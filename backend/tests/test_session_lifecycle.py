@@ -7,6 +7,7 @@ contract that replaces it: undo, report, retry with growing pauses; one session 
 switch goes back to the previous link or ends cleanly.
 """
 import asyncio
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -222,6 +223,38 @@ async def test_a_bind_that_fails_outside_the_bootstrap_starts_the_bootstrap_agai
     h.fail.clear()
     await asyncio.wait_for(task, 5)
     assert h.ctx.serial == SERIAL
+
+
+async def test_api_callers_do_not_re_bind_a_phone_that_just_failed(h):
+    """A phone adb lists but cannot talk to ("device offline") made every GET /api/apps re-try the bind many times a second;
+    each try flipped the device state, the UI reloaded and asked again. After a failure ensure_device() waits."""
+    h.listed(WIFI)
+    h.fail["android_id"] = RuntimeError("adb: device offline")
+    with pytest.raises(RuntimeError):
+        await h.ctx.bind_device(WIFI)
+    h.ctx.bootstrap_task.cancel()                       # the bootstrap loop retries on its own schedule: not under test
+    attempts = h.calls.count("android_id")
+
+    for _ in range(5):
+        assert await h.ctx.ensure_device() is None      # inside the pause: no new attempt
+    assert h.calls.count("android_id") == attempts
+
+    h.ctx._bind_retry_after = 0.0                       # pause over
+    h.fail.clear()
+    assert await h.ctx.ensure_device() == WIFI
+    assert h.ctx._bind_retry_after == 0.0               # a successful bind clears it
+
+
+async def test_the_pause_after_a_failed_bind_grows_and_is_capped(h):
+    h.listed(WIFI)
+    h.fail["android_id"] = RuntimeError("adb: device offline")
+    gaps = []
+    for _ in range(7):
+        with pytest.raises(RuntimeError):
+            await h.ctx.bind_device(WIFI)
+        h.ctx.bootstrap_task.cancel()
+        gaps.append(round(h.ctx._bind_retry_after - time.monotonic()))
+    assert gaps[:3] == [2, 4, 8] and max(gaps) == 30
 
 
 # ------------------------------------------------------------------ one change at a time

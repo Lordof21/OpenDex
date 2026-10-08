@@ -144,6 +144,10 @@ class AppContext:
         # bootstrap loop, GET /api/devices (ensure_device) and a pairing listener can all try to bind the same phone.
         self._session_lock = asyncio.Lock()
         self._bind_failures = 0  # consecutive failed binds: spaces the retries and the user notices
+        # time.monotonic() before which ensure_device() does not try to bind again. Without it every API call that needs a
+        # phone (GET /api/apps …) re-tried a phone that adb lists but cannot talk to ("device offline") many times a second,
+        # and each try flipped the device state, which made the UI reload and ask again — an endless loop.
+        self._bind_retry_after = 0.0
         self._device_state_seq = 0  # every computed state is numbered: the UI drops one older than what it applied
         self.mdns = MdnsDiscovery()
         self.app_registry = AppRegistry(self.adb, settings)
@@ -339,6 +343,8 @@ class AppContext:
         """Returns self.serial if bound. If not bound, immediately discovers and binds an attached ready device."""
         if self.serial:
             return self.serial
+        if time.monotonic() < self._bind_retry_after:
+            return None  # the last bind failed a moment ago: the bootstrap loop retries on its own schedule
         try:
             devices = await self.device_manager.list_devices()
             ready = [d for d in devices if d.state == DeviceState.DEVICE]
@@ -396,6 +402,7 @@ class AppContext:
             await self._abort_bind(serial, exc)
             raise
         self._bind_failures = 0
+        self._bind_retry_after = 0.0
         log.info(
             "device bound: serial=%s android_id=%s encoder_limit=%d daemon=%s",
             serial, self.android_id, profile.encoder_limit, self.startup.current.daemon,
@@ -457,6 +464,8 @@ class AppContext:
             log.debug("[BIND] başlangıç durumu sıfırlanamadı", exc_info=True)
         if isinstance(exc, Exception):
             self._bind_failures += 1
+            # 2 s, 4 s, 8 s … capped at 30 s: the same pause the bootstrap loop uses, so API callers do not out-run it.
+            self._bind_retry_after = time.monotonic() + min(2.0 * (2 ** (self._bind_failures - 1)), 30.0)
             await self._announce_bind_failure(serial, exc)
             self._ensure_bootstrap()  # whoever called, something must keep trying
 

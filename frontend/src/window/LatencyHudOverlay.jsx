@@ -42,7 +42,8 @@ const Row = ({ icon: Icon, iconClass, label, title, children }) => (
 export default function LatencyHudOverlay({ win, decoder, hasFrame }) {
   const [stats, setStats] = useState(null); // ilk gerçek örneğe kadar HİÇBİR sayı gösterilmez
   const [isExpanded, setIsExpanded] = useState(false);
-  const [isVisible, setIsVisible] = useState(true);
+  // Hidden until the user asks for it (F8): a measurement overlay on every window is not a default.
+  const [isVisible, setIsVisible] = useState(false);
   // Always-mounted anchor (also while the HUD is hidden): tells which document this overlay is drawn in.
   const anchorRef = useRef(null);
   const rtt = useBackendRtt();

@@ -57,12 +57,15 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+// HUD varsayılan olarak kapalıdır: F8 ile açılır.
+const showHud = () => act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F8', bubbles: true, cancelable: true })); });
 const expand = () => fireEvent.click(screen.getByTitle(/Canlı yayın ölçümlerini genişletmek/));
 
 describe('LatencyHudOverlay', () => {
   it('çizilen FPS ve alınan Mbps decoder\'dan gelir; backend telemetrisi HUD\'a girmez (taskbar\'dadır)', async () => {
     const decoder = fakeDecoder();
     render(<LatencyHudOverlay win={WIN} decoder={decoder} hasFrame />);
+    showHud();
     act(() => decoder.emit(STATS(30, 4.25)));
 
     expand();
@@ -78,6 +81,7 @@ describe('LatencyHudOverlay', () => {
     const a = fakeDecoder();
     const b = fakeDecoder();
     const { rerender } = render(<LatencyHudOverlay win={WIN} decoder={a} hasFrame />);
+    showHud();
     act(() => a.emit(STATS(60, 8)));
     expect(screen.getByText('60')).toBeInTheDocument();
 
@@ -93,6 +97,7 @@ describe('LatencyHudOverlay', () => {
 
   it('decoder henüz yokken (null) hata vermez ve sayı uydurmaz', () => {
     render(<LatencyHudOverlay win={WIN} decoder={null} hasFrame />);
+    showHud();
     expect(screen.getAllByText('—').length).toBeGreaterThan(0);
   });
 });

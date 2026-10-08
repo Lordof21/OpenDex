@@ -32,6 +32,7 @@ import PipApp from './window/PipApp.jsx';
 import WorkspacePipApp from './window/workspacePip/WorkspacePipApp.jsx';
 import SnapIndicator from './window/SnapIndicator.jsx';
 import AltTabSwitcher from './window/AltTabSwitcher.jsx';
+import { useHeldTrue } from './ui/useHeldTrue.js';
 
 export default function App() {
   const [backendHealthy, setBackendHealthy] = useState(false);
@@ -136,7 +137,9 @@ export default function App() {
   const wallpaper = useWallpaper();
   useWallpaperSlideshow();
   const [pairingDismissed, setPairingDismissed] = useState(false);
-  const showPairing = connectionState === 'disconnected' && windows.length === 0 && !pairingDismissed;
+  // The QR panel goes away only when the connection stays up: a bind that fails at once (an adb entry that is "offline")
+  // passes through "connected" for a few milliseconds and would otherwise tear the panel down and restart its listener.
+  const showPairing = useHeldTrue(connectionState === 'disconnected' && windows.length === 0 && !pairingDismissed, 1500);
 
   if (pipWinId) {
     return <PipApp winId={pipWinId} />;

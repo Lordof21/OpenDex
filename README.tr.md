@@ -15,7 +15,7 @@ Her uygulama kendi penceresinde — yan yana, yeniden boyutlandırılabilir — 
 
 ## Sürümler ve indirme
 
-**Windows (x64)** — en son sürümü [Releases sayfasından](https://github.com/Lordof21/OpenDex/releases) indirin:
+**Windows (x64)** — en son sürümü bu deponun [`download/`](download/) klasöründen (sağlama toplamları `SHA256SUMS.txt` içinde) ya da [Releases sayfasından](https://github.com/Lordof21/OpenDex/releases) indirin:
 
 | Dosya | Ne olduğu |
 |---|---|

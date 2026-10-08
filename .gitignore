@@ -37,6 +37,3 @@ frontend/harness.html
 frontend/harness.jsx
 frontend/vite.harness.config.mjs
 frontend/harness-fixtures/
-
-# Release downloads (msi / portable zip / checksums): built locally, attached to GitHub Releases, never committed
-/download/

@@ -124,15 +124,15 @@ class AppAudioRouter:
     # "İkisi" alignment (see the module docstring). All in ms.
     CHUNK_MS = 20                 # a chunk is complete (and sent) this long after its first frame
     RELAY_MS = 6                  # backend relay + the page's socket
-    JITTER_MARGIN_MS = 30         # headroom over the link's jitter; LATE reports add to it
+    JITTER_MARGIN_MS = 60         # headroom over the link's jitter (Wi-Fi adb shares the air with the video: a resize burst delays audio); LATE reports add to it
     DEFAULT_PC_OUTPUT_MS = 30     # the page's output device latency until it reports its own
     MIN_TARGET_MS = 60
     MAX_TARGET_MS = 800
     MAX_PHONE_TARGET_MS = 1500    # = PhoneRender.MAX_TARGET_MS on the phone
-    LATE_BUMP_AFTER = 3           # late chunks in one report that raise the margin …
-    LATE_BUMP_MS = 20             # … by this much (up to LATE_BUMP_MAX_MS)
-    LATE_BUMP_MAX_MS = 240
-    CALM_REPORTS_TO_RELAX = 12    # reports without a late chunk before the margin gives a step back
+    LATE_BUMP_AFTER = 2           # late chunks in one report that raise the margin (every late chunk is an audible click) …
+    LATE_BUMP_MS = 30             # … by this much (up to LATE_BUMP_MAX_MS)
+    LATE_BUMP_MAX_MS = 300
+    CALM_REPORTS_TO_RELAX = 45    # calm reports (one per 4 s) before the margin gives a step back: 3 min — a faster give-back made the glitches return
     RELAX_STEP_MS = 10
     RETUNE_MIN_MS = 4             # a smaller change is not worth a daemon round trip (and an audible skip)
     REPORT_MIN_MS = 15            # the page's output latency jitters: only a real change retunes

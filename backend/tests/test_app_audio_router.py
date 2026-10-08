@@ -610,8 +610,8 @@ async def test_a_session_that_comes_back_or_a_snapshot_without_a_list_keeps_the_
 # ---------------------------------------------------------------- "İkisi": phone and DeX on one timeline
 
 YT = "com.google.android.youtube"
-# Defaults with a 20 ms ping (link one way 10 ms): output 30 + chunk 20 + link 10 + relay 6 + margin 30 = 96 ms.
-COMMON = 96
+# Defaults with a 20 ms ping (link one way 10 ms): output 30 + chunk 20 + link 10 + relay 6 + margin 60 = 126 ms.
+COMMON = 126
 
 
 async def test_both_gives_the_dex_and_the_phone_one_common_target_latency():
@@ -653,6 +653,7 @@ async def test_the_fine_tune_moves_the_phone_alone_and_the_target_never_leaves_i
     assert h3.router.list_apps()[0]["target_ms"] == AppAudioRouter.MAX_TARGET_MS     # capped: nothing waits longer than this
 
     h4 = _Harness(daemon=_Daemon(sync=True, rtt_ms=0.0))
+    h4.router.JITTER_MARGIN_MS = 0                                     # no headroom at all: the floor (26 ms) is below the minimum
     await h4.per_app()
     await h4.router.report_pc(0)
     await h4.router.set_prefs(YT, route="both", standalone=True)

@@ -24,7 +24,7 @@ Every app runs in its own window — resizable, side by side — with its own so
 
 ## Download
 
-**Windows (x64)** — take the latest build from the [Releases page](https://github.com/Lordof21/OpenDex/releases):
+**Windows (x64)** — take the latest build from the [`download/`](download/) folder of this repository (checksums in `SHA256SUMS.txt`) or from the [Releases page](https://github.com/Lordof21/OpenDex/releases):
 
 | File | What it is |
 |---|---|

@@ -60,7 +60,7 @@ constant. Left alone, you hear an echo. OpenDeX puts both outputs on **one timel
    * the **computer**: the page converts the PTS to its own clock using the **device-clock offset** it measures (`POST /audio/clock`, a
      few round trips, the quickest wins) and schedules each chunk with Web Audio at `PTS + target`.
 3. The **target** is the least latency that every chunk can meet: the page's output-device latency + one chunk + the link + the relay +
-   a jitter margin. When the page reports chunks that arrived too late (`PUT /audio/sync`) the margin grows; when none are late, it relaxes.
+   a jitter margin (60 ms to start with). When the page reports chunks that arrived too late (`PUT /audio/sync`) the margin grows quickly (30 ms per report with two or more late chunks, up to 300 ms) and relaxes slowly (10 ms after three calm minutes), because a late chunk is an audible gap.
 4. A helper without the `audio_playout` capability, or a phone that cannot build the playback track, falls back to *native* phone playback
    (the state says `synced: false`, and the UI says so).
 

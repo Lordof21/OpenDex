@@ -14,10 +14,17 @@ is in `git log` (mostly in Turkish).
 ### Changed
 - The security headers (`nosniff`, `no-store`, …) are now also sent on the `401`/`403`/`411`/`413` answers of the middleware.
 - `docker-compose` publishes the UI on loopback only.
+- Release builds keep the WebView inspector (right-click → Inspect, F12) available; the obfuscator options that fight an inspector are off.
+- The installer is built in Turkish (`OpenDeX_0.1.0_x64_tr-TR.msi`), the only language the interface has.
+- The backend log file gets INFO and above by default; log and telemetry files older than 7 days are deleted at start and the folder is kept under 150 MB.
+- The stream HUD (F8) is hidden by default.
+- "İkisi" audio: the DeX copy starts with a 60 ms jitter margin (was 30), raises it faster after late chunks and gives it back after three calm minutes (was 48 s), so a resize burst on Wi-Fi is less likely to cut the sound.
 
 ### Fixed
 - File manager: grid thumbnails were requested for the folder instead of the file, so they never showed.
 - Notification cards forward their ref (React warning inside `AnimatePresence`).
+- A phone that adb lists but cannot talk to ("device offline") no longer causes an endless bind/reload loop: failed binds now back off (2 s … 30 s) for API callers too, and the QR pairing panel is not torn down by the momentary "connected" state of a failing attempt.
+- The phone helper (`opendex-tools.jar`) compiles again against the public SDK (compile-only `IContentProvider` stub), and the release exe no longer embeds the builder's home directory.
 
 ### Removed
 - Obsolete planning and analysis reports from the repository root; the compiled backend sidecar and developer-specific files from version control.
