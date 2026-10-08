@@ -1,0 +1,40 @@
+name: opendex
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: opendex-backend
+    restart: unless-stopped
+    ports:
+      # Loopback only: even with the API token this port must not be exposed to the LAN (see docs/SECURITY_MODEL.md).
+      - "127.0.0.1:8710:8710"
+    environment:
+      - PYTHONUNBUFFERED=1
+      # Container-internal bind (the port above is published on 127.0.0.1 only). A non-loopback bind is refused
+      # unless both of the next two are set — put OPENDEX_API_TOKEN (≥ 32 characters) in a .env file next to this
+      # compose file; the nginx-served UI obtains it from /api/auth/bootstrap, which answers the app's own origins only.
+      - OPENDEX_HTTP_HOST=0.0.0.0
+      - OPENDEX_ALLOW_REMOTE=true
+      - OPENDEX_API_TOKEN=${OPENDEX_API_TOKEN:?OPENDEX_API_TOKEN .env dosyasinda ayarlanmali (en az 32 karakter)}
+      - OPENDEX_TOKEN_BOOTSTRAP=true
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8710/api/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: opendex-frontend
+    restart: unless-stopped
+    ports:
+      # Loopback only, like the API: the UI obtains the API token for pages served from its own origin.
+      - "127.0.0.1:80:80"
+    depends_on:
+      backend:
+        condition: service_healthy

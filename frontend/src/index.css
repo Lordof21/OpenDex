@@ -1,0 +1,594 @@
+@import '@fontsource-variable/manrope';
+@import '@fontsource/ibm-plex-mono/400.css';
+@import '@fontsource/ibm-plex-mono/500.css';
+@import '@fontsource/ibm-plex-mono/600.css';
+@import '@fontsource/ibm-plex-mono/700.css';
+@import '@fontsource/instrument-serif';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --radius: 0.375rem;
+  --radius-window: 7px;
+  --warning: oklch(0.72 0.15 75);
+  --warning-foreground: oklch(0.22 0.014 65);
+  --info: oklch(0.61 0.16 245);
+  --scrim: oklch(0.14 0.01 62 / 0.82);
+  --scrim-foreground: oklch(0.95 0.006 82);
+  --video-backdrop: oklch(0.13 0.01 62);
+  --background: oklch(0.97 0.006 80);
+  --foreground: oklch(0.18 0.012 65);
+  --card: oklch(0.985 0.003 80);
+  --card-foreground: oklch(0.18 0.012 65);
+  --popover: oklch(0.985 0.003 80);
+  --popover-foreground: oklch(0.18 0.012 65);
+  --primary: oklch(0.25 0.018 64);
+  --primary-foreground: oklch(0.98 0.004 80);
+  --secondary: oklch(0.9 0.018 74);
+  --secondary-foreground: oklch(0.24 0.014 65);
+  --muted: oklch(0.925 0.009 77);
+  --muted-foreground: oklch(0.49 0.014 69);
+  --accent: oklch(0.88 0.028 59);
+  --accent-foreground: oklch(0.2 0.015 60);
+  --destructive: oklch(0.58 0.2 27);
+  --destructive-foreground: oklch(0.98 0.004 80);
+  --border: oklch(0.84 0.012 73);
+  --input: oklch(0.84 0.012 73);
+  --ring: oklch(0.48 0.07 52);
+  --workspace: oklch(0.915 0.01 73);
+  --frame: oklch(0.945 0.008 74);
+  --frame-border: oklch(0.74 0.013 70);
+  --frame-muted: oklch(0.48 0.012 68);
+  --image-foreground: oklch(0.985 0.003 80);
+  --window-close: oklch(0.62 0.19 27);
+  --window-minimize: oklch(0.78 0.15 81);
+  --window-expand: oklch(0.66 0.13 152);
+  --status-active: oklch(0.62 0.14 151);
+  --taskbar: oklch(0.955 0.008 76 / 0.82);
+  --taskbar-foreground: oklch(0.22 0.014 65);
+  --taskbar-border: oklch(0.68 0.014 72 / 0.34);
+  --taskbar-shadow: oklch(0.3 0.012 65 / 0.13);
+  --taskbar-upper-fade: oklch(0.955 0.008 76 / 0.5);
+  --taskbar-inset: oklch(1 0 0 / 0.42);
+  --app-lovable: oklch(0.58 0.2 25);
+  --app-browser: oklch(0.61 0.16 245);
+  --app-files: oklch(0.75 0.14 80);
+  --app-gallery: oklch(0.62 0.17 328);
+  --app-mail: oklch(0.58 0.17 260);
+  --app-settings: oklch(0.48 0.025 245);
+  --app-workspace: oklch(0.55 0.2 278);
+  --app-workspace-2: oklch(0.72 0.12 200);
+  --window-shadow: oklch(0.17 0.018 61 / 0.2);
+  --window-shadow-tight: oklch(0.17 0.018 61 / 0.14);
+  --grid-line: oklch(0.65 0.012 70 / 0.22);
+  --image-shade-start: oklch(0.12 0.016 60 / 0);
+  --image-shade-end: oklch(0.12 0.016 60 / 0.72);
+  --app-icon-highlight: oklch(1 0 0 / 0.32);
+  --app-icon-glint: oklch(1 0 0 / 0.72);
+  --app-icon-shadow: oklch(0.16 0.02 65 / 0.22);
+  --notification-surface: oklch(0.985 0.005 76 / 0.98);
+  --notification-raised: oklch(1 0 0 / 0.96);
+  --notification-hover: oklch(0.93 0.015 69 / 0.92);
+  --notification-border: oklch(0.72 0.018 70 / 0.65);
+  --notification-foreground: oklch(0.21 0.014 64);
+  --notification-accent: oklch(0.58 0.2 25);
+  --notification-shadow: oklch(0.22 0.02 60 / 0.25);
+  --mixer-track-highlight: oklch(1 0 0 / 0.2);
+  --mixer-track-shadow: oklch(0.16 0.018 65 / 0.16);
+  --mixer-thumb: oklch(0.985 0.003 80);
+  --mixer-thumb-ring: oklch(0.2 0.015 60 / 0.18);
+  --shadow-window: 0 28px 70px var(--window-shadow), 0 4px 14px var(--window-shadow-tight);
+  --shadow-taskbar: 0 16px 45px var(--taskbar-shadow), 0 2px 8px var(--window-shadow-tight);
+  --shadow-notification: 0 18px 48px var(--notification-shadow), 0 2px 8px var(--window-shadow-tight);
+  /* Telefon Yükü charts — categorical slots validated (dataviz validator, surface #fbfaf8): CVD ΔE ≥ 9.2 adjacent.
+     Aqua is < 3:1 on the light surface → every chart ships a legend + a table view (relief rule). */
+  /* Dosya türü tonları (Dosyalar uygulaması): simge renkleri — açık yüzeyde ≥ 3:1. */
+  --ft-folder: oklch(0.7 0.14 78);
+  --ft-image: oklch(0.6 0.11 205);
+  --ft-video: oklch(0.56 0.15 300);
+  --ft-audio: oklch(0.6 0.16 350);
+  --ft-pdf: oklch(0.58 0.19 27);
+  --ft-doc: oklch(0.56 0.15 255);
+  --ft-sheet: oklch(0.58 0.13 150);
+  --ft-slides: oklch(0.64 0.16 50);
+  --ft-archive: oklch(0.58 0.07 70);
+  --ft-code: oklch(0.55 0.14 275);
+  --ft-data: oklch(0.58 0.09 120);
+  --ft-app: oklch(0.57 0.12 232);
+  --ft-generic: oklch(0.55 0.015 70);
+  --viz-opendex: #2a78d6;
+  --viz-apps: #eb6834;
+  --viz-system: #1baf7a;
+  --viz-other: #b9b2a8;
+  --viz-battery: #4a3aa7;
+  --viz-soc: #a39c92;
+  --viz-grid: #e7e2da;
+  --viz-axis: #cfc9c2;
+  --viz-good: #0ca30c;
+  --viz-warning: #fab219;
+  --viz-serious: #ec835a;
+  --viz-critical: #d03b3b;
+}
+
+.dark {
+  /* Dark steps of the same hues, validated against the dark popover (#211d19): all ≥ 3:1. */
+  --viz-opendex: #3987e5;
+  --viz-apps: #d95926;
+  --viz-system: #199e70;
+  --viz-other: #5c564f;
+  --viz-battery: #9085e9;
+  --viz-soc: #7d766d;
+  --viz-grid: #2e2924;
+  --viz-axis: #413c36;
+  --ft-folder: oklch(0.8 0.13 80);
+  --ft-image: oklch(0.75 0.1 205);
+  --ft-video: oklch(0.72 0.14 300);
+  --ft-audio: oklch(0.75 0.14 350);
+  --ft-pdf: oklch(0.7 0.17 27);
+  --ft-doc: oklch(0.72 0.13 255);
+  --ft-sheet: oklch(0.74 0.12 150);
+  --ft-slides: oklch(0.76 0.14 55);
+  --ft-archive: oklch(0.72 0.07 72);
+  --ft-code: oklch(0.72 0.13 275);
+  --ft-data: oklch(0.74 0.09 120);
+  --ft-app: oklch(0.73 0.11 232);
+  --ft-generic: oklch(0.7 0.012 76);
+  --warning: oklch(0.8 0.14 80);
+  --warning-foreground: oklch(0.2 0.015 60);
+  --info: oklch(0.7 0.13 245);
+  --background: oklch(0.19 0.009 68);
+  --foreground: oklch(0.95 0.006 82);
+  --card: oklch(0.235 0.01 68);
+  --card-foreground: oklch(0.95 0.006 82);
+  --popover: oklch(0.235 0.01 68);
+  --popover-foreground: oklch(0.95 0.006 82);
+  --primary: oklch(0.93 0.008 80);
+  --primary-foreground: oklch(0.21 0.012 66);
+  --secondary: oklch(0.3 0.013 68);
+  --secondary-foreground: oklch(0.94 0.006 82);
+  --muted: oklch(0.27 0.011 68);
+  --muted-foreground: oklch(0.72 0.012 76);
+  --accent: oklch(0.34 0.019 62);
+  --accent-foreground: oklch(0.96 0.005 82);
+  --destructive: oklch(0.58 0.2 27);
+  --destructive-foreground: oklch(0.98 0.004 80);
+  --border: oklch(0.36 0.012 70);
+  --input: oklch(0.36 0.012 70);
+  --ring: oklch(0.72 0.06 58);
+  --workspace: oklch(0.155 0.009 68);
+  --frame: oklch(0.26 0.011 70);
+  --frame-border: oklch(0.38 0.012 70);
+  --frame-muted: oklch(0.72 0.012 74);
+  --image-foreground: oklch(0.97 0.004 80);
+  --status-active: oklch(0.72 0.15 152);
+  --taskbar: oklch(0.235 0.011 68 / 0.82);
+  --taskbar-foreground: oklch(0.94 0.006 80);
+  --taskbar-border: oklch(0.52 0.012 72 / 0.32);
+  --taskbar-shadow: oklch(0.05 0.01 60 / 0.55);
+  --taskbar-upper-fade: oklch(0.235 0.011 68 / 0.5);
+  --taskbar-inset: oklch(1 0 0 / 0.08);
+  --app-settings: oklch(0.62 0.03 245);
+  --app-workspace: oklch(0.62 0.19 278);
+  --app-workspace-2: oklch(0.72 0.12 200);
+  --window-shadow: oklch(0.04 0.01 60 / 0.62);
+  --window-shadow-tight: oklch(0.04 0.01 60 / 0.42);
+  --grid-line: oklch(0.72 0.012 70 / 0.09);
+  --app-icon-highlight: oklch(1 0 0 / 0.18);
+  --app-icon-glint: oklch(1 0 0 / 0.45);
+  --app-icon-shadow: oklch(0.04 0.01 60 / 0.5);
+  --notification-surface: oklch(0.18 0.009 68 / 0.98);
+  --notification-raised: oklch(0.24 0.012 68 / 0.96);
+  --notification-hover: oklch(0.31 0.016 66 / 0.92);
+  --notification-border: oklch(0.42 0.014 70 / 0.7);
+  --notification-foreground: oklch(0.95 0.006 82);
+  --notification-accent: oklch(0.66 0.19 26);
+  --notification-shadow: oklch(0.03 0.01 60 / 0.7);
+  --mixer-track-highlight: oklch(1 0 0 / 0.07);
+  --mixer-track-shadow: oklch(0.02 0.01 60 / 0.6);
+  --mixer-thumb: oklch(0.95 0.006 82);
+  --mixer-thumb-ring: oklch(0.95 0.006 82 / 0.22);
+  --shadow-window: 0 28px 70px var(--window-shadow), 0 4px 14px var(--window-shadow-tight);
+  --shadow-taskbar: 0 20px 50px var(--taskbar-shadow), 0 2px 8px var(--window-shadow-tight);
+  --shadow-notification: 0 24px 60px var(--notification-shadow), 0 4px 14px var(--window-shadow-tight);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+    user-select: none;
+  }
+  body {
+    margin: 0;
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: "Manrope Variable", "Manrope", ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    transition-property: color, background-color, border-color;
+    transition-duration: 300ms;
+  }
+  button {
+    letter-spacing: 0;
+  }
+}
+
+@keyframes notif-countdown {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .notif-countdown { animation: none; }
+}
+
+/* Force selectable text across desktop webview even inside user-select:none root */
+.selectable-text,
+.selectable-text * {
+  -webkit-user-select: text !important;
+  -moz-user-select: text !important;
+  -ms-user-select: text !important;
+  user-select: text !important;
+  cursor: text !important;
+}
+
+/* Samsung DeX Quality Hardware Canvas Sharpening (Zero Bilinear Blur) */
+.dex-canvas-sharp {
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  transition: none !important;
+}
+
+@layer utilities {
+  .workspace-grid {
+    background-image: linear-gradient(to right, var(--grid-line) 1px, transparent 1px), linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+  /* Masaüstü yazıları (simge adları, boş-durum notları): kapağın parlaklığına göre — kapak açıksa koyu, koyuysa beyaz yazı.
+     `data-wallpaper-tone` uygulama kabuğunda (App.jsx) durur; değeri desktop/wallpaper/prefs.js `toneOf` hesaplar. */
+  /* Işıma (halo) ters renktedir: yazı, ortalama parlaklığın tersi kalan bölgelerde de (ör. açık gökyüzü + koyu dağ) okunur kalır. */
+  [data-wallpaper-tone="dark"] .desktop-ink {
+    color: rgb(255 255 255 / 0.96);
+    text-shadow: 0 1px 2px rgb(0 0 0 / 0.75), 0 0 6px rgb(0 0 0 / 0.55), 0 0 12px rgb(0 0 0 / 0.35);
+  }
+  [data-wallpaper-tone="light"] .desktop-ink {
+    color: rgb(18 20 26 / 0.94);
+    text-shadow: 0 0 2px rgb(255 255 255 / 0.9), 0 0 6px rgb(255 255 255 / 0.7), 0 0 12px rgb(255 255 255 / 0.45);
+  }
+  .bg-image-shade {
+    background: linear-gradient(to bottom, var(--image-shade-start) 44%, var(--image-shade-end) 100%);
+  }
+  .resize-handle::before {
+    content: "";
+    position: absolute;
+    right: 7px;
+    bottom: 7px;
+    width: 15px;
+    height: 15px;
+    border-right: 2px solid var(--image-foreground);
+    border-bottom: 2px solid var(--image-foreground);
+    opacity: 0.9;
+  }
+  .resize-handle::after {
+    content: "";
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    width: 7px;
+    height: 7px;
+    border-right: 1px solid var(--image-foreground);
+    border-bottom: 1px solid var(--image-foreground);
+    opacity: 0.7;
+  }
+  .app-icon {
+    color: var(--primary-foreground);
+    box-shadow: inset 0 1px 0 var(--app-icon-highlight), inset 0 -1px 0 color-mix(in oklab, var(--foreground) 18%, transparent), 0 3px 7px var(--app-icon-shadow);
+  }
+  .app-icon-shine {
+    background: linear-gradient(to bottom, var(--app-icon-highlight), transparent);
+  }
+  .app-icon-glint { background-color: var(--app-icon-glint); }
+  .app-icon-orbit { border: 1px solid color-mix(in oklab, var(--primary-foreground) 25%, transparent); }
+  .app-icon-glyph { background: color-mix(in oklab, var(--primary-foreground) 12%, transparent); box-shadow: inset 0 1px 0 color-mix(in oklab, var(--primary-foreground) 22%, transparent); }
+  .app-icon-lovable { background: linear-gradient(145deg, var(--app-lovable), color-mix(in oklab, var(--app-lovable) 72%, var(--primary))); }
+  .app-icon-browser { background: conic-gradient(from 20deg, var(--app-browser), var(--status-active), var(--window-minimize), var(--window-close), var(--app-browser)); }
+  .app-icon-files { background: linear-gradient(145deg, var(--app-files), color-mix(in oklab, var(--app-files) 68%, var(--window-minimize))); }
+  .app-icon-gallery { background: linear-gradient(145deg, var(--app-gallery), color-mix(in oklab, var(--app-gallery) 68%, var(--window-close))); }
+  .app-icon-mail { background: linear-gradient(145deg, var(--app-mail), color-mix(in oklab, var(--app-mail) 72%, var(--app-browser))); }
+  .app-icon-workspace { background: linear-gradient(145deg, var(--app-workspace), color-mix(in oklab, var(--app-workspace) 38%, var(--app-workspace-2))); }
+  .app-icon-settings { background: linear-gradient(145deg, var(--app-settings), color-mix(in oklab, var(--app-settings) 68%, var(--foreground))); }
+  .app-icon-browser .app-icon-orbit { border-width: 2px; border-color: color-mix(in oklab, var(--primary-foreground) 65%, transparent); border-radius: 999px; }
+  .app-icon-browser .app-icon-glyph { inset: 9px; border-radius: 999px; background: var(--app-browser); }
+  .app-icon-files .app-icon-glyph { inset: 8px 5px 5px; border-radius: 3px; background: color-mix(in oklab, var(--primary-foreground) 24%, transparent); }
+  .app-icon-gallery .app-icon-orbit { transform: rotate(8deg); border-radius: 5px; }
+  .app-icon-mail .app-icon-glyph { inset: 7px 4px; }
+  .app-icon-settings .app-icon-orbit { border-style: dashed; }
+  .notification-panel { box-shadow: inset 0 1px 0 var(--taskbar-inset), var(--shadow-notification); }
+  .notification-header::after { content: ""; position: absolute; inset-inline: 16px; bottom: -1px; height: 1px; background: linear-gradient(to right, var(--notification-accent), transparent 42%); opacity: 0.55; }
+  .notification-card::before { content: ""; position: absolute; inset-block: 9px; left: 0; width: 2px; border-radius: 0 2px 2px 0; background: var(--notification-accent); opacity: 0.72; }
+  .dex-scroll, .notification-scroll { scroll-behavior: smooth; }
+  .dex-scroll, .notification-scroll, .files-scroll { scrollbar-width: thin; scrollbar-color: color-mix(in oklab, var(--taskbar-foreground) 24%, transparent) transparent; }
+  :is(.dex-scroll, .notification-scroll, .files-scroll)::-webkit-scrollbar { width: 8px; height: 8px; }
+  :is(.dex-scroll, .notification-scroll, .files-scroll)::-webkit-scrollbar-track { background: transparent; }
+  :is(.dex-scroll, .notification-scroll, .files-scroll)::-webkit-scrollbar-thumb {
+    background: color-mix(in oklab, var(--taskbar-foreground) 22%, transparent);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  :is(.dex-scroll, .notification-scroll, .files-scroll)::-webkit-scrollbar-thumb:hover { background-color: color-mix(in oklab, var(--taskbar-foreground) 38%, transparent); }
+  :is(.dex-scroll, .notification-scroll, .files-scroll)::-webkit-scrollbar-corner { background: transparent; }
+
+  /* ── Bildirim kartı (toast + bildirim merkezi): bej cam, ince üst ışık, katmanlı yumuşak gölge ── */
+  .notif-card {
+    background: color-mix(in oklab, var(--notification-raised) 86%, transparent);
+    border: 1px solid color-mix(in oklab, var(--notification-border) 55%, transparent);
+    box-shadow:
+      inset 0 1px 0 var(--taskbar-inset),
+      0 1px 2px var(--window-shadow-tight),
+      0 8px 22px color-mix(in oklab, var(--notification-shadow) 55%, transparent);
+    backdrop-filter: blur(28px) saturate(1.5);
+    -webkit-backdrop-filter: blur(28px) saturate(1.5);
+    transition: background-color 180ms ease, border-color 180ms ease, box-shadow 220ms ease;
+  }
+  .notif-card:hover {
+    background: color-mix(in oklab, var(--notification-raised) 96%, transparent);
+    border-color: color-mix(in oklab, var(--notification-border) 80%, transparent);
+    box-shadow:
+      inset 0 1px 0 var(--taskbar-inset),
+      0 2px 4px var(--window-shadow-tight),
+      0 14px 32px color-mix(in oklab, var(--notification-shadow) 75%, transparent);
+  }
+  .notif-card:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+  /* Toast: over any wallpaper/window, and cards stacked behind it must never read through → near-opaque. */
+  .notif-card--toast,
+  .notif-card--toast:hover {
+    background: color-mix(in oklab, var(--notification-raised) 97%, transparent);
+    box-shadow: inset 0 1px 0 var(--taskbar-inset), var(--shadow-notification);
+  }
+  /* Grup kapalıyken arkada duran "tabaklar" (iOS yığını) */
+  .notif-plate {
+    background: color-mix(in oklab, var(--notification-raised) 70%, transparent);
+    border: 1px solid color-mix(in oklab, var(--notification-border) 40%, transparent);
+    box-shadow: 0 4px 10px color-mix(in oklab, var(--notification-shadow) 30%, transparent);
+  }
+  /* Uygulama ikonunun sağ altındaki kategori rozeti: yüzey rengiyle halkalı */
+  .notif-badge { box-shadow: 0 0 0 2px var(--notification-raised), 0 1px 3px var(--window-shadow-tight); }
+  .notif-pill {
+    background: color-mix(in oklab, var(--notification-hover) 70%, transparent);
+    border: 1px solid color-mix(in oklab, var(--notification-border) 45%, transparent);
+    transition: background-color 150ms ease, transform 150ms ease, border-color 150ms ease;
+  }
+  .notif-pill:hover { background: var(--notification-hover); border-color: color-mix(in oklab, var(--notification-border) 80%, transparent); }
+  .notif-countdown { transform-origin: left center; animation-name: notif-countdown; animation-timing-function: linear; animation-fill-mode: forwards; }
+  .notif-progress { background: linear-gradient(to right, color-mix(in oklab, var(--notification-accent) 85%, transparent), color-mix(in oklab, var(--notification-accent) 35%, transparent)); }
+
+  /* ── Orta üst sistem mesajı ("ada"): zıt renkli hap — açıkta koyu, koyuda açık ── */
+  .island {
+    background: color-mix(in oklab, var(--primary) 94%, transparent);
+    color: var(--primary-foreground);
+    box-shadow:
+      inset 0 1px 0 color-mix(in oklab, var(--primary-foreground) 14%, transparent),
+      0 12px 32px var(--window-shadow),
+      0 2px 6px var(--window-shadow-tight);
+    backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  }
+  /* Ton rengi hap zeminine göre ayarlanır (açık temada açılır, koyu temada koyulaşır): kontrast iki temada da korunur. */
+  .island-glyph {
+    background: color-mix(in oklab, var(--island-tone) 24%, transparent);
+    color: color-mix(in oklab, var(--island-tone) 72%, var(--primary-foreground));
+  }
+  .island-halo { background: radial-gradient(closest-side, color-mix(in oklab, var(--island-tone) 45%, transparent), transparent); }
+  .taskbar-surface {
+    box-shadow: inset 0 1px 0 var(--taskbar-inset), var(--shadow-taskbar);
+  }
+  .taskbar-surface::before {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    top: -22px;
+    height: 22px;
+    pointer-events: none;
+    background: linear-gradient(to bottom, transparent, var(--taskbar-upper-fade));
+    mask-image: linear-gradient(to bottom, transparent, black);
+  }
+  .mixer-surface { box-shadow: inset 0 1px 0 var(--mixer-track-highlight); }
+  .mixer-track { box-shadow: inset 0 1px 3px var(--mixer-track-shadow), inset 0 1px 0 var(--mixer-track-highlight); }
+  .mixer-level { box-shadow: inset 0 1px 0 var(--mixer-track-highlight), 2px 0 10px var(--mixer-track-shadow); }
+  .mixer-thumb {
+    background: var(--mixer-thumb);
+    box-shadow: 0 0 0 2px var(--mixer-thumb-ring), 0 1px 4px var(--mixer-track-shadow);
+  }
+  .mixer-slider:focus-visible .mixer-thumb {
+    box-shadow: 0 0 0 2px var(--mixer-thumb-ring), 0 0 0 4px var(--ring);
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+/* Dosya yöneticisi: sanal liste satırları yalnız transform/opacity ile hareket eder; kaydırma kapsayıcısı izole edilir. */
+@layer utilities {
+  .files-scroll { contain: strict; overflow-anchor: none; scrollbar-gutter: stable; }
+  .files-row { contain: layout style; }
+  .files-marquee { background: color-mix(in oklab, var(--ring) 14%, transparent); border: 1px solid color-mix(in oklab, var(--ring) 70%, transparent); }
+  .files-drop-target { outline: 2px solid var(--ring); outline-offset: -2px; background: color-mix(in oklab, var(--ring) 12%, transparent); }
+  .files-drag-ghost { box-shadow: 0 10px 30px var(--window-shadow), 0 2px 8px var(--window-shadow-tight); }
+}
+
+/* Sürükle-bırak hedefi (fare üstünde): öznitelikle işaretlenir — her fare hareketinde React'i yeniden çizdirmemek için. */
+[data-drop-hover="true"] {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+  background-color: color-mix(in oklab, var(--ring) 12%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ── Medya: ortam rengi, ekolayzer, nefes ışığı ─────────────────────────────────────────────────────────
+   --media-ink  : çalan şeyin vurgu rengi (ilerleme, ekolayzer, halka). Kapaktan gelir (ui/media/mediaAccent.js; açıklık
+                  iki temada da ≥3:1 kontrast verecek şekilde sabit); yoksa sistemin --primary'sine döner.
+   --media-glow : kapağın arkasındaki yumuşak ışık. `.media-scope` içindeki her şey bu iki değeri okur. */
+@property --media-accent {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: transparent;
+}
+:root {
+  --media-ink: var(--primary);
+  --media-glow: color-mix(in oklab, var(--foreground) 14%, transparent);
+}
+/* Türetilmiş tonlar aynı elemanda yeniden hesaplanmalı (:root'ta çözülen var() kapsam içindeki --media-ink'i görmez). */
+:root, .media-scope {
+  --media-ink-soft: color-mix(in oklab, var(--media-ink) 28%, transparent);
+  --media-ink-faint: color-mix(in oklab, var(--media-ink) 12%, transparent);
+}
+.media-scope { transition: --media-accent 600ms ease; }
+.media-scope[data-accent='on'] {
+  --media-ink: var(--media-accent);
+  --media-glow: color-mix(in oklab, var(--media-accent) 55%, transparent);
+}
+.media-eq-bar {
+  transform-origin: bottom;
+  transform: scaleY(0.3);
+  animation: media-eq 0.9s ease-in-out infinite;
+}
+.media-eq[data-playing='false'] .media-eq-bar { animation: none; transform: scaleY(0.3); }
+@keyframes media-eq {
+  0%, 100% { transform: scaleY(0.3); }
+  50% { transform: scaleY(1); }
+}
+.media-breathe { animation: media-breathe 4.5s ease-in-out infinite; }
+@keyframes media-breathe {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50% { opacity: 0.85; transform: scale(1.04); }
+}
+/* Theme-matching custom tooltip for placeholder/hover descriptions */
+[data-tooltip] {
+  position: relative;
+}
+[data-tooltip]::after,
+[data-tooltip]::before {
+  position: absolute;
+  left: 50%;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateX(-50%) translateY(4px);
+  transition: opacity 150ms ease, transform 150ms ease;
+  z-index: 60;
+}
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  bottom: calc(100% + 6px);
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  color: var(--popover-foreground);
+  background-color: var(--popover);
+  border: 1px solid var(--border);
+  box-shadow: 0 6px 18px color-mix(in oklab, var(--window-shadow) 30%, transparent), 0 1px 3px color-mix(in oklab, var(--window-shadow-tight) 25%, transparent);
+}
+[data-tooltip]::before {
+  content: "";
+  bottom: calc(100% + 1px);
+  border-width: 5px;
+  border-style: solid;
+  border-color: var(--border) transparent transparent transparent;
+}
+[data-tooltip]:hover::after,
+[data-tooltip]:focus-visible::after,
+[data-tooltip]:hover::before,
+[data-tooltip]:focus-visible::before {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+[data-tooltip-position="bottom"]::after {
+  top: calc(100% + 6px);
+  bottom: auto;
+  transform: translateX(-50%) translateY(-4px);
+}
+[data-tooltip-position="bottom"]::before {
+  top: calc(100% + 1px);
+  bottom: auto;
+  border-color: transparent transparent var(--border) transparent;
+}
+[data-tooltip-position="bottom"]:hover::after,
+[data-tooltip-position="bottom"]:focus-visible::after {
+  transform: translateX(-50%) translateY(0);
+}
+
+[data-tooltip-align="end"]::after,
+[data-tooltip-align="end"]::before {
+  left: auto;
+  right: 0;
+  transform: translateY(4px);
+}
+[data-tooltip-align="end"]:hover::after,
+[data-tooltip-align="end"]:focus-visible::after,
+[data-tooltip-align="end"]:hover::before,
+[data-tooltip-align="end"]:focus-visible::before {
+  transform: translateY(0);
+}
+[data-tooltip-align="end"]::after {
+  right: -2px;
+}
+[data-tooltip-align="end"]::before {
+  right: 10px;
+}
+
+/* ── Shimmer & Scanline Animations for Skeleton States ──────────────────────── */
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 2s infinite ease-in-out;
+}
+
+@keyframes scanline {
+  0% {
+    top: 0%;
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    top: 100%;
+    opacity: 0.6;
+  }
+}
+
+.animate-scanline {
+  animation: scanline 2.2s ease-in-out infinite alternate;
+}

@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="tr"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>harness</title>
+<!-- Tercihler modül yüklenmeden ÖNCE yazılmalı: wallpaperStore.js içe aktarılırken localStorage'ı okur. -->
+<script>
+  (function () {
+    var q = new URLSearchParams(location.search);
+    try {
+      localStorage.setItem('theme', q.get('theme') === 'dark' ? 'dark' : 'light');
+      if (q.get('prefs')) localStorage.setItem('opendex_wallpaper_v2', q.get('prefs'));
+    } catch (e) {}
+  })();
+</script></head>
+<body style="margin:0"><div id="root"></div><script type="module" src="/harness.jsx"></script></body></html>

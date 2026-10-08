@@ -1,0 +1,420 @@
+[
+ {
+  "name": "widget-playing-light",
+  "w": 1100,
+  "h": 70,
+  "params": "theme=light&scene=playing",
+  "wait": 1400,
+  "dpr": 2,
+  "clip": {
+   "x": 0,
+   "y": 8,
+   "width": 580,
+   "height": 82
+  }
+ },
+ {
+  "name": "widget-multi-light",
+  "w": 1100,
+  "h": 70,
+  "params": "theme=light&scene=multi",
+  "wait": 1400,
+  "dpr": 2,
+  "clip": {
+   "x": 0,
+   "y": 8,
+   "width": 580,
+   "height": 82
+  }
+ },
+ {
+  "name": "widget-playing-dark",
+  "w": 1100,
+  "h": 70,
+  "params": "theme=dark&scene=playing",
+  "wait": 1400,
+  "dpr": 2,
+  "clip": {
+   "x": 0,
+   "y": 8,
+   "width": 580,
+   "height": 82
+  }
+ },
+ {
+  "name": "widget-multi-dark",
+  "w": 1100,
+  "h": 70,
+  "params": "theme=dark&scene=multi",
+  "wait": 1400,
+  "dpr": 2,
+  "clip": {
+   "x": 0,
+   "y": 8,
+   "width": 580,
+   "height": 82
+  }
+ },
+ {
+  "name": "widget-hover-light",
+  "w": 1100,
+  "h": 70,
+  "params": "theme=light&scene=playing",
+  "wait": 1400,
+  "steps": [
+   {
+    "type": "hover",
+    "sel": "[role=group][aria-label='Medya oynatıcı'] [role=slider]",
+    "pos": {
+     "x": 90,
+     "y": 8
+    },
+    "after": 500
+   }
+  ],
+  "dpr": 2,
+  "clip": {
+   "x": 0,
+   "y": 8,
+   "width": 580,
+   "height": 82
+  }
+ },
+ {
+  "name": "widget-paused-dark",
+  "w": 1100,
+  "h": 70,
+  "params": "theme=dark&scene=paused",
+  "wait": 1400,
+  "dpr": 2,
+  "clip": {
+   "x": 0,
+   "y": 8,
+   "width": 580,
+   "height": 82
+  }
+ },
+ {
+  "name": "widget-pending-light",
+  "w": 1100,
+  "h": 70,
+  "params": "theme=light&scene=pending",
+  "wait": 1400,
+  "dpr": 2,
+  "clip": {
+   "x": 0,
+   "y": 8,
+   "width": 580,
+   "height": 82
+  }
+ },
+ {
+  "name": "widget-noart-dark",
+  "w": 1100,
+  "h": 70,
+  "params": "theme=dark&scene=noart",
+  "wait": 1400,
+  "dpr": 2,
+  "clip": {
+   "x": 0,
+   "y": 8,
+   "width": 580,
+   "height": 82
+  }
+ },
+ {
+  "name": "widget-live-light",
+  "w": 1100,
+  "h": 70,
+  "params": "theme=light&scene=live",
+  "wait": 1400,
+  "dpr": 2,
+  "clip": {
+   "x": 0,
+   "y": 8,
+   "width": 580,
+   "height": 82
+  }
+ },
+ {
+  "name": "widget-md-light",
+  "w": 800,
+  "h": 70,
+  "params": "theme=light&scene=multi",
+  "wait": 1400,
+  "dpr": 2,
+  "clip": {
+   "x": 0,
+   "y": 8,
+   "width": 580,
+   "height": 82
+  }
+ },
+ {
+  "name": "widget-sm-dark",
+  "w": 480,
+  "h": 70,
+  "params": "theme=dark&scene=multi",
+  "wait": 1400,
+  "dpr": 2,
+  "clip": {
+   "x": 0,
+   "y": 8,
+   "width": 500,
+   "height": 82
+  }
+ },
+ {
+  "name": "panel-playing-light",
+  "w": 1280,
+  "h": 780,
+  "params": "theme=light&scene=playing&w=1280&h=780",
+  "wait": 1400,
+  "steps": [
+   {
+    "type": "click",
+    "sel": "button[aria-label*='medya merkezini aç']",
+    "after": 900
+   }
+  ]
+ },
+ {
+  "name": "panel-multi-light",
+  "w": 1280,
+  "h": 780,
+  "params": "theme=light&scene=multi&w=1280&h=780",
+  "wait": 1400,
+  "steps": [
+   {
+    "type": "click",
+    "sel": "button[aria-label*='medya merkezini aç']",
+    "after": 900
+   }
+  ]
+ },
+ {
+  "name": "panel-empty-light",
+  "w": 1280,
+  "h": 780,
+  "params": "theme=light&scene=playing&w=1280&h=780",
+  "wait": 1400,
+  "steps": [
+   {
+    "type": "click",
+    "sel": "button[aria-label*='medya merkezini aç']",
+    "after": 900
+   },
+   {
+    "type": "eval",
+    "code": "window.__clearMedia()",
+    "after": 700
+   }
+  ]
+ },
+ {
+  "name": "panel-playing-dark",
+  "w": 1280,
+  "h": 780,
+  "params": "theme=dark&scene=playing&w=1280&h=780",
+  "wait": 1400,
+  "steps": [
+   {
+    "type": "click",
+    "sel": "button[aria-label*='medya merkezini aç']",
+    "after": 900
+   }
+  ]
+ },
+ {
+  "name": "panel-multi-dark",
+  "w": 1280,
+  "h": 780,
+  "params": "theme=dark&scene=multi&w=1280&h=780",
+  "wait": 1400,
+  "steps": [
+   {
+    "type": "click",
+    "sel": "button[aria-label*='medya merkezini aç']",
+    "after": 900
+   }
+  ]
+ },
+ {
+  "name": "panel-empty-dark",
+  "w": 1280,
+  "h": 780,
+  "params": "theme=dark&scene=playing&w=1280&h=780",
+  "wait": 1400,
+  "steps": [
+   {
+    "type": "click",
+    "sel": "button[aria-label*='medya merkezini aç']",
+    "after": 900
+   },
+   {
+    "type": "eval",
+    "code": "window.__clearMedia()",
+    "after": 700
+   }
+  ]
+ },
+ {
+  "name": "panel-paused-light",
+  "w": 1280,
+  "h": 780,
+  "params": "theme=light&scene=paused&w=1280&h=780",
+  "wait": 1400,
+  "steps": [
+   {
+    "type": "click",
+    "sel": "button[aria-label*='medya merkezini aç']",
+    "after": 900
+   }
+  ]
+ },
+ {
+  "name": "panel-pending-dark",
+  "w": 1280,
+  "h": 780,
+  "params": "theme=dark&scene=pending&w=1280&h=780",
+  "wait": 1400,
+  "steps": [
+   {
+    "type": "click",
+    "sel": "button[aria-label*='medya merkezini aç']",
+    "after": 900
+   }
+  ]
+ },
+ {
+  "name": "panel-noart-light",
+  "w": 1280,
+  "h": 780,
+  "params": "theme=light&scene=noart&w=1280&h=780",
+  "wait": 1400,
+  "steps": [
+   {
+    "type": "click",
+    "sel": "button[aria-label*='medya merkezini aç']",
+    "after": 900
+   }
+  ]
+ },
+ {
+  "name": "panel-live-dark",
+  "w": 1280,
+  "h": 780,
+  "params": "theme=dark&scene=live&w=1280&h=780",
+  "wait": 1400,
+  "steps": [
+   {
+    "type": "click",
+    "sel": "button[aria-label*='medya merkezini aç']",
+    "after": 900
+   }
+  ]
+ },
+ {
+  "name": "panel-long-light",
+  "w": 1280,
+  "h": 780,
+  "params": "theme=light&scene=long&w=1280&h=780",
+  "wait": 1400,
+  "steps": [
+   {
+    "type": "click",
+    "sel": "button[aria-label*='medya merkezini aç']",
+    "after": 900
+   }
+  ]
+ },
+ {
+  "name": "panel-disconnected-dark",
+  "w": 1280,
+  "h": 780,
+  "params": "theme=dark&scene=playing&w=1280&h=780",
+  "wait": 1400,
+  "steps": [
+   {
+    "type": "click",
+    "sel": "button[aria-label*='medya merkezini aç']",
+    "after": 900
+   },
+   {
+    "type": "eval",
+    "code": "window.__clearMedia(true)",
+    "after": 700
+   }
+  ]
+ },
+ {
+  "name": "panel-narrow-light",
+  "w": 420,
+  "h": 760,
+  "params": "theme=light&scene=multi&w=420&h=760",
+  "wait": 1400,
+  "steps": [
+   {
+    "type": "click",
+    "sel": "button[aria-label*='medya merkezini aç']",
+    "after": 900
+   }
+  ]
+ },
+ {
+  "name": "panel-short-dark",
+  "w": 1100,
+  "h": 520,
+  "params": "theme=dark&scene=multi&w=1100&h=520",
+  "wait": 1400,
+  "steps": [
+   {
+    "type": "click",
+    "sel": "button[aria-label*='medya merkezini aç']",
+    "after": 900
+   }
+  ]
+ },
+ {
+  "name": "panel-scrub-hover-dark",
+  "w": 1280,
+  "h": 780,
+  "params": "theme=dark&scene=playing&w=1280&h=780",
+  "wait": 1400,
+  "steps": [
+   {
+    "type": "click",
+    "sel": "button[aria-label*='medya merkezini aç']",
+    "after": 900
+   },
+   {
+    "type": "hover",
+    "sel": "[role=dialog] [role=slider]",
+    "pos": {
+     "x": 230,
+     "y": 10
+    },
+    "after": 400
+   }
+  ]
+ },
+ {
+  "name": "panel-row-hover-light",
+  "w": 1280,
+  "h": 780,
+  "params": "theme=light&scene=multi&w=1280&h=780",
+  "wait": 1400,
+  "steps": [
+   {
+    "type": "click",
+    "sel": "button[aria-label*='medya merkezini aç']",
+    "after": 900
+   },
+   {
+    "type": "hover",
+    "sel": "[role=dialog] ul [data-playing='true'] >> nth=0",
+    "after": 500
+   }
+  ]
+ }
+]

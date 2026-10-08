@@ -1,0 +1,37 @@
+name: Device compatibility report
+description: Tell us how OpenDeX behaves on your phone (works or not)
+labels: [device-compat]
+body:
+  - type: markdown
+    attributes:
+      value: See [Device compatibility](https://github.com/Lordof21/OpenDex/blob/main/docs/DEVICE_COMPATIBILITY.md). Do **not** post serial numbers, IMEI or your Wi-Fi name.
+  - type: textarea
+    id: props
+    attributes:
+      label: Output of the getprop commands
+      description: "`adb shell getprop ro.product.manufacturer`, `ro.product.model`, `ro.build.version.release`, `ro.build.version.sdk`, `ro.build.version.incremental`"
+      render: text
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Overall
+      options:
+        - Works well
+        - Works with problems
+        - Does not work
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: What worked and what did not
+      description: "Windows open? Touch? Audio (per-app needs Android 13+)? Files? USB / Wi-Fi? Any section of the device checklist you ran."
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log lines
+      render: text

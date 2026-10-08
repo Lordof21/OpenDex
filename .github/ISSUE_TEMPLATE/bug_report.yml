@@ -1,0 +1,51 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Please check [Troubleshooting](https://github.com/Lordof21/OpenDex/blob/main/docs/TROUBLESHOOTING.md) first. For a phone that behaves differently, use the *Device compatibility* form.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, what you saw instead. Screenshots welcome.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: OpenDeX version or commit
+      placeholder: "0.1.0 / main@abc1234"
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Computer
+      placeholder: "Windows 11 23H2"
+    validations:
+      required: true
+  - type: input
+    id: phone
+    attributes:
+      label: "Phone, Android version, vendor skin"
+      placeholder: "Xiaomi POCO X7 Pro, Android 16, HyperOS"
+    validations:
+      required: true
+  - type: dropdown
+    id: link
+    attributes:
+      label: Connection
+      options:
+        - USB
+        - Wi-Fi
+        - Both / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: The relevant lines of `logs/opendex-YYYYMMDD.log` (and `adb shell cat /data/local/tmp/opendex-daemon.log`). They contain package names and window ids, not notification text — skim before posting.
+      render: text

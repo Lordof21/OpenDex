@@ -1,0 +1,78 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: OpenDex <opendex@local>
+Date: Thu, 1 Oct 2026 12:00:00 +0000
+Subject: [PATCH 3/3] OpenDex: encoder bit rate in the same resize
+
+OPENDEX_RESIZE's bitRate is handed to CaptureControl before the resize is
+requested; the capture reset that resize causes applies it (KEY_BIT_RATE on
+the reused MediaFormat, so it also holds for later resets). A bigger display
+gets its bigger bit rate without rebuilding the encoder session.
+---
+ .../com/genymobile/scrcpy/control/Controller.java   |  4 ++++
+ .../com/genymobile/scrcpy/video/CaptureControl.java | 13 +++++++++++++
+ .../com/genymobile/scrcpy/video/SurfaceEncoder.java |  6 ++++++
+ 3 files changed, 23 insertions(+)
+
+diff --git a/server/src/main/java/com/genymobile/scrcpy/control/Controller.java b/server/src/main/java/com/genymobile/scrcpy/control/Controller.java
+index 732691d..e939ffb 100644
+--- a/server/src/main/java/com/genymobile/scrcpy/control/Controller.java
++++ b/server/src/main/java/com/genymobile/scrcpy/control/Controller.java
+@@ -886,6 +886,10 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
+ 
+     private void opendexResize(ControlMessage msg) {
+         NewDisplayCapture newDisplayCapture = (NewDisplayCapture) surfaceCapture;
++        if (msg.getBitRate() > 0) {
++            // Before the resize: the capture reset it causes is the one that applies the new bit rate
++            newDisplayCapture.getCaptureControl().requestBitRate(msg.getBitRate());
++        }
+         newDisplayCapture.requestResize(msg.getWidth(), msg.getHeight(), msg.getDpi());
+     }
+ 
+diff --git a/server/src/main/java/com/genymobile/scrcpy/video/CaptureControl.java b/server/src/main/java/com/genymobile/scrcpy/video/CaptureControl.java
+index 7933ea7..2d86ec3 100644
+--- a/server/src/main/java/com/genymobile/scrcpy/video/CaptureControl.java
++++ b/server/src/main/java/com/genymobile/scrcpy/video/CaptureControl.java
+@@ -11,6 +11,9 @@ public class CaptureControl {
+ 
+     private int reset = 0;
+ 
++    // OpenDex: encoder bit rate to apply at the next (re)configuration; 0 = keep the current one
++    private int pendingBitRate = 0;
++
+     // Current instance of MediaCodec to "interrupt" on reset
+     private MediaCodec runningMediaCodec;
+ 
+@@ -36,6 +39,16 @@ public class CaptureControl {
+         }
+     }
+ 
++    public synchronized void requestBitRate(int bitRate) {
++        pendingBitRate = bitRate;
++    }
++
++    public synchronized int consumeBitRate() {
++        int value = pendingBitRate;
++        pendingBitRate = 0;
++        return value;
++    }
++
+     public synchronized void setRunningMediaCodec(MediaCodec runningMediaCodec) {
+         this.runningMediaCodec = runningMediaCodec;
+     }
+diff --git a/server/src/main/java/com/genymobile/scrcpy/video/SurfaceEncoder.java b/server/src/main/java/com/genymobile/scrcpy/video/SurfaceEncoder.java
+index a52d428..7be3429 100644
+--- a/server/src/main/java/com/genymobile/scrcpy/video/SurfaceEncoder.java
++++ b/server/src/main/java/com/genymobile/scrcpy/video/SurfaceEncoder.java
+@@ -120,6 +120,12 @@ public class SurfaceEncoder implements AsyncProcessor {
+ 
+                 format.setInteger(MediaFormat.KEY_WIDTH, size.getWidth());
+                 format.setInteger(MediaFormat.KEY_HEIGHT, size.getHeight());
++                int bitRate = captureControl.consumeBitRate();
++                if (bitRate > 0) {
++                    // Same reset as the resize that asked for it; the format is reused, so it also holds afterwards
++                    format.setInteger(MediaFormat.KEY_BIT_RATE, bitRate);
++                    Ln.i("OpenDex: bit_rate=" + bitRate);
++                }
+ 
+                 Surface surface = null;
+                 boolean mediaCodecStarted = false;

@@ -1,0 +1,416 @@
+[
+ {
+  "name": "menu-light",
+  "w": 1100,
+  "h": 700,
+  "params": "theme=light",
+  "steps": [
+   {
+    "type": "click",
+    "sel": "[data-index='2']",
+    "button": "right",
+    "pos": {
+     "x": 120,
+     "y": 12
+    }
+   },
+   {
+    "type": "wait",
+    "ms": 400
+   }
+  ]
+ },
+ {
+  "name": "menu-dark",
+  "w": 1100,
+  "h": 700,
+  "params": "theme=dark",
+  "steps": [
+   {
+    "type": "click",
+    "sel": "[data-index='11']",
+    "button": "right",
+    "pos": {
+     "x": 120,
+     "y": 12
+    }
+   },
+   {
+    "type": "wait",
+    "ms": 400
+   }
+  ]
+ },
+ {
+  "name": "grid-light",
+  "w": 1100,
+  "h": 700,
+  "params": "theme=light&loc=dcim&view=grid"
+ },
+ {
+  "name": "grid-dark-sel",
+  "w": 1100,
+  "h": 700,
+  "params": "theme=dark&loc=dcim&view=grid&select=0,3,4,5"
+ },
+ {
+  "name": "medium-light",
+  "w": 700,
+  "h": 640,
+  "params": "theme=light"
+ },
+ {
+  "name": "compact-light",
+  "w": 420,
+  "h": 720,
+  "params": "theme=light",
+  "touch": true
+ },
+ {
+  "name": "compact-dark-places",
+  "w": 420,
+  "h": 720,
+  "params": "theme=dark",
+  "steps": [
+   {
+    "type": "click",
+    "sel": "button[aria-label='Yerler']"
+   },
+   {
+    "type": "wait",
+    "ms": 500
+   }
+  ]
+ },
+ {
+  "name": "grid2-light",
+  "w": 1100,
+  "h": 700,
+  "params": "theme=light&loc=dcim&view=grid"
+ },
+ {
+  "name": "dual-light",
+  "w": 1280,
+  "h": 720,
+  "params": "theme=light&layout=dual",
+  "wait": 2500
+ },
+ {
+  "name": "tray-light",
+  "w": 1100,
+  "h": 700,
+  "params": "theme=light&tray=1",
+  "wait": 2000
+ },
+ {
+  "name": "preview-dark",
+  "w": 1100,
+  "h": 700,
+  "params": "theme=dark&loc=dcim&preview=3",
+  "wait": 2000
+ },
+ {
+  "name": "rename-light",
+  "w": 1100,
+  "h": 700,
+  "params": "theme=light&select=3&rename=3"
+ },
+ {
+  "name": "trash-light",
+  "w": 1100,
+  "h": 700,
+  "params": "theme=light&dialog=trash",
+  "wait": 2000
+ },
+ {
+  "name": "shortcuts-dark",
+  "w": 1100,
+  "h": 700,
+  "params": "theme=dark&dialog=shortcuts"
+ },
+ {
+  "name": "dual2-light",
+  "w": 1280,
+  "h": 720,
+  "params": "theme=light&layout=dual",
+  "wait": 2500
+ },
+ {
+  "name": "trash2-light",
+  "w": 1100,
+  "h": 700,
+  "params": "theme=light&dialog=trash",
+  "wait": 2000
+ },
+ {
+  "name": "props-light",
+  "w": 1100,
+  "h": 700,
+  "params": "theme=light",
+  "steps": [
+   {
+    "type": "click",
+    "sel": "[data-index='13']"
+   },
+   {
+    "type": "press",
+    "key": "Alt+Enter"
+   },
+   {
+    "type": "wait",
+    "ms": 700
+   }
+  ]
+ },
+ {
+  "name": "delete-confirm-light",
+  "w": 1100,
+  "h": 700,
+  "params": "theme=light",
+  "steps": [
+   {
+    "type": "click",
+    "sel": "[data-index='11']"
+   },
+   {
+    "type": "click",
+    "sel": "[data-index='12']",
+    "mods": [
+     "Control"
+    ]
+   },
+   {
+    "type": "press",
+    "key": "Shift+Delete"
+   },
+   {
+    "type": "wait",
+    "ms": 600
+   }
+  ]
+ },
+ {
+  "name": "sortmenu-light",
+  "w": 1100,
+  "h": 700,
+  "params": "theme=light",
+  "steps": [
+   {
+    "type": "click",
+    "sel": "button[aria-label='Sırala']"
+   },
+   {
+    "type": "wait",
+    "ms": 400
+   }
+  ]
+ },
+ {
+  "name": "viewmenu-dark",
+  "w": 1100,
+  "h": 700,
+  "params": "theme=dark",
+  "steps": [
+   {
+    "type": "click",
+    "sel": "button[aria-label='Görünüm']"
+   },
+   {
+    "type": "wait",
+    "ms": 400
+   }
+  ]
+ },
+ {
+  "name": "pathedit-light",
+  "w": 1100,
+  "h": 700,
+  "params": "theme=light&loc=dcim",
+  "steps": [
+   {
+    "type": "click",
+    "sel": "nav[aria-label='Klasör yolu']",
+    "pos": {
+     "x": 600,
+     "y": 10
+    }
+   },
+   {
+    "type": "wait",
+    "ms": 300
+   }
+  ]
+ },
+ {
+  "name": "search-light",
+  "w": 1100,
+  "h": 700,
+  "params": "theme=light",
+  "steps": [
+   {
+    "type": "click",
+    "sel": "input[type=search]"
+   },
+   {
+    "type": "type",
+    "text": "rapor"
+   },
+   {
+    "type": "wait",
+    "ms": 300
+   }
+  ]
+ },
+ {
+  "name": "nomatch-light",
+  "w": 1100,
+  "h": 700,
+  "params": "theme=light",
+  "steps": [
+   {
+    "type": "click",
+    "sel": "input[type=search]"
+   },
+   {
+    "type": "type",
+    "text": "zzzz"
+   },
+   {
+    "type": "wait",
+    "ms": 300
+   }
+  ]
+ },
+ {
+  "name": "preview2-dark",
+  "w": 1100,
+  "h": 700,
+  "params": "theme=dark&loc=dcim&preview=3",
+  "wait": 2000
+ },
+ {
+  "name": "drag-light",
+  "w": 1100,
+  "h": 700,
+  "params": "theme=light",
+  "steps": [
+   {
+    "type": "drag",
+    "x1": 330,
+    "y1": 496,
+    "x2": 330,
+    "y2": 208,
+    "hold": 600
+   },
+   {
+    "type": "wait",
+    "ms": 100
+   }
+  ]
+ },
+ {
+  "name": "empty-light",
+  "w": 1100,
+  "h": 700,
+  "params": "theme=light&loc=pc",
+  "steps": [
+   {
+    "type": "click",
+    "sel": "nav[aria-label='Klasör yolu'] button",
+    "pos": {
+     "x": 5,
+     "y": 5
+    }
+   },
+   {
+    "type": "wait",
+    "ms": 300
+   }
+  ]
+ },
+ {
+  "name": "compact-sel-dark",
+  "w": 420,
+  "h": 720,
+  "params": "theme=dark&select=2,3",
+  "touch": true
+ },
+ {
+  "name": "compact-grid-light",
+  "w": 420,
+  "h": 720,
+  "params": "theme=light&loc=dcim&view=grid",
+  "touch": true
+ },
+ {
+  "name": "narrow-light",
+  "w": 360,
+  "h": 640,
+  "params": "theme=light",
+  "touch": true
+ },
+ {
+  "name": "sortmenu2-light",
+  "w": 1100,
+  "h": 700,
+  "params": "theme=light",
+  "steps": [
+   {
+    "type": "click",
+    "sel": "button[aria-label='Sırala']"
+   },
+   {
+    "type": "wait",
+    "ms": 400
+   }
+  ]
+ },
+ {
+  "name": "tray-compact-dark",
+  "w": 420,
+  "h": 720,
+  "params": "theme=dark&tray=1",
+  "wait": 2000,
+  "touch": true
+ },
+ {
+  "name": "tray-compact2-dark",
+  "w": 420,
+  "h": 720,
+  "params": "theme=dark&tray=1",
+  "wait": 2000,
+  "touch": true
+ },
+ {
+  "name": "compact-selbar-light",
+  "w": 420,
+  "h": 720,
+  "params": "theme=light&select=2,3",
+  "touch": true,
+  "wait": 1500
+ },
+ {
+  "name": "sortmenu3-light",
+  "w": 1100,
+  "h": 700,
+  "params": "theme=light",
+  "steps": [
+   {
+    "type": "click",
+    "sel": "button[aria-label='Sırala']"
+   },
+   {
+    "type": "wait",
+    "ms": 400
+   }
+  ]
+ },
+{"name": "belge-pdf-dark", "w": 1100, "h": 700, "params": "theme=dark&loc=docs&preview=1", "wait": 5000},
+{"name": "belge-docx-light", "w": 1100, "h": 700, "params": "theme=light&loc=docs&preview=3", "wait": 5000},
+{"name": "belge-xlsx-dark", "w": 1100, "h": 700, "params": "theme=dark&loc=docs&preview=0", "wait": 5000},
+{"name": "belge-pptx-light", "w": 1100, "h": 700, "params": "theme=light&loc=docs&preview=2", "wait": 5000},
+{"name": "onizleme-ipucu-dark", "w": 1100, "h": 700, "params": "theme=dark&loc=docs&preview=1", "wait": 4500, "steps": [{"type": "hover", "sel": "button[aria-label='Kapat (Esc)']", "after": 700}]},
+{"name": "onizleme-ipucu2-light", "w": 1100, "h": 700, "params": "theme=light&loc=docs&preview=1", "wait": 4500, "steps": [{"type": "hover", "sel": "button[aria-label='Bilgisayara kaydet']", "after": 700}]},
+{"name": "medya-ses-dark", "w": 1100, "h": 700, "params": "theme=dark&loc=medya&preview=1", "wait": 3000},
+{"name": "medya-video-hata-light", "w": 1100, "h": 700, "params": "theme=light&loc=medya&preview=0", "wait": 3000}
+]

@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+backend/build/
+backend/dist/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Tauri
+frontend/src-tauri/target/
+# The compiled backend sidecar (Nuitka, tens of MB) is a BUILD OUTPUT, never source: scripts/build-backend-sidecar.ps1 produces it
+# and release builds attach it to GitHub Releases. The folder itself stays (Tauri's externalBin looks for it).
+frontend/src-tauri/binaries/*
+!frontend/src-tauri/binaries/.gitkeep
+
+# Local state
+.env
+*.db
+
+backend/java/build/
+# scrcpy-server build workspace (backend/scrcpy/build.py: upstream clone + patched sources)
+backend/scrcpy/build/
+Smooth Resize Studio (1)/
+
+.gradle/
+
+# Runtime logs (backend/logs/opendex-YYYYMMDD.log)
+backend/logs/
+
+# Dosya yöneticisi görsel doğrulama harness'ı (tools/dosya-sistemi-dogrulama/gorsel/run.sh geçici kopyalar)
+frontend/harness.html
+frontend/harness.jsx
+frontend/vite.harness.config.mjs
+frontend/harness-fixtures/
+
+# Release downloads (msi / portable zip / checksums): built locally, attached to GitHub Releases, never committed
+/download/

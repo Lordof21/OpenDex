@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="tr"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>harness</title>
+<script>
+  (function () {
+    var q = new URLSearchParams(location.search);
+    try { localStorage.setItem('theme', q.get('theme') === 'dark' ? 'dark' : 'light'); } catch (e) {}
+  })();
+</script></head>
+<body style="margin:0"><div id="root"></div><script type="module" src="/harness.jsx"></script></body></html>

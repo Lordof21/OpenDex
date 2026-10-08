@@ -1,0 +1,42 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "OpenDeX",
+  "version": "0.1.0",
+  "identifier": "com.opendex.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "OpenDeX",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 960,
+        "minHeight": 600,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://127.0.0.1:8710; font-src 'self' data:; media-src 'self' blob: http://127.0.0.1:8710; worker-src 'self' blob:; connect-src 'self' http://127.0.0.1:8710 ws://127.0.0.1:8710 http://ipc.localhost http://*.localhost ws://*.localhost; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "dmg"],
+    "externalBin": ["binaries/opendex-backend"],
+    "icon": ["icons/icon.ico", "icons/icon.png"],
+    "resources": {
+      "../../backend/vendor/": "vendor/"
+    },
+    "windows": {
+      "wix": {
+        "language": "tr-TR"
+      }
+    }
+  }
+}

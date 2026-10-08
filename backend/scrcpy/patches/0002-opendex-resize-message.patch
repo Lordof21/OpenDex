@@ -1,0 +1,294 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: OpenDex <opendex@local>
+Date: Thu, 1 Oct 2026 12:00:00 +0000
+Subject: [PATCH 2/3] =?UTF-8?q?OpenDex:=20OPENDEX=5FRESIZE=20=E2=80=94=20s?=
+ =?UTF-8?q?ize=20and=20density=20in=20one=20VirtualDisplay.resize?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+New control message type 200 (upstream types 0-22 untouched):
+  u8 type | u16 width | u16 height | u16 dpi | u32 bitRate
+width = height = 0 keeps the size, dpi = 0 the density, bitRate = 0 the
+encoder bit rate (applied by the next patch).
+
+The debounced request carries the density too (newest wins per field), and
+triggerResize applies size and density in ONE VirtualDisplay.resize call:
+one display configuration change instead of a resize followed by a separate
+`wm density`. A density-only request keeps the display's size and, like any
+request that does not change the size, adds no pending client-resize entry
+to the tracker (no capture reset follows it).
+---
+ .../scrcpy/control/ControlMessage.java        | 26 +++++++++++
+ .../scrcpy/control/ControlMessageReader.java  | 10 +++++
+ .../genymobile/scrcpy/control/Controller.java |  8 ++++
+ .../display/DisplayResizeDebouncer.java       | 43 +++++++++++++++----
+ .../scrcpy/video/NewDisplayCapture.java       | 39 ++++++++++++-----
+ 5 files changed, 108 insertions(+), 18 deletions(-)
+
+diff --git a/server/src/main/java/com/genymobile/scrcpy/control/ControlMessage.java b/server/src/main/java/com/genymobile/scrcpy/control/ControlMessage.java
+index 777873b..d49ef25 100644
+--- a/server/src/main/java/com/genymobile/scrcpy/control/ControlMessage.java
++++ b/server/src/main/java/com/genymobile/scrcpy/control/ControlMessage.java
+@@ -31,6 +31,9 @@ public final class ControlMessage {
+     public static final int TYPE_RESIZE_DISPLAY = 21;
+     public static final int TYPE_SCAN_FILE = 22;
+ 
++    // OpenDex: size + density (+ bit rate) of a flex display in one resize; far from upstream's numbering on purpose
++    public static final int TYPE_OPENDEX_RESIZE = 200;
++
+     public static final long SEQUENCE_INVALID = 0;
+ 
+     public static final int COPY_KEY_NONE = 0;
+@@ -60,6 +63,8 @@ public final class ControlMessage {
+     private int productId;
+     private int width;
+     private int height;
++    private int dpi;
++    private int bitRate;
+ 
+     private ControlMessage() {
+     }
+@@ -188,6 +193,19 @@ public final class ControlMessage {
+         return msg;
+     }
+ 
++    /**
++     * OpenDex: width = height = 0 keeps the size, dpi = 0 the density, bitRate = 0 the encoder bit rate.
++     */
++    public static ControlMessage createOpenDexResize(int width, int height, int dpi, int bitRate) {
++        ControlMessage msg = new ControlMessage();
++        msg.type = TYPE_OPENDEX_RESIZE;
++        msg.width = width;
++        msg.height = height;
++        msg.dpi = dpi;
++        msg.bitRate = bitRate;
++        return msg;
++    }
++
+     public static ControlMessage createScanFile(String path) {
+         ControlMessage msg = new ControlMessage();
+         msg.type = TYPE_SCAN_FILE;
+@@ -286,4 +304,12 @@ public final class ControlMessage {
+     public int getHeight() {
+         return height;
+     }
++
++    public int getDpi() {
++        return dpi;
++    }
++
++    public int getBitRate() {
++        return bitRate;
++    }
+ }
+diff --git a/server/src/main/java/com/genymobile/scrcpy/control/ControlMessageReader.java b/server/src/main/java/com/genymobile/scrcpy/control/ControlMessageReader.java
+index b2591d6..d9c70a7 100644
+--- a/server/src/main/java/com/genymobile/scrcpy/control/ControlMessageReader.java
++++ b/server/src/main/java/com/genymobile/scrcpy/control/ControlMessageReader.java
+@@ -64,6 +64,8 @@ public class ControlMessageReader {
+                 return parseResizeDisplay();
+             case ControlMessage.TYPE_SCAN_FILE:
+                 return parseScanFile();
++            case ControlMessage.TYPE_OPENDEX_RESIZE:
++                return parseOpenDexResize();
+             default:
+                 throw new ControlProtocolException("Unknown event type: " + type);
+         }
+@@ -185,6 +187,14 @@ public class ControlMessageReader {
+         return ControlMessage.createResizeDisplay(width, height);
+     }
+ 
++    private ControlMessage parseOpenDexResize() throws IOException {
++        int width = dis.readUnsignedShort();
++        int height = dis.readUnsignedShort();
++        int dpi = dis.readUnsignedShort();
++        int bitRate = dis.readInt();
++        return ControlMessage.createOpenDexResize(width, height, dpi, bitRate);
++    }
++
+     private ControlMessage parseScanFile() throws IOException {
+         String path = parseString();
+         return ControlMessage.createScanFile(path);
+diff --git a/server/src/main/java/com/genymobile/scrcpy/control/Controller.java b/server/src/main/java/com/genymobile/scrcpy/control/Controller.java
+index 55d6e11..732691d 100644
+--- a/server/src/main/java/com/genymobile/scrcpy/control/Controller.java
++++ b/server/src/main/java/com/genymobile/scrcpy/control/Controller.java
+@@ -413,6 +413,9 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
+                 case ControlMessage.TYPE_RESIZE_DISPLAY:
+                     resizeDisplay(msg.getWidth(), msg.getHeight());
+                     return true;
++                case ControlMessage.TYPE_OPENDEX_RESIZE:
++                    opendexResize(msg);
++                    return true;
+                 case ControlMessage.TYPE_SCAN_FILE:
+                     scanFile(msg.getText());
+                     return true;
+@@ -881,6 +884,11 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
+         newDisplayCapture.requestResize(width, height);
+     }
+ 
++    private void opendexResize(ControlMessage msg) {
++        NewDisplayCapture newDisplayCapture = (NewDisplayCapture) surfaceCapture;
++        newDisplayCapture.requestResize(msg.getWidth(), msg.getHeight(), msg.getDpi());
++    }
++
+     private void scanFile(String path) {
+         try {
+             @SuppressWarnings("deprecation")
+diff --git a/server/src/main/java/com/genymobile/scrcpy/display/DisplayResizeDebouncer.java b/server/src/main/java/com/genymobile/scrcpy/display/DisplayResizeDebouncer.java
+index 71591ec..c7decc2 100644
+--- a/server/src/main/java/com/genymobile/scrcpy/display/DisplayResizeDebouncer.java
++++ b/server/src/main/java/com/genymobile/scrcpy/display/DisplayResizeDebouncer.java
+@@ -12,12 +12,37 @@ import android.os.SystemClock;
+ public final class DisplayResizeDebouncer {
+ 
+     public interface Callback {
+-        void trigger(Size size);
++        void trigger(Request request);
++    }
++
++    /**
++     * OpenDex: what one resize changes. {@code size == null} keeps the display's size, {@code dpi == 0} its density.
++     */
++    public static final class Request {
++        private final Size size;
++        private final int dpi;
++
++        public Request(Size size, int dpi) {
++            this.size = size;
++            this.dpi = dpi;
++        }
++
++        public Size getSize() {
++            return size;
++        }
++
++        public int getDpi() {
++            return dpi;
++        }
++
++        Request mergedWith(Request newer) {
++            return new Request(newer.size != null ? newer.size : size, newer.dpi != 0 ? newer.dpi : dpi);
++        }
+     }
+ 
+     private final Callback callback;
+     private final long minIntervalMs;
+-    private Size request;
++    private Request request;
+     private long deadline;
+     private long lastTrigger;
+ 
+@@ -47,7 +72,7 @@ public final class DisplayResizeDebouncer {
+     private void debounce() {
+         try {
+             while (true) {
+-                Size newSize;
++                Request newRequest;
+                 synchronized (this) {
+                     while (true) {
+                         long now = SystemClock.uptimeMillis();
+@@ -62,11 +87,11 @@ public final class DisplayResizeDebouncer {
+                         }
+                     }
+                     assert request != null : "An active deadline implies request != null";
+-                    newSize = request;
++                    newRequest = request;
+                     request = null;
+                     lastTrigger = SystemClock.uptimeMillis();
+                 }
+-                callback.trigger(newSize);
++                callback.trigger(newRequest);
+             }
+         } catch (InterruptedException e) {
+             // ignore
+@@ -75,12 +100,14 @@ public final class DisplayResizeDebouncer {
+         }
+     }
+ 
+-    public synchronized void requestResize(Size size) {
+-        assert size != null;
++    public synchronized void requestResize(Request newRequest) {
++        assert newRequest != null;
+         if (request == null) {
+             deadline = Math.max(SystemClock.uptimeMillis(), lastTrigger + minIntervalMs);
++            request = newRequest;
++        } else {
++            request = request.mergedWith(newRequest);
+         }
+-        request = size;
+         notify();
+     }
+ 
+diff --git a/server/src/main/java/com/genymobile/scrcpy/video/NewDisplayCapture.java b/server/src/main/java/com/genymobile/scrcpy/video/NewDisplayCapture.java
+index e933d0f..256da5c 100644
+--- a/server/src/main/java/com/genymobile/scrcpy/video/NewDisplayCapture.java
++++ b/server/src/main/java/com/genymobile/scrcpy/video/NewDisplayCapture.java
+@@ -329,18 +329,28 @@ public class NewDisplayCapture extends SurfaceCapture {
+     }
+ 
+     public void requestResize(int width, int height) {
++        requestResize(width, height, 0);
++    }
++
++    /**
++     * OpenDex: width = height = 0 keeps the display's size, dpi = 0 its density.
++     */
++    public void requestResize(int width, int height, int dpi) {
+         if (!flexDisplay) {
+             throw new IllegalStateException("Cannot resize a non-flex display");
+         }
+ 
+-        VideoConstraints constraints = getVideoConstraints(); // synchronized
+-        Size newSize = new Size(width, height).constrain(constraints, false);
++        Size newSize = null;
++        if (width != 0 || height != 0) {
++            VideoConstraints constraints = getVideoConstraints(); // synchronized
++            newSize = new Size(width, height).constrain(constraints, false);
++        }
+         if (Ln.isEnabled(Ln.Level.VERBOSE)) {
+-            Ln.v(getClass().getSimpleName() + ": requestResize(" + width + ", " + height + ")");
++            Ln.v(getClass().getSimpleName() + ": requestResize(" + width + ", " + height + ", " + dpi + ")");
+             Ln.v(getClass().getSimpleName() + ": constrained size = " + newSize);
+         }
+ 
+-        debouncer.requestResize(newSize);
++        debouncer.requestResize(new DisplayResizeDebouncer.Request(newSize, dpi));
+     }
+ 
+     private synchronized void setCurrentVirtualDisplay(VirtualDisplay virtualDisplay) {
+@@ -355,18 +365,27 @@ public class NewDisplayCapture extends SurfaceCapture {
+         this.videoConstraints = videoConstraints;
+     }
+ 
+-    private synchronized void triggerResize(Size size) {
++    private synchronized void triggerResize(DisplayResizeDebouncer.Request request) {
+         if (virtualDisplay != null) {
+-            size = size.constrain(videoConstraints, false); // in case the constraints have changed
+             int displayId = virtualDisplay.getDisplay().getDisplayId();
+             DisplayInfo displayInfo = ServiceManager.getDisplayManager().getDisplayInfo(displayId);
+             @SuppressWarnings("checkstyle:HiddenField") // hides this.dpi on purpose
+-            int dpi = displayInfo.getDpi();
++            int dpi = request.getDpi() != 0 ? request.getDpi() : displayInfo.getDpi();
+             int displayRotation = displayInfo.getRotation();
+-            if (captureOrientation.isSwap()) {
+-                size = size.rotate();
++            Size size = request.getSize();
++            if (size == null) {
++                // Density only: the display keeps its (rotated, as DisplayInfo reports it) size
++                size = displayInfo.getSize();
++            } else {
++                size = size.constrain(videoConstraints, false); // in case the constraints have changed
++                if (captureOrientation.isSwap()) {
++                    size = size.rotate();
++                }
++            }
++            if (!size.equals(displayInfo.getSize())) {
++                // Only a size change resets the capture; a pending entry for anything else would wait 3 s for nothing
++                tracker.pushClientRequest(new DisplayProperties(size, displayRotation));
+             }
+-            tracker.pushClientRequest(new DisplayProperties(size, displayRotation));
+ 
+             // Although the display size (as detected by the DisplayMonitor) is rotated, the virtual display itself is not
+             Size vdSize = (displayRotation % 2) == 0 ? size : size.rotate();

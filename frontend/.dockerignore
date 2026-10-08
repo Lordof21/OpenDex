@@ -1,0 +1,11 @@
+node_modules/
+node_modules/**
+dist/
+dist/**
+src-tauri/target/
+src-tauri/target/**
+src-tauri/**/target
+.git/
+.venv/
+__pycache__/
+*.db

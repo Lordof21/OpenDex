@@ -1,0 +1,132 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: OpenDex <opendex@local>
+Date: Mon, 5 Oct 2026 12:00:00 +0000
+Subject: [PATCH 4/4] OpenDex: key frame on request without an encoder restart
+
+New control message type 201 OPENDEX_REQUEST_KEYFRAME (u8 type, no payload):
+MediaCodec.setParameters(PARAMETER_KEY_REQUEST_SYNC_FRAME) on the running
+encoder — the next frame is a key frame; same session, same surface, same
+codec config, so the client's decoder is not reconfigured. Upstream's
+RESET_VIDEO (17) rebuilds the whole encoder for the same purpose.
+
+With key frames on request, the periodic one (KEY_I_FRAME_INTERVAL) goes from
+10 s to 60 s: the stream rides adb's TCP, so there is no loss to recover from.
+
+Announced as "keyframe_request"; a server that does not announce it is never
+sent type 201.
+---
+diff --git a/server/src/main/java/com/genymobile/scrcpy/Server.java b/server/src/main/java/com/genymobile/scrcpy/Server.java
+index beb4e5c..f3cf9f3 100644
+--- a/server/src/main/java/com/genymobile/scrcpy/Server.java
++++ b/server/src/main/java/com/genymobile/scrcpy/Server.java
+@@ -69,7 +69,7 @@ public final class Server {
+     }
+ 
+     private static void scrcpy(Options options) throws IOException, ConfigurationException {
+-        Ln.i("OpenDex: features=leading_resize,opendex_resize,bitrate_on_reset");
++        Ln.i("OpenDex: features=leading_resize,opendex_resize,bitrate_on_reset,keyframe_request");
+ 
+         if (Build.VERSION.SDK_INT < AndroidVersions.API_31_ANDROID_12 && options.getVideoSource() == VideoSource.CAMERA) {
+             Ln.e("Camera mirroring is not supported before Android 12");
+diff --git a/server/src/main/java/com/genymobile/scrcpy/control/ControlMessage.java b/server/src/main/java/com/genymobile/scrcpy/control/ControlMessage.java
+index d49ef25..412804b 100644
+--- a/server/src/main/java/com/genymobile/scrcpy/control/ControlMessage.java
++++ b/server/src/main/java/com/genymobile/scrcpy/control/ControlMessage.java
+@@ -33,6 +33,7 @@ public final class ControlMessage {
+ 
+     // OpenDex: size + density (+ bit rate) of a flex display in one resize; far from upstream's numbering on purpose
+     public static final int TYPE_OPENDEX_RESIZE = 200;
++    public static final int TYPE_OPENDEX_REQUEST_KEYFRAME = 201;
+ 
+     public static final long SEQUENCE_INVALID = 0;
+ 
+diff --git a/server/src/main/java/com/genymobile/scrcpy/control/ControlMessageReader.java b/server/src/main/java/com/genymobile/scrcpy/control/ControlMessageReader.java
+index d9c70a7..647a3d7 100644
+--- a/server/src/main/java/com/genymobile/scrcpy/control/ControlMessageReader.java
++++ b/server/src/main/java/com/genymobile/scrcpy/control/ControlMessageReader.java
+@@ -47,6 +47,7 @@ public class ControlMessageReader {
+             case ControlMessage.TYPE_ROTATE_DEVICE:
+             case ControlMessage.TYPE_OPEN_HARD_KEYBOARD_SETTINGS:
+             case ControlMessage.TYPE_RESET_VIDEO:
++            case ControlMessage.TYPE_OPENDEX_REQUEST_KEYFRAME:
+             case ControlMessage.TYPE_CAMERA_ZOOM_IN:
+             case ControlMessage.TYPE_CAMERA_ZOOM_OUT:
+                 return ControlMessage.createEmpty(type);
+diff --git a/server/src/main/java/com/genymobile/scrcpy/control/Controller.java b/server/src/main/java/com/genymobile/scrcpy/control/Controller.java
+index e939ffb..4d61784 100644
+--- a/server/src/main/java/com/genymobile/scrcpy/control/Controller.java
++++ b/server/src/main/java/com/genymobile/scrcpy/control/Controller.java
+@@ -337,6 +337,9 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
+             case ControlMessage.TYPE_RESET_VIDEO:
+                 resetVideo();
+                 return true;
++            case ControlMessage.TYPE_OPENDEX_REQUEST_KEYFRAME:
++                requestKeyFrame();
++                return true;
+             default:
+                 // fall through
+         }
+@@ -879,6 +882,13 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
+         }
+     }
+ 
++    private void requestKeyFrame() {
++        // OpenDex: a key frame without RESET_VIDEO's encoder restart (no new surface, no new codec config)
++        if (surfaceCapture != null && !surfaceCapture.getCaptureControl().requestSyncFrame()) {
++            Ln.d("OpenDex: key frame request while the encoder restarts (the restart starts with one)");
++        }
++    }
++
+     private void resizeDisplay(int width, int height) {
+         NewDisplayCapture newDisplayCapture = (NewDisplayCapture) surfaceCapture;
+         newDisplayCapture.requestResize(width, height);
+diff --git a/server/src/main/java/com/genymobile/scrcpy/video/CaptureControl.java b/server/src/main/java/com/genymobile/scrcpy/video/CaptureControl.java
+index 2d86ec3..3397b8a 100644
+--- a/server/src/main/java/com/genymobile/scrcpy/video/CaptureControl.java
++++ b/server/src/main/java/com/genymobile/scrcpy/video/CaptureControl.java
+@@ -1,6 +1,7 @@
+ package com.genymobile.scrcpy.video;
+ 
+ import android.media.MediaCodec;
++import android.os.Bundle;
+ 
+ public class CaptureControl {
+ 
+@@ -49,6 +50,22 @@ public class CaptureControl {
+         return value;
+     }
+ 
++    // OpenDex: the next frame is encoded as a key frame; the encoder keeps running. False when no encoder is running (a
++    // (re)start is under way, and it begins with a key frame anyway) or the codec refused the request.
++    public synchronized boolean requestSyncFrame() {
++        if (runningMediaCodec == null) {
++            return false;
++        }
++        Bundle params = new Bundle();
++        params.putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0);
++        try {
++            runningMediaCodec.setParameters(params);
++            return true;
++        } catch (IllegalStateException e) {
++            return false;
++        }
++    }
++
+     public synchronized void setRunningMediaCodec(MediaCodec runningMediaCodec) {
+         this.runningMediaCodec = runningMediaCodec;
+     }
+diff --git a/server/src/main/java/com/genymobile/scrcpy/video/SurfaceEncoder.java b/server/src/main/java/com/genymobile/scrcpy/video/SurfaceEncoder.java
+index 7be3429..83adf64 100644
+--- a/server/src/main/java/com/genymobile/scrcpy/video/SurfaceEncoder.java
++++ b/server/src/main/java/com/genymobile/scrcpy/video/SurfaceEncoder.java
+@@ -28,7 +28,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
+ 
+ public class SurfaceEncoder implements AsyncProcessor {
+ 
+-    private static final int DEFAULT_I_FRAME_INTERVAL = 10; // seconds
++    // OpenDex: 60 s instead of 10 — the stream rides adb's TCP (nothing is lost to recover from) and a client that needs a
++    // key frame asks for one (TYPE_OPENDEX_REQUEST_KEYFRAME); the periodic one is only a backstop.
++    private static final int DEFAULT_I_FRAME_INTERVAL = 60; // seconds
+     private static final int REPEAT_FRAME_DELAY_US = 100_000; // repeat after 100ms
+     private static final String KEY_MAX_FPS_TO_ENCODER = "max-fps-to-encoder";
+ 

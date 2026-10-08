@@ -1,0 +1,34 @@
+{
+  "key_kinds": [
+    "char",
+    "keycode",
+    "shortcut",
+    "text"
+  ],
+  "keycode_names": [
+    "android_home",
+    "app_switch",
+    "arrowdown",
+    "arrowleft",
+    "arrowright",
+    "arrowup",
+    "back",
+    "backspace",
+    "delete",
+    "end",
+    "enter",
+    "escape",
+    "home",
+    "pagedown",
+    "pageup",
+    "tab"
+  ],
+  "ws_input_types": [
+    "clipboard",
+    "down",
+    "move",
+    "release_all",
+    "scroll",
+    "up"
+  ]
+}

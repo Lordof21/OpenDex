@@ -1,0 +1,40 @@
+name: Backend CI
+
+on:
+  push:
+    paths:
+      - "backend/**"
+      - "docs/**"
+      - "scripts/**"
+      - "tools/screenshots/**"
+      - ".github/workflows/backend-ci.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - "docs/**"
+      - "scripts/**"
+      - "tools/screenshots/**"
+      - ".github/workflows/backend-ci.yml"
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend + dev dependencies
+        run: python -m pip install -e ".[dev]"
+
+      - name: ruff check
+        run: python -m ruff check app
+
+      # includes the documentation drift tests (generated docs, OpenAPI, sample data) and — with the runner's JDK — the phone helper's JVM tests
+      - name: pytest
+        run: python -m pytest -q

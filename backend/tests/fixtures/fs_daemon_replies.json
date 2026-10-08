@@ -1,0 +1,300 @@
+{
+  "bad_request": {
+    "request": "fs_list abc",
+    "request_reply": {
+      "detail": "",
+      "error": "bad_request",
+      "ok": false,
+      "type": "fs_list_result"
+    }
+  },
+  "delete_ok": {
+    "request": "fs_delete L3N0b3JhZ2UvZW11bGF0ZWQvMC9Hb2xkZW4vTmV3",
+    "request_reply": {
+      "deleted": 1,
+      "ok": true,
+      "type": "fs_delete_result"
+    }
+  },
+  "delete_protected": {
+    "request": "fs_delete L3N0b3JhZ2UvZW11bGF0ZWQvMA==",
+    "request_reply": {
+      "detail": "protected folder",
+      "error": "permission",
+      "ok": false,
+      "type": "fs_delete_result"
+    }
+  },
+  "list_all": {
+    "request": "fs_list L3N0b3JhZ2UvZW11bGF0ZWQvMC9Hb2xkZW4= - 100",
+    "request_reply": {
+      "items": [
+        [
+          ".hidden",
+          0,
+          1,
+          1650000000,
+          2,
+          null
+        ],
+        [
+          "Sub",
+          1,
+          0,
+          1650000000,
+          0,
+          null
+        ],
+        [
+          "a.jpg",
+          0,
+          10,
+          1650000000,
+          0,
+          null
+        ],
+        [
+          "link-to-sub",
+          1,
+          0,
+          1650000000,
+          1,
+          "/storage/emulated/0/Golden/Sub"
+        ],
+        [
+          "ş ö.txt",
+          0,
+          1,
+          1650000000,
+          0,
+          null
+        ]
+      ],
+      "next": null,
+      "ok": true,
+      "path": "/storage/emulated/0/Golden",
+      "type": "fs_list_result"
+    }
+  },
+  "list_first_page": {
+    "request": "fs_list L3N0b3JhZ2UvZW11bGF0ZWQvMC9Hb2xkZW4= - 2",
+    "request_reply": {
+      "items": [
+        [
+          ".hidden",
+          0,
+          1,
+          1650000000,
+          2,
+          null
+        ],
+        [
+          "Sub",
+          1,
+          0,
+          1650000000,
+          0,
+          null
+        ]
+      ],
+      "next": "U3Vi",
+      "ok": true,
+      "path": "/storage/emulated/0/Golden",
+      "type": "fs_list_result"
+    }
+  },
+  "list_missing": {
+    "request": "fs_list L3N0b3JhZ2UvZW11bGF0ZWQvMC9Ob3Bl - 10",
+    "request_reply": {
+      "detail": "/storage/emulated/0/Nope",
+      "error": "not_found",
+      "ok": false,
+      "type": "fs_list_result"
+    }
+  },
+  "list_next_page": {
+    "request": "fs_list L3N0b3JhZ2UvZW11bGF0ZWQvMC9Hb2xkZW4= U3Vi 2",
+    "request_reply": {
+      "items": [
+        [
+          "a.jpg",
+          0,
+          10,
+          1650000000,
+          0,
+          null
+        ],
+        [
+          "link-to-sub",
+          1,
+          0,
+          1650000000,
+          1,
+          "/storage/emulated/0/Golden/Sub"
+        ]
+      ],
+      "next": "bGluay10by1zdWI=",
+      "ok": true,
+      "path": "/storage/emulated/0/Golden",
+      "type": "fs_list_result"
+    }
+  },
+  "list_not_a_dir": {
+    "request": "fs_list L3N0b3JhZ2UvZW11bGF0ZWQvMC9Hb2xkZW4vYS5qcGc= - 10",
+    "request_reply": {
+      "detail": "/storage/emulated/0/Golden/a.jpg",
+      "error": "not_a_dir",
+      "ok": false,
+      "type": "fs_list_result"
+    }
+  },
+  "list_outside": {
+    "request": "fs_list L2V0Yw== - 10",
+    "request_reply": {
+      "detail": "/etc",
+      "error": "outside_roots",
+      "ok": false,
+      "type": "fs_list_result"
+    }
+  },
+  "mkdir_exists": {
+    "request": "fs_mkdir L3N0b3JhZ2UvZW11bGF0ZWQvMC9Hb2xkZW4vTmV3 -",
+    "request_reply": {
+      "detail": "/storage/emulated/0/Golden/New",
+      "error": "exists",
+      "ok": false,
+      "type": "fs_mkdir_result"
+    }
+  },
+  "mkdir_ok": {
+    "request": "fs_mkdir L3N0b3JhZ2UvZW11bGF0ZWQvMC9Hb2xkZW4vTmV3 -",
+    "request_reply": {
+      "ok": true,
+      "type": "fs_mkdir_result"
+    }
+  },
+  "rename_exists": {
+    "request": "fs_rename L3N0b3JhZ2UvZW11bGF0ZWQvMC9Hb2xkZW4vYS5qcGc= L3N0b3JhZ2UvZW11bGF0ZWQvMC9Hb2xkZW4vxZ8gw7YudHh0 -",
+    "request_reply": {
+      "detail": "ş ö.txt",
+      "error": "exists",
+      "ok": false,
+      "type": "fs_rename_result"
+    }
+  },
+  "rename_protected": {
+    "request": "fs_rename L3N0b3JhZ2UvZW11bGF0ZWQvMA== L3N0b3JhZ2UvZW11bGF0ZWQvMHg= -",
+    "request_reply": {
+      "detail": "protected folder",
+      "error": "permission",
+      "ok": false,
+      "type": "fs_rename_result"
+    }
+  },
+  "roots": {
+    "request": "fs_roots",
+    "request_reply": {
+      "ok": true,
+      "roots": [
+        {
+          "free": 500000000,
+          "kind": "internal",
+          "path": "/storage/emulated/0",
+          "total": 1000000000
+        },
+        {
+          "free": 500000000,
+          "kind": "tmp",
+          "path": "/data/local/tmp",
+          "total": 1000000000
+        }
+      ],
+      "type": "fs_roots_result"
+    }
+  },
+  "stat_file": {
+    "request": "fs_stat L3N0b3JhZ2UvZW11bGF0ZWQvMC9Hb2xkZW4vYS5qcGc=",
+    "request_reply": {
+      "item": [
+        "a.jpg",
+        0,
+        10,
+        1650000000,
+        0,
+        null
+      ],
+      "ok": true,
+      "path": "/storage/emulated/0/Golden/a.jpg",
+      "type": "fs_stat_result"
+    }
+  },
+  "stat_link": {
+    "request": "fs_stat L3N0b3JhZ2UvZW11bGF0ZWQvMC9Hb2xkZW4vbGluay10by1zdWI=",
+    "request_reply": {
+      "item": [
+        "link-to-sub",
+        1,
+        0,
+        1650000000,
+        1,
+        "/storage/emulated/0/Golden/Sub"
+      ],
+      "ok": true,
+      "path": "/storage/emulated/0/Golden/link-to-sub",
+      "type": "fs_stat_result"
+    }
+  },
+  "stat_many": {
+    "request": "fs_stat_many L3N0b3JhZ2UvZW11bGF0ZWQvMC9Hb2xkZW4vYS5qcGcKL3N0b3JhZ2UvZW11bGF0ZWQvMC9Hb2xkZW4vZ2hvc3QKL3N0b3JhZ2UvZW11bGF0ZWQvMC9Hb2xkZW4vU3Vi",
+    "request_reply": {
+      "items": [
+        [
+          "a.jpg",
+          0,
+          10,
+          1650000000,
+          0,
+          null
+        ],
+        null,
+        [
+          "Sub",
+          1,
+          0,
+          1650000000,
+          0,
+          null
+        ]
+      ],
+      "ok": true,
+      "type": "fs_stat_many_result"
+    }
+  },
+  "stat_missing": {
+    "request": "fs_stat L3N0b3JhZ2UvZW11bGF0ZWQvMC9Hb2xkZW4vZ2hvc3Q=",
+    "request_reply": {
+      "detail": "/storage/emulated/0/Golden/ghost",
+      "error": "not_found",
+      "ok": false,
+      "type": "fs_stat_result"
+    }
+  },
+  "thumb_unsupported": {
+    "request": "fs_thumb L3N0b3JhZ2UvZW11bGF0ZWQvMC9Hb2xkZW4vxZ8gw7YudHh0 256",
+    "request_reply": {
+      "detail": "no thumbnail for this type",
+      "error": "unsupported",
+      "ok": false,
+      "type": "fs_thumb_result"
+    }
+  },
+  "unknown_command": {
+    "request": "fs_format x",
+    "request_reply": {
+      "detail": "",
+      "error": "unknown_command",
+      "ok": false,
+      "type": "fs_format_result"
+    }
+  }
+}

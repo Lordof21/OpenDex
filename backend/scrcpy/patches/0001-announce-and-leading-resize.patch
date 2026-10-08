@@ -1,0 +1,163 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: OpenDex <opendex@local>
+Date: Thu, 1 Oct 2026 12:00:00 +0000
+Subject: [PATCH 1/3] OpenDex: capability announcement, leading-edge resize
+ debouncer
+
+- Server: "OpenDex: features=leading_resize,opendex_resize,bitrate_on_reset"
+  at INFO, so the client learns what this server can do without a version
+  bump (VERSION_NAME stays "4.1") and without changing the log level.
+- SurfaceEncoder: "OpenDex: size_alignment=<px>" at INFO (upstream prints it
+  at DEBUG only): lets the client predict what a flex resize really yields.
+- DisplayResizeDebouncer: leading edge instead of a fixed 300 ms delay. A
+  request reaching an idle debouncer is triggered at once; while requests
+  keep coming, at least resize_min_interval_ms (new option, default 300)
+  separate two triggers and only the newest request is applied.
+---
+ .../main/java/com/genymobile/scrcpy/Options.java  |  8 ++++++++
+ .../main/java/com/genymobile/scrcpy/Server.java   |  2 ++
+ .../scrcpy/display/DisplayResizeDebouncer.java    | 15 +++++++++++----
+ .../scrcpy/video/NewDisplayCapture.java           |  4 +++-
+ .../genymobile/scrcpy/video/SurfaceEncoder.java   |  1 +
+ 5 files changed, 25 insertions(+), 5 deletions(-)
+
+diff --git a/server/src/main/java/com/genymobile/scrcpy/Options.java b/server/src/main/java/com/genymobile/scrcpy/Options.java
+index 26a6ba9..1258c0a 100644
+--- a/server/src/main/java/com/genymobile/scrcpy/Options.java
++++ b/server/src/main/java/com/genymobile/scrcpy/Options.java
+@@ -68,6 +68,7 @@ public class Options {
+     private boolean vdDestroyContent = true;
+     private boolean vdSystemDecorations = true;
+     private boolean flexDisplay;
++    private int resizeMinIntervalMs = 300; // OpenDex: least time between two flex display resizes
+ 
+     private boolean keepActive;
+     private boolean ignoreVideoEncoderConstraints;
+@@ -275,6 +276,10 @@ public class Options {
+         return flexDisplay;
+     }
+ 
++    public int getResizeMinIntervalMs() {
++        return resizeMinIntervalMs;
++    }
++
+     public boolean getIgnoreVideoEncoderConstraints() {
+         return ignoreVideoEncoderConstraints;
+     }
+@@ -533,6 +538,9 @@ public class Options {
+                 case "flex_display":
+                     options.flexDisplay = Boolean.parseBoolean(value);
+                     break;
++                case "resize_min_interval_ms":
++                    options.resizeMinIntervalMs = Integer.parseInt(value);
++                    break;
+                 case "capture_orientation":
+                     Pair<Orientation.Lock, Orientation> pair = parseCaptureOrientation(value);
+                     options.captureOrientationLock = pair.first;
+diff --git a/server/src/main/java/com/genymobile/scrcpy/Server.java b/server/src/main/java/com/genymobile/scrcpy/Server.java
+index d7d1a76..beb4e5c 100644
+--- a/server/src/main/java/com/genymobile/scrcpy/Server.java
++++ b/server/src/main/java/com/genymobile/scrcpy/Server.java
+@@ -69,6 +69,8 @@ public final class Server {
+     }
+ 
+     private static void scrcpy(Options options) throws IOException, ConfigurationException {
++        Ln.i("OpenDex: features=leading_resize,opendex_resize,bitrate_on_reset");
++
+         if (Build.VERSION.SDK_INT < AndroidVersions.API_31_ANDROID_12 && options.getVideoSource() == VideoSource.CAMERA) {
+             Ln.e("Camera mirroring is not supported before Android 12");
+             throw new ConfigurationException("Camera mirroring is not supported");
+diff --git a/server/src/main/java/com/genymobile/scrcpy/display/DisplayResizeDebouncer.java b/server/src/main/java/com/genymobile/scrcpy/display/DisplayResizeDebouncer.java
+index 0b961c6..71591ec 100644
+--- a/server/src/main/java/com/genymobile/scrcpy/display/DisplayResizeDebouncer.java
++++ b/server/src/main/java/com/genymobile/scrcpy/display/DisplayResizeDebouncer.java
+@@ -5,22 +5,28 @@ import com.genymobile.scrcpy.util.Ln;
+ 
+ import android.os.SystemClock;
+ 
++/**
++ * OpenDex: leading edge instead of a fixed delay. A request reaching an idle debouncer is triggered at once; while
++ * resizes keep coming, at least {@code minIntervalMs} separate two triggers and only the newest request is applied.
++ */
+ public final class DisplayResizeDebouncer {
+ 
+-    private static final long DEBOUNCE_DELAY_MS = 300;
+-
+     public interface Callback {
+         void trigger(Size size);
+     }
+ 
+     private final Callback callback;
++    private final long minIntervalMs;
+     private Size request;
+     private long deadline;
++    private long lastTrigger;
+ 
+     private Thread thread;
+ 
+-    public DisplayResizeDebouncer(Callback callback) {
++    public DisplayResizeDebouncer(Callback callback, long minIntervalMs) {
+         this.callback = callback;
++        this.minIntervalMs = minIntervalMs;
++        this.lastTrigger = SystemClock.uptimeMillis() - minIntervalMs;
+     }
+ 
+     public void start() {
+@@ -58,6 +64,7 @@ public final class DisplayResizeDebouncer {
+                     assert request != null : "An active deadline implies request != null";
+                     newSize = request;
+                     request = null;
++                    lastTrigger = SystemClock.uptimeMillis();
+                 }
+                 callback.trigger(newSize);
+             }
+@@ -71,7 +78,7 @@ public final class DisplayResizeDebouncer {
+     public synchronized void requestResize(Size size) {
+         assert size != null;
+         if (request == null) {
+-            deadline = SystemClock.uptimeMillis() + DEBOUNCE_DELAY_MS;
++            deadline = Math.max(SystemClock.uptimeMillis(), lastTrigger + minIntervalMs);
+         }
+         request = size;
+         notify();
+diff --git a/server/src/main/java/com/genymobile/scrcpy/video/NewDisplayCapture.java b/server/src/main/java/com/genymobile/scrcpy/video/NewDisplayCapture.java
+index 5ed4c73..e933d0f 100644
+--- a/server/src/main/java/com/genymobile/scrcpy/video/NewDisplayCapture.java
++++ b/server/src/main/java/com/genymobile/scrcpy/video/NewDisplayCapture.java
+@@ -61,6 +61,7 @@ public class NewDisplayCapture extends SurfaceCapture {
+     private final boolean vdDestroyContent;
+     private final boolean vdSystemDecorations;
+     private final boolean flexDisplay;
++    private final int resizeMinIntervalMs;
+ 
+     private VideoConstraints videoConstraints;
+ 
+@@ -88,6 +89,7 @@ public class NewDisplayCapture extends SurfaceCapture {
+         this.vdDestroyContent = options.getVDDestroyContent();
+         this.vdSystemDecorations = options.getVDSystemDecorations();
+         this.flexDisplay = options.getFlexDisplay();
++        this.resizeMinIntervalMs = options.getResizeMinIntervalMs();
+     }
+ 
+     @Override
+@@ -102,7 +104,7 @@ public class NewDisplayCapture extends SurfaceCapture {
+             }
+ 
+             tracker = new DisplayPropertiesTracker();
+-            debouncer = new DisplayResizeDebouncer(this::triggerResize);
++            debouncer = new DisplayResizeDebouncer(this::triggerResize, resizeMinIntervalMs);
+             debouncer.start();
+ 
+             // Hardcode default values if not defined
+diff --git a/server/src/main/java/com/genymobile/scrcpy/video/SurfaceEncoder.java b/server/src/main/java/com/genymobile/scrcpy/video/SurfaceEncoder.java
+index 539681b..a52d428 100644
+--- a/server/src/main/java/com/genymobile/scrcpy/video/SurfaceEncoder.java
++++ b/server/src/main/java/com/genymobile/scrcpy/video/SurfaceEncoder.java
+@@ -90,6 +90,7 @@ public class SurfaceEncoder implements AsyncProcessor {
+             alignment = minSizeAlignment;
+             Ln.d("Actual video size alignment: " + alignment + "px");
+         }
++        Ln.i("OpenDex: size_alignment=" + alignment);
+ 
+         // Do not constrain by the declared video encoder capabilities before encoding actually fails
+         videoConstraints = new VideoConstraints(maxSize, alignment, null);

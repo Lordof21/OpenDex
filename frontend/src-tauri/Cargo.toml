@@ -1,0 +1,29 @@
+[package]
+name = "opendex"
+version = "0.1.0"
+description = "OpenDeX — Android multi-window desktop"
+license = "GPL-3.0-or-later"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# "devtools" is ON: it keeps the WebView inspector (right-click → Inspect, F12) available in RELEASE builds too, which
+# Tauri otherwise disables. OpenDeX is open source, so anyone auditing or debugging a shipped build should be able to
+# look inside it.
+tauri = { version = "2", features = ["tray-icon", "devtools"] }
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-log = "2"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+codegen-units = 1
+lto = true
+strip = true
+# Drops unwind tables/landing-pad metadata (a ready-made map of every function's cleanup paths) and aborts
+# immediately on panic instead of unwinding — smaller binary, nothing for a disassembler to walk for free.
+panic = "abort"
