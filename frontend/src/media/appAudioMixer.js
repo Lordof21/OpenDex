@@ -3,7 +3,8 @@
 // Same raw-PCM framing as the legacy sessionAudioPlayer (12-byte header: u64 flags|pts, u32 size; s16le stereo 48k).
 //
 // Two ways to play a chunk:
-//   * ARRIVAL (default, lowest latency): a chunk is queued after the previous one, START_CUSHION_S after it arrived.
+//   * ARRIVAL (default, lowest latency): a chunk is queued after the previous one, a cushion after it arrived; the cushion
+//     adapts to the link (jitterBuffer.js).
 //   * PRESENTED (route "İkisi", `targetMs` set, device clock known): the chunk is placed so its first sample is AUDIBLE at
 //     device PTS + targetMs — the very instant the phone's own playback presents it (the daemon uses the same PTS). Network
 //     jitter then changes nothing about WHEN it is heard; only a chunk that arrives after that instant is late (and counted:
@@ -15,14 +16,15 @@
 import { wsUrl } from '../lib/api.js';
 import { logger } from '../lib/logger.js';
 import { deviceClock } from './deviceClock.js';
+import { BACKLOG_SLACK_S, JitterBuffer, MIN_CUSHION_S } from './jitterBuffer.js';
 
 const HEADER_SIZE = 12;
 const SAMPLE_RATE = 48000;
 const CHANNELS = 2;
 const PTS_MASK = (1n << 61n) - 1n;   // scrcpy v4 header: bit63 session, bit62 config, low 61 bits PTS
 const CONFIG_FLAG = 1n << 62n;
-export const START_CUSHION_S = 0.05; // first chunk (and after an underrun) plays 50 ms ahead: absorbs jitter
-export const MAX_LATENCY_S = 0.15;   // beyond this the backlog is dropped and playback resyncs (freshness first)
+export const START_CUSHION_S = MIN_CUSHION_S;                  // first chunk (and after an underrun) plays this far ahead — more on a weak link
+export const MAX_LATENCY_S = MIN_CUSHION_S + BACKLOG_SLACK_S;  // beyond this (at the lowest cushion) the backlog is dropped (freshness first)
 const RECONNECT_MS = 1200;
 const RAMP_S = 0.015;                // click-free gain changes
 export const PRESENT_TOLERANCE_S = 0.006;   // PRESENTED mode: within this of the contiguous position a chunk simply follows the last
@@ -108,6 +110,7 @@ class Channel {
     this.basePtsUs = null;
     this.baseCtxTime = null;
     this.sources = new Set();
+    this.jitter = new JitterBuffer();
     this.ws = null;
     this.closed = false;
     this.reconnectTimer = null;
@@ -158,11 +161,10 @@ class Channel {
       if (plan.drop) return;                                     // wholly past: the next chunk is re-evaluated anyway
       ({ start, skip } = plan);
     } else {
-      if (this.nextStartTime <= now) {
-        this.nextStartTime = now + START_CUSHION_S;             // first chunk / underrun: nothing queued
-      } else if (this.nextStartTime > now + MAX_LATENCY_S) {
-        this._flush();                                           // backlog (tab slept, network burst)
-        this.nextStartTime = now + START_CUSHION_S;
+      const restart = this.jitter.restartAt({ now, nextStart: this.nextStartTime, ptsUs, duration: buffer.duration });
+      if (restart !== null) {
+        this._flush();                                           // backlog (tab slept, network burst); nothing to drop after an underrun
+        this.nextStartTime = restart;                            // first chunk / underrun / backlog: a cushion ahead
       }
       start = this.nextStartTime;
     }

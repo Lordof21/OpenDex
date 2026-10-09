@@ -4,8 +4,10 @@ import struct
 
 import pytest
 
+from app.streams import app_audio_link
 from app.streams.app_audio_link import (
     FLAG_END,
+    FLAG_KEEPALIVE,
     HEADER,
     SCRCPY_HEADER,
     AppAudioLink,
@@ -72,3 +74,45 @@ async def test_desynced_stream_ends_the_connection_instead_of_reading_garbage():
     reader.feed_eof()
     assert await _link(frames, ends)._pump(reader) is True
     assert len(frames) == 1
+
+
+# ---------------------------------------------------------------- a link that goes quiet
+
+
+def keepalive() -> bytes:
+    return frame(0, 0, b"", FLAG_KEEPALIVE)
+
+
+async def test_keepalives_carry_neither_audio_nor_an_end():
+    frames, ends = [], []
+    reader = asyncio.StreamReader()
+    reader.feed_data(keepalive() + frame(1, 5, b"ab" * 4) + keepalive())
+    reader.feed_eof()
+
+    assert await _link(frames, ends)._pump(reader) is True
+    assert [sid for sid, _ in frames] == [1] and ends == []
+
+
+async def test_a_link_that_goes_silent_after_keepalives_is_declared_dead(monkeypatch):
+    """A half-open socket gives no error and no EOF: only the missing keepalive says the link is gone."""
+    monkeypatch.setattr(app_audio_link, "KEEPALIVE_TIMEOUT_S", 0.1)
+    reader = asyncio.StreamReader()
+    reader.feed_data(keepalive())                           # then nothing, and no EOF either
+
+    got_data = await asyncio.wait_for(_link([], [])._pump(reader), timeout=2.0)
+
+    assert got_data is True, "data had arrived, so the supervisor reconnects at the minimum back-off"
+
+
+async def test_a_daemon_that_never_sent_a_keepalive_is_not_timed_out(monkeypatch):
+    """An older daemon is silent whenever nothing plays; reconnecting would loop forever on a healthy link."""
+    monkeypatch.setattr(app_audio_link, "KEEPALIVE_TIMEOUT_S", 0.05)
+    reader = asyncio.StreamReader()
+    reader.feed_data(frame(1, 5, b"ab" * 4))
+    pump = asyncio.ensure_future(_link([], [])._pump(reader))
+
+    await asyncio.sleep(0.3)
+
+    assert not pump.done()
+    reader.feed_eof()
+    assert await pump is True

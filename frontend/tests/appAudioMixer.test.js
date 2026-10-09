@@ -213,6 +213,24 @@ describe('appAudioMixer', () => {
   });
 });
 
+describe('appAudioMixer — a weak link (ARRIVAL mode)', () => {
+  it('plays further ahead once the link has run the queue dry in the middle of a stream', () => {
+    mixer.attach('w1');
+    sockets[0].onmessage({ data: chunk(0) });                  // plays 0.05–0.07
+    ctx.currentTime = 0.3;                                      // nothing arrived for 230 ms
+    sockets[0].onmessage({ data: chunk(20_000) });              // the stream's next chunk, late
+    expect(ctx.started[1].startedAt).toBeGreaterThan(0.3 + START_CUSHION_S);
+  });
+
+  it('does not blame the link for a pause of the app', () => {
+    mixer.attach('w1');
+    sockets[0].onmessage({ data: chunk(0) });
+    ctx.currentTime = 5;
+    sockets[0].onmessage({ data: chunk(5_000_000) });           // the app was silent; its clock moved on
+    expect(ctx.started[1].startedAt).toBeCloseTo(5 + START_CUSHION_S);
+  });
+});
+
 describe('appAudioMixer — output latency (the device\'s own, which the backend counts into the common target)', () => {
   it('is unknown until the context exists, then the graph\'s + the output device\'s latency', () => {
     expect(mixer.outputLatencyMs()).toBeNull();

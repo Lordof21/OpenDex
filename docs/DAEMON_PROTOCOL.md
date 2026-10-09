@@ -302,11 +302,15 @@ A second socket, `opendex_audio`, carries PCM only; **what is captured and where
 u16 stream_id | u16 flags | u64 pts_us | u32 size | size bytes of PCM (s16le, stereo, 48 kHz)
 ```
 
-`flags` bit 0 (`0x1`) = end of that stream. `pts_us` is on the **phone's** monotonic clock (the clock `ping` returns). The phone side
-queues at most 64 frames (~1.3 s of one stream) and a stalled consumer loses the *oldest* audio — freshness over completeness — so a
-slow PC link can neither block an `AudioRecord` read nor the command thread. The backend (`app_audio_link.py`) validates `size`
-(≤ 1 MiB; more means the stream desynced), reconnects with back-off, and re-emits each payload with the 12-byte `u64 pts | u32 size`
-header the browser player already parses for `/ws/audio` (see [API.md](API.md#wsaudio-and-wsaudiowindow_id--pcm)).
+`flags` bit 0 (`0x1`) = end of that stream; bit 1 (`0x2`) = keepalive (`stream_id` 0, `size` 0), sent every second while the channel is
+idle. `pts_us` is on the **phone's** monotonic clock (the clock `ping` returns). The phone side queues at most 64 frames (~1.3 s of
+one stream) and a stalled consumer loses the *oldest audio* — freshness over completeness — so a slow PC link can neither block an
+`AudioRecord` read nor the command thread. A stream's *end* is never dropped: one that finds no consumer (the link is down), or
+dies unwritten with its connection, is kept and delivered first to the next. The backend (`app_audio_link.py`) validates `size`
+(≤ 1 MiB; more means the stream desynced), reconnects with back-off (0.25 s … 2 s), treats 4 s of silence as a dead link once it has
+seen a keepalive on the connection (a half-open socket gives no error; a helper without keepalives is never timed out), and re-emits
+each payload with the 12-byte `u64 pts | u32 size` header the browser player already parses for `/ws/audio` (see
+[API.md](API.md#wsaudio-and-wsaudiowindow_id--pcm)).
 
 ## Changing the protocol
 

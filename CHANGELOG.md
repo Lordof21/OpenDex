@@ -21,6 +21,7 @@ is in `git log` (mostly in Turkish).
 - "İkisi" audio: the DeX copy starts with a 60 ms jitter margin (was 30), raises it faster after late chunks and gives it back after three calm minutes (was 48 s), so a resize burst on Wi-Fi is less likely to cut the sound.
 
 ### Fixed
+- Audio on a weak or unstable link: the Android ≤ 12 session stream reopens itself when its adb socket ends (it stayed silent until a window opened); the phone → PC channel never loses a stream's end, sends a keepalive when idle and is reconnected when it goes silent; the browser's playback cushion adapts to the link instead of a fixed 50 ms. The phone-side part needs a rebuilt `opendex-tools.jar`.
 - File manager: grid thumbnails were requested for the folder instead of the file, so they never showed.
 - Notification cards forward their ref (React warning inside `AnimatePresence`).
 - A phone that adb lists but cannot talk to ("device offline") no longer causes an endless bind/reload loop: failed binds now back off (2 s … 30 s) for API callers too, and the QR pairing panel is not torn down by the momentary "connected" state of a failing attempt.

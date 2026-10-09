@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import time
 from typing import Awaitable, Callable
 
 from ..events import cancel_and_wait
@@ -65,7 +66,15 @@ class SessionAudio:
     Per-app audio (streams/app_audio.py) SUPPRESSES this stream while it owns the device's audio: both would capture
     the same app (double audio / echo). Suppression is the single gate — every caller of start_session_audio()
     (bind, window open, settings, transport migration) becomes a no-op without having to know why.
+
+    The stream lives exactly as long as the adb socket under it, so a Wi-Fi hiccup or a crashed audio-only scrcpy ends it for
+    good — the browser's WebSocket stays open on a stream that no longer produces. A keeper task therefore reopens it whenever
+    it ends unasked; stopping the stream cancels the keeper first.
     """
+
+    RESTART_BASE_S = 0.5     # pause before the first reopen; doubles while reopening keeps failing
+    RESTART_MAX_S = 8.0
+    STABLE_AFTER_S = 15.0    # a stream that lived this long was healthy: its loss starts over at the base pause
 
     def __init__(
         self, adb: Adb, settings: Settings, broadcasters: BroadcasterRegistry
@@ -75,6 +84,7 @@ class SessionAudio:
         self._broadcasters = broadcasters
         self._server: ScrcpyServer | None = None
         self._pump_task: asyncio.Task | None = None
+        self._keeper: asyncio.Task | None = None
         self._serial: str | None = None
         self._output_mode: str = "pc"
         self._suppressed = False
@@ -126,34 +136,70 @@ class SessionAudio:
                     "Audio output mode or serial changing from %s to %s (%s -> %s), restarting audio server...",
                     self._output_mode, output_mode, self._serial, serial,
                 )
+            if self._keeper is not None:    # another mode/phone, or a stream waiting to be reopened: start over right now
                 await self._stop_session_audio_locked(serial=self._serial)
 
-            self._output_mode = output_mode
-            server = ScrcpyServer(self._adb, self._settings, serial)
+            await self._open(serial, output_mode)
+            self._keeper = asyncio.create_task(self._reopen_when_lost(serial, output_mode), name="session-audio-keeper")
+
+    async def _open(self, serial: str, output_mode: str) -> None:
+        self._output_mode = output_mode
+        server = ScrcpyServer(self._adb, self._settings, serial)
+        try:
             await server.push_server()
             await server.start_forward()
             audio_dup = output_mode == "both"
             await server.spawn(video=False, audio=True, control=False, audio_dup=audio_dup)
             sockets = await server.connect_sockets(video=False, audio=True, control=False)
-            assert sockets.audio is not None
-            self._server = server
-            broadcaster = self._broadcasters.get_audio_broadcaster()
+        except BaseException:
+            with contextlib.suppress(Exception):
+                await server.stop()         # half-built: its adb forward / process must not outlive the failed attempt
+            raise
+        assert sockets.audio is not None
+        self._server = server
+        broadcaster = self._broadcasters.get_audio_broadcaster()
 
-            async def _on_chunk(meta: FrameMeta, chunk: bytes) -> None:
-                if meta.is_config:
-                    broadcaster.remember_config(chunk)
-                await broadcaster.broadcast(chunk)
+        async def _on_chunk(meta: FrameMeta, chunk: bytes) -> None:
+            if meta.is_config:
+                broadcaster.remember_config(chunk)
+            await broadcaster.broadcast(chunk)
 
-            self._pump_task = asyncio.create_task(
-                read_audio_socket(sockets.audio[0], _on_chunk), name="session-audio-pump"
-            )
-            log.info("session audio started (output_mode=%s, audio_dup=%s, codec=%s)", output_mode, audio_dup, sockets.audio_codec)
+        self._pump_task = asyncio.create_task(
+            read_audio_socket(sockets.audio[0], _on_chunk), name="session-audio-pump"
+        )
+        log.info("session audio started (output_mode=%s, audio_dup=%s, codec=%s)", output_mode, audio_dup, sockets.audio_codec)
+
+    async def _reopen_when_lost(self, serial: str, output_mode: str) -> None:
+        delay = self.RESTART_BASE_S
+        while True:
+            up_since = time.monotonic()
+            await asyncio.wait({self._pump_task})            # until the audio socket ends
+            log.warning("session audio lost — reopening")
+            if time.monotonic() - up_since > self.STABLE_AFTER_S:
+                delay = self.RESTART_BASE_S
+            while True:
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, self.RESTART_MAX_S)
+                async with self._lock:
+                    if self._suppressed:
+                        return                              # per-app audio took over meanwhile
+                    try:
+                        await self._close(serial)
+                        await self._open(serial, output_mode)
+                        break
+                    except Exception as exc:  # noqa: BLE001 — the phone may still be unreachable: try again, slower
+                        log.info("session audio reopen failed: %s", exc)
 
     async def stop_session_audio(self, serial: str | None = None) -> None:
         async with self._lock:
             await self._stop_session_audio_locked(serial=serial)
 
     async def _stop_session_audio_locked(self, serial: str | None = None) -> None:
+        keeper, self._keeper = self._keeper, None
+        await cancel_and_wait(keeper)                       # before the teardown: it must not reopen what we close
+        await self._close(serial)
+
+    async def _close(self, serial: str | None = None) -> None:
         target_serial = serial or self._serial
         await cancel_and_wait(self._pump_task)
         self._pump_task = None

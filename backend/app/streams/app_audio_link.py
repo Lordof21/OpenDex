@@ -22,8 +22,11 @@ AUDIO_SOCKET = "opendex_audio"
 HEADER = struct.Struct(">HHQI")        # 16 bytes
 SCRCPY_HEADER = struct.Struct(">QI")   # 12 bytes: what /ws/audio already speaks
 FLAG_END = 0x1
+FLAG_KEEPALIVE = 0x2                   # empty frame the daemon sends every second while the channel is idle
 MAX_FRAME = 1 << 20                    # sanity bound: a 20 ms chunk is 3840 B
-MAX_BACKOFF_S = 5.0
+MIN_BACKOFF_S = 0.25                   # a Wi-Fi blip should cost a fraction of a second of silence, not seconds
+MAX_BACKOFF_S = 2.0
+KEEPALIVE_TIMEOUT_S = 4.0              # a daemon that sends keepalives and goes silent for this long has lost the link
 
 OnFrame = Callable[[int, bytes], Awaitable[None]]      # (stream_id, 12-byte header + pcm)
 OnEnd = Callable[[int], Awaitable[None]]
@@ -79,7 +82,7 @@ class AppAudioLink:
                 await self._adb.forward_remove(self._port, serial=serial)
 
     async def _supervise(self, serial: str) -> None:
-        backoff = 0.5
+        backoff = MIN_BACKOFF_S
         while True:
             got_data = False
             try:
@@ -99,24 +102,34 @@ class AppAudioLink:
                 log.debug("[AppAudio] PCM link error (%s): %s", serial, exc)
             if got_data:
                 log.info("🔊 [AppAudio] PCM kanalı koptu, yeniden bağlanılıyor (serial=%s)", serial)
-                backoff = 0.5
+                backoff = MIN_BACKOFF_S
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, MAX_BACKOFF_S)
 
     async def _pump(self, reader: asyncio.StreamReader) -> bool:
-        """Reads frames until EOF/desync. Returns whether any frame arrived."""
+        """Reads frames until EOF/desync/silence. Returns whether any frame arrived."""
         got_data = False
+        # A half-open socket (the Wi-Fi vanished without a FIN) reports no error, so a link that has gone quiet is only
+        # recognised by a missing keepalive — but only once this daemon has shown it sends them: an older one is silent
+        # whenever nothing plays, which is not a fault.
+        timeout = None
         try:
             while True:
-                stream_id, flags, pts_us, size = parse_header(await reader.readexactly(HEADER.size))
-                payload = await reader.readexactly(size) if size else b""
+                header = await asyncio.wait_for(reader.readexactly(HEADER.size), timeout)
+                stream_id, flags, pts_us, size = parse_header(header)
+                payload = await asyncio.wait_for(reader.readexactly(size), timeout) if size else b""
                 if not got_data:
                     got_data = True
                     log.info("🔊 [AppAudio] PCM kanalı bağlandı (serial=%s)", self._serial)
-                if flags & FLAG_END:
+                if flags & FLAG_KEEPALIVE:
+                    timeout = KEEPALIVE_TIMEOUT_S
+                elif flags & FLAG_END:
                     await self._on_end(stream_id)
                 elif payload:
                     await self._on_frame(stream_id, reframe(pts_us, payload))
+        except asyncio.TimeoutError:
+            log.warning("🔊 [AppAudio] PCM kanalı %.0f sn sessiz kaldı (keepalive yok) — yeniden bağlanılıyor", KEEPALIVE_TIMEOUT_S)
+            return got_data
         except asyncio.IncompleteReadError:
             return got_data
         except ValueError as exc:  # desynced framing: only a fresh connection realigns it

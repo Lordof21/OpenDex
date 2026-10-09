@@ -82,6 +82,20 @@ phone + computer + link** — and no software number can tell it; an ear or a mi
 Calibration needs microphone permission for the page. It is the only place OpenDeX uses the microphone, only while you press *Oto*, and the
 recording never leaves the page.
 
+## Weak or unstable links
+
+The phone's sound reaches the computer over adb, usually Wi-Fi, which stalls, drops and comes back. The aim is to lose a little sound,
+never to stay silent afterwards:
+
+* **Phone → PC.** The end of a stream is never lost (the phone holds it for the next connection), an idle channel sends a keepalive
+  every second, and the backend reconnects after 4 s of silence (a half-open socket) and 0.25–2 s after a drop.
+* **Android ≤ 12** (one stream for the whole phone, `/ws/audio`): when its adb socket ends unasked it is reopened by itself (0.5 s,
+  doubling to 8 s while it keeps failing).
+* **Browser.** The cushion in front of playback adapts (`media/jitterBuffer.js`): 50 ms on a clean link, up to 400 ms after the link
+  has run the queue dry mid-stream, given back slowly. A pause of the app is not mistaken for a bad link.
+
+A stall longer than the cushion is still one gap — a buffer cannot play sound that has not arrived — but the cushion is larger afterwards.
+
 ## Settings and API at a glance
 
 | | |

@@ -8,6 +8,7 @@
 
 import { wsUrl } from '../lib/api.js';
 import { logger } from '../lib/logger.js';
+import { JitterBuffer } from './jitterBuffer.js';
 
 const HEADER_SIZE = 12;
 // scrcpy raw audio: 48kHz stereo s16le.
@@ -30,6 +31,7 @@ class SessionAudioPlayer {
     this.active = false;
     this.reconnectTimer = null;
     this.scheduledSources = new Set();
+    this.jitter = new JitterBuffer();
     this._gestureCleanup = null;
   }
 
@@ -243,17 +245,12 @@ class SessionAudioPlayer {
     const now = this.ctx.currentTime;
     const duration = audioBuffer.duration;
 
-    // 1. Startup or Buffer Underrun (ses bitti veya ilk açılış):
-    if (this.nextStartTime < now) {
-      this.nextStartTime = now + 0.050; // 50ms initial cushion prevents underrun chatter
-    }
-
-    // 2. Severe desync / buffer overload (e.g. sekme arka planda uyudu, sistem uyandı > 500ms):
-    // Zamanlama koptuğunda eski zamanlanmış parçaları durdurup (flush) temiz yeniden senkronize et.
-    // Bu sayede ASLA üst üste binme (overlap / echo) veya çakışma olmaz.
-    if (this.nextStartTime > now + 0.500) {
+    // Startup, an underrun, or a backlog (tab slept, network burst > the ceiling): restart a cushion ahead and drop what is queued,
+    // so nothing overlaps (no echo). The cushion adapts to the link (jitterBuffer.js).
+    const restart = this.jitter.restartAt({ now, nextStart: this.nextStartTime, ptsUs, duration });
+    if (restart !== null) {
       this._flushScheduled();
-      this.nextStartTime = now + 0.050;
+      this.nextStartTime = restart;
     }
 
     const startAt = this.nextStartTime;

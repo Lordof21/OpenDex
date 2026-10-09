@@ -45,6 +45,7 @@ Find your symptom, check the likely cause, then look at the log. The backend log
 |---|---|
 | No sound on the computer | Android below 13 has one session stream and no per-app choice; check *Output* is *DeX* or *İkisi*, `enable_audio` is on, and the app's route in the mixer. |
 | **Echo** with *İkisi* | The two copies are apart: use *Telefon–DeX ince ayarı → Oto* (microphone calibration) or adjust by ear. See [AUDIO.md](AUDIO.md#fine-tune-and-automatic-calibration). |
+| Sound **chops** on Wi-Fi | The link delivers unevenly. The player lengthens its cushion after each gap, so it settles within seconds; a USB cable or a better 5 GHz link removes the cause. See [AUDIO.md](AUDIO.md#weak-or-unstable-links). |
 | Sound plays twice | Two tabs/windows of the UI: the newest listener wins; close the other. |
 
 ## Files
