@@ -79,6 +79,19 @@ def test_bring_to_front_command():
     assert android_shell.bring_to_front_command("com.a", "0", windowing_mode=1).startswith(
         "am start --display 0 --windowingMode 1 -a android.intent.action.MAIN"
     )
+    assert android_shell.bring_to_front_command("com.a", 0, reorder_only=True) == (
+        "am start --display 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p com.a -f 0x10020000 --activity-reorder-to-front"
+    )
+
+
+async def test_sync_display0_focus():
+    adb = _Adb("")
+    await android_shell.sync_display0_focus(adb, "S")
+    assert adb.calls == [
+        "input -d 0 keyevent 0",
+        "am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS",
+    ]
+
 
 
 async def test_set_display_density_prefers_the_daemon():

@@ -21,22 +21,27 @@ _LARGE_FIELDS = frozenset({
     "album_art", "album_art_uri", "picture", "artwork", "thumbnail",
     "large_icon", "icon", "cover_art", "art", "art_b64", "image"
 })
-_MAX_FIELD_LEN = 30
+_MAX_FIELD_LEN = 30        # other long strings: a readable head
+_IMAGE_PREVIEW_LEN = 10    # pictures (album art, icons, data: URIs): only the first characters are logged
 
-def _truncate_payload(obj: Any, _depth: int = 0) -> Any:
-    """Recursively truncate large string fields in dicts/lists for clean debug logging."""
+def truncate_payload(obj: Any, _depth: int = 0, *, long_strings: bool = True) -> Any:
+    """Recursively shorten picture fields (and, with ``long_strings``, every string over 80 chars) for logging.
+    ``long_strings=False`` touches only pictures — for replies, where an error text must stay whole."""
     if _depth > 5:
         return obj
     if isinstance(obj, dict):
         result = {}
         for k, v in obj.items():
-            if isinstance(v, str) and (k in _LARGE_FIELDS or len(v) > 80 or v.startswith("data:")):
-                result[k] = f"{v[:_MAX_FIELD_LEN]}…({len(v)}b)"
-            else:
-                result[k] = _truncate_payload(v, _depth + 1)
+            if isinstance(v, str):
+                image = k in _LARGE_FIELDS or v.startswith("data:")
+                if image or (long_strings and len(v) > 80):
+                    keep = _IMAGE_PREVIEW_LEN if image else _MAX_FIELD_LEN
+                    result[k] = f"{v[:keep]}…({len(v)}b)"
+                    continue
+            result[k] = truncate_payload(v, _depth + 1, long_strings=long_strings)
         return result
     if isinstance(obj, list):
-        return [_truncate_payload(item, _depth + 1) for item in obj]
+        return [truncate_payload(item, _depth + 1, long_strings=long_strings) for item in obj]
     return obj
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -179,7 +184,7 @@ class EventBus:
     async def emit(self, type: EventType, **payload: Any) -> None:
         event = Event(type=type, payload=payload)
         if log.isEnabledFor(logging.DEBUG):
-            log.debug("event %s %s", event.type, _truncate_payload(payload))
+            log.debug("event %s %s", event.type, truncate_payload(payload))
 
         # 1. External WebSocket streaming clients
         async with self._lock:

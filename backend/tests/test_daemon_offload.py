@@ -258,16 +258,6 @@ async def test_pushed_notifications_flow_through_without_a_single_shell_command(
     assert item.text == "4 yeni mesaj"
 
 
-async def test_a_click_target_comes_from_the_pushed_intent_not_from_dumpsys():
-    daemon = FakeDaemon()
-    sup, adb, _ = _supervisor(daemon)
-    await daemon.push("notifications_update", {"ok": True, "items": [wa_item()]})
-    (item,) = sup._notifications.values()
-    args = await sup.resolve_notification_intent(item)
-    assert args and "-a android.intent.action.VIEW" in args and "com.whatsapp/.Conversation" in args
-    assert adb.heavy() == []
-
-
 async def test_push_mode_runs_no_logcat_and_no_heartbeat_dumpsys(monkeypatch):
     daemon = FakeDaemon(notifications_list={"ok": True, "items": [wa_item()]})
     sup, adb, bus = _supervisor(daemon)

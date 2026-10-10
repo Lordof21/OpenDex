@@ -35,6 +35,9 @@ def isolated(tmp_path, monkeypatch, capsys):
     app_logger.setLevel(saved[2])
     lc._log_file = saved[3]
     lc._console_gate.traced, lc._console_gate.categories, lc._daemon_filter.enabled = saved[4], saved[5], saved[6]
+    # setup() attaches the DIAG filter to the daemon client's logger; left behind, it hides SEND_RPC lines from the
+    # caplog-based tests that run after this module.
+    logging.getLogger("app.device.device_daemon_client").removeFilter(lc._daemon_filter)
 
 
 def _flush():
@@ -188,10 +191,25 @@ def test_env_var_enables_trace_at_startup(isolated, monkeypatch):
     assert lc.get_trace() == ["power", "handoff"]
 
 
-def test_debug_log_level_opens_everything(isolated, capsys):
+def test_debug_log_level_writes_debug_to_the_file_but_not_to_the_terminal(isolated, capsys):
+    """LOG_LEVEL=DEBUG used to open EVERY flow on the terminal (media covers, notifications, load samples flooded it).
+    Now it only adds DEBUG to the file; the terminal shows what OPENDEX_TRACE names and nothing else."""
     lc.setup("DEBUG")
-    logging.getLogger("app.windows.window_manager").debug("her şey görünür")
-    assert "her şey görünür" in capsys.readouterr().out
+    capsys.readouterr()
+    logging.getLogger("app.windows.window_manager").debug("pencere ayrıntısı")
+    logging.getLogger("app.events").debug("event device_media_update {'title': 'x'}")
+    assert capsys.readouterr().out == ""
+    assert "pencere ayrıntısı" in _file_text()
+
+
+def test_only_an_explicit_trace_opens_a_flow_on_the_terminal_even_at_debug(isolated, capsys, monkeypatch):
+    monkeypatch.setenv("OPENDEX_TRACE", "windows")
+    lc.setup("DEBUG")
+    capsys.readouterr()
+    logging.getLogger("app.windows.window_manager").debug("izlenen akış")
+    logging.getLogger("app.device.device_daemon_client").debug("izlenmeyen akış")
+    out = capsys.readouterr().out
+    assert "izlenen akış" in out and "izlenmeyen akış" not in out
 
 
 def test_third_party_noise_stays_out_of_the_file(isolated):

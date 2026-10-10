@@ -326,8 +326,20 @@ def forget_display_density(display_id: str | int) -> None:
 # ---------------------------------------------------------------- launching
 
 
-def bring_to_front_command(package: str, display_id: str | int, windowing_mode: int | None = None) -> str:
+def bring_to_front_command(
+    package: str, display_id: str | int, windowing_mode: int | None = None, *, reorder_only: bool = False,
+) -> str:
     mode = f" --windowingMode {windowing_mode}" if windowing_mode is not None else ""
+    if reorder_only:
+        # Taşıma sonrası zaten çalışan görevi öne getirirken sıfırdan LAUNCHER intent'i pompalamaz;
+        # URL/input odağını, sayfa geçmişini ve pencere durumunu korur.
+        # KRİTİK: -a MAIN -c LAUNCHER verilmesi zorunludur. Aksi halde Android birden fazla export
+        # edilmiş aktivitesi olan uygulamalarda (Chrome -> ResolverActivity / 'complete action using',
+        # Gallery -> GallerySettingsActivity) yanlış aktivite açar veya chooser diyaloğu çıkarır.
+        return (
+            f"am start --display {display_id}{mode} -a android.intent.action.MAIN "
+            f"-c android.intent.category.LAUNCHER -p {package} -f 0x10020000 --activity-reorder-to-front"
+        )
     return (
         f"am start --display {display_id}{mode} -a android.intent.action.MAIN "
         f"-c android.intent.category.LAUNCHER -p {package} -f 0x10000000"
@@ -336,11 +348,26 @@ def bring_to_front_command(package: str, display_id: str | int, windowing_mode: 
 
 async def bring_to_front(
     adb: Any, serial: str, package: str, display_id: str | int, *,
-    windowing_mode: int | None = None, timeout_s: float = 2.0,
+    windowing_mode: int | None = None, timeout_s: float = 2.0, reorder_only: bool = False,
 ) -> str:
     """Starts the app's launcher activity on `display_id` — an existing task is brought to the front (NEW_TASK), so
     this also 'resumes' a task that was just moved there. Returns `am start` output; raises on adb failure."""
-    return await adb.shell(bring_to_front_command(package, display_id, windowing_mode), serial=serial, timeout_s=timeout_s)
+    return await adb.shell(
+        bring_to_front_command(package, display_id, windowing_mode, reorder_only=reorder_only),
+        serial=serial,
+        timeout_s=timeout_s,
+    )
+
+
+async def sync_display0_focus(adb: Any, serial: str) -> None:
+    """Telefona aktarılan görevin Display 0 üzerinde tam dokunma/klavye/hareket odağını (Gesture Navigation)
+    kesinleştirmesini sağlar ve hayalet dialog/klavye katmanlarını sıfırlar.
+    Not: Geçmişte denenen keyevent 111 (ESC) Android uygulamalarında onBackPressed tetikleyip
+    durum sıfırlanmasına ve Galeri gibi uygulamalarda geri atlamaya yol açtığı için kaldırılmıştır.
+    """
+    with contextlib.suppress(Exception):
+        await adb.shell("input -d 0 keyevent 0", serial=serial, timeout_s=1.0)
+        await adb.shell("am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS", serial=serial, timeout_s=1.0)
 
 
 async def wake_and_unlock(adb: Any, serial: str) -> None:

@@ -31,7 +31,10 @@ MAX_ETA_MIN = 48 * 60
 CURRENT_EMA_ALPHA = 0.3    # the current jumps with every DeX frame; the ETA must not
 MIN_SESSION_MIN = 1.0
 HEALTH_PLAUSIBLE = (0.30, 1.20)   # full ÷ design outside this is a unit mix-up, not a worn battery
-ESTIMATE_LEVEL_RANGE = (15, 98)   # the charge counter ÷ level estimate is only as good as the level's rounding allows
+LIMIT_EXCEEDED_RATIO = 1.3        # measured charge above port limit x this: the limit is a default, not the charger's
+FAST_CHARGE_W = 15.0              # the battery takes at least this much: a fast charger, whatever it calls itself
+DESIGN_IMPOSSIBLE_RATIO = 1.1    # charge now ÷ design above this cannot be a real rating (a cell is never fuller than ~full)
+ESTIMATE_LEVEL_RANGE = (15, 98)  # the charge counter ÷ level estimate is only as good as the level's rounding allows
 
 _STATUS = {2: "charging", 3: "discharging", 4: "not_charging", 5: "full"}
 # BatteryManager.CHARGING_POLICY_*: 1 default, 2 adaptive (always-on), 3 adaptive (AC), 4 adaptive (long life)
@@ -91,6 +94,8 @@ def capacity_block(facts: dict[str, Any]) -> dict[str, Any]:
     if design is None:
         design_uah = _pos(facts, "charge_full_design_uah")
         design = design_uah / 1000 if design_uah else None
+    if design and now_mah and now_mah > design * DESIGN_IMPOSSIBLE_RATIO:
+        design = None            # the cell holds more than its "rating": the rating is a placeholder (Xiaomi's power profile says 1000 mAh)
 
     full, source = None, None
     gauge_full = _pos(facts, "charge_full_uah")
@@ -257,6 +262,17 @@ def build_report(
     limit_w = round(limit_ma / 1000 * limit_v, 1) if limit_ma and limit_v else None
     battery_w = round(current_ma / 1000 * voltage_v, 1) if current_ma is not None and voltage_v else None
     charging = status == "charging"
+    usb_type = facts.get("usb_type")
+    if direction == "in" and source is not None and current_ma is not None and (
+        (limit_ma and current_ma > limit_ma * LIMIT_EXCEEDED_RATIO)
+        or (limit_w and battery_w and battery_w > limit_w * LIMIT_EXCEEDED_RATIO)
+    ):
+        # The battery is taking more than the port's reported limit: the limit (and the USB class that came with it) is the
+        # platform's default for a plain USB port - a vendor fast charger (Xiaomi HyperCharge, ...) never updates it. What was
+        # measured wins over what was assumed, and the "slow port" verdict must not be drawn from a stale limit.
+        limit_ma = limit_v = limit_w = None
+        usb_type = None
+        source = "fast" if battery_w is not None and battery_w >= FAST_CHARGE_W else "adapter"
 
     thermal = thermal_block(facts.get("temp_c"), soc_c, android_thermal, charging)
     protection = protection_block(facts)
@@ -290,7 +306,7 @@ def build_report(
         "first_use": first_use_block(facts, now_ms),
         "charging": {
             "source": source,
-            "usb_type": facts.get("usb_type"),
+            "usb_type": usb_type,
             "direction": direction,
             "current_ma": round(current_ma) if current_ma is not None else None,
             "battery_w": battery_w,

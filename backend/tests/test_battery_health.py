@@ -345,3 +345,23 @@ def test_the_client_asks_only_a_phone_that_knows_the_command():
 
     client = DeviceDaemonClient(MagicMock(), MagicMock())
     assert asyncio.run(client.battery_health()) is None                           # not connected / no capability: no RPC
+
+
+# --------------------------------------------------------------------------- facts that contradict each other
+
+
+def test_a_placeholder_rating_below_the_charge_in_the_cell_is_dropped_and_the_capacity_still_shows():
+    # Xiaomi's power profile says 1000 mAh; the cell holds 1595 mAh at 30 %: the rating cannot be real.
+    r = report({**POCO, "level": 30, "voltage_mv": 3751, "charge_counter_uah": 1_595_000, "design_mah": 1000})
+    assert r["capacity"] == {"now_mah": 1595, "full_mah": 5317, "design_mah": None, "full_source": "estimate"}
+    assert r["health"] is None                      # nothing to compare the full capacity with: "—", not a made-up percentage
+
+
+def test_a_fast_charger_beats_the_stale_default_port_limit():
+    # The platform keeps "500 mA / 5 V / SDP" for a Xiaomi fast charger; the cell takes 6.1 A.
+    r = report({**POCO, "level": 40, "voltage_mv": 3780, "current_ua": 6_110_000, "charge_counter_uah": 2_400_000})
+    c = r["charging"]
+    assert (c["source"], c["usb_type"]) == ("fast", None)
+    assert (c["limit_ma"], c["limit_v"], c["limit_w"]) == (None, None, None)
+    assert c["current_ma"] == 6110 and c["battery_w"] == 23.1
+    assert "slow_port" not in r["diagnoses"]

@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from .adb import Adb
     from ..events import EventBus
 
-from ..events import cancel_and_wait, spawn_background
+from ..events import cancel_and_wait, spawn_background, truncate_payload
 from ..logging_config import BackoffLogLimiter
 from ..schemas.identifiers import MEDIA_ACTIONS, PACKAGE_RE
 from ..telemetry.adb_meter import meter as adb_meter
@@ -713,7 +713,7 @@ class DeviceDaemonClient:
             if quiet:
                 log.debug("[OpenDexDaemon:RECV_RPC 📥] req_id=%s %s", req_id, req_prefix)
             else:
-                log.info("[OpenDexDaemon:RECV_RPC 📥] req_id=%s resp=%s", req_id, resp)
+                log.info("[OpenDexDaemon:RECV_RPC 📥] req_id=%s resp=%s", req_id, truncate_payload(resp, long_strings=False))
             return resp
         except asyncio.TimeoutError:
             log.warning(
@@ -776,13 +776,74 @@ class DeviceDaemonClient:
         resp = await self._send_rpc_full(f"task_density_info {int(task_id)}", "task_density_info", timeout=2.0)
         return resp if resp and resp.get("ok") else None
 
-    async def restart_task_activity(self, task_id: int | str) -> bool:
-        """Android SizeCompat kancasıyla Activity'yi yeni DPI'a göre durum kaybetmeden yeniden başlatır."""
-        return await self._send_rpc(f"restart_task_activity {int(task_id)}", "restart_task_activity", timeout=4.0)
+    @property
+    def supports_move_task(self) -> bool:
+        """The connected daemon jar knows `move_task` / `move_task_to_display`."""
+        return self.is_connected and bool({"move_task", "move_task_to_display", "move_task_wct"} & self.daemon_capabilities)
+
+    @property
+    def supports_wct_move(self) -> bool:
+        """The connected daemon jar supports atomic WCT task movement (`move_task_wct`)."""
+        return self.is_connected and "move_task_wct" in self.daemon_capabilities
+
+    async def move_task_wct(
+        self,
+        task_id: int | str,
+        target_display_id: int | str,
+        mode: int = 1,
+        clear_bounds: bool = False,
+        bounds: tuple[int, int, int, int] | None = None,
+    ) -> bool:
+        """Atomically moves a task to a target display, sets its windowing mode, places/clears
+        its bounds, and reorders focus in a single VSYNC transaction via WindowContainerTransaction.
+        """
+        if not self.is_connected:
+            return False
+        clean_task = "".join(filter(str.isdigit, str(task_id)))
+        clean_disp = "".join(filter(str.isdigit, str(target_display_id)))
+        if not clean_task or not clean_disp:
+            return False
+
+        if bounds is not None:
+            bounds_arg = ",".join(str(int(v)) for v in bounds)
+        else:
+            bounds_arg = "true" if clear_bounds else "false"
+
+        cmd = f"move_task_wct {int(clean_task)} {int(clean_disp)} {int(mode)} {bounds_arg}"
+        res = await self._send_rpc_full(cmd, "move_task_wct", timeout=3.5)
+        log.info("⚡ [OpenDexDaemon:WCT_RPC_RESULT] cmd='%s' -> response=%s", cmd, res)
+        return bool(res and res.get("ok", False))
 
     async def move_task_to_display(self, task_id: int | str, display_id: int | str) -> bool:
-        """Moves a task to a virtual/physical display via ActivityTaskManager Binder IPC."""
-        return await self._send_rpc(f"move_task {int(task_id)} {int(display_id)}", "move_task")
+        """Moves a task to a virtual/physical display via ActivityTaskManager Binder IPC.
+
+        Uses in-process Binder call `moveRootTaskToDisplay` in OpenDexDaemon, bypassing
+        shell process fork overhead (~100-200ms -> ~1-2ms).
+        """
+        if not self.is_connected:
+            return False
+        clean_task = "".join(filter(str.isdigit, str(task_id)))
+        clean_disp = "".join(filter(str.isdigit, str(display_id)))
+        if not clean_task or not clean_disp:
+            return False
+        return await self._send_rpc(f"move_task {int(clean_task)} {int(clean_disp)}", "move_task")
+
+    async def restart_task_activity(self, task_id: int | str) -> bool:
+        """Invokes ITaskOrganizerController.restartTaskTopActivityProcessIfVisible(token)
+        or ATMS.restartActivityProcessIfVisible via OpenDexDaemon Binder IPC.
+
+        Re-inflates the top Activity's View tree under the target display's current layout XML
+        (e.g., smoothly morphing tablet tab strip into mobile toolbar) in ~30ms without killing
+        the process or losing state/backstack.
+        """
+        if not self.is_connected:
+            return False
+        clean_task = "".join(filter(str.isdigit, str(task_id)))
+        if not clean_task:
+            return False
+        res = await self._send_rpc_full(f"restart_task_activity {int(clean_task)}", "restart_task_activity", timeout=2.5)
+        log.info("🔄 [OpenDexDaemon:RESTART_TASK_ACTIVITY] taskId=%s -> %s", clean_task, res)
+        return bool(res and res.get("ok", False))
 
     async def get_task_geometry(self, task_id: int | str) -> dict[str, Any] | None:
         """Queries in-memory TaskInfo bounds directly from ActivityTaskManager via Binder IPC.
@@ -1096,14 +1157,25 @@ class DeviceDaemonClient:
         return resp
 
     async def notif_invoke(self, *args: str | int) -> dict[str, Any] | None:
-        """NotificationInvoker.run(args) inside the daemon (click / action / clear / clear_all) — no JVM per click."""
+        """NotificationInvoker.run(args) inside the daemon (click / action / clear / clear_all / launch) — no JVM per click."""
         parts = [str(a) for a in args]
         while parts and parts[-1] == "":
             parts.pop()  # a trailing empty argument (clear without a package) means the same as a missing one
         if not parts or not all(_B64_ARG_RE.fullmatch(p) or _PACKAGE_RE.fullmatch(p) or p.lstrip("-").isdigit()
-                                or p in ("clear", "clear_all") for p in parts):
+                                or p in ("clear", "clear_all", "launch") for p in parts):
             return None
         return await self._read("notif_invoke", "notif_invoke " + " ".join(parts), timeout=5.0)
+
+    async def notif_launch(self, key_b64: str, display_id: int) -> dict[str, Any]:
+        """`notif_invoke launch`: the daemon's answer AS IT IS — `{"ok": False, "error": …}` included. (`_read` turns every not-ok answer
+        into None, which here hid WHY a notification could not be opened behind a bare "no answer".) Always a dict:
+        `{"ok": False, "error": "no_answer" | "daemon_not_supported" | "bad_arguments"}` when the daemon did not answer at all."""
+        if not self.supports("notif_invoke"):
+            return {"ok": False, "error": "daemon_not_supported"}
+        if not _B64_ARG_RE.fullmatch(key_b64) or not isinstance(display_id, int) or isinstance(display_id, bool) or display_id < 0:
+            return {"ok": False, "error": "bad_arguments"}
+        resp = await self._send_rpc_full(f"notif_invoke launch {key_b64} {display_id}", "notif_invoke", timeout=6.0)
+        return _payload(resp) if isinstance(resp, dict) else {"ok": False, "error": "no_answer"}
 
     async def thermal_state(self) -> dict[str, Any] | None:
         """thermal_update {status, temps} — PowerManager status + the thermal HAL's current temperatures."""

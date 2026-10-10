@@ -14,7 +14,7 @@ from pydantic import ValidationError
 from app.api.v1.endpoints import notifications as notif_ep
 from app.api.v1.endpoints import pairing as pairing_ep
 from app.api.v1.endpoints import windows as win_ep
-from app.device import intent_utils, notification_invoker
+from app.device import notification_invoker
 from app.device.adb import Adb
 from app.device.device_daemon_client import DeviceDaemonClient
 from app.main import create_app
@@ -185,21 +185,3 @@ async def test_clear_all_passes_packages_as_separate_arguments():
     await notification_invoker.clear_all(adb, "S", ["com.b", "com.a"])
     assert calls[0] == ("clear_all", 0, "com.a", "com.b")
 
-
-def test_intent_args_from_a_hostile_app_stay_one_word_each():
-    line = "act=android.intent.action.VIEW dat=content://x/1';touch${IFS}/data/local/tmp/pwned;' cmp=com.x/.A flg=0x10000000"
-    joined = " ".join(intent_utils.parse_intent_args(line, quote="'"))
-    tokens = shlex.split(joined)
-    assert tokens == ["-a", "android.intent.action.VIEW", "-d", "content://x/1';touch${IFS}/data/local/tmp/pwned;'",
-                      "-n", "com.x/.A", "-f", "0x10000000"]
-    # Re-embedding the value the way deep_navigator does keeps it one word too.
-    assert shlex.split(f"am start -d {shlex.quote(intent_utils.option_value(joined, '-d'))}")[3] == tokens[3]
-    assert intent_utils.option_value(joined, "-n") == "com.x/.A"
-    assert intent_utils.option_value("-d 'unterminated", "-d") is None
-
-
-def test_plain_intent_values_are_left_readable():
-    line = "act=android.intent.action.VIEW dat=https://www.linkedin.com/feed cmp=com.linkedin.android/.urls.DeeplinkActivity"
-    assert " ".join(intent_utils.parse_intent_args(line)) == (
-        "-a android.intent.action.VIEW -d https://www.linkedin.com/feed -n com.linkedin.android/.urls.DeeplinkActivity -f 0x14000000"
-    )

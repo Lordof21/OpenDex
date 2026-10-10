@@ -125,3 +125,69 @@ async def test_the_wifi_password_is_neither_logged_nor_put_in_the_error(monkeypa
     assert "p@ss" not in str(exc_info.value) and "p@ss" not in " ".join(exc_info.value.cmd)
     assert "exec:" in caplog.text and "p@ss" not in caplog.text
     assert "***" in caplog.text
+
+
+# ---------------------------------------------------------------- an offline phone is asked once, not once per loop
+def _counting_spawn(monkeypatch, proc):
+    calls = []
+
+    async def fake_exec(*cmd, **kwargs):
+        calls.append(cmd)
+        return proc
+
+    monkeypatch.setattr(adb_module.asyncio, "create_subprocess_exec", fake_exec)
+    return calls
+
+
+async def test_a_phone_adb_calls_offline_is_not_asked_again_for_a_moment(monkeypatch):
+    calls = _counting_spawn(monkeypatch, _Proc(stderr=b"adb.exe: device offline", returncode=1))
+    adb = Adb("adb")
+    with pytest.raises(AdbError, match="offline"):
+        await adb.run("forward", "tcp:1", "tcp:2", serial="R5C")
+    assert len(calls) == 1
+
+    for _ in range(5):                                       # every other loop asking the same phone
+        with pytest.raises(AdbError, match="offline"):
+            await adb.shell_direct("dumpsys window", "R5C")
+    assert len(calls) == 1                                   # no further adb.exe was started
+
+    with pytest.raises(AdbError):                            # another phone is a different question
+        await adb.run("forward", "tcp:1", "tcp:2", serial="OTHER")
+    assert len(calls) == 2
+
+
+async def test_server_level_commands_and_a_changed_device_list_are_never_gated(monkeypatch):
+    calls = _counting_spawn(monkeypatch, _Proc(stderr=b"adb.exe: device offline", returncode=1))
+    adb = Adb("adb")
+    with pytest.raises(AdbError):
+        await adb.run("get-state", serial="R5C")
+    for cmd in ("devices", "reconnect", "connect"):
+        with pytest.raises(AdbError):
+            await adb.run(cmd, serial="R5C")
+    assert len(calls) == 4                                   # the three server commands went through
+
+    adb.clear_device_gone()                                  # the device list changed: ask again at once
+    with pytest.raises(AdbError):
+        await adb.run("get-state", serial="R5C")
+    assert len(calls) == 5
+
+
+async def test_the_hold_ends_and_a_success_clears_it(monkeypatch):
+    calls = _counting_spawn(monkeypatch, _Proc(stderr=b"adb.exe: error: device unauthorized.", returncode=1))
+    adb = Adb("adb")
+    with pytest.raises(AdbError):
+        await adb.run("get-state", serial="R5C")
+    adb._gone_until["R5C"] = 0.0                             # the hold has run out
+    _counting_spawn(monkeypatch, _Proc(stdout=b"device\n"))
+    assert (await adb.run("get-state", serial="R5C")).strip() == "device"
+    assert "R5C" not in adb._gone_until
+    assert len(calls) == 1
+
+
+async def test_an_ordinary_command_failure_does_not_mark_the_phone_gone(monkeypatch):
+    calls = _counting_spawn(monkeypatch, _Proc(stderr=b"cat: /x: No such file or directory", returncode=1))
+    adb = Adb("adb")
+    for _ in range(3):
+        with pytest.raises(AdbError):
+            await adb.shell_direct("cat /x", "R5C")
+    assert len(calls) == 3

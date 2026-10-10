@@ -113,6 +113,19 @@ async def test_move_task_to_display_writes_command_and_resolves_status():
     assert await task is True
 
 
+@pytest.mark.asyncio
+async def test_move_task_wct_writes_command_and_resolves_status():
+    client = _connected_client()
+    task = asyncio.create_task(client.move_task_wct("task-142", "0", mode=1, clear_bounds=True))
+    await asyncio.sleep(0)
+    assert bytes(client._writer.written) == b"#1 move_task_wct 142 0 1 true\n"
+    await client._dispatch_event(
+        {"type": "move_task_wct_result", "ok": True, "task_id": 142, "display_id": 0, "req_id": "1", "tier": "wct_atomic"}
+    )
+    assert await task is True
+
+
+
 
 @pytest.mark.asyncio
 async def test_dispatch_event_drops_response_with_unknown_req_id_without_raising():

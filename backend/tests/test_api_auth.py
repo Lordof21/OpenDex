@@ -178,3 +178,20 @@ def test_remote_binds_need_an_explicit_token_and_an_explicit_opt_in(settings, so
 def test_create_app_refuses_a_remote_bind_without_the_opt_in():
     with pytest.raises(auth.RemoteBindRefused):
         create_app(Settings(HTTP_HOST="0.0.0.0"))
+
+
+# ---------------------------------------------------------------- an adb failure nobody caught is a 503, not a 500 + traceback
+@pytest.mark.parametrize("stderr, expected", [
+    ("adb.exe: device offline", "çevrimdışı"),
+    ("adb.exe: device unauthorized.", "izin vermedi"),
+    ("adb.exe: no devices/emulators found", "bulunamadı"),
+    ("adb.exe: something odd", "adb komutu başarısız"),
+])
+def test_an_uncaught_adb_error_is_a_503_with_a_readable_sentence(client, stderr, expected):
+    from unittest.mock import AsyncMock
+    from app.device.adb import AdbError
+
+    client.app.state.ctx.app_registry.list_launcher_apps = AsyncMock(side_effect=AdbError(["shell", "x"], 1, stderr))
+    r = client.get("/api/apps")
+    assert r.status_code == 503
+    assert r.json()["code"] == "adb_error" and expected in r.json()["detail"]

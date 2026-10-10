@@ -33,7 +33,7 @@ from .api.websockets import ws_router
 from .apps.app_registry import AppRegistry
 from .config import Settings, get_settings
 from .device import daemon_auth
-from .device.adb import Adb
+from .device.adb import Adb, AdbError
 from .device.capability_probe import CapabilityProbe
 from .device.connection_supervisor import ConnectionSupervisor
 from .device.device_daemon_client import HEALTH_CHECK_ATTEMPTS, HEALTH_CHECK_INTERVAL_S
@@ -314,6 +314,7 @@ class AppContext:
         self._schedule_device_state()  # the session phase changed with it
 
     def _on_device_list_changed(self) -> None:
+        self.adb.clear_device_gone()  # a phone that was offline may be back: ask it again at once
         self._device_list_changed.set()
         self._schedule_device_state()
 
@@ -1033,6 +1034,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return JSONResponse(
             status_code=exc.status, content={"detail": exc.message, "code": exc.code, "path": exc.path, "reason": exc.detail},
         )
+
+    @app.exception_handler(AdbError)
+    async def _adb_error(_request, exc: AdbError):
+        # An adb command that nobody caught used to end as a 500 with a page-long traceback per request. The phone being
+        # offline / unauthorized is an everyday condition: one log line, a 503 the UI can show.
+        text = (exc.stderr or "").lower()
+        if "unauthorized" in text:
+            detail = "Telefon bu bilgisayara izin vermedi — telefondaki “USB hata ayıklamaya izin ver” penceresini onaylayın."
+        elif "offline" in text:
+            detail = "Telefon adb’de çevrimdışı görünüyor (device offline). Kabloyu çıkarıp takın ya da USB hata ayıklamayı kapatıp açın."
+        elif "no devices" in text or "not found" in text:
+            detail = "Telefon bulunamadı."
+        else:
+            detail = f"adb komutu başarısız: {(exc.stderr or '').strip()[:200]}"
+        log.warning("[API] adb hatası: %s", detail)
+        return JSONResponse(status_code=503, content={"detail": detail, "code": "adb_error"})
 
     for prefix in ("/api", "/api/v1"):
         app.include_router(api_auth.router, prefix=prefix)

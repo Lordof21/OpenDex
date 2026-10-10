@@ -485,12 +485,13 @@ def setup(level: str = "INFO") -> None:
     for name in _THIRD_PARTY_QUIET:
         logging.getLogger(name).setLevel(logging.ERROR)
 
-    logging.getLogger("app.device.device_daemon_client").addFilter(_daemon_filter)
+    daemon_log = logging.getLogger("app.device.device_daemon_client")
+    if _daemon_filter not in daemon_log.filters:  # setup() can run again (tests, a re-configured run): attach once
+        daemon_log.addFilter(_daemon_filter)
 
-    # OPENDEX_TRACE=handoff,applock,... ; LOG_LEVEL=DEBUG tüm akışları terminale açar.
+    # OPENDEX_TRACE=handoff,applock,... opens chosen flows on the terminal. LOG_LEVEL=DEBUG only adds DEBUG lines to the
+    # FILE (see _FileGate): the terminal stays quiet unless a trace is asked for by name.
     requested = [c for c in os.environ.get("OPENDEX_TRACE", "").split(",") if c.strip()]
-    if str(level).upper() == "DEBUG":
-        requested.append("all")
     applied, unknown = set_trace(requested)
     logging.getLogger("app.main").info(
         "Log: dosya=%s terminal=WARNING+ izleme=%s%s",

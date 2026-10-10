@@ -161,7 +161,6 @@ async def open_window(body: OpenWindowRequest, ctx: AppContextDep):
             display_mode=body.display_mode,
             auto_start_app=body.auto_start_app,
         )
-        _schedule_screen_off(ctx, first_window)
         return handle
     except EncoderLimitError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

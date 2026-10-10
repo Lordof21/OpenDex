@@ -116,6 +116,25 @@ def test_saved_networks_including_a_full_width_ssid():
     assert parse_saved_networks("No networks") == []
 
 
+def test_saved_transition_networks_are_listed_once_per_id():
+    # Android 16 lists a WPA2/WPA3 (or open/OWE) network once per security type under the same id.
+    text = (
+        "Network Id      SSID                         Security type\n"
+        "0             Turk Telekom WiFi               open\n"
+        "0             Turk Telekom WiFi               owe^\n"
+        "1            10                               wpa2-psk\n"
+        "1            10                               wpa3-sae^\n"
+        "9            eduroam                          wpa2-enterprise\n"
+        "9            eduroam                          wpa3-sae^\n"
+    )
+    saved = parse_saved_networks(text)
+    assert [(n["network_id"], n["ssid"], n["kind"]) for n in saved] == [
+        (0, "Turk Telekom WiFi", "open"),
+        (1, "10", "wpa2"),
+        (9, "eduroam", "wpa3"),          # the first row cannot be joined here, the second can
+    ]
+
+
 def test_bands_bars_flags_and_macs():
     assert (band_of(2437), band_of(5180), band_of(6115), band_of(900)) == ("2.4 GHz", "5 GHz", "6 GHz", None)
     assert (signal_level(-50), signal_level(-70), signal_level(-95)) == (4, 2, 0)

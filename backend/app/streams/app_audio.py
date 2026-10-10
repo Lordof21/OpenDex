@@ -552,7 +552,7 @@ class AppAudioRouter:
 
     # Calibration probe (the page plays its own tone and listens; see frontend/src/media/syncCalibration.js)
     PROBE_COUNT = 6
-    PROBE_SPACING_MS = 500
+    PROBE_SPACING_MS = 750
     PROBE_LEAD_MS = 700           # from the daemon's answer to the first tone: covers the page's round trip + scheduling
 
     async def probe(self) -> dict[str, Any]:
@@ -565,14 +565,14 @@ class AppAudioRouter:
             return {"ok": False, "error": "not_supported"}
         common = self._common_target_ms(await self._link_one_way_ms(daemon))
         offset = await self._sync_offset()
-        phone = int(max(0, min(self.MAX_PHONE_TARGET_MS, common + offset)))
+        phone = int(max(0, min(self.MAX_PHONE_TARGET_MS, common)))
         res = await daemon.audio_probe(phone, self.PROBE_COUNT, self.PROBE_SPACING_MS, self.PROBE_LEAD_MS)
         pts = res.get("pts_us")
         if not res.get("ok") or not isinstance(pts, list) or not pts:
             return {"ok": False, "error": str(res.get("error") or "probe_failed")}
         return {
             "ok": True, "pts_us": [int(p) for p in pts], "spacing_ms": int(res.get("spacing_ms", self.PROBE_SPACING_MS)),
-            "common_target_ms": common, "phone_target_ms": int(res.get("target_ms", phone)), "offset_ms": phone - common,
+            "common_target_ms": common, "phone_target_ms": int(res.get("target_ms", phone)), "offset_ms": 0, "current_offset_ms": offset,
         }
 
     async def sync_info(self) -> dict[str, Any]:

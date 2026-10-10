@@ -757,15 +757,15 @@ async def test_the_alignment_settings_read_what_is_assumed():
 # ---------------------------------------------------------------- calibration probe (the phone's half)
 
 
-async def test_the_probe_plays_at_the_phones_current_target_and_tells_the_page_what_it_needs():
+async def test_the_probe_plays_at_neutral_baseline_regardless_of_sync_offset():
     h = _Harness(daemon=_Daemon(sync=True, rtt_ms=20.0))
     h.daemon.probe_calls = []
     h.sync_offset = 25
     await h.per_app()
     res = await h.router.probe()
     assert res["ok"] is True
-    assert (res["common_target_ms"], res["phone_target_ms"], res["offset_ms"]) == (COMMON, COMMON + 25, 25)
-    assert h.daemon.probe_calls == [(COMMON + 25, AppAudioRouter.PROBE_COUNT, AppAudioRouter.PROBE_SPACING_MS, AppAudioRouter.PROBE_LEAD_MS)]
+    assert (res["common_target_ms"], res["phone_target_ms"], res["offset_ms"], res["current_offset_ms"]) == (COMMON, COMMON, 0, 25)
+    assert h.daemon.probe_calls == [(COMMON, AppAudioRouter.PROBE_COUNT, AppAudioRouter.PROBE_SPACING_MS, AppAudioRouter.PROBE_LEAD_MS)]
     assert len(res["pts_us"]) == AppAudioRouter.PROBE_COUNT
     assert res["spacing_ms"] == AppAudioRouter.PROBE_SPACING_MS
 

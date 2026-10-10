@@ -1,7 +1,9 @@
 """Touch and keyboard input injection endpoints."""
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
@@ -10,6 +12,7 @@ from pydantic import BaseModel, Field
 from app.api.deps import AppContextDep
 from app.input import keyboard_control, keyboard_setup, touch_control
 from app.input.touch_control import TouchAction
+from app.windows.mirror_packages import is_mirror_package
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -77,15 +80,53 @@ async def input_touch(body: TouchRequest, ctx: AppContextDep):
 @router.post("/input/key")
 async def input_key(body: KeyRequest, ctx: AppContextDep):
     """Injects key events, typed characters, or desktop shortcuts."""
-    # Root Activity Guard: prevent terminating root activity on secondary display
-    if body.kind == "keycode" and (str(body.key).lower() == "back" or body.key == "4"):
-        is_root = await ctx.window_manager.is_window_at_root(body.window_id)
-        if is_root:
-            log.info("[RootActivityGuard 🛡️] Window %s is at root activity; blocking KEYCODE_BACK to prevent white screen", body.window_id)
-            return {"ok": True, "at_root": True, "status": "at_root", "message": "Başlangıç noktasındasınız"}
-
     session = _get_control_session(ctx, body.window_id)
     control = session.control
+    pkg = session.state.package
+
+    # Handle Android Back Key with Root Activity Guard
+    is_back = body.kind == "keycode" and (str(body.key).lower() == "back" or str(body.key) == "4")
+    if is_back:
+        # Protect window from AppPresence auto-close if the app finishes at root
+        session.back_protect_until = time.monotonic() + 4.0
+        log.info("🔙 [Keyboard:BACK 📥] win=%s (%s) Back key injection initiated", body.window_id, pkg)
+        try:
+            await keyboard_control.inject_key_press(control, 4)
+            log.info("✅ [Keyboard:BACK] Keycode 4 injected into %s", pkg)
+        except Exception as exc:
+            log.error("❌ [Keyboard:BACK] Failed to inject keycode 4 into %s: %s", pkg, exc)
+            if isinstance(exc, HTTPException):
+                raise
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        # Verify on virtual display whether the app finished (was at true root)
+        display_id = ctx.window_manager.get_display_for_session(session)
+        is_mirror = is_mirror_package(pkg) or display_id in (None, "0")
+        if not is_mirror and display_id:
+            at_root = False
+            # Check over ~400ms: in-app navigation stays alive & visible; root exit becomes invisible/removed
+            for delay in (0.12, 0.15, 0.15):
+                await asyncio.sleep(delay)
+                alive, visible = await ctx.window_manager.is_package_visible_on_display(pkg, display_id)
+                if not alive or not visible:
+                    at_root = True
+                    break
+
+            if at_root:
+                log.info(
+                    "[RootActivityGuard 🛡️] App %s exited on Back at root; reviving on win=%s to prevent blank display",
+                    pkg,
+                    body.window_id,
+                )
+                await ctx.window_manager.start_app_in_window(pkg)
+                return {
+                    "ok": True,
+                    "at_root": True,
+                    "status": "at_root",
+                    "message": "Başlangıç noktasındasınız",
+                }
+        return {"ok": True, "at_root": False}
+
     log.info(
         "⌨️ [Keyboard:API 📥] win=%s (%s) kind=%s key=%s char=%s text=%s mod=%s",
         body.window_id,

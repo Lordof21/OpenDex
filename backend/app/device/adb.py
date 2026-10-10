@@ -20,6 +20,7 @@ import contextlib
 import logging
 import re
 import shlex
+import time
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -93,6 +94,20 @@ class AdbError(RuntimeError):
         super().__init__(f"adb {' '.join(self.cmd)} failed ({returncode}): {stderr.strip()}")
 
 
+# adb's own verdict that the PHONE cannot be reached (not that a command failed): "adb.exe: device offline",
+# "error: device unauthorized.", "no devices/emulators found", "device 'X' not found".
+_DEVICE_GONE = re.compile(
+    r"adb(?:\.exe)?: (?:error: )?(?:device (?:offline|unauthorized)|no devices/emulators found|device '[^']*' not found)",
+    re.IGNORECASE,
+)
+# After such a verdict the same phone is not asked again for this long: every loop (notifications, thermal, handoff, audio
+# link, the app list with its two fallbacks …) used to start its own adb.exe and get the same answer — eleven processes in
+# two seconds for one open request. The device-list push (DeviceManager) clears it the moment the phone's state changes.
+DEVICE_GONE_HOLD_S = 2.0
+# Commands that are about the adb server / connections themselves, never gated.
+_UNGATED = frozenset({"devices", "connect", "disconnect", "pair", "reconnect", "kill-server", "start-server", "tcpip", "mdns", "version"})
+
+
 def _tcp_spec(local: int | str) -> str:
     """Host side of a forward: a bare port means tcp:<port>."""
     return str(local) if str(local).startswith("tcp:") else f"tcp:{local}"
@@ -108,6 +123,14 @@ class Adb:
         self._default_serial = default_serial
         self._shell_transport: ShellTransport | None = None
         self._routes = {"daemon": 0, "adb": 0}
+        self._gone_until: dict[str, float] = {}  # serial -> time.monotonic() until which it is not asked again
+
+    def clear_device_gone(self, serial: str | None = None) -> None:
+        """Forget the "phone is offline" verdict (all phones, or one): the device list just changed."""
+        if serial is None:
+            self._gone_until.clear()
+        else:
+            self._gone_until.pop(serial, None)
 
     def attach_shell_transport(self, transport: ShellTransport | None) -> None:
         """Makes `transport` (the daemon client) the first stop for every shell command; None detaches it."""
@@ -132,6 +155,14 @@ class Adb:
 
         `stdin` is fed to the remote command and then closed (EOF). It is the way to hand a command something that must
         not appear in any argv — adb.exe's on this PC, `sh -c`'s on the phone: neither is private. Never logged."""
+        target = serial or self._default_serial
+        gated = bool(target) and not (args and args[0] in _UNGATED)
+        if gated:
+            until = self._gone_until.get(target)
+            if until is not None:
+                if time.monotonic() < until:
+                    raise AdbError(args, 1, "adb.exe: device offline (not asked again: adb said so a moment ago)")
+                del self._gone_until[target]
         cmd = self._build(args, serial)
         log.debug("exec: %s", " ".join(shlex.quote(a) for a in _redacted(cmd)))
         proc = await asyncio.create_subprocess_exec(
@@ -151,7 +182,12 @@ class Adb:
                 proc.kill()
             raise AdbError(args, -1, f"I/O error: {exc}") from exc
         if proc.returncode != 0:
-            raise AdbError(args, proc.returncode or -1, stderr.decode("utf-8", errors="replace"))
+            text = stderr.decode("utf-8", errors="replace")
+            if gated and _DEVICE_GONE.search(text):
+                self._gone_until[target] = time.monotonic() + DEVICE_GONE_HOLD_S
+            raise AdbError(args, proc.returncode or -1, text)
+        if gated:
+            self._gone_until.pop(target, None)
         return stdout
 
     async def run(
@@ -234,10 +270,14 @@ class Adb:
     async def push(self, local: str, remote: str, serial: str | None = None) -> None:
         await self.run("push", local, remote, serial=serial, timeout_s=60.0)
 
-    async def forward(self, local: int | str, remote: int | str, serial: str | None = None) -> None:
+    async def forward(self, local: int | str, remote: int | str, serial: str | None = None) -> int:
         remote_str = str(remote)
         remote_spec = remote_str if (":" in remote_str) else f"localabstract:{remote_str}"
-        await self.run("forward", _tcp_spec(local), remote_spec, serial=serial)
+        out = await self.run("forward", _tcp_spec(local), remote_spec, serial=serial)
+        if str(local) in ("0", "tcp:0"):
+            text = out.strip()
+            return int(text) if text.isdigit() else 0
+        return int(local) if str(local).isdigit() else 0
 
     async def forward_remove(self, local: int | str, serial: str | None = None) -> None:
         local_spec = _tcp_spec(local)

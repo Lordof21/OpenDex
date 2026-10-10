@@ -291,19 +291,30 @@ def connect_kind_of_saved(security: str) -> str | None:
 
 def parse_saved_networks(text: str) -> list[dict[str, Any]]:
     """`cmd wifi list-networks` rows: "%-12d %-32s %-4s" — the security token is the LAST token of the line, so an
-    SSID that fills all 32 columns (a single separating space) or contains spaces still parses."""
-    out = []
+    SSID that fills all 32 columns (a single separating space) or contains spaces still parses.
+
+    A network saved in transition mode is listed once per security type under ONE network id (Android 13+: "0 Home
+    wpa2-psk" then "0 Home wpa3-sae^"). The first row is the primary one, so it wins; a later row only fills in a kind
+    the first could not give."""
+    out: list[dict[str, Any]] = []
+    by_id: dict[int, dict[str, Any]] = {}
     for line in text.splitlines():
         m = re.match(r"^\s*(\d+)\s+(.*\S)\s+(\S+)\s*$", line)
         if not m:
             continue
         security = m.group(3)
-        out.append({
+        entry = {
             "network_id": int(m.group(1)),
             "ssid": _unquote(m.group(2)),
             "security": security,
             "kind": connect_kind_of_saved(security),
-        })
+        }
+        seen = by_id.get(entry["network_id"])
+        if seen is None:
+            by_id[entry["network_id"]] = entry
+            out.append(entry)
+        elif seen["kind"] is None and entry["kind"] is not None:
+            seen["kind"], seen["security"] = entry["kind"], entry["security"]
     return out
 
 

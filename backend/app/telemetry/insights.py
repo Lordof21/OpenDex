@@ -72,7 +72,7 @@ def compute(
                         "detail": f"Olağan üst sınıra ulaştı{trend}."})
         elif slope is not None and slope >= SLOPE_WARN_C_PER_MIN:
             out.append({"id": "temp", "severity": "warning", "title": f"Hızla ısınıyor: {_fmt(slope, 2)} °C/dk",
-                        "detail": f"Şu an {_fmt(temp)} °C; bu hızla 10 dk'da ~{_fmt(temp + slope * 10)} °C."})
+                        "detail": f"Şu an {_fmt(temp)} °C{trend}."})
         else:
             out.append({"id": "temp", "severity": "good", "title": f"Sıcaklık normal: {_fmt(temp)} °C",
                         "detail": f"S{change[1:]}." if change else "Isınma eğilimi yok."})
