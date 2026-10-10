@@ -110,7 +110,9 @@ class TaskTeleporter:
         if density_before is not None and not pinned_dpi:
             changed_at = await self._density.mark()  # no override: the MOVE is what changes the density
         try:
-            await move_task_to_display(self._adb, task.task_id, new_disp_id, serial=serial)
+            await move_task_to_display(
+                self._adb, task.task_id, new_disp_id, serial=serial, daemon=self._daemon_client_getter()
+            )
         except Exception:
             with contextlib.suppress(Exception):
                 await server.stop()  # görev Workspace'te kaldı: yeni VD + encoder sızmasın

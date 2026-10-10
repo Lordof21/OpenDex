@@ -614,7 +614,7 @@ class ScrcpyServer:
             task_id, target_disp = evacuate
             with contextlib.suppress(Exception):
                 from .task_movement import move_task_to_display
-                await move_task_to_display(self._adb, task_id, target_disp, serial=self._serial)
+                await move_task_to_display(self._adb, task_id, target_disp, serial=self._serial, daemon=self.daemon)
                 await asyncio.sleep(0.15)  # Let AOSP settle the stack on target display before teardown
 
         if self._sockets:

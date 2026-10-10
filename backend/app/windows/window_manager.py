@@ -209,6 +209,8 @@ class WindowManager:
         # call the composed object's method directly, never a public wrapper
         # (that would try to reacquire the lock and deadlock).
         self._lock = asyncio.Lock()
+        # package -> monotonic deadline: while it runs, focusing that app's window does NOT send the launcher START_APP (see hold_launch).
+        self._launch_held: dict[str, float] = {}
         # window_id -> its teardown task, from the moment the user closed it (close_window) until it is gone.
         self._closers: dict[str, asyncio.Task] = {}
         # heal_links runs one window at a time under `_lock` (so a close/open can interleave between windows); this keeps
@@ -664,6 +666,8 @@ class WindowManager:
         if not (self._serial and self._profile):
             raise DeviceNotBoundError()
         is_mirror = is_mirror_package(package)
+        if not is_mirror:
+            self.hold_handoff(package, seconds=4.0)
 
         # 1. Activity-start pre-check equivalent — API gate.
         if not is_mirror and self._profile.android_api < MIN_API_FOR_VIRTUAL_DISPLAY_LAUNCH:
@@ -1401,12 +1405,55 @@ class WindowManager:
         if launchable:
             await self._launch_if_absent(session)          # outside the lock: it asks the phone
 
+    def hold_launch(self, package: str, seconds: float = 10.0) -> None:
+        """For `seconds`, focusing `package`'s window sends no launcher START_APP. A tapped notification opens its target by firing its
+        own PendingIntent into the window's display; a focus that lands first — the window has no task yet, so `_launch_if_absent`
+        would start the app's main page — races it, and the launcher intent arriving last leaves the app on its home screen
+        (Gmail's inbox instead of the mail)."""
+        self._launch_held[package] = time.monotonic() + seconds
+
+    def release_launch_hold(self, package: str) -> None:
+        """Immediately releases any launch hold on `package`."""
+        self._launch_held.pop(package, None)
+
+    def hold_handoff(self, package: str, seconds: float = 5.0) -> None:
+        """Suspends continuity handoff-to-phone for `package` during window creation / navigation."""
+        if hasattr(self, "_handoff") and self._handoff:
+            self._handoff.hold(f"pkg_{package}", lease_s=seconds)
+
+    def release_handoff_hold(self, package: str) -> None:
+        """Immediately releases handoff hold on `package`."""
+        if hasattr(self, "_handoff") and self._handoff:
+            self._handoff.release(f"pkg_{package}")
+
+    async def start_app_in_window(self, package: str) -> bool:
+        """Starts `package`'s own launcher page in its window (START_APP), whatever hold_launch says. For a notification that is no
+        longer on the phone: there is no target left to open, and the window must not stay a black display."""
+        session = self.get_session_by_package(package)
+        if session is None or session.control is None or is_mirror_package(package):
+            return False
+        with contextlib.suppress(Exception):
+            await session.control.send(serialize_start_app(package))
+            return True
+        return False
+
+    def _launch_is_held(self, package: str) -> bool:
+        until = self._launch_held.get(package)
+        if until is None:
+            return False
+        if time.monotonic() >= until:
+            self._launch_held.pop(package, None)
+            return False
+        return True
+
     async def _launch_if_absent(self, session: WindowSession) -> None:
         """Focus (every click on a window) must not LAUNCH anything on an app that is already there. START_APP is the app's
         LAUNCHER intent: on a running app whose task stands on a deeper screen — the chat a notification just opened —
         it lands on the app's main page ("returns to the home page"). So the intent is sent only when the app has no
         task on this window's display (the user closed it inside the window, or it never started). When that cannot be
-        told (the display id is not known yet), the old behaviour stays."""
+        told (the display id is not known yet), the old behaviour stays. A held package (hold_launch) is never launched."""
+        if self._launch_is_held(session.state.package):
+            return
         display = known_display_id(session)
         if display and self._adb and self._serial:
             with contextlib.suppress(Exception):
@@ -1550,43 +1597,65 @@ class WindowManager:
             # and so does restoring the window from the taskbar.
             window_logger(__name__, window_id).exception("[LINK] yerinde yeniden kurulamadı — donmuş kalıyor")
 
+    def get_display_for_session(self, session: WindowSession) -> str | None:
+        """Resolves the virtual display ID for this session (handling both Eco Workspace and dedicated displays)."""
+        eco = getattr(session.state, "workspace_id", None) == "eco"
+        display = self._eco_workspace.display_id if eco else known_display_id(session)
+        return str(display) if is_virtual_display_id(display) else None
+
+    async def is_package_alive_on_display(self, package: str, display_id: str | None) -> bool:
+        """Returns True if the given package has an active task on display_id (or anywhere if display_id is None)."""
+        alive, _ = await self.is_package_visible_on_display(package, display_id)
+        return alive
+
+    async def is_package_visible_on_display(self, package: str, display_id: str | None) -> tuple[bool, bool]:
+        """Returns (alive, visible) for the given package on display_id.
+        If the app was closed/finished at root, alive will be False or visible will be False.
+        """
+        if not (self._adb and self._serial):
+            return False, False
+
+        daemon = daemon_registry.live("find_task")
+        if daemon is not None:
+            disp = int(display_id) if display_id and str(display_id).isdigit() else None
+            try:
+                found = await daemon.find_task(package, disp) if disp is not None else await daemon.find_task(package)
+                if found and found.get("found"):
+                    return True, bool(found.get("visible", True))
+                return False, False
+            except Exception as e:
+                log.debug("[is_package_visible_on_display] daemon check failed: %s", e)
+
+        # Fallback via deep_navigator / adb
+        from app.device.deep_navigator import find_task_id_for_package
+        try:
+            task_id = await find_task_id_for_package(self._adb, package, display_id=display_id, serial=self._serial)
+            if not task_id:
+                return False, False
+            raw = await self._adb.shell("dumpsys activity activities", serial=self._serial, timeout_s=2.0)
+            for line in raw.splitlines():
+                if f"Task{{{task_id}" in line or (package in line and "Task{" in line):
+                    visible = "visible=true" in line
+                    return True, visible
+            return True, True
+        except Exception as e:
+            log.debug("[is_package_visible_on_display] check failed: %s", e)
+            return True, True
+
     async def is_window_at_root(self, window_id: str) -> bool:
-        """Checks if the top activity on this window's virtual display is at the root of its task stack.
-        Prevents injecting KEYCODE_BACK when at root, which would cause the Activity to finish()
-        and leave an empty/white virtual display surface.
+        """Checks if the window's app is already stopped or has no active task on its display.
+        Note: Modern Android apps use Single-Activity Architecture where num_activities == 1
+        regardless of backstack depth (fragments, compose, webview history).
+        Therefore, an active task cannot be presumed to be at root prior to injecting KEYCODE_BACK.
         """
         session = self._sessions.get(window_id)
         if not session or not session.state.package or not self._serial:
             return False
 
         pkg = session.state.package
-        # Asked on every Back press: the daemon counts the task's activities (ActivityTaskManager) in a few ms instead
-        # of a full `dumpsys activity activities` per key press.
-        daemon = daemon_registry.live("find_task")
-        display = known_display_id(session)
-        if daemon is not None:
-            found = await daemon.find_task(pkg, display) if display else await daemon.find_task(pkg)
-            if found is not None and (not found.get("found") or isinstance(found.get("num_activities"), int)):
-                return bool(found.get("found")) and found["num_activities"] <= 1
-        try:
-            # Adb.shell() returns the decoded stdout string directly (not a
-            # subprocess.CompletedProcess) — there is no `.stdout` attribute
-            # on it. This previously threw AttributeError on every call,
-            # silently caught below, making this method always return False.
-            raw = await self._adb.shell("dumpsys activity activities", serial=self._serial)
-            lines = raw.splitlines()
-            for i, line in enumerate(lines):
-                if pkg in line and "Task{" in line:
-                    # In AOSP dumpsys: 'sz=1' means task has exactly 1 activity (the root)
-                    if "sz=1" in line:
-                        return True
-                    # Check next few lines for rootOfTask=true
-                    for sub in lines[i:min(i + 8, len(lines))]:
-                        if "rootOfTask=true" in sub:
-                            return True
-        except Exception as e:
-            window_logger(__name__, window_id).debug("[is_window_at_root] inspection failed: %s", e)
-        return False
+        disp = self.get_display_for_session(session)
+        is_alive = await self.is_package_alive_on_display(pkg, disp)
+        return not is_alive
 
     async def migrate_transport(self, old_serial: str, new_serial: str) -> None:
         """Wi-Fi <-> USB geçişi sırasında açık olan tüm pencereleri ve

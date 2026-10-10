@@ -533,12 +533,10 @@ class DensityReconciler:
         except Exception as exc:  # noqa: BLE001
             log.debug("[DENSITY] am kill başarısız (%s): %s", package, exc)
             return "kept"
-        deadline = self._clock() + 1.5
-        while self._clock() < deadline:
-            await asyncio.sleep(0.15)
-            if await self._identity(package) != before:
-                log.info("[DENSITY] %s: görevsiz önbellek süreci öldürüldü (soğuk doğum garanti)", package)
-                return "killed"
+        changed, _ = await self._wait_identity_change(package, before, timeout_s=1.5, poll_s=0.15, need_alive=False)
+        if changed:
+            log.info("[DENSITY] %s: görevsiz önbellek süreci öldürüldü (soğuk doğum garanti)", package)
+            return "killed"
         return "kept"
 
     # ------------------------------------------------------------------ internals
@@ -820,13 +818,46 @@ class DensityReconciler:
 
     async def _await_rebirth(self, package: str, old: ProcessIdentity) -> ProcessIdentity | None:
         poll = max(0.05, self._num("DENSITY_REFRESH_POLL_S", 0.25))
-        deadline = self._clock() + self._num("DENSITY_REFRESH_VERIFY_TIMEOUT_S", 6.0)
+        changed, ident = await self._wait_identity_change(
+            package, old, timeout_s=self._num("DENSITY_REFRESH_VERIFY_TIMEOUT_S", 6.0), poll_s=poll, need_alive=True,
+        )
+        return ident if changed else None
+
+    async def _wait_identity_change(
+        self, package: str, old: ProcessIdentity, *, timeout_s: float, poll_s: float, need_alive: bool,
+    ) -> tuple[bool, ProcessIdentity | None]:
+        """Waits until ``package``'s process is no longer ``old`` (``need_alive``: until a DIFFERENT process is running).
+        Returns (changed, the process now). The waiting happens ON THE PHONE in one shell call: asking every 0.15–0.25 s
+        from here cost one RPC per question — a dozen for a single "open" — for an answer that is usually "not yet"."""
+        serial = self._serial_getter()
+        if not serial or not is_package_name(package):  # nothing to ask: same answer the per-question path would give
+            return False, None
+        tries = max(1, int(timeout_s / poll_s + 0.999))
+        alive = ' && [ -n "$p" ]' if need_alive else ""
+        script = (
+            f'i=0; c=0; while [ $i -lt {tries} ]; do p=$(pidof {package} 2>/dev/null); p=${{p%% *}}; '
+            f'if [ "$p" != "{old.pid}" ]{alive}; then c=1; break; fi; sleep {poll_s:g}; i=$((i+1)); done; '
+            f'echo $c; if [ -n "$p" ]; then echo "$p"; cat /proc/$p/stat 2>/dev/null; fi'
+        )
+        try:
+            raw = await self._adb.shell(script, serial=serial, timeout_s=timeout_s + 3.0)
+            lines = (raw if isinstance(raw, str) else "").splitlines()
+            if lines and lines[0].strip() in ("0", "1"):
+                ident = parse_process_identity("\n".join(lines[1:]) or None)
+                changed = lines[0].strip() == "1"
+                if changed and need_alive and (ident is None or ident == old):
+                    changed = False  # a pid that only looks different (never expected): do not claim a rebirth
+                return changed, ident if changed or ident is not None else None
+        except Exception as exc:  # noqa: BLE001
+            log.debug("[DENSITY] süreç beklemesi telefonda yapılamadı (%s): %s", package, exc)
+        # The phone could not run the loop (a shell without fractional sleep, a dropped RPC): ask question by question.
+        deadline = self._clock() + timeout_s
         while self._clock() < deadline:
-            await asyncio.sleep(poll)
+            await asyncio.sleep(poll_s)
             ident = await self._identity(package)
-            if ident is not None and ident != old:
-                return ident
-        return None
+            if ident != old and (ident is not None or not need_alive):
+                return True, ident
+        return False, None
 
     async def _worker_loop(self, key: str, worker: _Worker) -> None:
         try:

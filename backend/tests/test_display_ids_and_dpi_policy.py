@@ -46,6 +46,15 @@ def test_server_command_uses_the_floored_log_level():
 
 # ---------------------------------------------------------------- dpi policy (B5)
 
+from app.windows.dpi_policy import (
+    DEFAULT_PHONE_TARGET_DP,
+    MAX_DERIVED_DPI,
+    MIN_DERIVED_DPI,
+    derive_phone_target_dp,
+    negotiate_dpi,
+)
+
+
 def _project(**kw):
     return ProjectSettings(**kw)
 
@@ -68,5 +77,22 @@ def test_derived_density_is_clamped_the_same_way_for_open_and_resize(short_side,
     assert negotiate_dpi(short_side, short_side, None, _project(custom_dpi=0, target_dp=600), 160) == expected
 
 
-def test_fallback_when_nothing_is_configured():
-    assert negotiate_dpi(1280, 720, None, _project(custom_dpi=0, target_dp=0), 213) == 213
+def test_auto_target_dp_normalizes_to_360_dp():
+    # 720 short side with 360 target_dp -> 320 DPI
+    assert negotiate_dpi(1280, 720, None, _project(custom_dpi=0, target_dp=0), 213) == round(720 * 160 / 360)
+
+
+def test_auto_target_dp_with_custom_phone_dp():
+    # 720 short side with phone_dp=392 -> round(720 * 160 / 392) = 294 DPI
+    assert negotiate_dpi(1280, 720, None, _project(custom_dpi=0, target_dp=0), 213, phone_dp=392) == round(720 * 160 / 392)
+
+
+def test_fallback_when_auto_disabled():
+    assert negotiate_dpi(1280, 720, None, _project(custom_dpi=0, target_dp=0), 213, auto_target_dp=False) == 213
+
+
+def test_derive_phone_target_dp():
+    assert derive_phone_target_dp(1080, 513) == 337
+    assert derive_phone_target_dp(1080, 480) == 360
+    assert derive_phone_target_dp(0, 0) == DEFAULT_PHONE_TARGET_DP
+

@@ -30,6 +30,8 @@ class Phone(FakePhone):
     async def shell(self, command, serial=None, timeout_s=None):
         if command.strip() == "wm density":
             return "Physical density: 520"
+        if "cat /proc/net/unix" in command:
+            return "@chrome_devtools_remote"
         return await super().shell(command, serial=serial, timeout_s=timeout_s)
 
 

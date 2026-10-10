@@ -9,6 +9,7 @@ The contract these tests pin down (see windows/density_reconciler.py):
 """
 import asyncio
 import logging
+import re
 import time
 from unittest.mock import AsyncMock
 
@@ -49,6 +50,7 @@ class FakePhone:
         self.kill_cmds: list[str] = []
         self.kill_works = True
         self.commands: list[str] = []
+        self.wait_cmds = 0  # on-phone waits answered (one RPC each, however long the wait)
         # `am update-appinfo`: recreates the visible activities in place; the system logs a wm_relaunch_activity event
         # (config mask with CONFIG_ASSETS_PATHS). `relaunch_works=False` models a ROM where nothing is relaunched/logged.
         self.relaunch_works = relaunch_works
@@ -82,6 +84,13 @@ class FakePhone:
 
     async def shell(self, command, serial=None, timeout_s=None):
         self.commands.append(command)
+        wait = re.search(r'while \[ \$i -lt \d+ \].*\[ "\$p" != "(\d+)" \]( && \[ -n "\$p" \])?', command)
+        if wait:  # the reconciler's on-phone wait: "has the process stopped being <pid> (and is one running)?"
+            self.wait_cmds += 1
+            old, need_alive = int(wait.group(1)), bool(wait.group(2))
+            now = self.pid if self.alive else None
+            changed = now != old and (now is not None or not need_alive)
+            return f"{1 if changed else 0}\n" + (f"{self.pid}\n{self.stat_line()}\n" if self.alive else "")
         if "pidof" in command:
             return f"{self.pid}\n{self.stat_line()}\n" if self.alive else ""
         if command.startswith("am kill"):
@@ -862,6 +871,50 @@ async def test_a_process_am_kill_refuses_to_kill_is_kept(tasks):
     rec = make(phone, FakeDaemon(phone))
 
     assert await rec.discard_stale_cached_process(PKG) == "kept"
+
+
+async def test_waiting_for_the_process_to_die_is_one_rpc_not_one_per_question(tasks):
+    """One "open" used to cost a dozen `pidof` round trips: the check for the killed process asked every 0.15 s. The
+    waiting now happens on the phone, in ONE shell call — whether the process died or survived."""
+    tasks[None] = None
+    for kill_works, expected in ((True, "killed"), (False, "kept")):
+        phone = FakePhone()
+        phone.kill_works = kill_works
+        rec = make(phone, FakeDaemon(phone))
+        assert await rec.discard_stale_cached_process(PKG) == expected
+        pidof = [c for c in phone.commands if "pidof" in c]
+        assert phone.wait_cmds == 1 and len(pidof) == 2        # the identity before + the single on-phone wait
+
+
+async def test_waiting_for_a_reborn_process_is_one_rpc(tasks):
+    phone = FakePhone()
+    rec = make(phone, FakeDaemon(phone))
+    old = ProcessIdentity(phone.pid, phone.ticks)
+    phone.reborn()
+    ident = await rec._await_rebirth(PKG, old)
+    assert ident == ProcessIdentity(phone.pid, phone.ticks) and ident != old
+    assert phone.wait_cmds == 1
+
+    still = FakePhone()                                         # nothing is ever reborn: one wait, then "no"
+    rec2 = make(still, FakeDaemon(still))
+    assert await rec2._await_rebirth(PKG, ProcessIdentity(still.pid, still.ticks)) is None
+    assert still.wait_cmds == 1
+
+
+async def test_a_phone_that_cannot_run_the_wait_falls_back_to_asking_question_by_question(tasks):
+    phone = FakePhone()
+    original = phone.shell
+
+    async def no_loops(command, serial=None, timeout_s=None):   # e.g. a shell whose `sleep` rejects fractions
+        if "while [ $i -lt" in command:
+            return "sleep: bad number\n"
+        return await original(command, serial, timeout_s)
+
+    phone.shell = no_loops
+    rec = make(phone, FakeDaemon(phone))
+    old = ProcessIdentity(phone.pid, phone.ticks)
+    phone.reborn()
+    assert await rec._await_rebirth(PKG, old) == ProcessIdentity(phone.pid, phone.ticks)
 
 
 # ---------------------------------------------------------------- did the app already adapt? (device log 2026-09-30)

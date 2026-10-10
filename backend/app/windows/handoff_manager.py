@@ -29,10 +29,12 @@ from ..device.adb import Adb
 from ..events import EventBus, spawn_background
 from ..logging_config import window_logger
 from ..telemetry import markers as load_markers
+from .cdp_refresher import capture_browser_scroll_state, refresh_browser_layout_inplace
 from .display_ids import is_virtual_display_id, known_display_id
 from .mirror_packages import is_internal_package, is_launcher_package, is_mirror_package
 from .task_movement import move_task_to_display
 from .task_windowing import land_fullscreen, read_task_windowing, settle_task_windowing
+from .web_inspector import inspect_app_runtime
 
 if TYPE_CHECKING:
     from .window_manager import WindowSession
@@ -86,6 +88,15 @@ def _fits_display(bounds: tuple[int, int, int, int], size: tuple[int, int], tole
     return abs(bw - dw) <= dw * tolerance and abs(bh - dh) <= dh * tolerance
 
 
+# Legacy helper for tests / fast-path; actual handoff uses dynamic web_inspector.inspect_app_runtime
+def is_web_rendered_app(package: str | None) -> bool:
+    """True if the package name indicates a web browser (fallback check)."""
+    if not package:
+        return False
+    pkg = package.lower()
+    return any(name in pkg for name in ("chrome", "browser", "firefox", "chromium"))
+
+
 class HandoffManager:
     def __init__(
         self,
@@ -131,6 +142,8 @@ class HandoffManager:
         # transport switch, a link-drop heal): what the watchdog / focus events / pump ends see then is OUR move, not
         # the user handing an app off. Per-owner so one owner letting go never lifts another's hold.
         self._holds: dict[str, float | None] = {}
+        # Pencere bazında aktif geçiş kilidi (art arda hızlı geçişlerde race-condition koruması)
+        self._active_transitions: set[str] = set()
         self._events.on("device_task_focused", self._on_device_task_focused)
 
     def hold(self, owner: str, *, lease_s: float | None = None) -> None:
@@ -147,7 +160,18 @@ class HandoffManager:
         for owner, deadline in list(self._holds.items()):
             if deadline is not None and deadline <= now:
                 del self._holds[owner]
-        return bool(self._holds)
+        return any(not owner.startswith("pkg_") for owner in self._holds)
+
+    def is_package_held(self, package: str) -> bool:
+        """True if handoff detection is paused globally or specifically for `package`."""
+        now = time.monotonic()
+        for owner, deadline in list(self._holds.items()):
+            if deadline is not None and deadline <= now:
+                del self._holds[owner]
+                continue
+            if not owner.startswith("pkg_") or owner == f"pkg_{package}":
+                return True
+        return False
 
     def _locked(self):
         return self._lock if self._lock is not None else contextlib.nullcontext()
@@ -211,14 +235,35 @@ class HandoffManager:
     ) -> bool:
         """Only the PC-initiated handoff of a live app on a real window: elsewhere there is no PC window to hide the
         rebuild behind (the app already stands on the phone) or nothing to reconcile. Wanted when the display differs
-        from the phone in density OR size (a window at the phone's density but DeX-shaped still lands wrong)."""
+        from the phone in Target DP (Smallest Width dp), density, OR size."""
         if source != "pc" or not task_id or not is_virtual_display_id(disp_id):
             return False
         if not phys_dpi:
             return False  # an unread phone density is never guessed: no pre-landing, the post-move settle covers it
+
+        tw = getattr(session, "target_display_w", None)
+        th = getattr(session, "target_display_h", None)
+        if isinstance(tw, (int, float)) and isinstance(th, (int, float)):
+            short_side = min(tw, th)
+        elif hasattr(session, "state") and isinstance(getattr(session.state, "width", None), (int, float)):
+            short_side = min(session.state.width, session.state.height)
+        else:
+            short_side = 720
+
+        pw = phone_size[0] if (phone_size and len(phone_size) > 0 and isinstance(phone_size[0], (int, float))) else None
+        phone_dp = round(pw * 160 / phys_dpi) if (pw and phys_dpi) else 360
+        window_dp = round(short_side * 160 / (window_dpi or 160))
+
         needs_dpi = self._density is not None and window_dpi > 0 and window_dpi != phys_dpi
+        needs_dp = abs(window_dp - phone_dp) > 16
         needs_size = self._resize_display is not None and self._landing_size_needed(session, phone_size)
-        if not (needs_dpi or needs_size):
+
+        log.debug(
+            "[HANDOFF:DP_EVAL] pkg=%s window_dp=%ddp vs phone_dp=%ddp (needs_dp=%s, needs_dpi=%s, needs_size=%s)",
+            pkg, window_dp, phone_dp, needs_dp, needs_dpi, needs_size,
+        )
+
+        if not (needs_dpi or needs_dp or needs_size):
             return False
         state = session.state
         if state.workspace_id is not None or state.frozen or not session.server.is_alive:
@@ -297,6 +342,7 @@ class HandoffManager:
             if not await self._set_density(disp_id, phys_dpi, serial):
                 return False, None, None
             log.info("🛬 [HANDOFF: ÖN-İNİŞ] %s: sanal ekran %d → %d DPI (telefon); taşıma öncesi uzlaştırılıyor", pkg, window_dpi, phys_dpi)
+
         if not needs_dpi:
             return landed, None, None  # size only: the app has nothing to rebuild for a density it does not change
         if before is None:
@@ -419,6 +465,18 @@ class HandoffManager:
                 "x".join(map(str, phone_size)) if phone_size else "boyut okunamadı", phys_dpi if phys_dpi else "okunamadı",
             )
 
+            # Telefon ekranını aktarımın başında erkenden uyandır (panel açılış gecikmesini ve siyah ekranı önle)
+            with contextlib.suppress(Exception):
+                await android_shell.wake_and_unlock(self._adb, serial)
+
+            # Geçiş öncesi runtime profili ve tarayıcı scroll çıpası (0,0) tespiti
+            saved_scroll = None
+            runtime_profile = await inspect_app_runtime(self._adb, serial, pkg)
+            if runtime_profile.is_browser_cdp and runtime_profile.cdp_socket:
+                saved_scroll = await capture_browser_scroll_state(
+                    self._adb, serial, runtime_profile.cdp_socket,
+                )
+
             # ÖN-İNİŞ (yalnız PC'den aktarım): yoğunluk değişimi perdenin arkasında, sanal ekranda yaşanır; taşıma nötr olur.
             prelanded = False
             density_before, changed_at = None, None
@@ -443,7 +501,10 @@ class HandoffManager:
             if task_id:
                 log.info("🚚 [HANDOFF: GÖREV TAŞIMA] Task %s Display %s'den Display 0'a taşınıyor", task_id, disp_id)
                 try:
-                    await move_task_to_display(self._adb, task_id, "0", serial=serial, timeout_s=2.0, daemon=self._daemon_client_getter())
+                    await move_task_to_display(
+                        self._adb, task_id, "0", serial=serial, timeout_s=2.0, daemon=self._daemon_client_getter(),
+                        mode=1, clear_bounds=True,
+                    )
                 except Exception as exc:
                     log.warning("⚠️ [HANDOFF] move_task_to_display uyarısı: %s", exc)
             else:
@@ -454,23 +515,82 @@ class HandoffManager:
                         serial=serial,
                         timeout_s=2.0,
                     )
+            session.state.handoff_to_phone = True
 
-            # 2. Android'in tam ekran yığınına oturmasını sağla (Freeform veya letterbox kalıntısını önle)
+            # 2. Android'in tam ekran yığınına oturmasını sağla (Focus & Visible on Display 0)
             try:
-                out_start = await android_shell.bring_to_front(self._adb, serial, pkg, "0")
+                out_start = await android_shell.bring_to_front(
+                    self._adb, serial, pkg, "0", reorder_only=bool(task_id),
+                )
                 log.info("🎯 [HANDOFF] am start --display 0 tamamlandı: '%s'", out_start.strip() if out_start else "OK")
             except Exception as exc:
                 log.warning("⚠️ [HANDOFF] am start --display 0 uyarısı: %s", exc)
 
-            # 2b. Pencereleme kipi: seçilen aktarma kipine (tam ekran | serbest) göre doğrula/oturt.
+            # 2b. Display 0 Odak Senkronizasyonu & Hayalet Klavye/IME Katmanını Sıfırlama
+            try:
+                await android_shell.sync_display0_focus(self._adb, serial)
+                log.info("🧭 [HANDOFF: ODAK SENKRONU] Display 0 dokunma ve jest odağı kilitlendi (IME sıfırlandı)")
+            except Exception as exc:
+                log.debug("Display 0 focus sync atlandı: %s", exc)
+
+            # 3. View Ağacı Re-Inflate / Canlı Web Layout Yenileme (Evrensel Sıfır State Kaybı)
+            restarted = False
+
+            if runtime_profile.is_browser_cdp and runtime_profile.cdp_socket:
+                # ── KADEME 1: CDP Destekli Tarayıcı (Chrome, Chromium, Brave, Edge vb.) ──
+                # Süreci ÖLDÜRME! Web sayfasına canlı layout/font re-evaluation ve (0,0) scroll çıpalama dürtmesi gönder:
+                if saved_scroll is not None:
+                    cdp_ok = await refresh_browser_layout_inplace(
+                        self._adb, serial, runtime_profile.cdp_socket, saved_scroll=saved_scroll,
+                    )
+                else:
+                    cdp_ok = await refresh_browser_layout_inplace(
+                        self._adb, serial, runtime_profile.cdp_socket,
+                    )
+                if cdp_ok:
+                    log.info(
+                        "✨ [HANDOFF: CANLI DÜRTME] %s web sitesi layout'u CDP ile canlı tazelendi — süreç ve sekmeler korundu",
+                        pkg,
+                    )
+                else:
+                    # CDP dürtmesi yanıt vermezse ve ön-iniş yapılmadıysa güvenli geri çekilme (restart fallback)
+                    if not prelanded and task_id and self._daemon_client_getter:
+                        daemon = self._daemon_client_getter()
+                        if daemon and hasattr(daemon, "restart_task_activity"):
+                            restarted = await daemon.restart_task_activity(task_id)
+
+            elif runtime_profile.is_pure_native and not is_web_rendered_app(pkg) and prelanded:
+                # ── KADEME 2: Saf Yerel Uygulama (Play Store, WhatsApp, Gallery, Udemy, vb.) ──
+                # Ön-iniş zaten yapıldı, arayüz telefon DPI'ına kusursuz oturdu.
+                # Süreç ASLA öldürülmez — scroll, oynatılan medya, form verisi %100 KORUNUR!
+                log.info(
+                    "🛡️ [HANDOFF: DURUM KORUNDU] %s saf yerel uygulama — konum ve scroll kaybını önlemek için restart atlandı",
+                    pkg,
+                )
+
+            else:
+                # ── KADEME 3: Hibrit / Ön-inişsiz / Gömülü WebView Uygulamaları ──
+                should_reinflate = not prelanded or runtime_profile.has_web_engine or is_web_rendered_app(pkg)
+                if should_reinflate and task_id and self._daemon_client_getter:
+                    try:
+                        daemon = self._daemon_client_getter()
+                        if daemon and hasattr(daemon, "restart_task_activity"):
+                            restarted = await daemon.restart_task_activity(task_id)
+                            if restarted:
+                                log.info(
+                                    "🎯 [HANDOFF: REINFLATE] %s View ağacı Display 0 üzerinde telefon düzenine göre yeniden oluşturuldu (webviews=%d)",
+                                    pkg, runtime_profile.webview_count,
+                                )
+                    except Exception as exc:
+                        log.debug("restart_task_activity atlandı/uyarı: %s", exc)
+
+            # 4. Pencereleme kipi: seçilen aktarma kipine (tam ekran | serbest) göre doğrula/oturt.
             await self._settle_phone_windowing(pkg, task_id, serial)
 
-            # 2c. Telefon ekranını uyandır ve kilidi aç (Wakeup & dismiss keyguard)
-            await android_shell.wake_and_unlock(self._adb, serial)
-
-            # 3. Uygulama telefonun yoğunluğuna geçti: kendini yeniden kurmadıysa bir kez, doğrulanmış yenileme. (Ön-iniş
-            #    kanıtlandıysa `density_before` yoktur: uygulama zaten telefonun yoğunluğunda yeniden kuruldu.)
-            if self._density is not None and density_before is not None:
+            # 5. Re-inflate başarılı olduysa redundant settle yapılmaz; olmadıysa reconciler'a bırak
+            if restarted:
+                density_before = None
+            elif self._density is not None and density_before is not None:
                 self._density.schedule_settle(
                     session.state.window_id, pkg, density_before, display="0", reason=f"to_phone:{source}",
                     quiet_s=0.3, changed_at=changed_at,
@@ -492,23 +612,32 @@ class HandoffManager:
         if not session or not serial:
             return False
 
+        if window_id in self._active_transitions:
+            log.warning("⏳ [HANDOFF] window_id=%s için geçiş zaten devam ediyor (race-condition engellendi)", window_id)
+            return False
+
         pkg = session.state.package
-        disp_id = self._resolve_display_id(session)
-        wlog = window_logger(__name__, window_id)
-        wlog.info("📱 [HANDOFF TO PHONE] %s telefona aktarılıyor (disp_id=%s)...", pkg, disp_id)
+        self.hold(f"pkg_{pkg}", lease_s=5.0)
+        self._active_transitions.add(window_id)
+        try:
+            disp_id = self._resolve_display_id(session)
+            wlog = window_logger(__name__, window_id)
+            wlog.info("📱 [HANDOFF TO PHONE] %s telefona aktarılıyor (disp_id=%s)...", pkg, disp_id)
 
-        session.state.handoff_to_phone = True
-        load_markers.record("handoff", package=pkg)
-        await self._execute_to_phone(session, pkg, disp_id, serial, source="pc")
+            await self._execute_to_phone(session, pkg, disp_id, serial, source="pc")
+            session.state.handoff_to_phone = True
+            load_markers.record("handoff", package=pkg)
 
-        await self._events.emit(
-            "app_handoff_to_phone",
-            window_id=window_id,
-            package=pkg,
-            display_id="0",
-            message=f"{pkg} telefonunuza aktarıldı.",
-        )
-        return True
+            await self._events.emit(
+                "app_handoff_to_phone",
+                window_id=window_id,
+                package=pkg,
+                display_id="0",
+                message=f"{pkg} telefonunuza aktarıldı.",
+            )
+            return True
+        finally:
+            self._active_transitions.discard(window_id)
 
     async def _land_on_vd(self, session: "WindowSession", serial: str, task_id: str | int | None, wlog: logging.Logger) -> None:
         """The window's app is on its VD again: fullscreen there (task_windowing.land_fullscreen). Workspace members are
@@ -527,6 +656,8 @@ class HandoffManager:
         geometry and the app lands fullscreen there — under the lifecycle lock, like every other display change."""
         async with self._locked():
             if self._sessions.get(session.state.window_id) is not session:
+                return
+            if session.state.handoff_to_phone or session.state.window_id in self._active_transitions or self.is_package_held(session.state.package):
                 return
             await self._restore_window_geometry(session, log)
             await self._land_on_vd(session, serial, task_id, log)
@@ -550,103 +681,137 @@ class HandoffManager:
         if not session or not serial:
             return False
 
+        if window_id in self._active_transitions:
+            log.warning("⏳ [RECLAIM] window_id=%s için geçiş zaten devam ediyor (race-condition engellendi)", window_id)
+            return False
+
         pkg = session.state.package
-        disp_id = self._resolve_display_id(session)
-        wlog = window_logger(__name__, window_id)
-        wlog.info("📲 [RECLAIM WINDOW] %s PC penceresine geri alınıyor (disp_id=%s)...", pkg, disp_id)
+        self.hold(f"pkg_{pkg}", lease_s=5.0)
+        self._active_transitions.add(window_id)
+        try:
+            disp_id = self._resolve_display_id(session)
+            wlog = window_logger(__name__, window_id)
+            wlog.info("📲 [RECLAIM WINDOW] %s PC penceresine geri alınıyor (disp_id=%s)...", pkg, disp_id)
 
-        started = time.monotonic()
-        from app.device.deep_navigator import find_task_id_for_package
-        task_id = await find_task_id_for_package(self._adb, pkg, display_id="0", serial=serial)
-        task_source = "display0"
-        if not task_id:
-            task_id = await find_task_id_for_package(self._adb, pkg, serial=serial)
-            task_source = "genel" if task_id else "yok"
-        wlog.info(
-            "🔎 [RECLAIM: ADAY] %s task_id=%s (kaynak=%s) frozen=%s sunucu_canlı=%s disp_id=%s handoff_to_phone=%s",
-            pkg, task_id, task_source, session.state.frozen, session.server.is_alive, disp_id,
-            session.state.handoff_to_phone,
-        )
-
-        # Sonuç: "moved" = telefondaki CANLI görev sanal ekrana getirildi (kaldığı yerden devam);
-        # "relaunched" = görev yoktu / taşınamadı (kullanıcı Son Kullanılanlar'dan silmiş olabilir) →
-        # uygulama sanal ekranda SIFIRDAN başlatıldı (onDestroy kullanıcı eliyle yapıldı, bu doğal).
-        outcome = "relaunched"
-        if session.state.frozen or not session.server.is_alive or not disp_id:
-            wlog.info("❄️ [RECLAIM: UNFREEZE] Sunucu durmuş veya donmuş, yeniden başlatılıyor...")
-            # Telefona verilmiş bir uygulama telefonun yoğunluğunda yaşıyor; yeni sanal ekrana START_APP ile geri
-            # taşınınca pencerenin yoğunluğuna geçer (density_reconciler.py).
-            density_before, changed_at = None, None
-            # No live display to resize: the window's own size/density go back into the session, so the display the unfreeze
-            # builds is the window's — not the phone-shaped one a pre-landing left in it.
-            self._adopt_window_geometry(session)
-            if session.state.handoff_to_phone:
-                phys_dpi = await android_shell.phone_density(self._adb, serial)
-                density_before, changed_at = await self._density_bracket_open(
-                    pkg, phys_dpi, session.dpi or self._settings.VIRTUAL_DISPLAY_DPI,
-                )
-            await self._unfreeze_locked(window_id)
-            await self._land_on_vd(session, serial, None, wlog)
-            if density_before is not None:
-                self._density.schedule_settle(
-                    window_id, pkg, density_before,
-                    display=lambda: self._resolve_display_id(session) or session.state.display_id or None,
-                    reason="reclaim_unfreeze", quiet_s=0.3, changed_at=changed_at,
-                )
-        else:
-            phys_dpi = await android_shell.phone_density(self._adb, serial)
-            is_workspace = session.state.workspace_id is not None
-
-            # Sanal ekran pencerenin geometrisinde (boyut + yoğunluk) olmalı: ön-iniş yapılmış bir aktarımdan sonra
-            # telefonunkindedir. Boş olduğundan geri yazım hiçbir uygulamayı etkilemez; sonra taşıma, değişimin TAMAMINI
-            # tek adımda taşır. Yapılmadıysa ekran zaten pencerenin değerindedir (yapılandırma değişikliği doğurmaz).
-            restored = await self._restore_window_geometry(session, wlog)
-            target_dpi = session.dpi or self._settings.VIRTUAL_DISPLAY_DPI
-            if not restored:
-                await self._set_density(disp_id, target_dpi, serial)
-            density_before, changed_at = (None, None) if is_workspace else await self._density_bracket_open(
-                pkg, phys_dpi, target_dpi,
+            started = time.monotonic()
+            from app.device.deep_navigator import find_task_id_for_package
+            task_id = await find_task_id_for_package(self._adb, pkg, display_id="0", serial=serial)
+            task_source = "display0"
+            if not task_id:
+                task_id = await find_task_id_for_package(self._adb, pkg, serial=serial)
+                task_source = "genel" if task_id else "yok"
+            wlog.info(
+                "🔎 [RECLAIM: ADAY] %s task_id=%s (kaynak=%s) frozen=%s sunucu_canlı=%s disp_id=%s handoff_to_phone=%s",
+                pkg, task_id, task_source, session.state.frozen, session.server.is_alive, disp_id,
+                session.state.handoff_to_phone,
             )
 
-            if task_id:
-                wlog.info("🚚 [RECLAIM: GÖREV TAŞIMA] Task %s Display 0'dan Display %s'ye taşınıyor", task_id, disp_id)
-                # Merdiven: taşıma başarısız olabilir (Son Kullanılanlar'dan silinen görevin bayat kaydı, id değişmiş
-                # olabilir). İstisna YUKARI ÇIKMAZ — aksi halde "yeniden başlat" dalı hiç çalışmaz, `handoff_to_phone`
-                # True kalır ve kullanıcı "geri al" dediğinde hiçbir şey olmazdı.
-                try:
-                    await move_task_to_display(self._adb, task_id, disp_id, serial=serial, timeout_s=2.0, daemon=self._daemon_client_getter())
-                    outcome = "moved"
-                    # The task kept the mode it requested on the phone: a freeform handoff ("serbest pencere") must come
-                    # back FULLSCREEN into the VD window, not as a small frame inside the stream.
-                    await self._land_on_vd(session, serial, task_id, wlog)
-                except Exception as exc:
-                    wlog.warning(
-                        "⚠️ [RECLAIM: TAŞIMA BAŞARISIZ] task=%s taşınamadı (%s) — görev yok edilmiş/bayat; "
-                        "%s sanal ekranda SIFIRDAN başlatılacak", task_id, exc, pkg,
+            # Sonuç: "moved" = telefondaki CANLI görev sanal ekrana getirildi (kaldığı yerden devam);
+            # "relaunched" = görev yoktu / taşınamadı (kullanıcı Son Kullanılanlar'dan silmiş olabilir) →
+            # uygulama sanal ekranda SIFIRDAN başlatıldı (onDestroy kullanıcı eliyle yapıldı, bu doğal).
+            outcome = "relaunched"
+            if session.state.frozen or not session.server.is_alive or not disp_id:
+                wlog.info("❄️ [RECLAIM: UNFREEZE] Sunucu durmuş veya donmuş, yeniden başlatılıyor...")
+                # Telefona verilmiş bir uygulama telefonun yoğunluğunda yaşıyor; yeni sanal ekrana START_APP ile geri
+                # taşınınca pencerenin yoğunluğuna geçer (density_reconciler.py).
+                density_before, changed_at = None, None
+                # No live display to resize: the window's own size/density go back into the session, so the display the unfreeze
+                # builds is the window's — not the phone-shaped one a pre-landing left in it.
+                self._adopt_window_geometry(session)
+                if session.state.handoff_to_phone:
+                    phys_dpi = await android_shell.phone_density(self._adb, serial)
+                    density_before, changed_at = await self._density_bracket_open(
+                        pkg, phys_dpi, session.dpi or self._settings.VIRTUAL_DISPLAY_DPI,
+                    )
+                await self._unfreeze_locked(window_id)
+                await self._land_on_vd(session, serial, None, wlog)
+                if density_before is not None:
+                    self._density.schedule_settle(
+                        window_id, pkg, density_before,
+                        display=lambda: self._resolve_display_id(session) or session.state.display_id or None,
+                        reason="reclaim_unfreeze", quiet_s=0.3, changed_at=changed_at,
                     )
             else:
-                wlog.info("🆕 [RECLAIM: GÖREV YOK] %s için canlı görev bulunamadı (Son Kullanılanlar'dan silinmiş) — sıfırdan başlatılacak", pkg)
+                phys_dpi = await android_shell.phone_density(self._adb, serial)
+                is_workspace = session.state.workspace_id is not None
 
-            # Ekrandaki aktiviteyi ön plana çıkar ve canlandır
-            wlog.info("✨ [RECLAIM: SANAL EKRANDA ÖNE ÇIKARMA] %s Display %s üzerinde öne çıkarılıyor", pkg, disp_id)
-            with contextlib.suppress(Exception):
-                await android_shell.bring_to_front(self._adb, serial, pkg, disp_id)
+                # Sanal ekran pencerenin geometrisinde (boyut + yoğunluk) olmalı: ön-iniş yapılmış bir aktarımdan sonra
+                # telefonunkindedir. Boş olduğundan geri yazım hiçbir uygulamayı etkilemez; sonra taşıma, değişimin TAMAMINI
+                # tek adımda taşır. Yapılmadıysa ekran zaten pencerenin değerindedir (yapılandırma değişikliği doğurmaz).
+                restored = await self._restore_window_geometry(session, wlog)
+                target_dpi = session.dpi or self._settings.VIRTUAL_DISPLAY_DPI
+                if not restored:
+                    await self._set_density(disp_id, target_dpi, serial)
 
-            # Uygulama süreci telefonun yoğunluğunda yaşıyordu ve pencerenin yoğunluğuna geçti: kendini yeniden kurmadıysa
-            # bir kez, doğrulanmış yenileme. Görev kimliği burada TAŞIMADAN ÖNCEKİ kimlik (bayat olabilir) — uzlaştırıcı
-            # görevi hedef ekranda taze çözer. Arka planda: kilit altında saniyelerce beklenmez.
-            if self._density is not None and density_before is not None:
-                self._density.schedule_settle(
-                    window_id, pkg, density_before, display=lambda: self._resolve_display_id(session) or disp_id,
-                    reason="reclaim", quiet_s=0.3, changed_at=changed_at,
+                density_before, changed_at = (None, None) if is_workspace else await self._density_bracket_open(
+                    pkg, phys_dpi, target_dpi,
                 )
 
-        session.state.handoff_to_phone = False
-        load_markers.record("reclaim", package=pkg, detail=outcome)
-        await self._events.emit("app_handoff_resolved", window_id=window_id, package=pkg)
-        await self._events.emit("app_reclaim_result", window_id=window_id, package=pkg, outcome=outcome)
-        wlog.info("✅ [RECLAIM: TAMAM] %s -> %s (süre=%dms)", pkg, outcome, (time.monotonic() - started) * 1000)
-        return True
+                # Geçiş öncesi runtime profili ve tarayıcı scroll çıpası (0,0) tespiti
+                saved_scroll = None
+                runtime_profile = await inspect_app_runtime(self._adb, serial, pkg)
+                if runtime_profile.is_browser_cdp and runtime_profile.cdp_socket:
+                    saved_scroll = await capture_browser_scroll_state(
+                        self._adb, serial, runtime_profile.cdp_socket,
+                    )
+
+                if task_id:
+                    wlog.info("🚚 [RECLAIM: GÖREV TAŞIMA] Task %s Display 0'dan Display %s'ye taşınıyor", task_id, disp_id)
+                    # Merdiven: taşıma başarısız olabilir (Son Kullanılanlar'dan silinen görevin bayat kaydı, id değişmiş
+                    # olabilir). İstisna YUKARI ÇIKMAZ — aksi halde "yeniden başlat" dalı hiç çalışmaz, `handoff_to_phone`
+                    # True kalır ve kullanıcı "geri al" dediğinde hiçbir şey olmazdı.
+                    try:
+                        await move_task_to_display(
+                            self._adb, task_id, disp_id, serial=serial, timeout_s=2.0, daemon=self._daemon_client_getter(),
+                            mode=1, clear_bounds=True,
+                        )
+                        outcome = "moved"
+                        # The task kept the mode it requested on the phone: a freeform handoff ("serbest pencere") must come
+                        # back FULLSCREEN into the VD window, not as a small frame inside the stream.
+                        await self._land_on_vd(session, serial, task_id, wlog)
+                    except Exception as exc:
+                        wlog.warning(
+                            "⚠️ [RECLAIM: TAŞIMA BAŞARISIZ] task=%s taşınamadı (%s) — görev yok edilmiş/bayat; "
+                            "%s sanal ekranda SIFIRDAN başlatılacak", task_id, exc, pkg,
+                        )
+                else:
+                    wlog.info("🆕 [RECLAIM: GÖREV YOK] %s için canlı görev bulunamadı (Son Kullanılanlar'dan silinmiş) — sıfırdan başlatılacak", pkg)
+
+                # Ekrandaki aktiviteyi ön plana çıkar ve canlandır (reorder_only: aktivite yığınını ve scroll durumunu sıfırlamaz)
+                wlog.info("✨ [RECLAIM: SANAL EKRANDA ÖNE ÇIKARMA] %s Display %s üzerinde öne çıkarılıyor", pkg, disp_id)
+                with contextlib.suppress(Exception):
+                    await android_shell.bring_to_front(self._adb, serial, pkg, disp_id, reorder_only=bool(task_id))
+
+                # Tarayıcı layout'u ve (0,0) çıpasını PC penceresinde canlı olarak tazele
+                if runtime_profile.is_browser_cdp and runtime_profile.cdp_socket:
+                    if saved_scroll is not None:
+                        cdp_ok = await refresh_browser_layout_inplace(
+                            self._adb, serial, runtime_profile.cdp_socket, saved_scroll=saved_scroll,
+                        )
+                    else:
+                        cdp_ok = await refresh_browser_layout_inplace(
+                            self._adb, serial, runtime_profile.cdp_socket,
+                        )
+                    if cdp_ok:
+                        wlog.info("✨ [RECLAIM: CANLI DÜRTME] %s web sitesi layout'u ve (0,0) çıpası CDP ile tazelendi", pkg)
+
+                # Uygulama süreci telefonun yoğunluğunda yaşıyordu ve pencerenin yoğunluğuna geçti: kendini yeniden kurmadıysa
+                # bir kez, doğrulanmış yenileme. Görev kimliği burada TAŞIMADAN ÖNCEKİ kimlik (bayat olabilir) — uzlaştırıcı
+                # görevi hedef ekranda taze çözer. Arka planda: kilit altında saniyelerce beklenmez.
+                if self._density is not None and density_before is not None:
+                    self._density.schedule_settle(
+                        window_id, pkg, density_before, display=lambda: self._resolve_display_id(session) or disp_id,
+                        reason="reclaim", quiet_s=0.3, changed_at=changed_at,
+                    )
+
+            session.state.handoff_to_phone = False
+            load_markers.record("reclaim", package=pkg, detail=outcome)
+            await self._events.emit("app_handoff_resolved", window_id=window_id, package=pkg)
+            await self._events.emit("app_reclaim_result", window_id=window_id, package=pkg, outcome=outcome)
+            wlog.info("✅ [RECLAIM: TAMAM] %s -> %s (süre=%dms)", pkg, outcome, (time.monotonic() - started) * 1000)
+            return True
+        finally:
+            self._active_transitions.discard(window_id)
 
     def _watched_sessions(self) -> list["WindowSession"]:
         """Windows whose app can wander to the phone: real apps (not our pseudo-windows, not a launcher), streaming.
@@ -677,6 +842,9 @@ class HandoffManager:
             return
 
         if on_phone and not on_vd:
+            if self.is_package_held(pkg) or s.state.window_id in self._active_transitions:
+                log.debug("🛡️ [HANDOFF IGNORED] %s için handoff koruması aktif (kaynak=%s)", pkg, source)
+                return
             if s.state.handoff_to_phone:
                 return
             s.state.handoff_to_phone = True
@@ -692,6 +860,9 @@ class HandoffManager:
                 message=f"{pkg} telefonunuzda açıldı. Görüntü telefon ekranınıza devredildi.",
             )
         elif on_vd and s.state.handoff_to_phone:
+            if self.is_package_held(pkg) or s.state.window_id in self._active_transitions:
+                log.debug("🛡️ [CONTINUITY IGNORED] %s için handoff koruması aktif (kaynak=%s)", pkg, source)
+                return
             s.state.handoff_to_phone = False
             log.info("💻 [CONTINUITY / GERİ ALINDI (%s)] %s PC sanal ekranına geri döndü!", source, pkg)
             if serial:
@@ -703,6 +874,9 @@ class HandoffManager:
         reclaimed (handoff_to_phone cleared) while it waited."""
         async with self._locked():
             if self._sessions.get(s.state.window_id) is not s or not s.state.handoff_to_phone:
+                return
+            if s.state.window_id in self._active_transitions or self.is_package_held(s.state.package):
+                log.debug("🛡️ [_to_phone_locked IGNORED] %s için geçiş aktif veya paket kilitli", s.state.package)
                 return
             await self._execute_to_phone(
                 s, s.state.package, self._resolve_display_id(s), serial, task_id=task_id, source=source,
@@ -718,7 +892,16 @@ class HandoffManager:
         destroyed, Android evacuating the task to display 0 — is a handoff. (Without this, a reclaim that finished
         before the old pump's end was reported marked the window "on the phone" again right after bringing it back.)"""
         serial = self._serial_getter()
-        if self.paused or not serial or s.state.frozen or s.state.minimized or s.state.workspace_id == "eco" or s.state.handoff_to_phone:
+        if (
+            self.paused
+            or self.is_package_held(s.state.package)
+            or s.state.window_id in self._active_transitions
+            or not serial
+            or s.state.frozen
+            or s.state.minimized
+            or s.state.workspace_id == "eco"
+            or s.state.handoff_to_phone
+        ):
             return
         if s.server.is_alive:
             return
@@ -743,9 +926,15 @@ class HandoffManager:
         """Instant event-driven handoff detection (< 1ms latency, 0 CPU)."""
         if self.paused or not package or not self._sessions:
             return
+        if self.is_package_held(package):
+            log.debug("🛡️ [HANDOFF IGNORED] %s için handoff koruması aktif (display_id=%s)", package, display_id)
+            return
         serial = self._serial_getter()
         for s in self._watched_sessions():
             if s.state.package != package:
+                continue
+            if s.state.window_id in self._active_transitions:
+                log.debug("🛡️ [HANDOFF IGNORED] %s penceresi için aktif geçiş var (display_id=%s)", s.state.window_id, display_id)
                 continue
             await self._observe(
                 s,
@@ -783,6 +972,8 @@ class HandoffManager:
                     continue
                 for s in self._watched_sessions():
                     pkg = s.state.package
+                    if self.is_package_held(pkg) or s.state.window_id in self._active_transitions:
+                        continue
                     await self._observe(
                         s,
                         on_phone=pkg in visible.get("0", ()),

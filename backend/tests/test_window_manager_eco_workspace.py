@@ -842,6 +842,44 @@ async def test_focus_does_not_relaunch_an_app_that_is_already_on_its_display(man
     assert sent == [serialize_start_app("com.app.a")]
 
 
+async def test_a_held_launch_keeps_focus_from_starting_the_app_on_top_of_a_notification_target(manager, monkeypatch):
+    """A tapped notification fires its own PendingIntent into the window; a focus landing first (no task on the display yet)
+    must not start the app's LAUNCHER page — it arrived last and left Gmail on its inbox instead of the mail."""
+    import app.device.deep_navigator as nav
+    from app.windows.scrcpy_launcher import serialize_start_app
+
+    sent = await _record_control_sends(monkeypatch)
+    a = await manager.open_window_in_workspace("com.app.a")
+    sent.clear()
+
+    async def _no_task(adb, pkg, display_id=None, serial=None):
+        return None
+
+    monkeypatch.setattr(nav, "find_task_id_for_package", _no_task)       # nothing on the display yet: focus would launch
+    manager.hold_launch("com.app.a", seconds=5.0)
+    await manager.focus_window(a.window_id)
+    assert sent == []                                                     # held: no START_APP
+
+    manager._launch_held["com.app.a"] = 0.0                               # the hold ran out
+    await manager.focus_window(a.window_id)
+    assert sent == [serialize_start_app("com.app.a")]
+    assert "com.app.a" not in manager._launch_held                        # and it was dropped, not kept for ever
+
+
+async def test_start_app_in_window_launches_even_while_the_launch_is_held(manager, monkeypatch):
+    """A notification that left the phone has no target to fire: its window gets the app's own page, hold or not."""
+    from app.windows.scrcpy_launcher import serialize_start_app
+
+    sent = await _record_control_sends(monkeypatch)
+    a = await manager.open_window_in_workspace("com.app.a")
+    sent.clear()
+    manager.hold_launch("com.app.a")
+
+    assert await manager.start_app_in_window("com.app.a") is True
+    assert sent == [serialize_start_app("com.app.a")]
+    assert await manager.start_app_in_window("com.app.unknown") is False
+
+
 async def test_minimize_and_restore_leave_the_app_alone(manager, monkeypatch):
     from app.schemas import VisibilityState
 

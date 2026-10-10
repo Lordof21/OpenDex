@@ -96,6 +96,7 @@ class AppPresenceMonitor:
             or st.minimized
             or st.handoff_to_phone
             or st.stealth_phase
+            or (getattr(s, "back_protect_until", 0.0) > time.monotonic())
             or _running(getattr(s, "lifecycle_task", None))
             or _running(getattr(s, "applock_task", None))
             or (st.workspace_id == "eco" and self._is_parked(st.window_id))
@@ -191,6 +192,16 @@ class AppPresenceMonitor:
                 return
 
     async def _app_gone(self, window_id: str, package: str, eco: bool) -> None:
+        session = self._sessions.get(window_id)
+        if session and getattr(session, "back_protect_until", 0.0) > time.monotonic():
+            log.info("🛡️ [AppPresence] %s Back tuşu sonrası kapandı; pencere korunuyor ve uygulama yeniden başlatılıyor (win=%s)", package, window_id)
+            session.back_protect_until = 0.0
+            if session.control is not None:
+                from .scrcpy_launcher import serialize_start_app
+                with contextlib.suppress(Exception):
+                    await session.control.send(serialize_start_app(package))
+            return
+
         behavior: Behavior = "close" if eco else await self._safe_behavior()
         log.info("🪦 [AppPresence] %s telefonda kapatıldı → %s (win=%s)", package, behavior, window_id)
         await self._events.emit("window_app_closed", window_id=window_id, package=package, action=behavior)

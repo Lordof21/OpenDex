@@ -43,12 +43,17 @@ async def test_on_device_task_focused_hands_the_app_to_the_phone(mock_adb, event
     sessions = {"win-1": session}
     unfreeze = AsyncMock()
 
+    mock_daemon = AsyncMock()
+    mock_daemon.is_connected = True
+    mock_daemon.move_task_wct.return_value = True
+
     handoff = HandoffManager(
         mock_adb,
         settings,
         events,
         sessions,
         serial_getter=lambda: "serial123",
+        daemon_client_getter=lambda: mock_daemon,
         unfreeze_locked=unfreeze,
     )
 
@@ -69,11 +74,10 @@ async def test_on_device_task_focused_hands_the_app_to_the_phone(mock_adb, event
     assert event_received[0]["package"] == "com.android.chrome"
     assert event_received[0]["display_id"] == "0"
 
+    mock_daemon.move_task_wct.assert_awaited_once_with("999", "0", mode=1, clear_bounds=True, bounds=None)
     calls = [call[0][0] for call in mock_adb.shell.call_args_list]
     # The window's display keeps the window's density
     assert not any(c.startswith("wm density") and "-d 10" in c for c in calls)
-    # Task 999 moved to display 0
-    assert any("am display move-stack 999 0" in c for c in calls)
     # Normalized on Display 0 in fullscreen launcher mode
     assert any("am start --display 0" in c and "com.android.chrome" in c for c in calls)
 
@@ -91,6 +95,9 @@ async def test_pc_handoff_to_phone(mock_adb, events, settings):
 
     sessions = {"win-2": session}
     unfreeze = AsyncMock()
+    mock_daemon = AsyncMock()
+    mock_daemon.is_connected = True
+    mock_daemon.move_task_wct.return_value = True
 
     handoff = HandoffManager(
         mock_adb,
@@ -98,6 +105,7 @@ async def test_pc_handoff_to_phone(mock_adb, events, settings):
         events,
         sessions,
         serial_getter=lambda: "serial123",
+        daemon_client_getter=lambda: mock_daemon,
         unfreeze_locked=unfreeze,
     )
 
@@ -110,10 +118,10 @@ async def test_pc_handoff_to_phone(mock_adb, events, settings):
 
     assert ok is True
     assert session.state.handoff_to_phone is True
+    mock_daemon.move_task_wct.assert_awaited_once_with("888", "0", mode=1, clear_bounds=True, bounds=None)
 
     calls = [call[0][0] for call in mock_adb.shell.call_args_list]
     assert not any(c.startswith("wm density") and "-d 11" in c for c in calls)
-    assert any("am display move-stack 888 0" in c for c in calls)
 
 
 def _watched(package="com.android.chrome", display_id="10", workspace_id=None, handoff_to_phone=False):
@@ -253,7 +261,7 @@ def test_handoff_holds_are_per_owner_and_a_leased_hold_lapses_by_itself():
     handoff.release("transport")
     assert handoff.paused is True  # link_drop hâlâ tutuyor
 
-    time.sleep(0.06)
+    time.sleep(0.08)
     assert handoff.paused is False  # lease doldu; kimse bırakmasa da
 
 
@@ -272,8 +280,13 @@ def _prelanding_rig(mock_adb, events, settings, *, outcome_ok=True, density_writ
     density.snapshot = AsyncMock(return_value="BEFORE")
     density.mark = AsyncMock(return_value=123.0)
     density.settle = AsyncMock(return_value=RefreshOutcome(ADAPTED if outcome_ok else UNCONFIRMED, session.state.package))
+    mock_daemon = AsyncMock()
+    mock_daemon.is_connected = True
+    mock_daemon.restart_task_activity = AsyncMock(return_value=False)
+    mock_daemon.move_task_wct = AsyncMock(side_effect=lambda *a, **kw: log.append("MOVE_WCT") or True)
     handoff = HandoffManager(
         mock_adb, settings, events, {"win-3": session}, serial_getter=lambda: "S",
+        daemon_client_getter=lambda: mock_daemon,
         unfreeze_locked=AsyncMock(), density=density,
     )
     log = []
@@ -306,7 +319,7 @@ async def test_pc_handoff_lands_the_density_on_the_virtual_display_before_the_ta
     assert density.settle.await_args.kwargs["reason"] == "pre_landing"
     assert density.settle.await_args.kwargs["display"] == "12"            # uzlaştırma SANAL ekranda, taşıma öncesi
     density.schedule_settle.assert_not_called()                           # taşıma yoğunluk-nötr: telefonda iş kalmadı
-    assert log.index("DENSITY") < next(i for i, c in enumerate(log) if "move-stack 888 0" in c)   # önce yoğunluk, sonra taşıma
+    assert log.index("DENSITY") < log.index("MOVE_WCT")                   # önce yoğunluk, sonra taşıma
     assert phases == ["stealth", "live"]                                  # PC perdesi açıldı ve kalktı
 
 
@@ -364,3 +377,73 @@ async def test_an_unreadable_phone_density_means_no_prelanding_and_a_verified_se
     set_density.assert_not_awaited()
     density.schedule_settle.assert_called_once()
     assert phases == []  # no veil: there was no pre-landing to hide
+
+
+@pytest.mark.asyncio
+async def test_reinflate_on_display_0_triggers_view_reinflation_without_redundant_settle(mock_adb, events, settings):
+    """PC'den telefona aktarımda reinflate (restart_task_activity) Display 0 üzerinde tetiklenir ve başarılı olduğunda
+    ikinci bir gereksiz reconcile çağrısını önler."""
+    handoff, _session, density, _log, _phases, patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=False)
+    daemon_client = handoff._daemon_client_getter()
+    daemon_client.restart_task_activity = AsyncMock(return_value=True)
+
+    with patches[0], patches[1], patches[2]:
+        assert await handoff.handoff_to_phone("win-3") is True
+
+    daemon_client.restart_task_activity.assert_awaited_once_with("888")
+    density.schedule_settle.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_native_app_with_prelanding_skips_restart_task_activity_to_preserve_state(mock_adb, events, settings):
+    """Play Store veya yerel uygulamalar ön-inişte adapte olduğunda süreç yeniden başlatılmaz — scroll ve state korunur."""
+    handoff, session, density, _log, _phases, patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=True)
+    session.state.package = "com.android.vending"
+    daemon_client = handoff._daemon_client_getter()
+    daemon_client.restart_task_activity = AsyncMock(return_value=True)
+
+    with patches[0], patches[1], patches[2]:
+        assert await handoff.handoff_to_phone("win-3") is True
+
+    daemon_client.restart_task_activity.assert_not_called()
+    density.schedule_settle.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_web_rendered_app_with_prelanding_still_triggers_reinflate(mock_adb, events, settings):
+    """Chrome gibi web tabanlı uygulamalar web sitelerinin render/font önbelleğini tazelemek için reinflate tetikler."""
+    handoff, session, density, _log, _phases, patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=True)
+    session.state.package = "com.android.chrome"
+    daemon_client = handoff._daemon_client_getter()
+    daemon_client.restart_task_activity = AsyncMock(return_value=True)
+
+    with patches[0], patches[1], patches[2]:
+        assert await handoff.handoff_to_phone("win-3") is True
+
+    daemon_client.restart_task_activity.assert_awaited_once_with("888")
+    density.schedule_settle.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_browser_with_cdp_triggers_live_nudge_without_restarting_process(mock_adb, events, settings):
+    """CDP soketi bulunan tarayıcıda canlı layout dürtmesi yapılır, süreç ASLA öldürülmez (sıfır state kaybı)."""
+    handoff, session, density, _log, _phases, patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=True)
+    session.state.package = "com.android.chrome"
+    daemon_client = handoff._daemon_client_getter()
+    daemon_client.restart_task_activity = AsyncMock(return_value=True)
+
+    with (
+        patches[0], patches[1], patches[2],
+        patch("app.windows.handoff_manager.inspect_app_runtime", AsyncMock(
+            return_value=MagicMock(is_browser_cdp=True, cdp_socket="chrome_devtools_remote", is_pure_native=False, has_web_engine=True)
+        )),
+        patch("app.windows.handoff_manager.refresh_browser_layout_inplace", AsyncMock(return_value=True)) as mock_nudge,
+    ):
+        assert await handoff.handoff_to_phone("win-3") is True
+
+    mock_nudge.assert_awaited_once_with(mock_adb, "S", "chrome_devtools_remote")
+    daemon_client.restart_task_activity.assert_not_called()
+    density.schedule_settle.assert_not_called()
+
+
+
