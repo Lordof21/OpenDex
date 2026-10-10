@@ -57,7 +57,7 @@ function AudioBody({ loc, entry, url, onError }) {
   );
 }
 
-export default function PreviewOverlay({ winId }) {
+export default function PreviewOverlay({ winId, compact = false }) {
   const preview = useFilesStore((s) => s.wins[winId]?.preview);
   const pane = useFilesStore((s) => (preview ? s.wins[winId]?.panes[preview.pane] : null));
   const root = useRef(null);
@@ -79,7 +79,7 @@ export default function PreviewOverlay({ winId }) {
     store.getState().closePreview(winId);
     requestAnimationFrame(() => document.querySelector(`[data-pane="${paneId}"] [data-files-scroll]`)?.focus({ preventScroll: true }));
   };
-  const step = (delta) => store.getState().stepPreview(winId, delta, canPreview);
+  const step = (delta) => store.getState().stepPreview(winId, delta, canPreview, { select: !compact });
 
   useEffect(() => { setLoaded(false); setFailed(false); }, [url, entry && keyOf(entry)]);          // eslint-disable-line react-hooks/exhaustive-deps
 

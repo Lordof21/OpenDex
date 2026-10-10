@@ -46,15 +46,14 @@ export function DexQuickPanelHost() {
   return createPortal(
     <AnimatePresence>
       {open && (
-        <motion.div
+        <div
           key="dex-quick-panel"
-          ref={anchorRef}
           data-dex-quick-panel=""
           className="fixed inset-x-0 h-0"
           style={{ bottom: taskbarHidden ? 0 : TASKBAR_H_PX, zIndex: Z_INDEX.flyout }}
         >
-          <DexSettings {...motionProps} onClose={close} />
-        </motion.div>
+          <DexSettings ref={anchorRef} {...motionProps} onClose={close} />
+        </div>
       )}
     </AnimatePresence>,
     document.body,

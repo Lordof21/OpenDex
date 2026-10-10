@@ -107,7 +107,7 @@ export default function FilesApp({ win }) {
       {compact && <CompactTabs provider={provider} onPick={pickProvider} />}
       <StatusBar winId={winId} layoutMode={mode} />
       <TransferTray compact={compact} />
-      <PreviewOverlay winId={winId} />
+      <PreviewOverlay winId={winId} compact={compact} />
       <FilesDialogs winId={winId} focused={Boolean(win.focused)} />
       <Dialog open={placesOpen} onClose={() => setPlacesOpen(false)} label="Yerler" position="absolute" align="top" className="max-w-sm p-1">
         <FilesSidebar winId={winId} variant="sheet" onNavigated={() => setPlacesOpen(false)} />

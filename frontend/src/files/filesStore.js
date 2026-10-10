@@ -176,13 +176,16 @@ export const useFilesStore = create((set, get) => {
       return get().load(winId, pi, { mode: 'navigate' });
     },
 
-    /** Üst klasör; geldiğimiz klasör seçili kalır (Gezgin gibi). Kanonik yoldan hesaplanır: /sdcard → /storage/emulated/0. */
-    goUp(winId, pi) {
+    /**
+     * Üst klasör; geldiğimiz klasör seçili kalır (Gezgin gibi). Kanonik yoldan hesaplanır: /sdcard → /storage/emulated/0.
+     * `select: false` (telefon düzeni): hiçbir şey seçilmez — orada seçim "seçim kipi" demektir (onay kutuları, seçim çubuğu).
+     */
+    goUp(winId, pi, { select = true } = {}) {
       const p = pane(winId, pi);
       const here = p?.loc && { ...p.loc, path: p.canonical || p.loc.path };
       const up = here && parentOf(here);
       if (!up) return Promise.resolve();
-      return get().navigate(winId, pi, up, { select: baseName(here) });
+      return get().navigate(winId, pi, up, { select: select ? baseName(here) : null });
     },
 
     reload(winId, pi, opts = {}) {
@@ -429,8 +432,11 @@ export const useFilesStore = create((set, get) => {
       patchWin(winId, { preview: { pane: pi, key } });
     },
     closePreview(winId) { patchWin(winId, { preview: null }); },
-    /** Önizlemede ←/→: aynı klasördeki bir sonraki/önceki ÖNİZLENEBİLİR girdi (`canPreview` süzgeci). */
-    stepPreview(winId, delta, canPreview) {
+    /**
+     * Önizlemede ←/→: aynı klasördeki bir sonraki/önceki ÖNİZLENEBİLİR girdi (`canPreview` süzgeci). Seçim önizlemeyi izler
+     * (kapatınca bakılan dosya seçili kalır); `select: false` (telefon düzeni) seçime dokunmaz — orada seçim, seçim kipidir.
+     */
+    stepPreview(winId, delta, canPreview, { select = true } = {}) {
       const w = win(winId);
       const p = w?.preview && w.panes[w.preview.pane];
       if (!p) return;
@@ -440,7 +446,7 @@ export const useFilesStore = create((set, get) => {
         if (at < 0 || at >= p.order.length) return;
         if (canPreview(p.visible[at])) {
           patchWin(winId, { preview: { pane: w.preview.pane, key: p.order[at] } });
-          patchPane(winId, w.preview.pane, { selection: { ids: new Set([p.order[at]]), anchor: p.order[at], focus: p.order[at] } });
+          if (select) patchPane(winId, w.preview.pane, { selection: { ids: new Set([p.order[at]]), anchor: p.order[at], focus: p.order[at] } });
           return;
         }
       }

@@ -23,6 +23,7 @@ import { saveSettings } from '../src/settings/settingsApi.js';
 import { ROUTE_OPTIONS, RouteSelector, routeOption } from '../src/ui/audioRouting.jsx';
 import { resetLiveSettingsForTests } from '../src/settings/liveSettings.js';
 import { useAudioMixerStore } from '../src/state/audioMixerStore.js';
+import { useSystemStore } from '../src/state/systemStore.js';
 
 beforeEach(() => {
   resetLiveSettingsForTests();
@@ -100,6 +101,45 @@ describe('SyncFineTune: automatic calibration', () => {
     useAudioMixerStore.setState({ apps: {}, sync: { supported: false } });
     render(<SyncFineTune />);
     expect(screen.getByTestId('audio-sync-auto')).toBeDisabled();
+  });
+
+  it('cancels immediately on click and informs via toast', async () => {
+    useAudioMixerStore.setState({ apps: {}, sync: { supported: true, offset_ms: 0 } });
+    useSystemStore.setState({ toasts: [] });
+    let passedSignal;
+    runCalibration.mockImplementationOnce(({ onPhase, signal }) => {
+      passedSignal = signal;
+      onPhase('listen');
+      return new Promise(() => {}); // never finishes until aborted
+    });
+    render(<SyncFineTune />);
+    click();
+    await waitFor(() => expect(screen.getByTestId('audio-sync-auto-cancel')).toBeInTheDocument());
+    expect(screen.getByTestId('audio-sync-auto')).toBeDisabled();
+    expect(passedSignal.aborted).toBe(false);
+
+    fireEvent.click(screen.getByTestId('audio-sync-auto-cancel'));
+
+    // UI immediately returns to idle
+    expect(screen.getByTestId('audio-sync-auto')).not.toBeDisabled();
+    expect(screen.queryByTestId('audio-sync-auto-cancel')).toBeNull();
+    expect(passedSignal.aborted).toBe(true);
+    expect(screen.getByTestId('audio-sync-auto-status')).toHaveTextContent('iptal edildi');
+
+    // Toast pushed
+    const toasts = useSystemStore.getState().toasts;
+    expect(toasts.some((t) => t.message.includes('iptal edildi'))).toBe(true);
+  });
+
+  it('pushes start and result toasts during calibration', async () => {
+    useAudioMixerStore.setState({ apps: {}, sync: { supported: true, offset_ms: 0 } });
+    useSystemStore.setState({ toasts: [] });
+    runCalibration.mockResolvedValueOnce({ ok: true, offsetMs: 25, previousMs: 0, gapMs: -25, spreadMs: 0.5, pairs: 5 });
+    render(<SyncFineTune />);
+    click();
+    await waitFor(() => expect(screen.getByTestId('audio-sync-auto')).not.toBeDisabled());
+    const toasts = useSystemStore.getState().toasts;
+    expect(toasts.some((t) => t.message.includes('Ses hizalandı'))).toBe(true);
   });
 });
 

@@ -1,9 +1,29 @@
 import React, { useEffect, useState } from 'react';
-import { FolderOpen, Smartphone, Sliders } from 'lucide-react';
 import { authedUrl } from '../lib/apiToken.js';
 import { isMirrorPackage } from '../window/mirrorPackage.js';
 import { realPackageOf } from '../window/cropPackage.js';
 import { isWorkspacePackage } from '../window/workspacePackage.js';
+import filesArt from '../assets/icons/files.png';
+import settingsArt from '../assets/icons/settings.png';
+import mirrorArt from '../assets/icons/mirror.png';
+import workspaceArt from '../assets/icons/workspace.png';
+
+/**
+ * OpenDeX'in kendi uygulamalarının ikonları (Dosyalar, Ayarlar, Telefon Yansıtma, Çalışma Alanı): kare, tam taşan resimler
+ * (frontend/src/assets/icons); köşe yuvarlama, çerçeve ve gölge burada, `rounded-[22%]` kutusunda verilir — resmin kendisi
+ * köşe/gölge içermez. Orta tonlu, doygun zemin: açık (bej) ve koyu temada aynı resim kullanılır.
+ */
+function ArtIcon({ src, size, className = '', name }) {
+  return (
+    <div
+      className={`app-icon relative flex shrink-0 overflow-hidden rounded-[22%] border border-foreground/10 shadow-sm select-none ${className}`}
+      style={size}
+      data-app-icon={name}
+    >
+      <img src={src} alt="" draggable={false} className="absolute inset-0 h-full w-full object-cover pointer-events-none" />
+    </div>
+  );
+}
 
 /**
  * Çalışma Alanı simgesi: birbirine binen üç pencere (arkada başlık çubuklu geniş pencere, önde iki kart) — "paylaşımlı ekranda yan yana
@@ -88,56 +108,19 @@ export default function AppIcon({
   const sizeStyle = { width: numSize, height: numSize, minWidth: numSize, minHeight: numSize };
 
   if (targetPkg === 'com.opendex.settings' || targetPkg === 'opendex' || targetPkg === 'settings') {
-    return (
-      <div
-        className={`app-icon app-icon-settings relative flex shrink-0 items-center justify-center font-bold text-image-foreground shadow-sm border border-foreground/10 overflow-hidden rounded-[22%] bg-[var(--app-settings)] select-none ${className}`}
-        style={sizeStyle}
-      >
-        <span className="app-icon-shine absolute inset-x-0 top-0 h-1/2" />
-        <span className="app-icon-glint absolute left-[4px] top-[3px] size-1 rounded-full" />
-        <Sliders className="drop-shadow-sm text-image-foreground relative z-10" style={{ width: numSize * 0.52, height: numSize * 0.52 }} />
-      </div>
-    );
+    return <ArtIcon src={settingsArt} size={sizeStyle} className={className} name="settings" />;
   }
 
   if (isWorkspacePackage(targetPkg)) {
-    return (
-      <div
-        className={`app-icon app-icon-workspace relative flex shrink-0 items-center justify-center text-image-foreground shadow-sm border border-foreground/10 overflow-hidden rounded-[22%] select-none ${className}`}
-        style={sizeStyle}
-        data-app-icon="workspace"
-      >
-        <span className="app-icon-shine absolute inset-x-0 top-0 h-1/2" />
-        <span className="app-icon-glint absolute left-[4px] top-[3px] size-1 rounded-full" />
-        <WorkspaceGlyph size={numSize * 0.68} className="relative z-10 drop-shadow-sm" />
-      </div>
-    );
+    return <ArtIcon src={workspaceArt} size={sizeStyle} className={className} name="workspace" />;
   }
 
   if (targetPkg === 'com.opendex.files') {
-    return (
-      <div
-        className={`app-icon app-icon-files relative flex shrink-0 items-center justify-center font-bold text-image-foreground shadow-sm border border-foreground/10 overflow-hidden rounded-[22%] select-none ${className}`}
-        style={sizeStyle}
-      >
-        <span className="app-icon-shine absolute inset-x-0 top-0 h-1/2" />
-        <span className="app-icon-glint absolute left-[4px] top-[3px] size-1 rounded-full" />
-        <FolderOpen className="drop-shadow-sm text-image-foreground relative z-10" style={{ width: numSize * 0.55, height: numSize * 0.55 }} />
-      </div>
-    );
+    return <ArtIcon src={filesArt} size={sizeStyle} className={className} name="files" />;
   }
 
   if (isMirrorPackage(targetPkg)) {
-    return (
-      <div
-        className={`app-icon app-icon-browser relative flex shrink-0 items-center justify-center font-bold text-image-foreground shadow-sm border border-foreground/10 overflow-hidden rounded-[22%] bg-[var(--app-browser)] select-none ${className}`}
-        style={sizeStyle}
-      >
-        <span className="app-icon-shine absolute inset-x-0 top-0 h-1/2" />
-        <span className="app-icon-glint absolute left-[4px] top-[3px] size-1 rounded-full" />
-        <Smartphone className="drop-shadow-sm text-image-foreground relative z-10" style={{ width: numSize * 0.55, height: numSize * 0.55 }} />
-      </div>
-    );
+    return <ArtIcon src={mirrorArt} size={sizeStyle} className={className} name="mirror" />;
   }
 
   // <img> cannot send a header: the token rides in the query string (backend accepts it on GET only).

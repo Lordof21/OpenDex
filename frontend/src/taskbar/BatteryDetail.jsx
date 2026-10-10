@@ -23,8 +23,8 @@ function Row({ icon: Icon, label, value, tone, title }) {
       <span className={cn('grid size-7 shrink-0 place-items-center rounded-full bg-background/85 shadow-sm', tone)}>
         <Icon className="size-3.5" />
       </span>
-      <span className="text-[11px] text-muted-foreground">{label}</span>
-      <span className="ml-auto min-w-0 truncate text-right font-mono text-[11px] font-bold tabular-nums text-foreground">{value}</span>
+      <span className="shrink-0 text-[11px] text-muted-foreground">{label}</span>
+      <span className="ml-auto min-w-0 break-words text-right font-mono text-[11px] font-bold tabular-nums text-foreground" title={String(value)}>{value}</span>
     </div>
   );
 }

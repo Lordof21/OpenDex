@@ -167,7 +167,7 @@ describe('BatteryDetail — nothing is invented', () => {
   });
 
   it('the Quick Settings tile and pill show dashes when the phone has said nothing', () => {
-    render(<QuickSettings view="main" volume={50} onView={() => {}} onVolume={() => {}} />);
+    render(<QuickSettings view="main" onView={() => {}} />);
     expect(screen.getByText('Telefon pili okunamıyor')).toBeInTheDocument();
     expect(screen.queryByText(/%68/)).not.toBeInTheDocument();
   });

@@ -134,10 +134,10 @@ export const useAudioMixerStore = create((set, get) => ({
   },
 
   /** One round trip to the device clock (the audio PTS' clock); the page keeps the quickest (media/deviceClock.js). */
-  async probeClock() {
+  async probeClock(opts = {}) {
     const sentMs = performance.now();
     try {
-      const res = await api.post('/api/audio/clock');
+      const res = await api.post('/api/audio/clock', undefined, opts);
       if (Number.isFinite(res?.device_us)) deviceClock.addSample(sentMs, performance.now(), res.device_us);
     } catch {
       /* 503: the phone cannot say — chunks keep their arrival timing (alignment is simply not as exact) */

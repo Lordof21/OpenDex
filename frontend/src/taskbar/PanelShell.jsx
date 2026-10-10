@@ -1,11 +1,12 @@
-import React from 'react';
+import React, { forwardRef } from 'react';
 import { motion } from 'framer-motion';
 import { cn } from '../lib/utils.js';
 import { Z_INDEX } from '../ui/zIndex.js';
 
-export function PanelShell({ children, className, style, ...motionProps }) {
+export const PanelShell = forwardRef(function PanelShell({ children, className, style, ...motionProps }, ref) {
   return (
     <motion.section
+      ref={ref}
       {...motionProps}
       transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
       style={{ zIndex: Z_INDEX.flyout, ...style }}
@@ -17,6 +18,6 @@ export function PanelShell({ children, className, style, ...motionProps }) {
       {children}
     </motion.section>
   );
-}
+});
 
 export default PanelShell;

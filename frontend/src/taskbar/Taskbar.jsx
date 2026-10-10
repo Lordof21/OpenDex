@@ -80,14 +80,9 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
     restoreSettings,
     minimizeSettings,
     focusSettings,
-    audioMuted,
-    audioVolume,
-    setAudioVolume,
     batteryInfo,
     hardwareStates,
     toggleHardwareState,
-    volumeStreams,
-    setStreamVolumeLevel,
     dexQuickOpen,
     openDexQuickPanel,
     closeDexQuickPanel,
@@ -149,19 +144,6 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
   // Hardware states and Volume integration
   const isWifiOn = hardwareStates?.wifi !== false;
   const isBtOn = hardwareStates?.bluetooth !== false;
-  const mediaStream = volumeStreams?.find((s) => s.id === 3);
-  const currentVolume = mediaStream
-    ? Math.round((mediaStream.current / (mediaStream.max || 15)) * 100)
-    : Math.round((audioVolume ?? 0.8) * 100);
-
-  const handleVolumeChange = (val) => {
-    setAudioVolume(val / 100);
-    if (mediaStream) {
-      const streamVal = Math.round((val / 100) * (mediaStream.max || 15));
-      setStreamVolumeLevel(3, streamVal);
-    }
-  };
-
   // Medya oturumları tek yerde birleştirilir (state/mediaSessions.js); görev çubuğu kartı ile medya merkezi AYNI listeyi okur.
   const { sessions: allSessions, hasLiveMedia } = assembleMediaSessions({
     mediaStatus,
@@ -639,7 +621,7 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
               active={false}
               onClick={() => openQuick('mixer')}
             >
-              {audioMuted ? <Volume2 className="text-destructive" /> : <Volume2 />}
+              <Volume2 />
             </SystemTrayButton>
 
             <SystemTrayButton
@@ -812,10 +794,8 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
               onView={setQuickView}
               wifi={isWifiOn}
               bluetooth={isBtOn}
-              volume={currentVolume}
               onWifi={() => toggleHardwareState('wifi')}
               onBluetooth={() => toggleHardwareState('bluetooth')}
-              onVolume={handleVolumeChange}
               onDex={openDex}
             />
           )}

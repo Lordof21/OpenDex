@@ -164,6 +164,23 @@ describe('geçmiş ve üst klasör', () => {
     c.end(0);
     await p;
   });
+  it('telefon düzeninde üst klasör (select: false) geldiğimiz klasörü seçili bırakmaz; varsayılan bırakır', async () => {
+    state().ensureWindow(W, pc('C:\\A\\B'));
+    let c = controllable();
+    let p = state().goUp(W, 0, { select: false });
+    c.page([d('B'), f('x.txt')]);
+    c.end(2);
+    await p;
+    expect(pane0().loc.path).toBe('C:\\A');
+    expect([...pane0().selection.ids]).toEqual([]);
+    state().ensureWindow('w2', pc('C:\\A\\B'));
+    c = controllable();
+    p = state().goUp('w2', 0);
+    c.page([d('B'), f('x.txt')]);
+    c.end(2);
+    await p;
+    expect([...state().wins.w2.panes[0].selection.ids]).toEqual(['B']);   // masaüstü: Gezgin gibi, B seçili
+  });
   it('kökte üste çıkılmaz', async () => {
     state().ensureWindow(W, pc('C:\\'));
     const calls = fsApi.streamList.mock.calls.length;
@@ -292,6 +309,18 @@ describe('bölmeler, yerler, olaylar', () => {
     expect(state().wins[W].preview.key).toBe('c.jpg');                    // sonda kalır
     state().closePreview(W);
     expect(state().wins[W].preview).toBeNull();
+  });
+  it('önizleme, telefon düzeninde (select: false) seçime dokunmaz: kapatınca asılı seçili dosya kalmaz', async () => {
+    state().ensureWindow(W, pc('C:\\A'));
+    const c = controllable();
+    const p = state().load(W, 0);
+    c.page([f('a.jpg'), f('c.jpg')]);
+    c.end(2);
+    await p;
+    state().openPreview(W, 0, 'a.jpg');
+    state().stepPreview(W, 1, (e) => e.name.endsWith('.jpg'), { select: false });
+    expect(state().wins[W].preview.key).toBe('c.jpg');                    // önizleme yine ilerler
+    expect([...pane0().selection.ids]).toEqual([]);                       // seçim kipine girilmez
   });
   it('makePane / derive yardımcıları', () => {
     const p = makePane('x', pc('C:\\'), state().prefs);

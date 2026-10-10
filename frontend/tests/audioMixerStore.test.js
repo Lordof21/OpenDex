@@ -223,7 +223,7 @@ describe('"İkisi" alignment — the page presents against the device clock and 
     store().onAppAudioState(both());
     await vi.advanceTimersByTimeAsync(800);
     expect(api.post).toHaveBeenCalledTimes(5);
-    expect(api.post).toHaveBeenCalledWith('/api/audio/clock');
+    expect(api.post).toHaveBeenCalledWith('/api/audio/clock', undefined, expect.anything());
     expect(deviceClock.ready).toBe(true);
     expect(deviceClock.rttMs()).toBe(10);
 

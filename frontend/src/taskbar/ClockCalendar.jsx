@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, forwardRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   CalendarDays,
@@ -46,7 +46,7 @@ export const INITIAL_NOTIFICATIONS = [
 
 const READ_ACTION = /\b(read|okundu)/i;
 
-export function ClockCalendar({
+export const ClockCalendar = forwardRef(function ClockCalendar({
   now,
   notifications = INITIAL_NOTIFICATIONS,
   onDismiss,
@@ -59,7 +59,7 @@ export function ClockCalendar({
   focusClock = '35:00',
   onFocusToggle,
   ...motionProps
-}) {
+}, ref) {
   const storeNotifications = useNotificationStore((s) => s.notifications);
   const storeRemove = useNotificationStore((s) => s.removeNotification);
   const storeClearAll = useNotificationStore((s) => s.clearAll);
@@ -181,7 +181,7 @@ export function ClockCalendar({
 
   return (
     <motion.section
-      {...slide}
+      ref={ref} {...slide}
       transition={
         reduced
           ? { duration: 0.12 }
@@ -453,6 +453,6 @@ export function ClockCalendar({
       </motion.section>
     </motion.section>
   );
-}
+});
 
 export default ClockCalendar;

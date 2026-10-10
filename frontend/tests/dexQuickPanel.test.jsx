@@ -9,14 +9,15 @@ vi.mock('../src/lib/api.js', () => ({
 
 // Panelin İÇERİĞİ (ayar kartları) ayrı test edilir; burada yalnız sahibi (host) sınanır.
 vi.mock('../src/taskbar/DexSettings.jsx', async () => {
+  const React = await import('react');
   const { PrecisionSlider } = await import('../src/ui/PrecisionSlider.jsx');
   return {
-    DexSettings: ({ onClose }) => (
-      <section data-testid="dex-settings">
+    DexSettings: React.forwardRef(({ onClose }, ref) => (
+      <section data-testid="dex-settings" ref={ref}>
         <button type="button" onClick={onClose}>kapat</button>
         <PrecisionSlider value={50} min={0} max={100} step={1} label="deneme" onChange={() => {}} onCommit={() => {}} />
       </section>
-    ),
+    )),
   };
 });
 

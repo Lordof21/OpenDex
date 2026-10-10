@@ -202,14 +202,14 @@ describe('Sıcaklık (taskbar)', () => {
 
   it('Hızlı Ayarlar pil sayfası aynı değeri aynı kuralla gösterir (okunamıyorsa eski "32.4 °C" uydurması yok)', () => {
     useSystemStore.setState({ batteryInfo: { level: 80, is_charging: false, temperature_c: 0 } });
-    const { unmount } = render(<QuickSettings view="battery" volume={50} onView={() => {}} onVolume={() => {}} />);
+    const { unmount } = render(<QuickSettings view="battery" onView={() => {}} />);
     const row = screen.getByText('Pil Sıcaklığı').parentElement;
     expect(within(row).getByText('—')).toBeInTheDocument();
     expect(screen.queryByText('32.4 °C')).not.toBeInTheDocument();
     unmount();
 
     useSystemStore.setState({ batteryInfo: { level: 80, is_charging: false, temperature_c: 38.2 } });
-    render(<QuickSettings view="battery" volume={50} onView={() => {}} onVolume={() => {}} />);
+    render(<QuickSettings view="battery" onView={() => {}} />);
     expect(within(screen.getByText('Pil Sıcaklığı').parentElement).getByText('38.2 °C')).toBeInTheDocument();
   });
 });

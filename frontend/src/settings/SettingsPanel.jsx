@@ -474,7 +474,7 @@ function SectionBody({ section }) {
   const fit = live.video_fit_mode || live.video_fit || 'fill';
   const audioRoute = live.audio_output_mode || 'pc';
   const audioCodec = live.audio_codec ? (live.audio_codec === 'raw' ? 'pcm' : live.audio_codec) : 'pcm';
-  const dimPhone = flag('screen_off_while_mirroring', true);
+  const dimPhone = flag('screen_off_while_mirroring', false);
   const ambient = flag('ambient_backdrop', true);
   const rememberDevices = flag('remember_devices', true);
 
@@ -696,7 +696,7 @@ function SectionBody({ section }) {
           </div>
           <PrecisionSlider
             value={targetDp === 'auto' ? 720 : Number(targetDp)}
-            min={360}
+            min={350}
             max={1200}
             step={10}
             auto={targetDp === 'auto'}
@@ -704,7 +704,7 @@ function SectionBody({ section }) {
             onAuto={() => handleTargetDpChange('auto')}
             label="Mantıksal alan (target dp)"
             unit="dp"
-            ticks={[480, 600, 720, 840, 960, 1080]}
+            ticks={[350, 480, 600, 720, 840, 960, 1080]}
           />
         </div>
         <OptionGroup

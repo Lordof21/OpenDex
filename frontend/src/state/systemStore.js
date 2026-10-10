@@ -4,8 +4,6 @@
 
 import { create } from 'zustand';
 import { api } from '../lib/api.js';
-import { sessionAudioPlayer } from '../media/audioPlayer.js';
-import { appAudioMixer } from '../media/appAudioMixer.js';
 import { logger } from '../lib/logger.js';
 import { newOpId } from '../lib/opId.js';
 import { setPhoneMetrics } from '../window/windowMath.js';
@@ -39,8 +37,6 @@ export const useSystemStore = create((set, get) => ({
   // DeX hızlı ayar paneli: görev çubuğu düğmesinden VEYA Ctrl+Alt+D'den açılır; tam ekran pencere
   // görev çubuğunu gizlediğinde de erişilebilir olması için sahibi Taskbar değil bu store'dur.
   dexQuickOpen: false,
-  audioMuted: false,
-  audioVolume: 1.0,
 
   // Live hardware state from OpenDexDaemon / DeviceStateController
   batteryInfo: null, // { level, is_charging, charge_type, temperature_c, voltage_mv, health }
@@ -309,18 +305,4 @@ export const useSystemStore = create((set, get) => ({
     set((s) => ({ launchpadOpen: typeof open === 'function' ? open(s.launchpadOpen) : !!open })),
   toggleLaunchpad: () => set((s) => ({ launchpadOpen: !s.launchpadOpen })),
 
-  // Master = whichever output path is active: the legacy session stream or the per-window mixer's master bus.
-  setAudioVolume(volume) {
-    const vol = Math.max(0, Math.min(1, volume));
-    sessionAudioPlayer.setVolume(vol);
-    appAudioMixer.setMasterVolume(vol);
-    set({ audioVolume: vol, audioMuted: vol === 0 });
-  },
-
-  toggleAudioMuted() {
-    const muted = !get().audioMuted;
-    sessionAudioPlayer.setMuted(muted);
-    appAudioMixer.setMasterMuted(muted);
-    set({ audioMuted: muted });
-  },
 }));

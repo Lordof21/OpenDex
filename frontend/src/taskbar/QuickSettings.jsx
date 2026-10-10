@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, forwardRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlarmClock,
@@ -44,18 +44,16 @@ import { PanelHeader } from '../ui/Typography.jsx';
 import { subviewMotion } from '../ui/motion.js';
 import { useConnectivityStore } from '../state/connectivityStore.js';
 
-export function QuickSettings({
+export const QuickSettings = forwardRef(function QuickSettings({
   view = 'main',
   onView,
   wifi = true,
   bluetooth = true,
-  volume = 80,
   onWifi,
   onBluetooth,
-  onVolume,
   onDex,
   ...motionProps
-}) {
+}, ref) {
   const setView = onView || (() => {});
   const systemStore = useSystemStore();
   const batteryInfo = systemStore?.batteryInfo;
@@ -169,7 +167,9 @@ export function QuickSettings({
 
   return (
     <PanelShell
-      {...motionProps}
+      ref={ref} {...motionProps}
+      // One height for every page, so switching between them never makes the panel jump; the main page keeps its controls at
+      // their natural size from the top and leaves the spare room at the bottom.
       className="right-4 h-[min(580px,calc(100vh-82px))] w-[min(380px,calc(100vw-32px))] overflow-hidden p-2.5"
     >
       <AnimatePresence initial={false} mode="wait" custom={direction}>
@@ -211,7 +211,7 @@ export function QuickSettings({
               />
             </div>
 
-            <div className="mt-2 grid min-h-0 flex-1 grid-cols-3 grid-rows-2 gap-1">
+            <div className="mt-2 grid shrink-0 auto-rows-[68px] grid-cols-3 gap-1">
               <IconTile
                 icon={Flashlight}
                 title="Fener"
@@ -253,28 +253,6 @@ export function QuickSettings({
                 status={mobileData ? 'Açık' : 'Kapalı'}
                 active={mobileData}
                 onClick={() => systemStore?.toggleHardwareState?.('mobile_data')}
-              />
-            </div>
-
-            <div className="mixer-surface mt-2 shrink-0 overflow-hidden rounded-lg border border-border/70 bg-muted/45 px-3">
-              <div className="flex items-center justify-between pt-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                <span>Ana ses düzeyi (Medya)</span>
-                <span className="font-mono text-[11px] tabular-nums text-foreground">
-                  %{volume}
-                </span>
-              </div>
-              <MixerRow
-                icon={Volume2}
-                label="Ana ses düzeyi (Medya)"
-                value={volume}
-                max={100}
-                onChange={(val) => {
-                  onVolume?.(val);
-                  if (mediaStream) {
-                    const streamVal = Math.round((val / 100) * (mediaStream.max || 15));
-                    handleStreamChange(3, streamVal);
-                  }
-                }}
               />
             </div>
 
@@ -320,21 +298,6 @@ export function QuickSettings({
               onBack={() => setView('main')}
             />
             <div className="dex-scroll min-h-0 flex-1 overflow-y-auto pb-1">
-              <MixerSection title="Ana ses düzeyi" value={`%${volume}`}>
-                <MixerRow
-                  icon={Volume2}
-                  label="Ana ses düzeyi"
-                  value={volume}
-                  max={100}
-                  onChange={(val) => {
-                    onVolume?.(val);
-                    if (mediaStream) {
-                      const streamVal = Math.round((val / 100) * (mediaStream.max || 15));
-                      handleStreamChange(3, streamVal);
-                    }
-                  }}
-                />
-              </MixerSection>
               <AppAudioSection mode={audioMode} />
               <MixerSection title="Telefon · Android akışları">
                 <MixerRow
@@ -434,7 +397,7 @@ export function QuickSettings({
       </AnimatePresence>
     </PanelShell>
   );
-}
+});
 
 // A tap on the tile toggles; the › area (when `onDetail` is given) opens the detail page — two sibling buttons, never
 // nested, so each has its own focus stop and accessible name.

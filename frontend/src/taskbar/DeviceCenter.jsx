@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, forwardRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   Activity,
@@ -95,7 +95,7 @@ function LinkIconFor({ link, className }) {
   return link === 'wifi' ? <Wifi className={className} /> : <Usb className={className} />;
 }
 
-export function DeviceCenter({ hub, ...motionProps }) {
+export const DeviceCenter = forwardRef(function DeviceCenter({ hub, ...motionProps }, ref) {
   const {
     devices, active, port, setPort, scanning, toast, knownDevices,
     pairingOpen, openPairing, closePairing,
@@ -129,7 +129,7 @@ export function DeviceCenter({ hub, ...motionProps }) {
   return (
     <>
       <motion.section
-        {...motionProps}
+        ref={ref} {...motionProps}
         transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
         aria-label="Cihaz merkezi"
         data-taskbar-portal="true"
@@ -471,7 +471,7 @@ export function DeviceCenter({ hub, ...motionProps }) {
       </AnimatePresence>
     </>
   );
-}
+});
 
 function AppCpuRow({ app, cores }) {
   const pct = app.cpu_pct;

@@ -7,7 +7,7 @@
 // Ortam: seçili oturumun kapağı panelin arkasında bulanık yankılanır ve vurgu rengini (--media-ink) belirler; renk
 // tüm panele (hero, satırlar, ekolayzer) tek kaynaktan akar. Hareket, "hareketi azalt" tercihine uyar.
 
-import React from 'react';
+import React, { forwardRef } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { ListMusic, Pause, Radio } from 'lucide-react';
 import { PanelShell } from './PanelShell.jsx';
@@ -38,7 +38,7 @@ function EmptyState({ disconnected }) {
   );
 }
 
-export function MediaCenter({
+export const MediaCenter = forwardRef(function MediaCenter({
   sessions = [],
   activeId,
   playing,
@@ -49,7 +49,7 @@ export function MediaCenter({
   onOpenApp,
   onPauseAll,
   ...motionProps
-}) {
+}, ref) {
   const reduce = useReducedMotion();
   const disconnected = useSystemStore((s) => s.connectionState === 'disconnected');
   const active = sessions.find((session) => session.id === activeId) || sessions[0] || null;
@@ -60,7 +60,7 @@ export function MediaCenter({
 
   return (
     <PanelShell
-      {...motionProps}
+      ref={ref} {...motionProps}
       role="dialog"
       aria-label="Medya merkezi"
       data-accent={accent ? 'on' : undefined}
@@ -156,6 +156,6 @@ export function MediaCenter({
       </div>
     </PanelShell>
   );
-}
+});
 
 export default MediaCenter;

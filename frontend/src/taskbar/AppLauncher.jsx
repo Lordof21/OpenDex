@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, forwardRef } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { Search, X } from 'lucide-react';
@@ -27,7 +27,7 @@ export const SYSTEM_APP_PKGS = new Set([
   'contacts',
 ]);
 
-export function AppLauncher({
+export const AppLauncher = forwardRef(function AppLauncher({
   apps = [],
   query = '',
   onQuery,
@@ -35,7 +35,7 @@ export function AppLauncher({
   onClose,
   openAppIds = [],
   ...motionProps
-}) {
+}, ref) {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -66,7 +66,7 @@ export function AppLauncher({
 
   return createPortal(
     <motion.div
-      {...motionProps}
+      ref={ref} {...motionProps}
       transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
       style={{ zIndex: Z_INDEX.flyout }}
       className="fixed inset-0 z-flyout grid place-items-center p-4 select-none"
@@ -171,7 +171,7 @@ export function AppLauncher({
     </motion.div>,
     document.body
   );
-}
+});
 
 function LauncherApp({ app, isOpen, onClick }) {
   const name = app.display_name || app.name || app.title || 'Uygulama';

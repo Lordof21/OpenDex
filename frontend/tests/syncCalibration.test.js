@@ -2,7 +2,7 @@
 // reverberant microphone recording to a fraction of a millisecond, and a run only ever writes a result it can believe.
 import { describe, expect, it, vi } from 'vitest';
 import {
-  CHIRP_MS, MAX_SPREAD_MS, PC_BAND, PC_LEAD_MS, PHONE_BAND,
+  CHIRP_MS, MAX_SPREAD_MS, PC_BAND, PC_LEAD_MS, PHONE_BAND, abortableSleep,
   analyzeRecording, calibrationMessage, chirp, crossCorrelate, fft, findPulses, pairPulses, runCalibration,
 } from '../src/media/syncCalibration.js';
 
@@ -23,7 +23,7 @@ function rng(seed) {
  * A microphone recording: `lengthS` of noise, then each pulse (template, at ms, gain) added — with an optional reflection
  * `echoMs` later at `echoGain`. Positions are exact in samples (fractional ms are rounded to the sample).
  */
-function recording({ lengthS = 5, noise = 0.01, seed = 7, pulses = [], echoMs = 0, echoGain = 0 }) {
+function recording({ lengthS = 6, noise = 0.01, seed = 7, pulses = [], echoMs = 0, echoGain = 0 }) {
   const out = new Float32Array(Math.round(lengthS * RATE));
   const next = rng(seed);
   for (let i = 0; i < out.length; i += 1) out[i] = noise * next();
@@ -39,7 +39,7 @@ function recording({ lengthS = 5, noise = 0.01, seed = 7, pulses = [], echoMs = 
 }
 
 /** N pairs: the page's falling chirp at start + i·spacing, the phone's rising one `gap` ms after it (gap = planned + β). */
-function pairsAt({ count = 6, start = 600, spacing = 500, gapMs, phoneGain = 0.3, pcGain = 0.6, jitterMs = 0, seed = 3 }) {
+function pairsAt({ count = 6, start = 600, spacing = 750, gapMs, phoneGain = 0.3, pcGain = 0.6, jitterMs = 0, seed = 3 }) {
   const next = rng(seed);
   const pulses = [];
   for (let i = 0; i < count; i += 1) {
@@ -195,7 +195,7 @@ describe('analyzeRecording', () => {
   });
 
   it('refuses pairs that disagree with each other (a jittery link, a noisy room) instead of averaging nonsense', () => {
-    const result = analyzeRecording(recording({ pulses: pairsAt({ gapMs: PC_LEAD_MS - 10, jitterMs: 25 }) }), opts(PC_LEAD_MS));
+    const result = analyzeRecording(recording({ pulses: pairsAt({ gapMs: PC_LEAD_MS - 10, jitterMs: 50 }) }), opts(PC_LEAD_MS));
     expect(result.ok).toBe(false);
     expect(result.reason).toBe('inconsistent');
     expect(result.spreadMs).toBeGreaterThan(MAX_SPREAD_MS);
@@ -205,8 +205,8 @@ describe('analyzeRecording', () => {
     const result = analyzeRecording(recording({ pulses: pairsAt({ gapMs: PC_LEAD_MS + 140 }) }), opts(PC_LEAD_MS));
     expect(result.ok).toBe(true);
     expect(result.biasMs).toBeCloseTo(140, 0);
-    const beyond = analyzeRecording(recording({ pulses: pairsAt({ gapMs: PC_LEAD_MS + 250 }) }), opts(PC_LEAD_MS));
-    expect(beyond).toMatchObject({ ok: false, reason: 'no_pairs' });   // 250 ms off: not its partner (and not the next pair's either) — nothing is written
+    const beyond = analyzeRecording(recording({ pulses: pairsAt({ gapMs: PC_LEAD_MS + 350 }) }), opts(PC_LEAD_MS));
+    expect(beyond).toMatchObject({ ok: false, reason: 'no_pairs' });   // 350 ms off: outside 320 ms gate — nothing is written
   });
 });
 
@@ -244,8 +244,8 @@ describe('runCalibration', () => {
       onPhase: (p) => phases.push(p),
       requestProbe: requestProbe || (async () => ({
         ok: true,
-        pts_us: Array.from({ length: count }, (_, i) => (2000 + i * 500) * 1000),
-        spacing_ms: 500, common_target_ms: 100, phone_target_ms: 100 + fineTune, offset_ms: fineTune,
+        pts_us: Array.from({ length: count }, (_, i) => (2000 + i * 750) * 1000),
+        spacing_ms: 750, common_target_ms: 100, phone_target_ms: 100 + fineTune, offset_ms: fineTune,
       })),
       record: record || (async () => ({
         async stop() {
@@ -330,6 +330,34 @@ describe('runCalibration', () => {
   it('never throws: an unexpected failure becomes a result', async () => {
     const h = harness({ mixerOverrides: { playProbeAt: () => { throw new Error('boom'); } } });
     expect(await runCalibration(h.defaults)).toMatchObject({ ok: false, reason: 'failed', detail: 'boom' });
+  });
+
+  it('cancels immediately when aborted and stops recorder', async () => {
+    const stop = vi.fn(async () => ({ samples: new Float32Array(0), rate: RATE, gap: false }));
+    const controller = new AbortController();
+    const h = harness({ record: async () => ({ stop }) });
+    const result = await runCalibration({
+      ...h.defaults,
+      sleep: vi.fn(async () => {
+        controller.abort();
+      }),
+      signal: controller.signal,
+    });
+    expect(result).toEqual({ ok: false, reason: 'cancelled' });
+    expect(stop).toHaveBeenCalled();
+  });
+});
+
+describe('abortableSleep', () => {
+  it('resolves after ms if not aborted', async () => {
+    await expect(abortableSleep(10)).resolves.toBeUndefined();
+  });
+
+  it('rejects immediately when aborted', async () => {
+    const controller = new AbortController();
+    const p = abortableSleep(10000, controller.signal);
+    controller.abort();
+    await expect(p).rejects.toMatchObject({ reason: 'cancelled' });
   });
 });
 

@@ -37,6 +37,7 @@ const SOURCE_LABEL = {
   pc_port: 'Bilgisayar USB portu',
   adapter: 'Şarj adaptörü',
   pd: 'Hızlı şarj adaptörü (USB-PD)',
+  fast: 'Hızlı şarj adaptörü',
   wireless: 'Kablosuz şarj',
   usb: 'USB kaynağı',
 };

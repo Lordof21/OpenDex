@@ -55,7 +55,7 @@ afterEach(() => {
   cleanup();
 });
 
-const renderMixer = () => render(<QuickSettings view="mixer" volume={50} onView={() => {}} onVolume={() => {}} />);
+const renderMixer = () => render(<QuickSettings view="mixer" onView={() => {}} />);
 
 describe('mixer: DeX\'teki uygulamalar', () => {
   it('shows one row per windowed app, titled after its window, with the drag-only slider', () => {

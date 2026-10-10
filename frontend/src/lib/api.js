@@ -44,19 +44,27 @@ async function request(method, path, body, opts = {}, retries = 6) {
       // sonuçlanmalı" istekler için — zaman aşımı yeniden denenmez (arka uç yanıt vermiyor), çağıran karar verir.
       const controller = opts.timeoutMs ? new AbortController() : null;
       const timer = controller ? setTimeout(() => controller.abort(), opts.timeoutMs) : null;
+      const onExternalAbort = () => controller?.abort();
+      if (opts.signal) {
+        if (opts.signal.aborted) throw new ApiError(499, 'İstemci isteği iptal etti.');
+        opts.signal.addEventListener('abort', onExternalAbort, { once: true });
+      }
       let res;
       try {
+        const signal = controller?.signal || opts.signal;
         res = await fetch(url, {
           method,
           headers: token ? { ...headers, Authorization: `Bearer ${token}` } : (Object.keys(headers).length ? headers : undefined),
           body: body !== undefined ? JSON.stringify(body) : undefined,
-          signal: controller?.signal,
+          signal,
         });
       } catch (err) {
+        if (opts.signal?.aborted) throw new ApiError(499, 'İstemci isteği iptal etti.');
         if (controller?.signal.aborted) throw new ApiError(408, 'İstek zaman aşımına uğradı.');
         throw err;
       } finally {
         if (timer) clearTimeout(timer);
+        if (opts.signal) opts.signal.removeEventListener('abort', onExternalAbort);
       }
       if (res.status === 401 && !authRetried) {
         // A restarted backend may have a new token: re-read every source once, then retry this same attempt.

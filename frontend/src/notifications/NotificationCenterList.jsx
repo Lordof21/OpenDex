@@ -1,6 +1,6 @@
 // Bildirim merkezinin listesi: uygulamaya göre gruplar, grup kapalıyken iOS yığını (en yeni kart + arkasında tabaklar),
 // açılınca kartlar dalga halinde iner. Her kart NotificationCard'dır — toast ile aynı dil ve aynı eylemler.
-import React, { useMemo, useState } from 'react';
+import React, { forwardRef, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { BellRing, ChevronDown, X } from 'lucide-react';
 import { cn } from '../lib/utils.js';
@@ -70,12 +70,14 @@ export default function NotificationCenterList({ models, privacy, onOpen, onDism
   );
 }
 
-function NotificationStack({ items, order, open, onToggle, onClear, cardProps }) {
+// A forwardRef: AnimatePresence (mode="popLayout") measures its direct child through a ref.
+const NotificationStack = forwardRef(function NotificationStack({ items, order, open, onToggle, onClear, cardProps }, ref) {
   const [first, ...rest] = items;
   const plates = Math.min(rest.length, 2);
 
   return (
     <motion.section
+      ref={ref}
       layout
       variants={centerCardVariants}
       initial="hidden"
@@ -186,7 +188,7 @@ function NotificationStack({ items, order, open, onToggle, onClear, cardProps })
       </AnimatePresence>
     </motion.section>
   );
-}
+});
 
 function EmptyState() {
   return (

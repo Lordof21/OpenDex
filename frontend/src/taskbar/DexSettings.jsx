@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, forwardRef } from 'react';
 import {
   Activity,
   AudioLines,
@@ -134,12 +134,12 @@ const APP_CLOSED_BEHAVIOR = [
   { value: 'badge', label: 'Pencerede göster', hint: 'Yeniden aç' },
 ];
 
-const DP_MIN = 480;
+const DP_MIN = 350;
 const DP_MAX = 1120;
-const DP_STEP = 20;
+const DP_STEP = 10;
 const DP_AUTO = 720;
 
-export function DexSettings({ onClose, ...motionProps }) {
+export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionProps }, ref) {
   const { theme, setTheme } = useTheme();
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
@@ -304,7 +304,7 @@ export function DexSettings({ onClose, ...motionProps }) {
 
   return (
     <PanelShell
-      {...motionProps}
+      ref={ref} {...motionProps}
       className="right-4 flex h-[min(620px,calc(100vh-82px))] w-[min(400px,calc(100vw-32px))] flex-col p-0 sm:right-28"
     >
       <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/70 px-3.5 py-3">
@@ -398,7 +398,7 @@ export function DexSettings({ onClose, ...motionProps }) {
                 onAuto={handleDpAuto}
                 label="Mantıksal alan (target dp)"
                 unit="dp"
-                ticks={[480, 600, 720, 840, 960, 1080]}
+                ticks={[350, 480, 600, 720, 840, 960, 1080]}
                 className="mt-2"
               />
             </SettingsGroup>
@@ -684,7 +684,7 @@ export function DexSettings({ onClose, ...motionProps }) {
       </div>
     </PanelShell>
   );
-}
+});
 
 function ScopeHeading({ scope, icon, title, name, hint }) {
   return (

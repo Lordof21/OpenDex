@@ -4,10 +4,11 @@
 // − brings it forward. The status line says what the alignment is doing right now, read from the apps on "İkisi".
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Mic } from 'lucide-react';
+import { Mic, Loader2, X } from 'lucide-react';
 import { updateSettings, useLiveSettings } from '../settings/liveSettings.js';
 import { calibrationMessage, runCalibration } from '../media/syncCalibration.js';
 import { useAudioMixerStore } from '../state/audioMixerStore.js';
+import { useSystemStore } from '../state/systemStore.js';
 import { cn } from '../lib/utils.js';
 import { PrecisionSlider } from '../ui/PrecisionSlider.jsx';
 
@@ -38,15 +39,53 @@ export function syncStatus(sync, apps) {
 function AutoCalibrate({ supported }) {
   const [run, setRun] = useState({ phase: 'idle', result: null });
   const mounted = useRef(true);
-  useEffect(() => () => { mounted.current = false; }, []);
+  const abortRef = useRef(null);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      abortRef.current?.abort();
+    };
+  }, []);
+
   const busy = run.phase !== 'idle';
 
-  const start = async () => {
-    setRun({ phase: 'mic', result: null });
-    let result = await runCalibration({
-      probeClock: () => useAudioMixerStore.getState().probeClock(),
-      onPhase: (phase) => mounted.current && setRun({ phase, result: null }),
+  const cancel = () => {
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+    setRun({ phase: 'idle', result: { ok: false, reason: 'cancelled' } });
+    useSystemStore.getState().pushToast?.('Ölçüm iptal edildi; mikrofon kapatıldı.', {
+      tone: 'info',
+      title: 'Ses Hizalama',
     });
+  };
+
+  const start = async () => {
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setRun({ phase: 'mic', result: null });
+    useSystemStore.getState().pushToast?.('Ses ölçümü başladı; telefon ve DeX hoparlörlerini açık tutun.', {
+      tone: 'info',
+      title: 'Ses Hizalama',
+    });
+
+    let result = await runCalibration({
+      probeClock: (opts) => useAudioMixerStore.getState().probeClock(opts),
+      onPhase: (phase) => {
+        if (!controller.signal.aborted && mounted.current) {
+          setRun({ phase, result: null });
+        }
+      },
+      signal: controller.signal,
+    });
+
+    if (controller.signal.aborted) {
+      return;
+    }
+
     if (result.ok) {
       const value = Math.max(FINE_TUNE_MIN, Math.min(FINE_TUNE_MAX, result.offsetMs));
       try {
@@ -55,25 +94,75 @@ function AutoCalibrate({ supported }) {
         result = { ok: false, reason: 'failed' };
       }
     }
-    if (mounted.current) setRun({ phase: 'idle', result });
+    abortRef.current = null;
+    if (mounted.current) {
+      setRun({ phase: 'idle', result });
+    }
+
+    if (result.ok) {
+      useSystemStore.getState().pushToast?.(
+        `Ses hizalandı! İnce ayar ${result.offsetMs > 0 ? '+' : ''}${result.offsetMs} ms uygulandı.`,
+        { tone: 'success', title: 'Hizalama Başarılı' },
+      );
+    } else if (result.reason !== 'cancelled') {
+      useSystemStore.getState().pushToast?.(
+        calibrationMessage(result),
+        { tone: 'warn', title: 'Ses Hizalama' },
+      );
+    }
   };
 
   return (
     <div className="pt-1.5">
-      <button
-        type="button"
-        disabled={busy || !supported}
-        onClick={start}
-        className={cn(
-          'inline-flex h-7 items-center gap-1.5 rounded-md bg-foreground/[0.08] px-2.5 text-[11px] font-semibold transition-colors',
-          busy || !supported ? 'cursor-default opacity-60' : 'cursor-pointer hover:bg-foreground/[0.14]',
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          disabled={busy || !supported}
+          onClick={start}
+          className={cn(
+            'inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-semibold transition-colors',
+            busy
+              ? 'bg-primary/15 text-primary cursor-default'
+              : !supported
+                ? 'cursor-default opacity-60 bg-foreground/[0.08]'
+                : 'cursor-pointer bg-foreground/[0.08] hover:bg-foreground/[0.14]',
+          )}
+          data-testid="audio-sync-auto"
+        >
+          {busy ? (
+            <Loader2 className="size-3.5 animate-spin text-primary" />
+          ) : (
+            <Mic className="size-3.5" />
+          )}
+          {busy ? (PHASE_TEXT[run.phase] || 'Ölçülüyor…') : 'Mikrofonla otomatik ayarla'}
+        </button>
+
+        {busy && (
+          <button
+            type="button"
+            onClick={cancel}
+            className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[10.5px] text-muted-foreground hover:bg-muted transition-colors cursor-pointer"
+            title="Ölçümü iptal et ve mikrofonu kapat"
+            data-testid="audio-sync-auto-cancel"
+          >
+            <X className="size-3" />
+            İptal
+          </button>
         )}
-        data-testid="audio-sync-auto"
+      </div>
+
+      <p
+        className={cn(
+          'pt-1 text-[9.5px] leading-snug',
+          run.result && !run.result.ok
+            ? 'text-destructive font-medium'
+            : run.result && run.result.ok
+              ? 'text-success font-medium'
+              : 'text-muted-foreground',
+        )}
+        aria-live="polite"
+        data-testid="audio-sync-auto-status"
       >
-        <Mic className="size-3.5" />
-        Mikrofonla otomatik ayarla
-      </button>
-      <p className={cn('pt-1 text-[9.5px] leading-snug', run.result && !run.result.ok ? 'text-destructive' : 'text-muted-foreground')} aria-live="polite" data-testid="audio-sync-auto-status">
         {busy
           ? PHASE_TEXT[run.phase]
           : run.result

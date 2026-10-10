@@ -36,7 +36,7 @@ describe('QuickSettings ses mikseri', () => {
   let setStreamVolumeLevel;
 
   function renderMixer() {
-    const utils = render(<QuickSettings view="mixer" volume={50} onView={() => {}} onVolume={() => {}} />);
+    const utils = render(<QuickSettings view="mixer" onView={() => {}} />);
     const media = utils.getByRole('slider', { name: 'Medya sesi' });
     stubRect(media);
     return { ...utils, media };
@@ -135,7 +135,7 @@ describe('QuickSettings ses mikseri', () => {
   it('sessize al düğmesi TEK istekle 0 gönderir', () => {
     const { container } = renderMixer();
     const muteButtons = container.querySelectorAll('button[aria-label="Sesi kapat"]');
-    fireEvent.click(muteButtons[1]); // 0: ana ses, 1: medya akışı
+    fireEvent.click(muteButtons[0]); // ilk satır: medya akışı
 
     expect(setStreamVolumeLevel).toHaveBeenCalledTimes(1);
     expect(setStreamVolumeLevel).toHaveBeenCalledWith(3, 0);

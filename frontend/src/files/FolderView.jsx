@@ -347,7 +347,7 @@ export default function FolderView({ winId, pi, layoutMode, active, dual = false
         if (focusEntry && previewKind(focusEntry)) S.openPreview(winId, pi, keyOf(focusEntry));
         return;
       case 'toggle': done(); S.toggleFocused(winId, pi); return;
-      case 'up': done(); S.goUp(winId, pi); return;
+      case 'up': done(); S.goUp(winId, pi, { select: !compact }); return;
       case 'back': done(); S.goBack(winId, pi); return;
       case 'forward': done(); S.goForward(winId, pi); return;
       case 'rename': done(); if (focusEntry && p.selection.ids.size <= 1) S.startRename(winId, pi, keyOf(focusEntry)); return;

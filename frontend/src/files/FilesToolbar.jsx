@@ -34,7 +34,7 @@ export function PaneHeader({ winId, pi, layoutMode }) {
           <IconButton label="İleri (Alt+→)" size="md" disabled={!canForward} onClick={() => store.getState().goForward(winId, pi)}><ArrowRight /></IconButton>
         </>
       )}
-      <IconButton label="Üst klasör (Alt+↑)" size="md" onClick={() => store.getState().goUp(winId, pi)}><ArrowUp /></IconButton>
+      <IconButton label="Üst klasör (Alt+↑)" size="md" onClick={() => store.getState().goUp(winId, pi, { select: layoutMode !== 'compact' })}><ArrowUp /></IconButton>
       <Breadcrumbs winId={winId} pi={pi} layoutMode={layoutMode} />
       <IconButton label="Yenile (F5)" size="md" onClick={() => store.getState().reload(winId, pi)}><RefreshCw className={pane.status === 'refreshing' || pane.status === 'loading' ? 'animate-spin motion-reduce:animate-none' : undefined} /></IconButton>
     </div>

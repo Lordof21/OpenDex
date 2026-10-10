@@ -1,8 +1,8 @@
-import React from 'react';
+import React, { forwardRef } from 'react';
 import { Cloud, Headphones, MonitorCog, ShieldCheck } from 'lucide-react';
 import { PanelShell } from './PanelShell.jsx';
 
-export function HiddenTray({ onDex, ...motionProps }) {
+export const HiddenTray = forwardRef(function HiddenTray({ onDex, ...motionProps }, ref) {
   const items = [
     { icon: Cloud, label: 'Cloud senkron' },
     { icon: ShieldCheck, label: 'Güvenlik' },
@@ -10,7 +10,7 @@ export function HiddenTray({ onDex, ...motionProps }) {
   ];
 
   return (
-    <PanelShell {...motionProps} className="right-4 w-56 p-3 sm:right-28">
+    <PanelShell ref={ref} {...motionProps} className="right-4 w-56 p-3 sm:right-28">
       <p className="mb-2 px-1 text-[9px] font-semibold uppercase text-muted-foreground">
         Arka plan servisleri
       </p>
@@ -41,6 +41,6 @@ export function HiddenTray({ onDex, ...motionProps }) {
       </div>
     </PanelShell>
   );
-}
+});
 
 export default HiddenTray;

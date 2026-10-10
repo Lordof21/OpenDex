@@ -142,11 +142,12 @@ describe('AppIcon: Çalışma Alanı simgesi', () => {
     const { container } = render(<AppIcon pkg={WORKSPACE_ICON_PACKAGE} displayName="Çalışma Alanı" size={34} />);
     const icon = container.querySelector('[data-app-icon="workspace"]');
     expect(icon).not.toBeNull();
-    expect(icon.querySelector('svg')).not.toBeNull();
-    expect(icon.querySelector('img')).toBeNull();
+    // Projeyle paketlenen resim (src/assets/icons): telefondan/arka uçtan ikon istenmez
+    const img = icon.querySelector('img');
+    expect(img).not.toBeNull();
+    expect(img.getAttribute('src')).not.toContain('/api/apps/icon');
     expect(icon.textContent).toBe(''); // "Ç" harfi yok
     expect(icon.style.width).toBe('34px');
-    expect(icon.className).toContain('app-icon-workspace');
   });
 
 });

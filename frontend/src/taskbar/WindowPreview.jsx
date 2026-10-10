@@ -7,7 +7,7 @@
 //     ~15 fps yeter; küçültülmüş pencerede önbellekteki son kare bir kez çizilir.
 //   - Sahte pencere başlığı (üç nokta + ad) yok: ikon + ad kartın başlık satırında zaten var.
 //   - Önizlemeye tıklamak görev çubuğu düğmesiyle AYNI eylemdir: açık pencere küçülür, küçültülmüş pencere geri yüklenir, arkadaki öne gelir.
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, forwardRef } from 'react';
 import { X } from 'lucide-react';
 import { PanelShell } from './PanelShell.jsx';
 import AppIcon from '../ui/AppIcon.jsx';
@@ -43,7 +43,7 @@ function initialAspect(win, windowId) {
   return 16 / 9;
 }
 
-export function WindowPreview({
+export const WindowPreview = forwardRef(function WindowPreview({
   app,
   anchorX = null,
   onActivate,
@@ -51,7 +51,7 @@ export function WindowPreview({
   onEnter,
   onLeave,
   ...motionProps
-}) {
+}, ref) {
   const canvasRef = useRef(null);
 
   const windows = useWindowStore((s) => s.windows);
@@ -124,7 +124,7 @@ export function WindowPreview({
 
   return (
     <PanelShell
-      {...motionProps}
+      ref={ref} {...motionProps}
       style={positionStyle}
       className="border border-border/80 bg-popover/95 p-2.5 shadow-2xl backdrop-blur-3xl rounded-xl"
     >
@@ -181,6 +181,6 @@ export function WindowPreview({
       </div>
     </PanelShell>
   );
-}
+});
 
 export default WindowPreview;

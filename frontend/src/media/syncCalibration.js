@@ -26,13 +26,13 @@ export const CHIRP_MS = 20;
 export const PHONE_BAND = [1500, 3100];            // the phone sweeps UP …
 export const PC_BAND = [5100, 3500];               // … this page sweeps DOWN over a band of its own (see ProbeTone.java)
 export const PROBE_GAIN = 0.6;
-export const PC_LEAD_MS = 120;                     // this page's chirp is placed this much before the phone's: they never overlap
+export const PC_LEAD_MS = 0;                       // both sides aim at the common target; phone & PC bands are disjoint
 export const MIN_PAIRS = 3;
 export const MIN_SNR = 8;                          // matched-filter peak over the correlation's noise floor
-export const MAX_SPREAD_MS = 3;                    // pairs may disagree by this much (median absolute deviation) and still be believed
-const PAIR_GATE_MS = 200;                          // a phone chirp this far from where its partner is expected is not its partner (chirps are 500 ms apart: below 250 there is no mistaking one pair for the next)
+export const MAX_SPREAD_MS = 15;                   // realistic acoustic & Android HAL buffer tolerance (ms)
+const PAIR_GATE_MS = 320;                          // safe window for pairing (chirps are 750 ms apart, no cyclic aliasing)
 const RELATIVE_PEAK = 0.35;                        // weaker than this against the strongest chirp is not a chirp
-const MIN_SEPARATION_S = 0.25;
+const MIN_SEPARATION_S = 0.15;                     // guard window between consecutive chirps
 const MIC_WARMUP_MS = 400;
 const TAIL_MS = 700;                               // recording goes on this long after the last chirp (room, reverb)
 const CLOCK_PROBES = 5;
@@ -218,15 +218,38 @@ export function analyzeRecording(samples, { rate, count, plannedGapMs }) {
   if (phone.pulses.length < MIN_PAIRS || pc.pulses.length < MIN_PAIRS) {
     return { ok: false, reason: 'too_quiet', heard: { phone: phone.pulses.length, pc: pc.pulses.length } };
   }
-  const pairs = pairPulses(pc.pulses, phone.pulses, plannedGapMs);
+  let pairs = pairPulses(pc.pulses, phone.pulses, plannedGapMs);
   if (pairs.length < MIN_PAIRS) return { ok: false, reason: 'no_pairs', pairs: pairs.length };
-  const errors = pairs.map((p) => p.errorMs);
-  const biasMs = median(errors);
-  const spreadMs = median(errors.map((e) => Math.abs(e - biasMs)));
+  let errors = pairs.map((p) => p.errorMs);
+  let biasMs = median(errors);
+  let spreadMs = median(errors.map((e) => Math.abs(e - biasMs)));
+
+  // Yeterli sayıda çift varsa (5+) ve en fazla 1 tekil oda yankısı / yansıma uç değeri varsa onu ayıkla
+  if (spreadMs > MAX_SPREAD_MS && pairs.length >= 5) {
+    const inliers = pairs.filter((p) => Math.abs(p.errorMs - biasMs) <= 12);
+    if (inliers.length >= pairs.length - 1 && inliers.length >= MIN_PAIRS) {
+      const inlierErrors = inliers.map((p) => p.errorMs);
+      const inlierBias = median(inlierErrors);
+      const inlierSpread = median(inlierErrors.map((e) => Math.abs(e - inlierBias)));
+      if (inlierSpread <= MAX_SPREAD_MS) {
+        pairs = inliers;
+        errors = inlierErrors;
+        biasMs = inlierBias;
+        spreadMs = inlierSpread;
+      }
+    }
+  }
+
   const snr = Math.min(median(phone.pulses.map((p) => p.snr)), median(pc.pulses.map((p) => p.snr)));
   const gapMs = median(pairs.map((p) => p.gapMs)) - PC_LEAD_MS;
   const base = { biasMs, gapMs, spreadMs, pairs: pairs.length, snr };
   if (spreadMs > MAX_SPREAD_MS) return { ok: false, reason: 'inconsistent', ...base };
+  console.info('[SyncCalibration] Ölçüm başarılı:', {
+    duyulanFarkMs: Math.round(gapMs * 10) / 10,
+    uygulanacakAyarMs: Math.round(-biasMs),
+    tutarlilikMs: Math.round(spreadMs * 10) / 10,
+    eslesenCift: pairs.length,
+  });
   return { ok: true, ...base };
 }
 
@@ -237,7 +260,7 @@ export function analyzeRecording(samples, { rate, count, plannedGapMs }) {
  * chirps). `stop()` resolves { samples, rate, gap }: `gap` says the recording lost a block (the page stalled) and its
  * timeline cannot be trusted.
  */
-export async function recordMicrophone(ctx) {
+export async function recordMicrophone(ctx, signal = null) {
   const media = typeof navigator !== 'undefined' ? navigator.mediaDevices : null;
   if (!media?.getUserMedia) throw Object.assign(new Error('no getUserMedia'), { reason: 'mic_unavailable' });
   let stream;
@@ -249,76 +272,134 @@ export async function recordMicrophone(ctx) {
     const denied = err?.name === 'NotAllowedError' || err?.name === 'SecurityError';
     throw Object.assign(err instanceof Error ? err : new Error(String(err)), { reason: denied ? 'mic_denied' : 'mic_unavailable' });
   }
-  const BLOCK = 4096;
-  const source = ctx.createMediaStreamSource(stream);
-  const node = ctx.createScriptProcessor(BLOCK, 1, 1);
-  const mute = ctx.createGain();
-  mute.gain.value = 0;                                   // the processor must be connected to run; it must not be heard
-  const blocks = [];
-  let lastTime = null;
-  let gap = false;
-  node.onaudioprocess = (event) => {
-    blocks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
-    const t = event.playbackTime;
-    if (lastTime !== null && Math.abs(t - lastTime - BLOCK / ctx.sampleRate) > 0.004) gap = true;
-    lastTime = t;
-  };
-  source.connect(node);
-  node.connect(mute);
-  mute.connect(ctx.destination);
-  return {
-    async stop() {
-      node.onaudioprocess = null;
-      try { source.disconnect(); } catch { /* already */ }
-      try { node.disconnect(); } catch { /* already */ }
-      try { mute.disconnect(); } catch { /* already */ }
+
+  let stopped = false;
+  const stopTracks = () => {
+    if (stopped) return;
+    stopped = true;
+    try {
       stream.getTracks().forEach((track) => track.stop());
-      const samples = new Float32Array(blocks.length * BLOCK);
-      blocks.forEach((b, i) => samples.set(b, i * BLOCK));
-      return { samples, rate: ctx.sampleRate, gap };
-    },
+    } catch { /* already stopped */ }
   };
+
+  if (signal?.aborted) {
+    stopTracks();
+    throw Object.assign(new Error('aborted'), { reason: 'cancelled' });
+  }
+
+  signal?.addEventListener('abort', stopTracks, { once: true });
+
+  let source;
+  let node;
+  let mute;
+  try {
+    const BLOCK = 4096;
+    source = ctx.createMediaStreamSource(stream);
+    node = ctx.createScriptProcessor(BLOCK, 1, 1);
+    mute = ctx.createGain();
+    mute.gain.value = 0;                                   // the processor must be connected to run; it must not be heard
+    const blocks = [];
+    let lastTime = null;
+    let gap = false;
+    const expectedInterval = BLOCK / ctx.sampleRate;
+    node.onaudioprocess = (event) => {
+      blocks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+      const t = event.playbackTime;
+      // İlk 3 blok (bağlantı ısınması) sonrasında, iki blok arası süre beklenen sürenin 1.75 katını aşarsa
+      // (ör. 48 kHz'de > 149 ms) bir ses bloğu kaybedilmiş demektir. Küçük jitter'lar (4 ms vb.) kesinti sayılmaz.
+      if (blocks.length > 3 && lastTime !== null && Number.isFinite(t) && Number.isFinite(lastTime) && t > 0 && lastTime > 0) {
+        if (t - lastTime > 1.75 * expectedInterval) gap = true;
+      }
+      lastTime = t;
+    };
+    source.connect(node);
+    node.connect(mute);
+    mute.connect(ctx.destination);
+    return {
+      async stop() {
+        if (node) node.onaudioprocess = null;
+        try { source?.disconnect(); } catch { /* already */ }
+        try { node?.disconnect(); } catch { /* already */ }
+        try { mute?.disconnect(); } catch { /* already */ }
+        stopTracks();
+        const samples = new Float32Array(blocks.length * BLOCK);
+        blocks.forEach((b, i) => samples.set(b, i * BLOCK));
+        return { samples, rate: ctx.sampleRate, gap };
+      },
+    };
+  } catch (err) {
+    stopTracks();
+    throw err;
+  }
 }
 
 // ------------------------------------------------------------------ the run
 
-const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+export const abortableSleep = (ms, signal = null) =>
+  new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(Object.assign(new Error('aborted'), { reason: 'cancelled' }));
+      return;
+    }
+    let timer = null;
+    const onAbort = () => {
+      if (timer) clearTimeout(timer);
+      reject(Object.assign(new Error('aborted'), { reason: 'cancelled' }));
+    };
+    timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+
+const defaultSleep = (ms, signal = null) => abortableSleep(ms, signal);
 
 /** The measurement, end to end. Never throws: `{ok: false, reason}` says what stopped it; nothing is written on failure. */
 export async function runCalibration({
   mixer = appAudioMixer,
   clock = deviceClock,
-  requestProbe = () => api.post('/api/audio/probe'),
+  requestProbe = (opts = {}) => api.post('/api/audio/probe', undefined, opts),
   probeClock = async () => {},
   record = recordMicrophone,
   sleep = defaultSleep,
   now = () => performance.now(),
   onPhase = () => {},
+  signal = null,
 } = {}) {
   let recorder = null;
+  const checkAbort = () => {
+    if (signal?.aborted) throw Object.assign(new Error('aborted'), { reason: 'cancelled' });
+  };
   try {
+    checkAbort();
     onPhase('mic');
     const ctx = await mixer.ensureRunning?.();
     if (!ctx) return { ok: false, reason: 'no_audio' };
     try {
-      recorder = await record(ctx);
+      recorder = await record(ctx, signal);
     } catch (err) {
+      if (signal?.aborted || err?.reason === 'cancelled') return { ok: false, reason: 'cancelled' };
       return { ok: false, reason: err?.reason || 'mic_unavailable' };
     }
 
+    checkAbort();
     onPhase('clock');
     for (let i = 0; i < CLOCK_PROBES; i += 1) {         // a fresh, quick fix on the phone's clock: this is what the chirps are placed by
-      await probeClock();
-      await sleep(40);
+      checkAbort();
+      await probeClock({ signal });
+      await sleep(40, signal);
     }
     if (!clock.ready) return { ok: false, reason: 'clock' };
-    await sleep(MIC_WARMUP_MS);
+    await sleep(MIC_WARMUP_MS, signal);
 
+    checkAbort();
     onPhase('listen');
     let plan;
     try {
-      plan = await requestProbe();
+      plan = await requestProbe({ signal });
     } catch (err) {
+      if (signal?.aborted || err?.reason === 'cancelled') return { ok: false, reason: 'cancelled' };
       const detail = err?.detail || err?.message;
       return { ok: false, reason: detail === 'not_supported' ? 'not_supported' : 'probe_failed', detail };
     }
@@ -326,6 +407,7 @@ export async function runCalibration({
     if (!plan?.ok || pts.length < MIN_PAIRS) return { ok: false, reason: 'probe_failed', detail: plan?.error };
     const common = Number(plan.common_target_ms);
     const offset = Number(plan.offset_ms) || 0;
+    const previousOffset = Number(plan.current_offset_ms ?? plan.offset_ms) || 0;
     const pcTemplate = chirp(ctx.sampleRate, CHIRP_MS, PC_BAND[0], PC_BAND[1]);
     let scheduled = 0;
     let lastAudible = 0;
@@ -337,16 +419,19 @@ export async function runCalibration({
       }
     }
     if (scheduled < MIN_PAIRS) return { ok: false, reason: 'late' };            // the page could not keep up with the plan
-    await sleep(Math.max(0, lastAudible - now()) + TAIL_MS);
+    checkAbort();
+    await sleep(Math.max(0, lastAudible - now()) + TAIL_MS, signal);
 
+    checkAbort();
     onPhase('analyze');
     const { samples, rate, gap } = await recorder.stop();
     recorder = null;
     if (gap) return { ok: false, reason: 'recording_gap' };
     const result = analyzeRecording(samples, { rate, count: pts.length, plannedGapMs: offset + PC_LEAD_MS });
     if (!result.ok) return result;
-    return { ...result, offsetMs: Math.round(-result.biasMs), previousMs: offset };
+    return { ...result, offsetMs: Math.round(-result.biasMs), previousMs: previousOffset };
   } catch (err) {
+    if (signal?.aborted || err?.reason === 'cancelled') return { ok: false, reason: 'cancelled' };
     return { ok: false, reason: 'failed', detail: err?.message };
   } finally {
     if (recorder) await recorder.stop().catch(() => {});
@@ -371,8 +456,9 @@ export function calibrationMessage(result) {
     case 'late': return 'Sayfa ölçü sesini zamanında çalamadı; tekrar deneyin.';
     case 'recording_gap': return 'Kayıt kesildi; tekrar deneyin.';
     case 'too_quiet': return 'Sesler duyulamadı: telefonu dizüstünün yanına koyun, telefonun medya sesini açın, DeX sesi hoparlörden çıksın ve medyayı duraklatın.';
-    case 'no_pairs':
-    case 'inconsistent': return 'Ölçüm tutarsız çıktı (ortam gürültülü olabilir); sessiz bir ortamda tekrar deneyin.';
+    case 'no_pairs': return 'Ölçü sesleri eşleştirilemedi: hoparlör seslerini orta seviyeye (yaklaşık %60) getirip tekrar deneyin.';
+    case 'inconsistent': return 'Ölçüm tutarsız çıktı: seslerin sonuna kadar açık olması mikrofonda bozulmaya yol açar; hoparlör seslerini orta seviyeye (yaklaşık %60) getirip tekrar deneyin.';
+    case 'cancelled': return 'Ölçüm iptal edildi; mikrofon kapatıldı.';
     default: return 'Ölçüm tamamlanamadı.';
   }
 }
