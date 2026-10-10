@@ -1,9 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
-# DEV/LEGACY ONLY — do not use this for a release artifact.
-# PyInstaller ships the original .pyc bytecode almost unchanged (trivially reversed with pyinstxtractor +
-# decompyle3/uncompyle6 — near-perfect source back); it exists here only for fast local sidecar iteration without a
-# C toolchain. The build that actually ships — Nuitka, which compiles the whole app to native code — lives in
-# backend/build_nuitka.py and is the only one scripts/build-backend-sidecar.ps1 / scripts/build_release.py call.
+# The quick sidecar build: `python scripts/build_release.py --pyinstaller` (no C compiler, about a minute).
+# PyInstaller ships the .pyc bytecode almost unchanged, so unlike the Nuitka build (backend/build_nuitka.py, native code,
+# the default of scripts/build_release.py) the Python source can be recovered from the exe. The source of this project is
+# public, so that costs no secrecy; the trade is a larger exe and a slower first start (onefile unpacks to a temp dir).
+# `vendor/` is embedded below and found through sys._MEIPASS (app/config.py).
 from PyInstaller.utils.hooks import collect_submodules
 
 hiddenimports = ['aiosqlite']
@@ -36,7 +36,14 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    # The dev environment carries far more than the backend imports (notebooks, plotting, numeric stacks, test tools); a PyInstaller
+    # run in it sweeps whatever a hook happens to touch. Nothing here is imported by app/ (see backend/pyproject.toml dependencies).
+    excludes=[
+        'numpy', 'scipy', 'pandas', 'matplotlib', 'sympy', 'numba', 'sklearn', 'cv2', 'torch', 'tensorflow',
+        'IPython', 'ipykernel', 'ipywidgets', 'jupyter_client', 'jupyter_core', 'notebook', 'nbformat', 'nbconvert', 'zmq', 'tornado',
+        'jedi', 'parso', 'astroid', 'prompt_toolkit', 'pygments', 'lark',
+        'pytest', '_pytest', 'setuptools', 'pkg_resources', 'wheel', 'tkinter', 'PyQt5', 'PyQt6', 'PySide6',
+    ],
     noarchive=False,
     optimize=0,
 )

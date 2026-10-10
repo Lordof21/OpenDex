@@ -55,8 +55,10 @@ powershell -File scripts\build-backend-sidecar.ps1      # calls build_nuitka.py 
 Without a sidecar the shell logs a warning and carries on; you then start the backend by hand (`python -m app.main`). A fresh clone has
 no sidecar, which is why `npm run tauri dev` works from the first command as described in [DEVELOPMENT.md](DEVELOPMENT.md).
 
-> The PyInstaller path (`backend/opendex-backend.spec`, `pyinstaller_entry.py`) is a legacy quick-iteration route that needs no C compiler.
-> It packs bytecode, is **not** what is shipped, and is marked as such at the top of the files. Removal is on the [roadmap](ROADMAP.md).
+> The PyInstaller path (`backend/opendex-backend.spec`, `pyinstaller_entry.py`) is the quick route and needs no C compiler:
+> `python scripts/build_release.py --pyinstaller` builds the whole chain with it (a minute instead of tens of minutes for the backend
+> step) and writes the same `binaries/opendex-backend-<triple>.exe`. It packs bytecode, not native code, and embeds `vendor/` in the exe.
+> The source is public, so that is a size/start-time trade-off, not a secrecy one; the Nuitka build stays the default.
 
 ## Hardening of release builds (obfuscation) — and why you may not want it
 

@@ -192,7 +192,7 @@ values; every reply also carries `req_id` when the request had one, and `ok` is 
 | Command | Arguments | Reply |
 |---|---|---|
 | `notifications_list` | — | `notifications_update` — the current list. |
-| `notif_invoke` | action arguments | `notif_invoke_result` — runs a notification's action / dismiss (`NotificationInvoker`). |
+| `notif_invoke` | action arguments | `notif_invoke_result` — runs a notification's action / dismiss (`NotificationInvoker`). `launch <base64 key> <display id>` sends the notification's own `contentIntent` onto that display (`{ok, package, display, kind, sender_mode, cleared}` or `{ok:false, error}`), with the sender background-start mode `ALLOW_ALWAYS` (the plain `ALLOWED` mode is blocked for a shell sender on Android 15+/16): the app opens the exact screen the notification pointed at, with its own identity and extras. Errors `notification_not_found` / `no_content_intent` mean there is nothing to open. Daemon only — it needs the live listener. |
 
 ### Wi-Fi and Bluetooth
 

@@ -163,7 +163,7 @@ python backend/java/build.py            # javac + R8/d8 → backend/vendor/opend
 
 * Backend log: `backend/logs/opendex-YYYYMMDD.log` (INFO and above; set `OPENDEX_LOG_LEVEL=DEBUG` to add DEBUG). Each HTTP request carries an `op_id`
   (`X-Op-Id` header or generated) printed as `[op:xxxxxx]` — a UI action can be followed through every line it caused.
-* `OPENDEX_LOG_LEVEL=DEBUG`, or `POST /api/v1/diagnostics/log-level` at run time.
+* Terminal: `OPENDEX_TRACE=<flow>` (e.g. `windows,density`), or `POST /api/v1/diagnostics/log-level` at run time, opens the named flows on the terminal. `OPENDEX_LOG_LEVEL=DEBUG` only adds DEBUG lines to the file; it no longer opens every flow on the terminal.
 * `OPENDEX_API_DOCS=true` serves Swagger UI at `/docs` for the **running** backend.
 * The phone side logs to `/data/local/tmp/opendex-daemon.log` (`adb shell cat …`).
 * In the UI, **F8** shows or hides each window's stream HUD (RTT, FPS, decode queue; hidden by default); the **Phone Load** panel shows what OpenDeX asks of the phone.

@@ -5,6 +5,8 @@ OpenDeX Release Build Pipeline — compiles and obfuscates every layer, then pro
                         (frontend/vite.config.js)
   [3/4] Python backend: Nuitka native-code compilation, copied to frontend/src-tauri/binaries/ as the Tauri
                         sidecar (backend/build_nuitka.py --package-sidecar)
+                        `--pyinstaller`: the quick alternative (backend/opendex-backend.spec) — a minute instead of tens of
+                        minutes, same sidecar path; it ships the .pyc bytecode, which is fine for a public-source project
   [4/4] Installer     : `tauri build` — packages steps 1-3's outputs into the signed .msi/.dmg
 
 Each earlier version of this pipeline step either silently skipped on a missing tool (Java) or built an artifact
@@ -24,6 +26,7 @@ FRONTEND_DIR = ROOT_DIR / "frontend"
 # `--no-obfuscate`: a plain, debuggable Java dex and JS bundle (the backend is still compiled by Nuitka). The source is public; this is
 # for contributors, packagers and anyone auditing a build — see docs/BUILD_AND_RELEASE.md.
 NO_OBFUSCATE = "--no-obfuscate" in sys.argv
+USE_PYINSTALLER = "--pyinstaller" in sys.argv
 
 
 def banner(msg: str):
@@ -50,6 +53,34 @@ def step_3_backend_sidecar():
         [sys.executable, str(BACKEND_DIR / "build_nuitka.py"), "--package-sidecar"],
         cwd=str(BACKEND_DIR),
     )
+
+
+def _host_triple() -> str:
+    out = subprocess.run(["rustc", "-vV"], capture_output=True, text=True, check=True).stdout
+    for line in out.splitlines():
+        if line.startswith("host:"):
+            return line.split(":", 1)[1].strip()
+    raise RuntimeError(f"Could not parse 'host:' from `rustc -vV`: {out}")
+
+
+def step_3_backend_sidecar_pyinstaller():
+    """The same sidecar file `tauri build` bundles (binaries/opendex-backend-<triple>.exe), built from backend/opendex-backend.spec.
+    The spec embeds vendor/ in the exe (sys._MEIPASS, see app/config.py), so the sidecar needs nothing next to it."""
+    banner("[3/4] Packaging the Python backend with PyInstaller (quick build) as the sidecar")
+    dist, work = BACKEND_DIR / "dist" / "pyinstaller", BACKEND_DIR / "build" / "pyinstaller"
+    subprocess.check_call(
+        [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--distpath", str(dist), "--workpath", str(work),
+         "opendex-backend.spec"],
+        cwd=str(BACKEND_DIR),
+    )
+    built = dist / ("opendex-backend.exe" if os.name == "nt" else "opendex-backend")
+    if not built.exists():
+        raise RuntimeError(f"PyInstaller reported success but the expected output is missing: {built}")
+    binaries = FRONTEND_DIR / "src-tauri" / "binaries"
+    binaries.mkdir(parents=True, exist_ok=True)
+    dest = binaries / f"opendex-backend-{_host_triple()}{'.exe' if os.name == 'nt' else ''}"
+    dest.write_bytes(built.read_bytes())
+    print(f"[OK] Sidecar ready: {dest} ({dest.stat().st_size} bytes)")
 
 
 def _rust_path_remap_env() -> dict:
@@ -84,6 +115,8 @@ def main():
     if skip_backend:
         print("\n[INFO] Backend compilation skipped (--skip-backend) — the installer step needs a sidecar already")
         print("       in frontend/src-tauri/binaries/ from a previous run, or it will fail.")
+    elif USE_PYINSTALLER:
+        step_3_backend_sidecar_pyinstaller()
     else:
         step_3_backend_sidecar()
 
