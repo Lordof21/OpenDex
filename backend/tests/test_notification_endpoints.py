@@ -256,22 +256,54 @@ async def test_invoke_action_finds_item_by_android_key_fallback(mock_ctx):
 async def test_open_notification_target_resolves_target_key_by_package_and_focuses_existing_window(mock_ctx):
     item = _FakeItem("n1", "com.example.chat", android_key="chat-key-1")
     mock_ctx.notifications = _FakeNotifications([item])
-    mock_ctx.notifications.resolve_notification_intent = AsyncMock(return_value=None)
     win = MagicMock(package="com.example.chat", window_id="w1")
     mock_ctx.window_manager.list_windows.return_value = [win]
     mock_ctx.window_manager.focus_window = AsyncMock()
     body = ep.OpenNotificationRequest(package="com.example.chat")
 
     with patch.object(ep, "_get_display_id", new=AsyncMock(return_value="disp1")), \
-         patch.object(ep, "_execute_deep_navigation", new=AsyncMock()) as mock_nav:
+         patch.object(ep, "_execute_deep_navigation", new=AsyncMock(return_value=True)) as mock_nav:
         res = await ep.open_notification_target(body, mock_ctx)
 
     assert res == {"ok": True, "action": "focus_existing", "window_id": "w1", "package": "com.example.chat"}
     mock_ctx.window_manager.focus_window.assert_awaited_once_with("w1")
     # target_key must have been resolved from the matching notification (not
     # left None) and threaded through to deep navigation.
-    mock_nav.assert_awaited_once_with(mock_ctx, "com.example.chat", "disp1", None, "chat-key-1", title="", text="")
+    mock_nav.assert_awaited_once_with(mock_ctx, "com.example.chat", "disp1", "chat-key-1")
     assert mock_ctx.notifications._last_nav_target_pkg == "com.example.chat"
+
+
+async def test_open_notification_target_holds_the_launcher_before_anything_can_focus_the_window(mock_ctx):
+    """The notification opens its target with its own PendingIntent; `focus_window` may start the app's launcher page when the
+    window has no task yet. The hold has to be taken BEFORE that focus."""
+    item = _FakeItem("n1", "com.example.chat", android_key="chat-key-1")
+    mock_ctx.notifications = _FakeNotifications([item])
+    win = MagicMock(package="com.example.chat", window_id="w1")
+    mock_ctx.window_manager.list_windows.return_value = [win]
+    order: list[str] = []
+    mock_ctx.window_manager.hold_launch = MagicMock(side_effect=lambda pkg: order.append(f"hold:{pkg}"))
+    mock_ctx.window_manager.focus_window = AsyncMock(side_effect=lambda wid: order.append(f"focus:{wid}"))
+    body = ep.OpenNotificationRequest(package="com.example.chat")
+
+    with patch.object(ep, "_get_display_id", new=AsyncMock(return_value="disp1")),          patch.object(ep, "_execute_deep_navigation", new=AsyncMock(return_value=True)):
+        await ep.open_notification_target(body, mock_ctx)
+
+    assert order == ["hold:com.example.chat", "focus:w1"]
+
+
+async def test_open_notification_target_reports_a_failed_navigation_instead_of_ok(mock_ctx):
+    item = _FakeItem("n1", "com.example.chat", android_key="chat-key-1")
+    mock_ctx.notifications = _FakeNotifications([item])
+    win = MagicMock(package="com.example.chat", window_id="w1")
+    mock_ctx.window_manager.list_windows.return_value = [win]
+    mock_ctx.window_manager.focus_window = AsyncMock()
+    body = ep.OpenNotificationRequest(package="com.example.chat")
+
+    with patch.object(ep, "_get_display_id", new=AsyncMock(return_value="disp1")),          patch.object(ep, "_execute_deep_navigation", new=AsyncMock(return_value=False)):
+        res = await ep.open_notification_target(body, mock_ctx)
+
+    assert res == {"ok": False, "action": "focus_existing", "window_id": "w1", "package": "com.example.chat",
+                   "error": "notification_target_not_opened"}
 
 
 @pytest.mark.parametrize("package", ["", "com.a;reboot", "com.a\n#9 exec reboot", "com.a b", "1com.a"])

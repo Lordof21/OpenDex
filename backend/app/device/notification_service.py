@@ -16,14 +16,12 @@ import asyncio
 import contextlib
 import hashlib
 import logging
-import re
 from typing import Any, Awaitable, Callable
 
 from ..device.adb import Adb
 from ..events import EventBus, cancel_and_wait, spawn_background
 from ..schemas.notifications import NotificationCategory, RichNotificationItem
 from . import notification_invoker
-from .intent_utils import find_request_intent, parse_intent_args
 from .notification_parser import notifications_from_daemon, parse_dumpsys_notifications, post_time_label
 
 log = logging.getLogger(__name__)
@@ -77,7 +75,6 @@ class NotificationSupervisor:
         self._window_manager = None
         self._helper_available: bool = False
         self._dismissed_signatures: dict[str, str] = {}  # notification_id -> content_signature hash
-        self._intent_cache: dict[str, str] = {}  # id / android_key / package -> resolved intent args
         self._initial_sync_done = False  # the first refresh doesn't log every existing notification as "new"
 
         # Debounce control
@@ -458,13 +455,6 @@ class NotificationSupervisor:
                     )
                 await self._events.emit("notification_updated", **new_item.to_dict())
 
-            # Warm intent cache in background for fast instant notification click. From the daemon this is free (the
-            # intent came with the item); an item without one is resolved on click, not with a dumpsys per notification.
-            if new_item.id not in self._intent_cache and new_item.package and (
-                new_item.content_intent or not self.push_live
-            ):
-                spawn_background(self.resolve_notification_intent(new_item))
-
         self._initial_sync_done = True
 
         # Removed notifications (Bidirectional sync: dismissed on phone -> cleared on PC)
@@ -474,92 +464,3 @@ class NotificationSupervisor:
             log.info("🗑️ [BİLDİRİM TELEFONDA SİLİNDİ] [%s] id=%s", old_item.app_name if old_item else key, key)
             await self._events.emit("notification_cleared", id=key)
 
-    # ------------------------------------------------------------------ intent resolution
-
-    @staticmethod
-    def _intent_str_to_am_args(intent_str: str) -> str:
-        """Converts an Android dumpsys requestIntent string into am start command arguments."""
-        return " ".join(parse_intent_args(intent_str, quote='"'))
-
-    @staticmethod
-    def _field(item: RichNotificationItem | dict, name: str) -> Any:
-        return item.get(name) if isinstance(item, dict) else getattr(item, name, None)
-
-    def _remember_intent(self, args: str, *keys: str | None) -> str:
-        for key in keys:
-            if key:
-                self._intent_cache[key] = args
-        return args
-
-    async def resolve_notification_intent(self, item: RichNotificationItem | dict) -> str | None:
-        """
-        Resolves the exact Android intent arguments (-a ... -d ... -n ...) for a notification
-        from dumpsys activity intents {pkg} so it can be launched directly into the target conversation
-        or activity on a specific Virtual Display.
-        """
-        if not self._serial or not self._adb:
-            return None
-
-        nid = self._field(item, "id")
-        ci_id = self._field(item, "content_intent_id")
-        pkg = self._field(item, "package")
-        android_key = self._field(item, "android_key")
-
-        # 0. In-memory cache: instant return
-        for key in (nid, android_key):
-            if key and key in self._intent_cache:
-                log.debug("⚡ [BİLDİRİM INTENT ÖNBELLEKTEN ALINDI (%s)] args: %s", key, self._intent_cache[key])
-                return self._intent_cache[key]
-
-        # 1. The daemon's listener read the launch Intent itself: no `dumpsys activity intents` at all.
-        content_intent = self._field(item, "content_intent")
-        if isinstance(content_intent, str) and content_intent:
-            args = self._intent_str_to_am_args(content_intent)
-            if args:
-                log.debug("🎯 [BİLDİRİM INTENT DAEMON'DAN] pkg=%s -> am_args=%s", pkg, args)
-                return self._remember_intent(args, nid, android_key, pkg)
-
-        log.debug("🔍 [INTENT ÇÖZÜMLEME BAŞLADI] pkg=%s ci_id=%s nid=%s key=%s", pkg, ci_id, nid, android_key)
-
-        try:
-            # 1. Fast package-specific dump (~60ms instead of 2.5s global dumpsys)
-            out = ""
-            if pkg:
-                with contextlib.suppress(Exception):
-                    out = await self._adb.shell(f"dumpsys activity intents {pkg}", serial=self._serial, timeout_s=2.5)
-
-            # Fallback to global dump only if package-specific was empty or failed
-            if not out or (pkg and f"packageName={pkg}" not in out and pkg not in out):
-                with contextlib.suppress(Exception):
-                    out = await self._adb.shell("dumpsys activity intents", serial=self._serial, timeout_s=2.5)
-
-            if not out:
-                cached = self._intent_cache.get(pkg) if pkg else None
-                log.debug("ℹ️ [INTENT DUMPSYS BOŞ] pkg=%s fallback_cache=%s", pkg, cached)
-                return cached
-
-            # 2. The notification's own PendingIntentRecord
-            if ci_id:
-                raw_intent = find_request_intent(out, ci_id)
-                if raw_intent:
-                    args = self._intent_str_to_am_args(raw_intent)
-                    log.debug("🎯 [BİLDİRİM INTENT ÇÖZÜLDÜ (CI_ID: %s)] raw=%s -> am_args=%s", ci_id, raw_intent, args)
-                    return self._remember_intent(args, nid, android_key, pkg)
-
-            # 3. Fallback: the package's latest startActivity PendingIntentRecord (a non-launcher one preferred)
-            if pkg:
-                pattern = (
-                    r"PendingIntentRecord\{[a-fA-F0-9]+\s+" + re.escape(pkg) + r"\s+startActivity[^\r\n]*\r?\n"
-                    r"(?:(?!\bPendingIntentRecord\{)[^\r\n]*\r?\n)*?\s*requestIntent=([^\r\n]+)"
-                )
-                intents = [m.group(1).strip() for m in re.finditer(pattern, out)]
-                if intents:
-                    chosen = next((i for i in reversed(intents) if "category.LAUNCHER" not in i), intents[-1])
-                    args = self._intent_str_to_am_args(chosen)
-                    log.debug("🎯 [BİLDİRİM INTENT ÇÖZÜLDÜ (PKG: %s)] raw=%s -> am_args=%s", pkg, chosen, args)
-                    return self._remember_intent(args, nid, android_key, pkg)
-            log.debug("ℹ️ [BİLDİRİM INTENT EŞLEŞMEDİ] pkg=%s ci_id=%s (dumpsys boyutu: %d byte)", pkg, ci_id, len(out))
-        except Exception as exc:
-            log.warning("resolve_notification_intent failed for %s: %s", pkg, exc)
-
-        return self._intent_cache.get(pkg) if pkg else None

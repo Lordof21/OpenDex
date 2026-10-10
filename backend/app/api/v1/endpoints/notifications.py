@@ -148,29 +148,29 @@ async def open_notification_target(body: OpenNotificationRequest, ctx: AppContex
     if not item:
         item = ctx.notifications.find_by_package(pkg)
 
-    intent_args = None
-    if ctx.notifications:
-        intent_args = await ctx.notifications.resolve_notification_intent(
-            item or {"id": body.id, "package": pkg, "android_key": target_key}
-        )
+    # The target is opened by the notification's own PendingIntent: no focus may start the app's launcher page on top of it.
+    if ctx.window_manager:
+        ctx.window_manager.hold_launch(pkg)
+        ctx.window_manager.hold_handoff(pkg, seconds=6.0)
 
     # 2. Check if the window is ALREADY running on a virtual display
-    if ctx.window_manager:
-        for win in ctx.window_manager.list_windows():
-            if win.package == pkg:
-                log.info("🎯 Smart Routing: %s is already open as window %s, navigating into message", pkg, win.window_id)
-                await ctx.window_manager.focus_window(win.window_id)
-                disp_id = await _get_display_id(ctx, pkg)
-                await _execute_deep_navigation(ctx, pkg, disp_id, intent_args, target_key, title=title, text=text)
-                return {
-                    "ok": True,
-                    "action": "focus_existing",
-                    "window_id": win.window_id,
-                    "package": pkg,
-                }
-
-    # 3. App is not open: launch virtual display window and navigate directly into message
     try:
+        if ctx.window_manager:
+            for win in ctx.window_manager.list_windows():
+                if win.package == pkg:
+                    log.info("🎯 Smart Routing: %s is already open as window %s, navigating into message", pkg, win.window_id)
+                    await ctx.window_manager.focus_window(win.window_id)
+                    disp_id = await _get_display_id(ctx, pkg)
+                    opened = await _execute_deep_navigation(ctx, pkg, disp_id, target_key)
+                    return {
+                        "ok": opened,
+                        "action": "focus_existing",
+                        "window_id": win.window_id,
+                        "package": pkg,
+                        **({} if opened else {"error": "notification_target_not_opened"}),
+                    }
+
+        # 3. App is not open: launch virtual display window and navigate directly into message
         session = ctx.window_manager.get_session_by_package(pkg) if ctx.window_manager else None
         if not session:
             await ctx.window_manager.open_window(pkg, auto_start_app=False)
@@ -184,12 +184,16 @@ async def open_notification_target(body: OpenNotificationRequest, ctx: AppContex
             await asyncio.sleep(0.1)
 
         await asyncio.sleep(0.15)
-        await _execute_deep_navigation(ctx, pkg, disp_id, intent_args, target_key, title=title, text=text)
+        opened = await _execute_deep_navigation(ctx, pkg, disp_id, target_key)
 
-        return {"ok": True, "action": "open_window", "package": pkg}
+        return {"ok": opened, "action": "open_window", "package": pkg, **({} if opened else {"error": "notification_target_not_opened"})}
     except Exception as exc:
         log.warning("Handled error opening notification target %s: %s", pkg, exc)
         return {"ok": False, "error": str(exc), "package": pkg}
+    finally:
+        if ctx.window_manager:
+            ctx.window_manager.release_launch_hold(pkg)
+            ctx.window_manager.release_handoff_hold(pkg)
 
 
 class ReplyRequest(BaseModel):

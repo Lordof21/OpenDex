@@ -1,5 +1,10 @@
 package com.opendex.tools;
 
+import android.app.ActivityOptions;
+import android.app.Notification;
+import android.app.PendingIntent;
+import android.service.notification.StatusBarNotification;
+
 import org.json.JSONObject;
 
 import java.lang.reflect.Method;
@@ -7,7 +12,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 
 /**
- * Notification click / action / clear through IStatusBarService + INotificationManager. Runs as a one-shot CLI
+ * Notification click / action / clear through IStatusBarService + INotificationManager, and `launch` (the notification's own
+ * PendingIntent sent onto a chosen display; daemon only — it needs the live listener). Runs as a one-shot CLI
  * (`app_process … NotificationInvoker <args>`, prints one JSON line) or inside the daemon (`notif_invoke <args>` —
  * the same {@link #run} without starting a JVM per click).
  */
@@ -19,6 +25,16 @@ public class NotificationInvoker {
     static JSONObject run(String[] args) {
         if (args.length == 0) {
             return Json.obj("ok", false, "error", "missing_key_arg");
+        }
+
+        if ("launch".equals(args[0])) {
+            // launch <base64 key> <display id>
+            String launchKey = decodeKey(args.length > 1 ? args[1] : "");
+            int displayId = 0;
+            if (args.length > 2) {
+                try { displayId = Integer.parseInt(args[2]); } catch (Throwable ignored) {}
+            }
+            return launchToDisplay(launchKey, displayId);
         }
 
         boolean isClear = "clear".equals(args[0]);
@@ -168,23 +184,30 @@ public class NotificationInvoker {
                 }
             }
 
-            Method onNotificationClick = null;
-            for (Method m : sb.getClass().getMethods()) {
-                if ("onNotificationClick".equals(m.getName())) {
-                    onNotificationClick = m;
-                    break;
-                }
-            }
-
-            if (onNotificationClick != null) {
-                Object nv = obtainVisibility(onNotificationClick.getParameterTypes()[1], key);
-                onNotificationClick.invoke(sb, key, nv);
+            if (clickViaStatusBar(key)) {
                 return Json.obj("ok", true, "action", "onNotificationClick", "key", key);
             }
             return Json.obj("ok", false, "error", "method_not_found");
         } catch (Throwable t) {
             return Json.obj("ok", false, "error", Json.reason(t));
         }
+    }
+
+    static boolean clickViaStatusBar(String key) {
+        try {
+            Object sb = Binders.service("statusbar", "com.android.internal.statusbar.IStatusBarService$Stub");
+            if (sb == null) return false;
+            for (Method m : sb.getClass().getMethods()) {
+                if ("onNotificationClick".equals(m.getName())) {
+                    Object nv = obtainVisibility(m.getParameterTypes()[1], key);
+                    m.invoke(sb, key, nv);
+                    return true;
+                }
+            }
+        } catch (Throwable t) {
+            Log.warn("NotificationInvoker", "clickViaStatusBar failed: " + Json.reason(t));
+        }
+        return false;
     }
 
     /**
@@ -217,6 +240,95 @@ public class NotificationInvoker {
             return builderClass.getMethod("build").invoke(builder);
         } catch (Throwable ignored) {}
         return null;
+    }
+
+    private static String decodeKey(String raw) {
+        if (raw == null || raw.isEmpty()) return "";
+        try {
+            String candidate = new String(Base64.getDecoder().decode(raw), StandardCharsets.UTF_8);
+            if (candidate.contains("|") || candidate.contains(".")) return candidate;
+        } catch (Throwable ignored) {}
+        return raw;
+    }
+
+    /**
+     * Fires the notification's OWN contentIntent onto a given display, as the notification's app. Unlike rebuilding an `am start`
+     * from the intent's text (which drops its extras — the DM thread, the tweet id — and is refused by components that are not
+     * exported), the PendingIntent carries the exact intent and the app's identity, so the app lands on the screen it meant.
+     * The reply says what kind of PendingIntent it was: a broadcast/service one starts its activity itself, on the phone.
+     */
+    static JSONObject launchToDisplay(String key, int displayId) {
+        if (key == null || key.isEmpty()) return Json.obj("ok", false, "error", "missing_key");
+        if (!NotificationEvents.isConnected()) return Json.obj("ok", false, "error", "listener_not_connected", "key", key);
+        StatusBarNotification sbn = NotificationEvents.findNotification(key);
+        if (sbn == null) return Json.obj("ok", false, "error", "notification_not_found", "key", key);
+        Notification n = sbn.getNotification();
+        PendingIntent pi = n == null ? null : n.contentIntent;
+        if (pi == null) return Json.obj("ok", false, "error", "no_content_intent", "package", sbn.getPackageName());
+
+        String kind = "unknown";
+        for (String probe : new String[] {"activity", "broadcast", "service"}) {
+            try {
+                String name = "is" + Character.toUpperCase(probe.charAt(0)) + probe.substring(1);
+                if (Boolean.TRUE.equals(PendingIntent.class.getMethod(name).invoke(pi))) { kind = probe; break; }
+            } catch (Throwable ignored) {}
+        }
+
+        ActivityOptions opts = ActivityOptions.makeBasic();
+        opts.setLaunchDisplayId(displayId);
+        // The sender (this shell process) may start the activity from the background only if it says so with the strongest mode:
+        // ALLOW_ALWAYS (Android 16). MODE_BACKGROUND_ACTIVITY_START_ALLOWED is not enough on 15+ — the platform logs "Background
+        // activity launch blocked" and the PendingIntent starts nothing (found on the POCO X7 Pro: 2 blocks with mode 1, none with 3).
+        int senderMode = 1;
+        try {
+            senderMode = ActivityOptions.class.getField("MODE_BACKGROUND_ACTIVITY_START_ALLOW_ALWAYS").getInt(null);
+        } catch (Throwable ignored) {}
+        try {
+            ActivityOptions.class.getMethod("setPendingIntentBackgroundActivityStartMode", int.class).invoke(opts, senderMode);
+        } catch (Throwable modern) {
+            try {
+                ActivityOptions.class.getMethod("setPendingIntentBackgroundActivityLaunchAllowed", boolean.class).invoke(opts, true);
+            } catch (Throwable ignored) {}
+        }
+        boolean sent = false;
+        String launchMethod = "pending_intent_display";
+        Throwable lastError = null;
+        try {
+            // The notification's own PendingIntent: the app's identity (non-exported targets work) and the intent's own extras.
+            pi.send(null, 0, null, null, null, null, opts.toBundle());
+            sent = true;
+        } catch (Throwable t) {
+            lastError = t;
+            Log.warn("NotificationInvoker", "pi.send with display opts failed: " + Json.reason(t) + ", trying default send");
+            try {
+                pi.send(null, 0, null, null, null, null, null);
+                sent = true;
+                launchMethod = "pending_intent_default";
+            } catch (Throwable t2) {
+                lastError = t2;
+                Log.warn("NotificationInvoker", "pi.send default also failed: " + Json.reason(t2) + ", falling back to statusbar click");
+                if (clickViaStatusBar(key)) {
+                    sent = true;
+                    launchMethod = "statusbar_click";
+                }
+            }
+        }
+
+        if (!sent) {
+            Throwable cause = lastError instanceof java.lang.reflect.InvocationTargetException && lastError.getCause() != null ? lastError.getCause() : lastError;
+            return Json.obj("ok", false, "error", Json.reason(cause), "package", sbn.getPackageName(), "kind", kind);
+        }
+
+        // What a tap does: a notification that cancels itself on tap goes; an ongoing / foreground-service one stays.
+        boolean cleared = false;
+        int flags = n.flags;
+        if ((flags & Notification.FLAG_AUTO_CANCEL) != 0
+                && (flags & (Notification.FLAG_ONGOING_EVENT | Notification.FLAG_FOREGROUND_SERVICE)) == 0) {
+            cancelViaNotificationManager(sbn.getPackageName(), sbn.getTag(), sbn.getId(), NotificationEvents.userId(sbn));
+            cleared = true;
+        }
+        return Json.obj("ok", true, "action", "launch", "package", sbn.getPackageName(), "display", displayId,
+                "kind", kind, "sender_mode", senderMode, "cleared", cleared);
     }
 
     private static Object notificationManager() {

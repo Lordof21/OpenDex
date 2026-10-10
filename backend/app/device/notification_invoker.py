@@ -39,6 +39,21 @@ async def click(adb: Any, serial: str, android_key: str, action_index: int | Non
     return await _run(adb, serial, *args, timeout_s=timeout_s)
 
 
+async def launch(adb: Any, serial: str, android_key: str, display_id: int | str, *, timeout_s: float = 4.0) -> dict[str, Any]:
+    """Fires the notification's OWN PendingIntent onto `display_id` (the notification's app starts the exact screen it meant).
+
+    Needs the daemon's live notification listener: the one-shot CLI has no listener, so without a connected daemon this
+    answers `{"ok": False, "error": "daemon_not_connected"}` instead of guessing. Always a dict: `ok`, and on failure `error`;
+    on success `package`, `display`, `kind` (activity | broadcast | service — a broadcast/service one starts its activity
+    itself, on the phone) and `cleared` (whether the notification cancelled itself, as a tap would).
+    """
+    daemon = daemon_registry.live("notif_invoke")
+    if daemon is None:
+        return {"ok": False, "error": "daemon_not_connected"}
+    resp = await daemon.notif_launch(_encode_key(android_key), int(display_id))
+    return {k: v for k, v in resp.items() if k not in ("type", "req_id")}
+
+
 async def clear(adb: Any, serial: str, android_key: str, package: str, *, timeout_s: float = 5.0) -> str:
     """Removes one notification from the phone's shade (status bar + NotificationManager)."""
     return await _run(adb, serial, "clear", _encode_key(android_key), package or "", timeout_s=timeout_s)

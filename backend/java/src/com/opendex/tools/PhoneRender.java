@@ -28,6 +28,7 @@ final class PhoneRender {
     private static final int QUEUE_CHUNKS = 128;                       // ≈ 2.5 s of 20 ms chunks: a stalled writer drops the oldest
     private static final int BYTES_PER_FRAME = AudioRouter.BYTES_PER_FRAME;
     private static final long PRIME_WAIT_NANOS = 600_000_000L;
+    private static final int START_THRESHOLD_FRAMES = AudioRouter.SAMPLE_RATE / 100;   // 10 ms: the first write starts the track
 
     private static final class Chunk {
         final byte[] data;
@@ -88,6 +89,17 @@ final class PhoneRender {
                     .build();
             if (track.getState() != AudioTrack.STATE_INITIALIZED) {
                 throw new IllegalStateException("AudioTrack not initialized");
+            }
+            // The buffer is deliberately large (it holds the silence that lines the phone up with the PC), and since Android 12
+            // a stream track does not start playing until that many frames are written (start threshold = capacity). The
+            // writer only places what the track's clock says is on time, so with a stalled head it wrote ~120 ms of silence,
+            // judged every later chunk "late" and dropped it: the track never started and the phone stayed silent.
+            if (android.os.Build.VERSION.SDK_INT >= 31) {
+                try {
+                    track.setStartThresholdInFrames(START_THRESHOLD_FRAMES);
+                } catch (Throwable t) {
+                    Log.warn("PhoneRender", "start threshold not set: " + t);
+                }
             }
             track.play();
             PhoneRender render = new PhoneRender(track, targetMs);

@@ -175,16 +175,23 @@ def build(obfuscate=True):
             raise RuntimeError("R8 obfuscation failed")
         print("  -> R8 Obfuscation & Dexing complete.")
     else:
-        print("\n[2/3] Converting to DEX (d8)...")
+        temp_jar = DEX_DIR / "temp_input.jar"
+        with zipfile.ZipFile(temp_jar, "w", zipfile.ZIP_DEFLATED) as zf:
+            for cf in class_files:
+                zf.write(cf, cf.relative_to(BUILD_DIR))
+
         d8_cmd = [
             f'"{d8_bat}"',
             "--output", f'"{DEX_DIR}"',
             "--lib", f'"{android_jar}"',
             "--min-api", "29",
-        ] + [f'"{cf}"' for cf in class_files]
+            f'"{temp_jar}"',
+        ]
 
         d8_cmd_str = " ".join(d8_cmd)
         res = subprocess.run(d8_cmd_str, capture_output=True, text=True, env=env, shell=True)
+        if temp_jar.exists():
+            temp_jar.unlink()
         if res.returncode != 0:
             print("D8 Error stdout:\n", res.stdout)
             print("D8 Error stderr:\n", res.stderr)

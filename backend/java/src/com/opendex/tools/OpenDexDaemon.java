@@ -150,7 +150,7 @@ public class OpenDexDaemon {
 
     private static final List<String> CAPABILITIES = Arrays.asList(
             "ping", "proc_probe", "media_get", "media_action", "media_seek", "get_focus",
-            "set_density", "set_task_density", "set_task_windowing", "get_task_geometry", "move_task", "volumes_get", "volume_set",
+            "set_density", "set_task_density", "set_task_windowing", "get_task_geometry", "move_task", "move_task_to_display", "move_task_wct", "restart_task_activity", "task_density_info", "volumes_get", "volume_set",
             "states_get", "state_set", "battery_get", "battery_health", "display_power", "status",
             "audio_route", "audio_stop", "audio_list", "audio_playout", "audio_probe",
             "task_events", "tasks_list", "display_events",
@@ -1346,13 +1346,8 @@ public class OpenDexDaemon {
     }
 
     private static boolean moveTaskToDisplay(int taskId, int displayId) {
-        Object atm = Binders.activityTaskManager();
-        if (atm != null) {
-            if (invokeVoid(atm, "moveRootTaskToDisplay", new Class[]{int.class, int.class}, taskId, displayId)) {
-                return true;
-            }
-        }
-        return execCommandOk("am display move-stack " + taskId + " " + displayId);
+        JSONObject res = moveTaskWct(taskId, displayId, 0, false, null);
+        return res != null && res.optBoolean("ok", false);
     }
 
     /**
@@ -1523,6 +1518,12 @@ public class OpenDexDaemon {
                     Log.warn("Daemon", "setBounds not found on WCT; leaving bounds to the system");
                 }
             }
+            try {
+                wctClass.getMethod("setFocusable", tokenClass, boolean.class).invoke(wct, token, true);
+            } catch (Throwable ignored) {}
+            try {
+                wctClass.getMethod("reorder", tokenClass, boolean.class).invoke(wct, token, true);
+            } catch (Throwable ignored) {}
             return true;
         });
         if (ok) Log.info("Daemon", "setTaskWindowing: taskId=" + taskId + " mode=" + windowingMode + " clearBounds=" + clearBounds
@@ -1543,15 +1544,196 @@ public class OpenDexDaemon {
         }
     }
 
+    /**
+     * Resolves the target TaskDisplayArea's WindowContainerToken for a given displayId.
+     * Tries multiple AOSP reflection paths:
+     * 1. getAllRootTaskInfosOnDisplay(displayId)
+     * 2. rootTasks(atm) scan for matching displayId -> displayAreaToken
+     * 3. getRootTaskInfoOnDisplay(0, 0, displayId)
+     * 4. getDisplayAreaInfo(displayId)
+     */
+    private static Object findTaskDisplayAreaToken(Object atm, int displayId) {
+        if (atm == null) return null;
+        try {
+            // 1. Try getAllRootTaskInfosOnDisplay if available on atm
+            try {
+                Object list = atm.getClass().getMethod("getAllRootTaskInfosOnDisplay", int.class).invoke(atm, displayId);
+                if (list instanceof List) {
+                    for (Object t : (List<?>) list) {
+                        if (t == null) continue;
+                        Object daToken = extractDisplayAreaToken(t);
+                        if (daToken != null) return daToken;
+                    }
+                }
+            } catch (Throwable ignored) {}
+
+            // 2. Search rootTasks(atm)
+            for (Object t : rootTasks(atm)) {
+                if (t == null) continue;
+                try {
+                    int dId = -1;
+                    try {
+                        dId = t.getClass().getField("displayId").getInt(t);
+                    } catch (Throwable t1) {
+                        try {
+                            dId = (int) t.getClass().getMethod("getDisplayId").invoke(t);
+                        } catch (Throwable ignored) {}
+                    }
+                    if (dId == displayId) {
+                        Object daToken = extractDisplayAreaToken(t);
+                        if (daToken != null) return daToken;
+                    }
+                } catch (Throwable ignored) {}
+            }
+
+            // 3. Try getRootTaskInfoOnDisplay(windowingMode, activityType, displayId)
+            try {
+                Object rootTask = atm.getClass().getMethod("getRootTaskInfoOnDisplay", int.class, int.class, int.class)
+                        .invoke(atm, 0, 0, displayId);
+                if (rootTask != null) {
+                    Object daToken = extractDisplayAreaToken(rootTask);
+                    if (daToken != null) return daToken;
+                }
+            } catch (Throwable ignored) {}
+
+            // 4. Try getDisplayAreaInfo(displayId)
+            try {
+                Object dai = atm.getClass().getMethod("getDisplayAreaInfo", int.class).invoke(atm, displayId);
+                if (dai != null) {
+                    try {
+                        Object tok = dai.getClass().getField("token").get(dai);
+                        if (tok != null) return tok;
+                    } catch (Throwable ignored) {}
+                    try {
+                        Object tok = dai.getClass().getMethod("getToken").invoke(dai);
+                        if (tok != null) return tok;
+                    } catch (Throwable ignored) {}
+                }
+            } catch (Throwable ignored) {}
+        } catch (Throwable ignored) {}
+        return null;
+    }
+
+    private static Object extractDisplayAreaToken(Object taskInfo) {
+        if (taskInfo == null) return null;
+        try {
+            return taskInfo.getClass().getField("displayAreaToken").get(taskInfo);
+        } catch (Throwable ignored) {}
+        try {
+            return taskInfo.getClass().getMethod("getDisplayAreaToken").invoke(taskInfo);
+        } catch (Throwable ignored) {}
+        return null;
+    }
+
+    /**
+     * Pure WindowContainerTransaction (WCT) atomic task movement without silent fallbacks.
+     * Moves task to target display's TaskDisplayArea, applies windowingMode, bounds, and focus
+     * in a single VSYNC transaction.
+     */
+    private static JSONObject moveTaskWct(int taskId, int targetDisplayId, int windowingMode, boolean clearBounds, Rect place) {
+        JSONObject res = Json.obj("type", "move_task_wct_result", "task_id", taskId, "display_id", targetDisplayId);
+        if (taskId <= 0) {
+            return Json.put(Json.put(res, "ok", false), "error", "bad_task_id");
+        }
+
+        Object atm = Binders.activityTaskManager();
+        if (atm == null) {
+            return Json.put(Json.put(res, "ok", false), "error", "atm_null");
+        }
+
+        Object taskToken = findTaskToken(atm, taskId);
+        if (taskToken == null) {
+            Log.warn("Daemon", "[WCT_PURE] WindowContainerToken not found for taskId=" + taskId);
+            return Json.put(Json.put(res, "ok", false), "error", "task_token_null");
+        }
+
+        Object targetTdaToken = findTaskDisplayAreaToken(atm, targetDisplayId);
+        // Tier 1: Full Atomic WCT Reparent + Bounds + Mode + Density Reset
+        if (taskToken != null && targetTdaToken != null) {
+            try {
+                Class<?> wctClass = Class.forName("android.window.WindowContainerTransaction");
+                Class<?> tokenClass = Class.forName("android.window.WindowContainerToken");
+                Object wct = wctClass.getDeclaredConstructor().newInstance();
+
+                // 1. Reparent to target display area
+                try {
+                    wctClass.getMethod("reparent", tokenClass, tokenClass, boolean.class)
+                            .invoke(wct, taskToken, targetTdaToken, true);
+                } catch (Throwable t) {
+                    Log.warn("Daemon", "wct.reparent reflection failed: " + t);
+                }
+
+                // 2. Set windowing mode if specified (1=fullscreen, 5=freeform)
+                if (windowingMode > 0) {
+                    try {
+                        wctClass.getMethod("setWindowingMode", tokenClass, int.class)
+                                .invoke(wct, taskToken, windowingMode);
+                    } catch (Throwable ignored) {}
+                }
+
+                // 3. Set bounds if specified
+                if (clearBounds || place != null) {
+                    try {
+                        wctClass.getMethod("setBounds", tokenClass, Rect.class)
+                                .invoke(wct, taskToken, place != null ? place : new Rect());
+                    } catch (Throwable ignored) {}
+                }
+
+                // 4. Reset per-task density override to 0 so the task inherits the target display's native density
+                try {
+                    wctClass.getMethod("setDensityDpi", tokenClass, int.class)
+                            .invoke(wct, taskToken, 0);
+                } catch (Throwable ignored) {}
+
+                // 5. Focus & Reorder on top
+                try {
+                    wctClass.getMethod("setFocusable", tokenClass, boolean.class).invoke(wct, taskToken, true);
+                } catch (Throwable ignored) {}
+                try {
+                    wctClass.getMethod("reorder", tokenClass, boolean.class).invoke(wct, taskToken, true);
+                } catch (Throwable ignored) {}
+
+                // Apply transaction
+                Object woc = invokeReturn(atm, "getWindowOrganizerController", new Class[0]);
+                if (woc != null) {
+                    woc.getClass().getMethod("applyTransaction", wctClass).invoke(woc, wct);
+                    Log.info("Daemon", "⚡ [WCT:TIER1_ATOMIC_SUCCESS] taskId=" + taskId + " -> display=" + targetDisplayId
+                            + " mode=" + windowingMode + (place != null ? " bounds=" + place.toShortString() : ""));
+                    return Json.put(Json.put(res, "ok", true), "tier", "wct_atomic");
+                }
+            } catch (Throwable t) {
+                Log.warn("Daemon", "Tier 1 WCT move failed for taskId=" + taskId + ": " + t + "; falling back to Tier 2 (Plan B)");
+            }
+        }
+
+        // Tier 2 (Plan B): ATM Binder moveRootTaskToDisplay + atomic WCT Windowing + Density Reset
+        boolean moveOk = invokeVoid(atm, "moveRootTaskToDisplay", new Class[]{int.class, int.class}, taskId, targetDisplayId);
+        if (!moveOk) {
+            moveOk = execCommandOk("am display move-stack " + taskId + " " + targetDisplayId);
+        }
+
+        if (moveOk) {
+            if (windowingMode > 0 || clearBounds || place != null) {
+                setTaskWindowing(taskId, windowingMode > 0 ? windowingMode : 1, clearBounds, place);
+            }
+            setTaskDensity(taskId, 0); // Reset density override on target display
+        }
+
+        Log.info("Daemon", "⚡ [WCT:TIER2_BINDER_SUCCESS] taskId=" + taskId + " -> display=" + targetDisplayId
+                + " ok=" + moveOk + " mode=" + windowingMode);
+        return Json.put(Json.put(res, "ok", moveOk), "tier", "atm_binder");
+    }
+
     private static boolean setTaskDensity(int taskId, int density) {
         boolean ok = applyTaskTransaction(taskId, "setTaskDensity", (wct, token, wctClass, tokenClass) -> {
+            boolean applied = false;
             try {
                 wctClass.getMethod("setDensityDpi", tokenClass, int.class).invoke(wct, token, density);
-                return true;
+                applied = true;
             } catch (NoSuchMethodException nsme) {
                 Log.warn("Daemon", "setDensityDpi not found on WCT (per-task density needs Android 12+); not applied");
-                return false;
             }
+            return applied;
         });
         if (ok) Log.info("Daemon", "setTaskDensity: Applied density=" + density + " to taskId=" + taskId);
         return ok;
@@ -2009,9 +2191,32 @@ public class OpenDexDaemon {
                     }
                     return getTaskGeometry(taskId);
                 }
+                case "move_task_wct": {
+                    int taskId = -1;
+                    int displayId = 0;
+                    int mode = 0;
+                    String boundsArg = "false";
+                    try {
+                        if (parts.length > 1) taskId = Integer.parseInt(parts[1]);
+                        if (parts.length > 2) displayId = Integer.parseInt(parts[2]);
+                        if (parts.length > 3) mode = Integer.parseInt(parts[3]);
+                        if (parts.length > 4) boundsArg = parts[4];
+                    } catch (Throwable ignored) {}
+                    Rect place = parseRect(boundsArg);
+                    boolean clearBounds = place == null && "true".equalsIgnoreCase(boundsArg);
+                    return moveTaskWct(taskId, displayId, mode, clearBounds, place);
+                }
+                case "move_task_to_display":
                 case "move_task": {
-                    int taskId = parts.length > 1 ? Integer.parseInt(parts[1]) : -1;
-                    int displayId = parts.length > 2 ? Integer.parseInt(parts[2]) : 0;
+                    int taskId = -1;
+                    int displayId = 0;
+                    try {
+                        if (parts.length > 1) taskId = Integer.parseInt(parts[1]);
+                        if (parts.length > 2) displayId = Integer.parseInt(parts[2]);
+                    } catch (Throwable ignored) {}
+                    if (taskId <= 0) {
+                        return res.put("type", "move_task_result").put("ok", false).put("error", "bad_args");
+                    }
                     boolean ok = moveTaskToDisplay(taskId, displayId);
                     return res.put("type", "move_task_result").put("ok", ok).put("task_id", taskId).put("display_id", displayId);
                 }

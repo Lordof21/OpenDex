@@ -32,7 +32,6 @@ def supervisor(monkeypatch):
     events.emit = AsyncMock()
     sup = NotificationSupervisor(adb, events)
     sup._serial = "SER"
-    monkeypatch.setattr(sup, "resolve_notification_intent", AsyncMock(return_value=None))
     return sup
 
 

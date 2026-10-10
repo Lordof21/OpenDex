@@ -219,7 +219,33 @@ final class NotificationEvents extends NotificationListenerService {
         return item;
     }
 
-    private static int userId(StatusBarNotification sbn) {
+    /**
+     * The live notification with this key (its real contentIntent included), or null: the listener is not connected, or the
+     * notification is already gone. Asks the framework for just that key instead of walking the whole shade.
+     */
+    static StatusBarNotification findNotification(String key) {
+        NotificationEvents listener = instance;
+        if (key == null || key.isEmpty() || listener == null || !connected) return null;
+        try {
+            StatusBarNotification[] hit = listener.getActiveNotifications(new String[] {key});
+            if (hit != null) {
+                for (StatusBarNotification sbn : hit) {
+                    if (sbn != null && key.equals(sbn.getKey())) return sbn;
+                }
+            }
+            StatusBarNotification[] all = listener.getActiveNotifications();
+            if (all != null) {
+                for (StatusBarNotification sbn : all) {
+                    if (sbn != null && (key.equals(sbn.getKey()) || (sbn.getKey() != null && sbn.getKey().contains(key)))) {
+                        return sbn;
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+        return null;
+    }
+
+    static int userId(StatusBarNotification sbn) {
         try {
             return (Integer) StatusBarNotification.class.getMethod("getUserId").invoke(sbn);
         } catch (Throwable t) {
