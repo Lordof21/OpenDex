@@ -359,6 +359,54 @@ async def bring_to_front(
     )
 
 
+_is_miui_cache: dict[str, bool] = {}
+
+
+async def is_miui_or_hyperos(adb: Any, serial: str) -> bool:
+    """True if the target device runs Xiaomi MIUI or HyperOS."""
+    if serial in _is_miui_cache:
+        return _is_miui_cache[serial]
+    try:
+        out = await adb.shell("getprop ro.mi.os.version.name", serial=serial, timeout_s=1.0)
+        if not (out and out.strip()):
+            out = await adb.shell("getprop ro.miui.ui.version.name", serial=serial, timeout_s=1.0)
+        is_mi = bool(out and out.strip())
+    except Exception:
+        is_mi = False
+    _is_miui_cache[serial] = is_mi
+    return is_mi
+
+
+async def unlock_display0_gesture_navigation(
+    adb: Any,
+    serial: str,
+    package: str,
+    *,
+    timeout_s: float = 2.0,
+) -> None:
+    """HyperOS / MIUI üzerinde kenar geri jestlerini (GestureStubLeft/Right) dokunuşa açar.
+
+    Kök Neden (bkz. HANDOFF_GERI_JESTI_KOK_NEDEN.md):
+    HyperOS RecentsImpl (com.miui.home / com.mi.android.globallauncher), kenar geri jestlerini
+    (GestureStubView) yalnızca Display 0 üzerinde gerçek bir ön plan değişimi (onForegroundChanged)
+    aldığında 'setBackTouchable(true)' ve 'showGestureStub' yaparak açar.
+    Görevin sanal ekrandan WCT ile Display 0'a doğrudan taşınması ATMS tarafında yeni bir
+    ön-plan geçişi üretmediği için jestler Home önde durumunda (view_touch_disabled) kilitli kalır.
+
+    Bu fonksiyon Display 0 üzerinde Home -> Hedef Paket geçişi yaşatarak ATMS'in gerçek bir
+    onForegroundChanged üretmesini ve GestureStubView'in anında açılmasını sağlar.
+    Hiçbir dokunma enjeksiyonu veya zararlı yayın yapmaz; süreç, DOM durumu ve scroll %100 korunur.
+    """
+    with contextlib.suppress(Exception):
+        await adb.shell(
+            f"am start --display 0 -a android.intent.action.MAIN -c android.intent.category.HOME; "
+            f"sleep 0.15; "
+            f"am start --display 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p {package} -f 0x10000000",
+            serial=serial,
+            timeout_s=timeout_s,
+        )
+
+
 async def sync_display0_focus(
     adb: Any,
     serial: str,
@@ -366,28 +414,13 @@ async def sync_display0_focus(
     coords: tuple[int, int] | None = None,
     package: str | None = None,
 ) -> None:
-    """Telefona aktarılan görevin Display 0 üzerinde tam dokunma/klavye/hareket odağını (Gesture Navigation)
-    kesinleştirmesini sağlar ve hayalet dialog/klavye katmanlarını sıfırlar.
-    Not: Geçmişte denenen keyevent 111 (ESC) Android uygulamalarında onBackPressed tetikleyip
-    durum sıfırlanmasına ve Galeri gibi uygulamalarda geri atlamaya yol açtığı için kaldırılmıştır.
-    Bunun yerine Display 0 dokunma kanalına (InputDispatcher) tarafsız bir motionevent (DOWN + anında CANCEL)
-    gönderilerek Android'in odak yöneticisi (WindowManager & GestureStub) doğrudan Display 0'a kilitlenir;
-    CANCEL sayesinde hiçbir tıklama, buton veya sayfa bağlantısı tetiklenmez.
+    """Telefona aktarılan görevin Display 0 üzerinde odak senkronizasyonu.
+
+    Geçmişte denenen dokunma enjeksiyonları (motionevent DOWN/CANCEL) ve CLOSE_SYSTEM_DIALOGS
+    yayını gerçek dokunma gibi algılanıp MIUI kenar çubuğunu ve jest izleyicilerini bozduğu
+    ve hatayı çözmediği için tamamen kaldırılmıştır (bkz. HANDOFF_GERI_JESTI_KOK_NEDEN.md).
     """
-    with contextlib.suppress(Exception):
-        x, y = coords if coords else (500, 1000)
-        await adb.shell(
-            f"input -d 0 motionevent DOWN {x} {y} && input -d 0 motionevent CANCEL {x} {y}",
-            serial=serial,
-            timeout_s=1.0,
-        )
-        await adb.shell("am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS", serial=serial, timeout_s=1.0)
-        if package:
-            await adb.shell(
-                f"am start --display 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p {package} -f 0x10000000",
-                serial=serial,
-                timeout_s=1.0,
-            )
+    pass
 
 
 async def wake_and_unlock(adb: Any, serial: str) -> None:

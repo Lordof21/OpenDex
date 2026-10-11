@@ -517,20 +517,23 @@ class HandoffManager:
                     )
             session.state.handoff_to_phone = True
 
-            # 2. Android'in tam ekran yığınına oturmasını sağla (Focus & Visible on Display 0)
+            # 2. Android'in tam ekran yığınına oturmasını sağla & HyperOS Jest Kilidini Çöz
             try:
-                out_start = await android_shell.bring_to_front(
-                    self._adb, serial, pkg, "0", reorder_only=bool(task_id),
-                )
-                log.info("🎯 [HANDOFF] am start --display 0 tamamlandı: '%s'", out_start.strip() if out_start else "OK")
+                if await android_shell.is_miui_or_hyperos(self._adb, serial):
+                    await android_shell.unlock_display0_gesture_navigation(self._adb, serial, pkg)
+                    log.info("🧭 [HANDOFF: HYPEROS JEST KİLİDİ] onForegroundChanged tetiklendi, GestureStub açıldı (%s)", pkg)
+                else:
+                    out_start = await android_shell.bring_to_front(
+                        self._adb, serial, pkg, "0", reorder_only=bool(task_id),
+                    )
+                    log.info("🎯 [HANDOFF] am start --display 0 tamamlandı: '%s'", out_start.strip() if out_start else "OK")
             except Exception as exc:
                 log.warning("⚠️ [HANDOFF] am start --display 0 uyarısı: %s", exc)
 
-            # 2b. Display 0 Odak Senkronizasyonu & Hayalet Klavye/IME Katmanını Sıfırlama
+            # 2b. Display 0 Odak Senkronizasyonu (zararlı dokunuş/yayınlar kaldırıldı)
             focus_coords = (phone_size[0] // 2, phone_size[1] // 2) if phone_size and len(phone_size) == 2 else None
             try:
                 await android_shell.sync_display0_focus(self._adb, serial, coords=focus_coords, package=pkg)
-                log.info("🧭 [HANDOFF: ODAK SENKRONU] Display 0 dokunma ve jest odağı kilitlendi (IME sıfırlandı)")
             except Exception as exc:
                 log.debug("Display 0 focus sync atlandı: %s", exc)
 
@@ -553,9 +556,6 @@ class HandoffManager:
                         "✨ [HANDOFF: CANLI DÜRTME] %s web sitesi layout'u CDP ile canlı tazelendi — süreç ve sekmeler korundu",
                         pkg,
                     )
-                # CDP sonrası Display 0 dokunma ve jest odağını nihai olarak mühürle
-                with contextlib.suppress(Exception):
-                    await android_shell.sync_display0_focus(self._adb, serial, coords=focus_coords, package=pkg)
                 if not cdp_ok:
                     # CDP dürtmesi yanıt vermezse ve ön-iniş yapılmadıysa güvenli geri çekilme (restart fallback)
                     if not prelanded and task_id and self._daemon_client_getter:

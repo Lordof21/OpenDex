@@ -84,22 +84,29 @@ def test_bring_to_front_command():
     )
 
 
-async def test_sync_display0_focus():
+async def test_sync_display0_focus_is_harmless_noop():
     adb = _Adb("")
     await android_shell.sync_display0_focus(adb, "S")
-    assert adb.calls == [
-        "input -d 0 motionevent DOWN 500 1000 && input -d 0 motionevent CANCEL 500 1000",
-        "am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS",
-    ]
-
-
-async def test_sync_display0_focus_with_coords_and_package():
-    adb = _Adb("")
     await android_shell.sync_display0_focus(adb, "S", coords=(610, 1356), package="com.android.chrome")
+    # Zararlı motionevent DOWN/CANCEL ve CLOSE_SYSTEM_DIALOGS kaldırıldığı için hiçbir ADB çağrısı yapmaz
+    assert adb.calls == []
+
+
+async def test_is_miui_or_hyperos():
+    adb_hyperos = _Adb("OS3.0\n")
+    assert await android_shell.is_miui_or_hyperos(adb_hyperos, "SER_HYPER") is True
+
+    adb_aosp = _Adb("\n")
+    assert await android_shell.is_miui_or_hyperos(adb_aosp, "SER_AOSP") is False
+
+
+async def test_unlock_display0_gesture_navigation():
+    adb = _Adb("")
+    await android_shell.unlock_display0_gesture_navigation(adb, "SER", "com.android.chrome")
     assert adb.calls == [
-        "input -d 0 motionevent DOWN 610 1356 && input -d 0 motionevent CANCEL 610 1356",
-        "am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS",
-        "am start --display 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p com.android.chrome -f 0x10000000",
+        "am start --display 0 -a android.intent.action.MAIN -c android.intent.category.HOME; "
+        "sleep 0.15; "
+        "am start --display 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p com.android.chrome -f 0x10000000"
     ]
 
 
