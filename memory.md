@@ -56,8 +56,10 @@
   - Chromium Blink bakes a `1.2000x` accessibility zoom factor into `visualViewport.zoom` on tablet/DeX viewports.
   - When transitioning to a phone screen (width <= 480dp), `_build_nudge_script` dynamically neutralizes this stale factor (`normZoom = 3.20625 / window.devicePixelRatio ≈ 0.833333`), returning computed font sizes and element widths to exact 1:1 physical dimensions (380.5 dp, 51.3 physical px for 16px font) with 0.0000px origin drift.
 - **Display 0 Gesture Navigation & Touch Focus Synchronization:**
-  - When transferring tasks from virtual displays (`FLAG_OWN_FOCUS`), Android's `InputDispatcher` and Xiaomi MIUI/HyperOS `GestureStub` retain focus on the previous display ID.
-  - `sync_display0_focus` dispatches `input -d 0 keyevent 0` (targeting Display 0 input channel) and `am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS` to dismiss ghost overlays/IME layers without sending destructive keys (such as ESC/back), unlocking edge swipe gestures immediately.
+  - When transferring tasks from virtual displays (`FLAG_OWN_FOCUS`), Android's `InputDispatcher` and Xiaomi MIUI/HyperOS `GestureStub` retain top display focus on the previous virtual display ID where focus evaluates to `null`, causing edge swipe back gestures (`GestureStubRight` / `GestureStubLeft`) to be dropped into the void.
+  - `sync_display0_focus` dispatches a hardware-channel neutral `motionevent DOWN` + `CANCEL` on Display 0 (`input -d 0 motionevent DOWN {x} {y} && input -d 0 motionevent CANCEL {x} {y}`), immediately binding `InputDispatcher.mFocusedDisplayId = 0` and window manager focus to the foreground app without firing any click, button, or link action.
+  - Dismisses stale active input focus (`document.activeElement.blur()`) to release soft keyboard (IME) ghost layers, broadcasts `CLOSE_SYSTEM_DIALOGS`, and re-affirms package top-resumed status (`am start -f 0x10000000`).
+  - Executed in multiple phases (both before and after CDP layout refresh), permanently unlocking the kaydırmalı geri tuşu (edge back swipe) on the initial screen immediately upon landing.
 - **Bidirectional Symmetry (DeX ⟷ Phone):**
   - Identical subpixel coordinate preservation (0.0000px drift) and instant scale locking are enforced symmetrically across both Handoff (DeX ➔ Phone) and Reclaim (Phone ➔ DeX).
 

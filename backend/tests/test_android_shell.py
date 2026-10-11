@@ -88,8 +88,18 @@ async def test_sync_display0_focus():
     adb = _Adb("")
     await android_shell.sync_display0_focus(adb, "S")
     assert adb.calls == [
-        "input -d 0 keyevent 0",
+        "input -d 0 motionevent DOWN 500 1000 && input -d 0 motionevent CANCEL 500 1000",
         "am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS",
+    ]
+
+
+async def test_sync_display0_focus_with_coords_and_package():
+    adb = _Adb("")
+    await android_shell.sync_display0_focus(adb, "S", coords=(610, 1356), package="com.android.chrome")
+    assert adb.calls == [
+        "input -d 0 motionevent DOWN 610 1356 && input -d 0 motionevent CANCEL 610 1356",
+        "am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS",
+        "am start --display 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p com.android.chrome -f 0x10000000",
     ]
 
 

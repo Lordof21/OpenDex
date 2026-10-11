@@ -359,15 +359,35 @@ async def bring_to_front(
     )
 
 
-async def sync_display0_focus(adb: Any, serial: str) -> None:
+async def sync_display0_focus(
+    adb: Any,
+    serial: str,
+    *,
+    coords: tuple[int, int] | None = None,
+    package: str | None = None,
+) -> None:
     """Telefona aktarılan görevin Display 0 üzerinde tam dokunma/klavye/hareket odağını (Gesture Navigation)
     kesinleştirmesini sağlar ve hayalet dialog/klavye katmanlarını sıfırlar.
     Not: Geçmişte denenen keyevent 111 (ESC) Android uygulamalarında onBackPressed tetikleyip
     durum sıfırlanmasına ve Galeri gibi uygulamalarda geri atlamaya yol açtığı için kaldırılmıştır.
+    Bunun yerine Display 0 dokunma kanalına (InputDispatcher) tarafsız bir motionevent (DOWN + anında CANCEL)
+    gönderilerek Android'in odak yöneticisi (WindowManager & GestureStub) doğrudan Display 0'a kilitlenir;
+    CANCEL sayesinde hiçbir tıklama, buton veya sayfa bağlantısı tetiklenmez.
     """
     with contextlib.suppress(Exception):
-        await adb.shell("input -d 0 keyevent 0", serial=serial, timeout_s=1.0)
+        x, y = coords if coords else (500, 1000)
+        await adb.shell(
+            f"input -d 0 motionevent DOWN {x} {y} && input -d 0 motionevent CANCEL {x} {y}",
+            serial=serial,
+            timeout_s=1.0,
+        )
         await adb.shell("am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS", serial=serial, timeout_s=1.0)
+        if package:
+            await adb.shell(
+                f"am start --display 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p {package} -f 0x10000000",
+                serial=serial,
+                timeout_s=1.0,
+            )
 
 
 async def wake_and_unlock(adb: Any, serial: str) -> None:

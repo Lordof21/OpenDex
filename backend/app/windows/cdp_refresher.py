@@ -117,6 +117,11 @@ def _build_nudge_script(saved_scroll: dict[str, Any] | None) -> str:
             body.style.webkitTextSizeAdjust = '100%';
         }}
 
+        // 1b. Dismiss stale active input focus to release soft keyboard (IME) ghost layers
+        if (document.activeElement && document.activeElement !== document.body && typeof document.activeElement.blur === 'function') {{
+            try {{ document.activeElement.blur(); }} catch (e) {{}}
+        }}
+
         // 2. Re-anchor strictly to document origin (0, 0) if at top, or exact reading anchor
         const lockScroll = () => {{
             if (isTop) {{
@@ -366,6 +371,10 @@ async def refresh_browser_layout_inplace(
                 # Connect via WebSocket to the active visible tab
                 remaining = max(0.5, deadline - loop.time())
                 async with websockets.connect(ws_url, close_timeout=0.4) as ws:
+                    # 0. Ensure foreground page tab activation in Blink
+                    with contextlib.suppress(Exception):
+                        await _send_cdp(ws, "Page.bringToFront", req_id=85, timeout_s=0.2)
+
                     # 1. Instantly enforce scale factor 1.0 and reset page scale (clears 1.55x zoom immediately)
                     with contextlib.suppress(Exception):
                         await _send_cdp(ws, "Emulation.setPageScaleFactor", {"pageScaleFactor": 1.0}, req_id=86, timeout_s=0.2)
