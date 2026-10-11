@@ -188,36 +188,6 @@ async def _send_cdp(
     return None
 
 
-async def _reload_page_ignoring_cache(
-    ws: Any,
-    *,
-    timeout_s: float = 1.5,
-) -> bool:
-    """Clears browser cache and reloads page ignoring HTTP/memory cache."""
-    # 1. Clear browser cache in Blink
-    await _send_cdp(ws, "Network.clearBrowserCache", req_id=90, timeout_s=0.4)
-    # 2. Enable Page domain to observe load events
-    await _send_cdp(ws, "Page.enable", req_id=91, timeout_s=0.4)
-    # 3. Request reload bypassing cache
-    reload_id = 92
-    await ws.send(json.dumps({"id": reload_id, "method": "Page.reload", "params": {"ignoreCache": True}}))
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout_s
-    reloaded = False
-    while loop.time() < deadline:
-        try:
-            remaining = max(0.05, deadline - loop.time())
-            raw = await asyncio.wait_for(ws.recv(), timeout=remaining)
-            msg = json.loads(raw)
-            method = msg.get("method", "")
-            if method in ("Page.loadEventFired", "Page.domContentEventFired", "Page.frameStoppedLoading"):
-                reloaded = True
-                break
-            if msg.get("id") == reload_id:
-                reloaded = True
-        except (asyncio.TimeoutError, Exception):
-            break
-    return reloaded
 
 
 async def _find_active_page_target(port: int, valid_pages: list[dict[str, Any]], timeout_s: float = 0.5) -> dict[str, Any]:
@@ -401,9 +371,6 @@ async def refresh_browser_layout_inplace(
                         await _send_cdp(ws, "Emulation.setPageScaleFactor", {"pageScaleFactor": 1.0}, req_id=86, timeout_s=0.2)
                         await _send_cdp(ws, "Emulation.resetPageScaleFactor", req_id=87, timeout_s=0.2)
 
-                    # 2. Clear browser HTTP & memory cache to flush stale assets
-                    with contextlib.suppress(Exception):
-                        await _send_cdp(ws, "Network.clearBrowserCache", req_id=90, timeout_s=0.2)
 
                     # 3. Evaluate multi-phase layout reflow & scroll anchor script
                     with contextlib.suppress(Exception):

@@ -278,7 +278,7 @@ async def test_refresh_browser_layout_inplace_command_sequence():
     active_methods = [m.get("method") for m in active_ws.sent_messages]
     assert "Emulation.setPageScaleFactor" in active_methods
     assert "Emulation.resetPageScaleFactor" in active_methods
-    assert "Network.clearBrowserCache" in active_methods
+    assert "Network.clearBrowserCache" not in active_methods  # Cache and images must be preserved!
     assert "Runtime.evaluate" in active_methods
 
     # Inspect background tab also got scale lock

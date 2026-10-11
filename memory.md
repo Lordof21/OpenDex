@@ -48,8 +48,7 @@
   - Active tab resolution queries `document.visibilityState === 'visible'` (and `document.hasFocus()`) across all open targets to dynamically lock onto the foreground visible tab.
 - **Instant Scale Lock (1.0x) & Non-Destructive Cache Busting:**
   - Destructive network page reloads (`Page.reload`) cause execution context destruction, white-screen flashes, and post-load Blink compositor zoom re-invalidation (1.55x zoom oscillation).
-  - Scale factor 1.0 is enforced instantly via CDP `Emulation.setPageScaleFactor(1.0)` and `Emulation.resetPageScaleFactor`.
-  - HTTP and memory caches are flushed cleanly via `Network.clearBrowserCache` without tearing down the live DOM or disrupting audio/video playback.
+  - HTTP disk and image caches are strictly PRESERVED (Network.clearBrowserCache was eliminated): layout reflow is performed purely in-memory via Blink StyleEngine/DOM, preventing images (webtoons/manga) from being re-downloaded over the cellular/wifi network.
 - **Multi-Phase Transition Stabilizer across Android Config Settle Window:**
   - Android activity movement and `onConfigurationChanged` asynchronous lifecycle settle over a 100-300ms window.
   - `_build_nudge_script` executes a continuous multi-phase stabilizer (`0ms`, `80ms`, `250ms`, `600ms`) with `overflowAnchor: 'none'`, strictly maintaining `scale = 1.0` and exact subpixel scroll coordinates without allowing Blink to revert to tablet zoom.
