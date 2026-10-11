@@ -452,6 +452,8 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
     canvasRef,
     touchRef,
     backTargetId: win.id,
+    deviceH: win.deviceH,
+    deviceW: win.deviceW,
     shouldSkip: () => isEditingKeymap,
     getDeviceCoords: (e, canvas, rect) => {
       const cw = canvas.width || win.deviceW;

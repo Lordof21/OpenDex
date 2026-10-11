@@ -90,6 +90,28 @@ export function computeScrollFromWheelDelta(accumulatedDeltaX, accumulatedDeltaY
   return { hscroll, vscroll };
 }
 
+/**
+ * Height-adaptive scroll divisor.
+ *
+ * Scales unitsPerTick dynamically based on display pixel height and viewport
+ * height across phone, tablet, and DeX dimensions.
+ *
+ * Taller phone screens / smaller viewports get appropriately damped, controlled
+ * scroll steps that prevent sudden page jumps ("fazla atlayışlar"), while
+ * widescreen DeX / tablet displays remain snappy and responsive.
+ */
+export function computeAdaptiveUnitsPerTick(deviceH, viewportH) {
+  const h = Number(deviceH) || (viewportH ? Number(viewportH) * (typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1) : 1080);
+  const vh = Number(viewportH) || 720;
+
+  const baseUnits = 700;
+  // Damped scaling based on display pixel height (phone 2400+, tablet 1600+, DeX 1080)
+  const heightRatio = Math.max(0.6, Math.min(2.5, h / 1080));
+  const viewportRatio = Math.max(0.65, Math.min(1.6, vh / 720));
+
+  return Math.round(baseUnits * Math.sqrt(heightRatio) * (1 / Math.sqrt(viewportRatio)));
+}
+
 /** One persistent input channel per open window (mirrors WindowVideoDecoder's
  * per-window WebSocket lifecycle). Messages are dropped silently while the
  * socket isn't open (window frozen/closing) — matching the old REST path's
@@ -152,16 +174,22 @@ export class WindowTouchSocket {
     }
   }
 
-  down(x, y) {
-    this._send({ type: 'down', x, y });
+  down(x, y, pointerId = 0) {
+    const payload = { type: 'down', x, y };
+    if (pointerId) payload.pointer_id = pointerId;
+    this._send(payload);
   }
 
-  move(x, y) {
-    this._send({ type: 'move', x, y });
+  move(x, y, pointerId = 0) {
+    const payload = { type: 'move', x, y };
+    if (pointerId) payload.pointer_id = pointerId;
+    this._send(payload);
   }
 
-  up(x, y) {
-    this._send({ type: 'up', x, y });
+  up(x, y, pointerId = 0) {
+    const payload = { type: 'up', x, y };
+    if (pointerId) payload.pointer_id = pointerId;
+    this._send(payload);
   }
 
   scroll(x, y, hscroll, vscroll) {

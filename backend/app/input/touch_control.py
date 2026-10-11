@@ -19,12 +19,31 @@ from typing import Protocol
 _TYPE_INJECT_TOUCH_EVENT = 2
 _TYPE_INJECT_SCROLL_EVENT = 3
 _POINTER_ID_VIRTUAL_FINGER = 0xFFFFFFFFFFFFFFFE
+_POINTER_ID_SECONDARY_FINGER = 0xFFFFFFFFFFFFFFFD
 _PRESSURE_FULL = 0xFFFF
 
 # Android's own gesture detector recognizes long-press by DURATION — there is no
 # special "long press" message type.
 DEFAULT_LONG_PRESS_MS = 500
 DEFAULT_DRAG_STEP_MS = 16  # ~60Hz move cadence
+
+
+def resolve_pointer_id(raw_id: int | None = None) -> int:
+    """Map a pointer index (0, 1) or raw 64-bit ID to scrcpy's pointerId.
+
+    scrcpy v3 protocol uses a u64 pointerId. We reserve:
+      0 / None -> _POINTER_ID_VIRTUAL_FINGER (0xFFFFFFFFFFFFFFFE)
+      1        -> _POINTER_ID_SECONDARY_FINGER (0xFFFFFFFFFFFFFFFD)
+      n (<100) -> (_POINTER_ID_VIRTUAL_FINGER - n) & 0xFFFFFFFFFFFFFFFF
+      direct   -> raw_id & 0xFFFFFFFFFFFFFFFF
+    """
+    if raw_id is None or raw_id == 0:
+        return _POINTER_ID_VIRTUAL_FINGER
+    if raw_id == 1:
+        return _POINTER_ID_SECONDARY_FINGER
+    if 0 <= raw_id < 100:
+        return (_POINTER_ID_VIRTUAL_FINGER - raw_id) & 0xFFFFFFFFFFFFFFFF
+    return raw_id & 0xFFFFFFFFFFFFFFFF
 
 
 class TouchAction(IntEnum):
@@ -45,6 +64,7 @@ def serialize_touch(
     screen_h: int,
     *,
     pressure: int = _PRESSURE_FULL,
+    pointer_id: int | None = None,
 ) -> bytes:
     if not (0 <= x <= screen_w and 0 <= y <= screen_h):
         raise ValueError(f"({x},{y}) outside screen {screen_w}x{screen_h}")
@@ -55,11 +75,12 @@ def serialize_touch(
     # inconsistent with SOURCE_TOUCHSCREEN — some views/gesture detectors then
     # silently swallow the event (matches the "screen renders, zero input
     # reacts" symptom exactly).
+    resolved_pointer_id = resolve_pointer_id(pointer_id)
     return struct.pack(
         "!BBQiiHHHii",
         _TYPE_INJECT_TOUCH_EVENT,
         action,
-        _POINTER_ID_VIRTUAL_FINGER,
+        resolved_pointer_id,
         x,
         y,
         screen_w,
@@ -109,62 +130,106 @@ async def inject_touch(
     action: TouchAction,
     screen_w: int,
     screen_h: int,
+    *,
+    pointer_id: int | None = None,
 ) -> None:
-    await control.send(serialize_touch(action, x, y, screen_w, screen_h))
+    await control.send(serialize_touch(action, x, y, screen_w, screen_h, pointer_id=pointer_id))
 
 
 class TouchTracker:
-    """The finger one input connection currently holds down on the phone.
+    """The fingers one input connection currently holds down on the phone.
 
     Android keeps a pointer pressed until it is told otherwise. When the browser tab loses focus, the page is closed
     or the socket drops between a DOWN and its UP, nothing ever sends that UP — the phone sees a finger resting on the
     glass for ever (a game character keeps walking, a list keeps being dragged). The connection therefore records what
     it pressed and lifts it itself when it ends or is told to (`release_all`).
 
+    Supports multi-touch: tracks all active pointer IDs and ensures all of them are cleanly lifted on release.
+
     A press is only recorded after it was actually delivered, and it is remembered together with the control it went
     to: a window that was frozen and rebuilt has a new control, on which the old press does not exist, so a late
     release must not inject a stray UP into it.
     """
 
-    __slots__ = ("_control", "_pos")
+    __slots__ = ("_control", "_pointers")
 
     def __init__(self) -> None:
         self._control: ControlWriter | None = None
-        self._pos: tuple[int, int] | None = None
+        self._pointers: dict[int, tuple[int, int]] = {}
 
     @property
     def pressed(self) -> bool:
-        return self._pos is not None
+        return bool(self._pointers)
 
-    def note(self, control: ControlWriter, action: TouchAction, x: int, y: int) -> None:
+    def note(
+        self,
+        control: ControlWriter,
+        action: TouchAction,
+        x: int,
+        y: int,
+        pointer_id: int | None = None,
+    ) -> None:
         """Record a touch event that was delivered to ``control``."""
+        pid = resolve_pointer_id(pointer_id)
         if action is TouchAction.DOWN:
-            self._control, self._pos = control, (x, y)
+            self._control = control
+            self._pointers[pid] = (x, y)
         elif action is TouchAction.MOVE:
             # a MOVE only follows a press this connection made; a stray one must not invent a finger to lift later
-            if self._pos is not None and self._control is control:
-                self._pos = (x, y)
+            if pid in self._pointers and self._control is control:
+                self._pointers[pid] = (x, y)
         else:  # UP
-            self.forget()
+            self._pointers.pop(pid, None)
+            if not self._pointers:
+                self._control = None
 
     def forget(self) -> None:
         """Drop the record without touching the phone (the control that held the finger is gone)."""
-        self._control, self._pos = None, None
+        self._control = None
+        self._pointers.clear()
 
     async def release(self, control: ControlWriter | None, screen_w: int, screen_h: int) -> bool:
-        """Lift the held finger. True when an UP was sent. Never raises: this runs while a connection is closing."""
-        pos, held_on = self._pos, self._control
+        """Lift all held fingers. True when at least one UP was sent. Never raises: this runs while a connection is closing."""
+        held = list(self._pointers.items())
+        held_on = self._control
         self.forget()
-        if pos is None or control is None or held_on is not control:
+        if not held or control is None or held_on is not control:
             return False
-        # the display may have been resized since the press: keep the last known point inside the screen
-        x = max(0, min(pos[0], screen_w))
-        y = max(0, min(pos[1], screen_h))
-        try:
-            await inject_touch(control, x, y, TouchAction.UP, screen_w, screen_h)
-        except (ValueError, OSError):   # OSError covers a reset / broken control socket
+        sent_any = False
+        # Release in reverse order (secondary fingers first, primary last)
+        for pid, pos in reversed(held):
+            # the display may have been resized since the press: keep the last known point inside the screen
+            x = max(0, min(pos[0], screen_w))
+            y = max(0, min(pos[1], screen_h))
+            try:
+                await inject_touch(control, x, y, TouchAction.UP, screen_w, screen_h, pointer_id=pid)
+                sent_any = True
+            except (ValueError, OSError):   # OSError covers a reset / broken control socket
+                pass
+        return sent_any
+
+    def has_secondary_pointers(self) -> bool:
+        """True if any secondary pointer (pid != _POINTER_ID_VIRTUAL_FINGER) is still held."""
+        return any(pid != _POINTER_ID_VIRTUAL_FINGER for pid in self._pointers)
+
+    async def release_secondary(self, control: ControlWriter | None, screen_w: int, screen_h: int) -> bool:
+        """Lift any secondary fingers that are still held down."""
+        if control is None or self._control is not control:
             return False
-        return True
+        secondary = [(pid, pos) for pid, pos in list(self._pointers.items()) if pid != _POINTER_ID_VIRTUAL_FINGER]
+        if not secondary:
+            return False
+        sent_any = False
+        for pid, pos in secondary:
+            self._pointers.pop(pid, None)
+            x = max(0, min(pos[0], screen_w))
+            y = max(0, min(pos[1], screen_h))
+            try:
+                await inject_touch(control, x, y, TouchAction.UP, screen_w, screen_h, pointer_id=pid)
+                sent_any = True
+            except (ValueError, OSError):
+                pass
+        return sent_any
 
 
 async def inject_scroll(

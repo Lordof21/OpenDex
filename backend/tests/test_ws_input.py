@@ -197,6 +197,7 @@ def test_a_rebuilt_control_is_not_sent_a_stray_up_on_close():
     client = TestClient(app)
     with client.websocket_connect("/ws/input/win-1") as ws:
         ws.send_json({"type": "down", "x": 10, "y": 20})
+        import time; time.sleep(0.02)
         sessions["win-1"] = _FakeSession(rebuilt)
         ws.send_json({"type": "scroll", "x": 5, "y": 5, "vscroll": 0.1})  # proves the new control is live
         ws.close()
@@ -209,3 +210,18 @@ def test_every_message_type_the_socket_serves_is_declared():
     from app.api.websockets import INPUT_MESSAGE_TYPES
 
     assert INPUT_MESSAGE_TYPES == {"down", "move", "up", "scroll", "clipboard", "release_all"}
+
+
+def test_single_finger_down_auto_releases_stale_secondary_pointer():
+    control = _CaptureControl()
+    app = _make_app({"win-1": _FakeSession(control)})
+    client = TestClient(app)
+    with client.websocket_connect("/ws/input/win-1") as ws:
+        ws.send_json({"type": "down", "x": 10, "y": 20, "pointer_id": 0})
+        ws.send_json({"type": "down", "x": 50, "y": 60, "pointer_id": 1})
+        ws.send_json({"type": "down", "x": 100, "y": 100})
+        ws.send_json({"type": "up", "x": 100, "y": 100})
+        ws.close()
+
+    actions = [_unpack_touch(p)[1] for p in control.sent]
+    assert actions == [0, 0, 1, 0, 1]

@@ -46,6 +46,12 @@ class TestSerializeTouch:
         _, _, pointer_id, *_ = _unpack(serialize_touch(TouchAction.DOWN, 0, 0, 100, 100))
         assert pointer_id == POINTER_ID_GENERIC_FINGER
 
+    def test_secondary_finger_pointer_id_serializes_correctly(self):
+        _, _, pid0, *_ = _unpack(serialize_touch(TouchAction.DOWN, 0, 0, 100, 100, pointer_id=0))
+        _, _, pid1, *_ = _unpack(serialize_touch(TouchAction.DOWN, 0, 0, 100, 100, pointer_id=1))
+        assert pid0 == 0xFFFFFFFFFFFFFFFE
+        assert pid1 == 0xFFFFFFFFFFFFFFFD
+
     @pytest.mark.parametrize("action", [TouchAction.DOWN, TouchAction.MOVE, TouchAction.UP])
     def test_action_button_and_buttons_are_always_zero(self, action):
         """The actual regression: these fields are mouse-click semantics and
@@ -196,3 +202,53 @@ class TestTouchTracker:
         assert not tracker.pressed
         assert await tracker.release(control, 1280, 720) is False
         assert control.sent == []
+
+    async def test_multitouch_tracker_tracks_and_releases_all_pointers(self):
+        control = _Capture()
+        tracker = TouchTracker()
+        tracker.note(control, TouchAction.DOWN, 100, 200, pointer_id=0)
+        tracker.note(control, TouchAction.DOWN, 300, 400, pointer_id=1)
+        assert tracker.pressed
+
+        assert await tracker.release(control, 1280, 720) is True
+        assert not tracker.pressed
+        assert len(control.sent) == 2
+
+        # Secondary finger released first, then primary
+        p1, p0 = control.sent
+        _, action1, pid1, x1, y1, *_ = _unpack(p1)
+        _, action0, pid0, x0, y0, *_ = _unpack(p0)
+        assert action1 == TouchAction.UP and (x1, y1) == (300, 400) and pid1 == 0xFFFFFFFFFFFFFFFD
+        assert action0 == TouchAction.UP and (x0, y0) == (100, 200) and pid0 == 0xFFFFFFFFFFFFFFFE
+
+    async def test_multitouch_tracker_partial_up_leaves_other_pointer_held(self):
+        control = _Capture()
+        tracker = TouchTracker()
+        tracker.note(control, TouchAction.DOWN, 10, 20, pointer_id=0)
+        tracker.note(control, TouchAction.DOWN, 30, 40, pointer_id=1)
+        tracker.note(control, TouchAction.UP, 30, 40, pointer_id=1)
+        # Finger 0 is still held down
+        assert tracker.pressed
+
+        assert await tracker.release(control, 1280, 720) is True
+        assert not tracker.pressed
+        (p0,) = control.sent
+        _, action0, pid0, x0, y0, *_ = _unpack(p0)
+        assert action0 == TouchAction.UP and (x0, y0) == (10, 20) and pid0 == 0xFFFFFFFFFFFFFFFE
+
+    async def test_release_secondary_lifts_only_secondary_pointers(self):
+        control = _Capture()
+        tracker = TouchTracker()
+        tracker.note(control, TouchAction.DOWN, 10, 20, pointer_id=0)
+        tracker.note(control, TouchAction.DOWN, 50, 60, pointer_id=1)
+        assert tracker.has_secondary_pointers()
+
+        assert await tracker.release_secondary(control, 1280, 720) is True
+        assert not tracker.has_secondary_pointers()
+        assert tracker.pressed  # primary finger is still down
+
+        assert len(control.sent) == 1
+        (p1,) = control.sent
+        _, action1, pid1, x1, y1, *_ = _unpack(p1)
+        assert action1 == TouchAction.UP and (x1, y1) == (50, 60) and pid1 == 0xFFFFFFFFFFFFFFFD
+

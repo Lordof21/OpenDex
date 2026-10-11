@@ -189,6 +189,8 @@ export default function WorkspaceCanvas({ win }) {
     touchRef,
     active: Boolean(anchorId) && hasLiveTasks,
     backTargetId: anchorId,
+    deviceH: vdH,
+    deviceW: vdW,
     getDeviceCoords: (e, canvas, rect) => {
       const canvasResized = canvas.width && canvas.height && (canvas.width !== 300 || canvas.height !== 150);
       const cw = canvasResized ? canvas.width : (win.streamW || canvas.width || vdW);

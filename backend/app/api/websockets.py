@@ -167,8 +167,16 @@ async def ws_input(ws: WebSocket, window_id: str) -> None:
                     if kind in _TOUCH_ACTION_TYPES:
                         # Touch down/up logging disabled to prevent terminal log spamming
                         action = TouchAction[kind.upper()]
-                        await touch_control.inject_touch(session.control, x, y, action, w, h)
-                        finger.note(session.control, action, x, y)   # only what was really delivered counts as pressed
+                        pointer_id = msg.get("pointer_id")
+                        if action is TouchAction.DOWN and (pointer_id is None or pointer_id == 0):
+                            if finger.has_secondary_pointers():
+                                await finger.release_secondary(session.control, w, h)
+                        await touch_control.inject_touch(
+                            session.control, x, y, action, w, h, pointer_id=pointer_id
+                        )
+                        finger.note(
+                            session.control, action, x, y, pointer_id=pointer_id
+                        )   # only what was really delivered counts as pressed
                     else:
                         # Touch scroll logging disabled to prevent terminal log spamming
                         await touch_control.inject_scroll(

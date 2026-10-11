@@ -10,6 +10,7 @@ vi.mock('../src/lib/api.js', () => ({
 }));
 
 import {
+  computeAdaptiveUnitsPerTick,
   computeScrollFromWheelDelta,
   mapClickToDeviceCoords,
   WindowTouchSocket,
@@ -122,6 +123,31 @@ describe('computeScrollFromWheelDelta', () => {
   });
 });
 
+describe('computeAdaptiveUnitsPerTick', () => {
+  it('scales unitsPerTick higher on tall phone screens to eliminate jumpy overshoots', () => {
+    // 2400px phone display in 700px window
+    const phoneUnits = computeAdaptiveUnitsPerTick(2400, 700);
+    // 1080p standard DeX display in 1080px window
+    const dexUnits = computeAdaptiveUnitsPerTick(1080, 1080);
+
+    expect(phoneUnits).toBeGreaterThan(dexUnits);
+    expect(phoneUnits).toBeGreaterThan(950);
+  });
+
+  it('balances tablet dimensions comfortably between phone and desktop', () => {
+    // 1600px tablet display in 800px window
+    const tabletUnits = computeAdaptiveUnitsPerTick(1600, 800);
+    expect(tabletUnits).toBeGreaterThan(700);
+    expect(tabletUnits).toBeLessThan(1050);
+  });
+
+  it('handles fallbacks gracefully when dimensions are omitted or zero', () => {
+    const fallbackUnits = computeAdaptiveUnitsPerTick(0, 0);
+    expect(fallbackUnits).toBeGreaterThan(400);
+    expect(fallbackUnits).toBeLessThan(1200);
+  });
+});
+
 // Regression: the old transport buffered a whole drag path and POSTed it once
 // on pointer-up, replayed with artificial delays server-side — the phone
 // showed nothing until release, then "caught up" all at once. This streams
@@ -173,6 +199,22 @@ describe('WindowTouchSocket', () => {
       { type: 'down', x: 10, y: 20 },
       { type: 'move', x: 15, y: 25 },
       { type: 'up', x: 15, y: 25 },
+    ]);
+  });
+
+  it('supports multi-touch pointers by attaching pointer_id when non-zero', () => {
+    const socket = new WindowTouchSocket('win-1').connect();
+    socket.down(10, 20, 0);
+    socket.down(30, 40, 1);
+    socket.move(35, 45, 1);
+    socket.up(35, 45, 1);
+    socket.up(10, 20, 0);
+    expect(socket.ws.sent).toEqual([
+      { type: 'down', x: 10, y: 20 },
+      { type: 'down', x: 30, y: 40, pointer_id: 1 },
+      { type: 'move', x: 35, y: 45, pointer_id: 1 },
+      { type: 'up', x: 35, y: 45, pointer_id: 1 },
+      { type: 'up', x: 10, y: 20 },
     ]);
   });
 
