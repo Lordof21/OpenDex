@@ -27,6 +27,12 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+# One browser tab may never answer (frozen / discarded renderer): every tab-level websocket gets a short open timeout
+# (websockets' default is 10 s) and background work an overall budget, so the in-place refresh stays bounded.
+_TAB_OPEN_TIMEOUT_S = 0.4
+_BACKGROUND_TABS_BUDGET_S = 1.0
+_BACKGROUND_TABS_PARALLEL = 4
+
 _cdp_locks: dict[str, asyncio.Lock] = {}
 
 
@@ -166,6 +172,43 @@ def _build_nudge_script(saved_scroll: dict[str, Any] | None) -> str:
     """
 
 
+def _build_auto_nudge_script() -> str:
+    """Constructs a self-contained JavaScript snippet evaluated on new document creation.
+
+    Injected via Page.addScriptToEvaluateOnNewDocument and Target.setAutoAttach
+    to guarantee any newly opened tab, popup ad (window.open / target="_blank"), or child WebContents
+    renders with exact 1:1 phone DPI instead of inheriting the un-restarted Chrome process's
+    stale 1.20x tablet magnification factor (dpr 3.8475).
+    """
+    return """
+    (() => {
+        try {
+            const root = document.documentElement;
+            const body = document.body;
+            const isPhoneScreen = (window.screen.width <= 480 || (window.screen.availWidth && window.screen.availWidth <= 480));
+            const hasStaleTabletZoom = (isPhoneScreen && window.devicePixelRatio > 3.4);
+
+            if (root) {
+                root.style.overflowAnchor = 'none';
+                root.style.webkitTextSizeAdjust = '100%';
+                if (hasStaleTabletZoom) {
+                    const normZoom = (3.20625 / window.devicePixelRatio);
+                    root.style.zoom = normZoom.toFixed(6);
+                } else {
+                    root.style.zoom = '1.0';
+                }
+            }
+            if (body) {
+                body.style.overflowAnchor = 'none';
+                body.style.webkitTextSizeAdjust = '100%';
+            }
+            window.dispatchEvent(new Event('resize'));
+            window.dispatchEvent(new Event('orientationchange'));
+        } catch (e) {}
+    })()
+    """
+
+
 async def _send_cdp(
     ws: Any,
     method: str,
@@ -195,33 +238,45 @@ async def _send_cdp(
 
 
 
+async def _probe_tab_visible(port: int, page: dict[str, Any]) -> dict[str, Any] | None:
+    """The page if its document is visible and focused-capable right now, else None. One short websocket, never raises."""
+    ws_url_raw = page.get("webSocketDebuggerUrl")
+    if not ws_url_raw:
+        return None
+    ws_url = re.sub(r"ws://[^/]+/", f"ws://127.0.0.1:{port}/", ws_url_raw)
+    try:
+        async with websockets.connect(ws_url, open_timeout=_TAB_OPEN_TIMEOUT_S, close_timeout=0.1) as ws:
+            check_js = "JSON.stringify({visible: document.visibilityState === 'visible', focus: document.hasFocus ? document.hasFocus() : false})"
+            res = await _send_cdp(ws, "Runtime.evaluate", {"expression": check_js}, req_id=1, timeout_s=0.25)
+            val_str = (res or {}).get("result", {}).get("result", {}).get("value")
+            if val_str and json.loads(val_str).get("visible"):
+                return page
+    except Exception:
+        return None
+    return None
+
+
 async def _find_active_page_target(port: int, valid_pages: list[dict[str, Any]], timeout_s: float = 0.5) -> dict[str, Any]:
     """Finds the foreground active/visible page tab among all open browser targets.
-    
-    If multiple tabs are open (e.g. 16 tabs), inspects document.visibilityState
-    to guarantee the tab actually visible on screen is refreshed rather than an arbitrary background tab.
-    """
+
+    With many tabs open (a browser can hold 16+, most of them frozen or discarded and never answering) the tabs are
+    probed IN PARALLEL under one overall budget: the old one-by-one probe cost up to ~0.4 s per unresponsive tab, i.e.
+    several seconds of a handoff that holds the window lifecycle lock. The first visible tab (in browser order) wins;
+    no answer in time falls back to the first page."""
     if len(valid_pages) <= 1:
         return valid_pages[0] if valid_pages else {}
 
-    # Probe for the tab that is currently visible in foreground
-    for page in valid_pages:
-        ws_url_raw = page.get("webSocketDebuggerUrl")
-        if not ws_url_raw:
-            continue
-        ws_url = re.sub(r"ws://[^/]+/", f"ws://127.0.0.1:{port}/", ws_url_raw)
-        try:
-            async with websockets.connect(ws_url, close_timeout=0.2) as ws:
-                check_js = "JSON.stringify({visible: document.visibilityState === 'visible', focus: document.hasFocus ? document.hasFocus() : false})"
-                res = await _send_cdp(ws, "Runtime.evaluate", {"expression": check_js}, req_id=1, timeout_s=0.2)
-                if res:
-                    val_str = res.get("result", {}).get("result", {}).get("value")
-                    if val_str:
-                        info = json.loads(val_str)
-                        if info.get("visible"):
-                            return page
-        except Exception:
-            continue
+    probes = [asyncio.ensure_future(_probe_tab_visible(port, page)) for page in valid_pages]
+    try:
+        await asyncio.wait(probes, timeout=max(timeout_s, 0.3))
+        for probe in probes:
+            if probe.done() and not probe.cancelled() and probe.exception() is None and probe.result() is not None:
+                return probe.result()
+    finally:
+        for probe in probes:
+            if not probe.done():
+                probe.cancel()
+        await asyncio.gather(*probes, return_exceptions=True)
 
     # Fallback to the first page if none explicitly reported visible
     return valid_pages[0]
@@ -370,7 +425,7 @@ async def refresh_browser_layout_inplace(
 
                 # Connect via WebSocket to the active visible tab
                 remaining = max(0.5, deadline - loop.time())
-                async with websockets.connect(ws_url, close_timeout=0.4) as ws:
+                async with websockets.connect(ws_url, open_timeout=_TAB_OPEN_TIMEOUT_S, close_timeout=0.4) as ws:
                     # 0. Ensure foreground page tab activation in Blink
                     with contextlib.suppress(Exception):
                         await _send_cdp(ws, "Page.bringToFront", req_id=85, timeout_s=0.2)
@@ -380,6 +435,9 @@ async def refresh_browser_layout_inplace(
                         await _send_cdp(ws, "Emulation.setPageScaleFactor", {"pageScaleFactor": 1.0}, req_id=86, timeout_s=0.2)
                         await _send_cdp(ws, "Emulation.resetPageScaleFactor", req_id=87, timeout_s=0.2)
 
+                    # (Page.addScriptToEvaluateOnNewDocument is NOT registered here: it lives only as long as the DevTools
+                    # session that added it, and this one closes at the end of the block — only the watcher's persistent
+                    # session keeps such a script, see BrowserTabAutoAttachWatcher.)
 
                     # 3. Evaluate multi-phase layout reflow & scroll anchor script
                     with contextlib.suppress(Exception):
@@ -391,20 +449,13 @@ async def refresh_browser_layout_inplace(
                             timeout_s=remaining,
                         )
 
-                # 4. Asynchronously enforce scale factor 1.0 on background tabs if present
-                for bg_page in pages:
-                    if bg_page.get("id") == target_page.get("id"):
-                        continue
-                    bg_ws_raw = bg_page.get("webSocketDebuggerUrl")
-                    if not bg_ws_raw:
-                        continue
-                    bg_ws_url = re.sub(r"ws://[^/]+/", f"ws://127.0.0.1:{port}/", bg_ws_raw)
-                    try:
-                        async with websockets.connect(bg_ws_url, close_timeout=0.2) as bg_ws:
-                            await _send_cdp(bg_ws, "Emulation.setPageScaleFactor", {"pageScaleFactor": 1.0}, req_id=98, timeout_s=0.2)
-                            await _send_cdp(bg_ws, "Emulation.resetPageScaleFactor", req_id=99, timeout_s=0.2)
-                    except Exception:
-                        pass
+                # 4. Scale factor 1.0 on the background tabs: best effort, in parallel, under one overall budget — a frozen tab
+                # must never hold the caller (a handoff, under the window lifecycle lock) for seconds.
+                background = [
+                    page for page in pages
+                    if page.get("id") != target_page.get("id") and page.get("webSocketDebuggerUrl")
+                ]
+                await _reset_scale_on_background_tabs(port, background)
 
                 log.info(
                     "⚡ [CDP_REFRESH: BAŞARILI] Aktif sekme ('%s') web layout, scale 1.0 ve (0,0) scroll çıpası korundu (0 state kaybı, 0 sapma, 0 zoom salınımı)",
@@ -416,6 +467,31 @@ async def refresh_browser_layout_inplace(
             return False
 
 
+async def _reset_scale_on_tab(port: int, page: dict[str, Any], gate: asyncio.Semaphore) -> None:
+    ws_url = re.sub(r"ws://[^/]+/", f"ws://127.0.0.1:{port}/", page["webSocketDebuggerUrl"])
+    async with gate:
+        try:
+            async with websockets.connect(ws_url, open_timeout=_TAB_OPEN_TIMEOUT_S, close_timeout=0.1) as ws:
+                await _send_cdp(ws, "Emulation.setPageScaleFactor", {"pageScaleFactor": 1.0}, req_id=98, timeout_s=0.2)
+                await _send_cdp(ws, "Emulation.resetPageScaleFactor", req_id=99, timeout_s=0.2)
+        except Exception:
+            pass
+
+
+async def _reset_scale_on_background_tabs(port: int, pages: list[dict[str, Any]]) -> None:
+    if not pages:
+        return
+    gate = asyncio.Semaphore(_BACKGROUND_TABS_PARALLEL)
+    jobs = [asyncio.ensure_future(_reset_scale_on_tab(port, page, gate)) for page in pages]
+    try:
+        await asyncio.wait(jobs, timeout=_BACKGROUND_TABS_BUDGET_S)
+    finally:
+        for job in jobs:
+            if not job.done():
+                job.cancel()
+        await asyncio.gather(*jobs, return_exceptions=True)
+
+
 async def _remove_forward_safe(adb: "Adb", serial: str, port: int) -> None:
     try:
         if hasattr(adb, "forward_remove"):
@@ -424,4 +500,167 @@ async def _remove_forward_safe(adb: "Adb", serial: str, port: int) -> None:
             await adb._run_cmd(["forward", "--remove", f"tcp:{port}"], serial=serial, timeout_s=1.0)
     except Exception:
         pass
+
+
+class BrowserTabAutoAttachWatcher:
+    """Continuous background watcher for browser tabs using CDP Target.setAutoAttach.
+
+    While a browser application stands on the phone (Display 0), any newly created tab,
+    popup ad (window.open / target="_blank"), or child WebContents is immediately
+    intercepted upon creation.
+
+    Uses flattened session multiplexing over a single persistent browser WebSocket connection:
+    - Zero per-tab port forwards
+    - Instant Page.addScriptToEvaluateOnNewDocument injection
+    - Scale factor 1.0 enforcement
+    - Neutralizes 1.20x tablet zoom factor before page content renders
+    """
+
+    def __init__(self, adb: "Adb", serial: str, socket_name: str, window_id: str):
+        self._adb = adb
+        self._serial = serial
+        self._socket_name = socket_name
+        self._window_id = window_id
+        self._task: asyncio.Task | None = None
+        self._stop_event = asyncio.Event()
+
+    def start(self) -> None:
+        if self._task and not self._task.done():
+            return
+        self._stop_event.clear()
+        self._task = asyncio.create_task(
+            self._run(), name=f"cdp_tab_watcher_{self._window_id}"
+        )
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._task and not self._task.done():
+            self._task.cancel()
+
+    async def _run(self) -> None:
+        clean_socket = self._socket_name.lstrip("@")
+        port = await self._adb.forward(0, f"localabstract:{clean_socket}", serial=self._serial)
+        if not port or port <= 0:
+            port = 9225
+            await self._adb.forward(port, f"localabstract:{clean_socket}", serial=self._serial)
+
+        try:
+            loop = asyncio.get_running_loop()
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/json/version")
+            raw_ver = await loop.run_in_executor(
+                None, lambda: urllib.request.urlopen(req, timeout=1.0).read().decode()
+            )
+            ver = json.loads(raw_ver)
+            browser_ws_raw = ver.get("webSocketDebuggerUrl") or f"ws://127.0.0.1:{port}/devtools/browser"
+            browser_ws = re.sub(r"ws://[^/]+/", f"ws://127.0.0.1:{port}/", browser_ws_raw)
+            auto_nudge = _build_auto_nudge_script()
+
+            async with websockets.connect(browser_ws) as ws:
+                req_id = 1
+                await ws.send(json.dumps({
+                    "id": req_id,
+                    "method": "Target.setAutoAttach",
+                    "params": {
+                        "autoAttach": True,
+                        "waitForDebuggerOnStart": False,
+                        "flatten": True,
+                    },
+                }))
+                log.info(
+                    "👁️ [CDP_WATCHER: BAŞLATILDI] win=%s için otomatik tab/popup dinleyicisi devrede (flatten: true)",
+                    self._window_id,
+                )
+
+                while not self._stop_event.is_set():
+                    try:
+                        raw = await ws.recv()
+                        msg = json.loads(raw)
+                        method = msg.get("method")
+                        if method == "Target.attachedToTarget":
+                            params = msg.get("params", {})
+                            session_id = params.get("sessionId")
+                            target_info = params.get("targetInfo", {})
+                            target_type = target_info.get("type")
+                            target_url = target_info.get("url", "")
+                            target_id = target_info.get("targetId", "")
+
+                            if target_type == "page" and session_id:
+                                log.info(
+                                    "🆕 [CDP_WATCHER: YENİ SEKME/POPUP] target=%s ('%s') yakalandı — telefon DPI ve auto-nudge enjekte ediliyor",
+                                    target_id, target_url[:50],
+                                )
+                                req_id += 1
+                                await ws.send(json.dumps({
+                                    "id": req_id,
+                                    "sessionId": session_id,
+                                    "method": "Page.enable",
+                                }))
+                                req_id += 1
+                                await ws.send(json.dumps({
+                                    "id": req_id,
+                                    "sessionId": session_id,
+                                    "method": "Page.addScriptToEvaluateOnNewDocument",
+                                    "params": {"source": auto_nudge},
+                                }))
+                                req_id += 1
+                                await ws.send(json.dumps({
+                                    "id": req_id,
+                                    "sessionId": session_id,
+                                    "method": "Emulation.setPageScaleFactor",
+                                    "params": {"pageScaleFactor": 1.0},
+                                }))
+                                req_id += 1
+                                await ws.send(json.dumps({
+                                    "id": req_id,
+                                    "sessionId": session_id,
+                                    "method": "Emulation.resetPageScaleFactor",
+                                }))
+                                req_id += 1
+                                await ws.send(json.dumps({
+                                    "id": req_id,
+                                    "sessionId": session_id,
+                                    "method": "Runtime.evaluate",
+                                    "params": {"expression": auto_nudge},
+                                }))
+                    except asyncio.CancelledError:
+                        break
+                    except Exception as loop_exc:
+                        log.debug("[CDP_WATCHER] Olay döngüsü uyarısı: %s", loop_exc)
+                        break
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            log.debug("[CDP_WATCHER] Dinleyici sonlandı: %s", exc)
+        finally:
+            log.info("🛑 [CDP_WATCHER: DURDURULDU] win=%s için tab dinleyicisi kapatıldı", self._window_id)
+            await _remove_forward_safe(self._adb, self._serial, port)
+
+
+_active_watchers: dict[str, BrowserTabAutoAttachWatcher] = {}
+
+
+def start_browser_auto_attach_watcher(
+    adb: "Adb",
+    serial: str,
+    socket_name: str,
+    window_id: str,
+) -> BrowserTabAutoAttachWatcher:
+    """Spawns or replaces a continuous CDP auto-attach watcher for a window session."""
+    stop_browser_auto_attach_watcher(window_id)
+    watcher = BrowserTabAutoAttachWatcher(adb, serial, socket_name, window_id)
+    _active_watchers[window_id] = watcher
+    watcher.start()
+    return watcher
+
+
+def stop_browser_auto_attach_watcher(window_id: str) -> None:
+    """Cancels and cleans up the CDP auto-attach watcher for a window session."""
+    watcher = _active_watchers.pop(window_id, None)
+    if watcher:
+        watcher.stop()
+
+
+def get_browser_auto_attach_watcher(window_id: str) -> BrowserTabAutoAttachWatcher | None:
+    return _active_watchers.get(window_id)
+
 

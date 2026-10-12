@@ -8,7 +8,7 @@ Two sources, one pipeline (``_apply``: new / updated / cleared events, dismissed
   * FALLBACK (no v1.2 daemon, or its listener was refused): `adb logcat` notification events trigger a debounced
     ``dumpsys notification --noredact`` refresh, plus a slow safety heartbeat.
 
-The supervisor switches between them by itself whenever the daemon (dis)connects.
+The supervisor switches between them by itself when the daemon is gone for good — not for a moment (see ``push_live``).
 """
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ import asyncio
 import contextlib
 import hashlib
 import logging
+import time
 from typing import Any, Awaitable, Callable
 
 from ..device.adb import Adb
@@ -56,6 +57,9 @@ class NotificationSupervisor:
     # Fallback only. logcat events already trigger a refresh within ~0.2 s; this merely catches a dropped stream.
     HEARTBEAT_S = 10.0
     PUSH_RECHECK_S = 2.0  # how often an idle fallback loop re-checks whether the daemon's push became live
+    # How long a daemon that VANISHED is waited for before dumpsys takes over. The phone's adbd restarts on a screen
+    # lock / USB cable change and takes the daemon with it; the client has a new one up in ~2 s.
+    PUSH_GRACE_S = 20.0
 
     def __init__(self, adb: Adb, event_bus: EventBus, poll_interval_s: float = 10.0) -> None:
         self._adb = adb
@@ -65,6 +69,7 @@ class NotificationSupervisor:
         self._raw: dict[str, dict[str, Any]] = {}  # push mode: the listener's items by Android key
         self._apply_lock = asyncio.Lock()
         self._mode_logged: str | None = None  # "push" / "fallback": each switch is logged once
+        self._push_lost_at: float | None = None  # when the daemon was first seen gone (None while it is live)
         self._notifications: dict[str, RichNotificationItem] = {}
         self._serial: str | None = None
         self._task: asyncio.Task[None] | None = None
@@ -99,7 +104,26 @@ class NotificationSupervisor:
 
     @property
     def push_live(self) -> bool:
-        """The daemon's listener is delivering notifications: no logcat stream, no heartbeat, no dumpsys."""
+        """The daemon's listener is delivering notifications: no logcat stream, no heartbeat, no dumpsys.
+
+        A daemon that was our source and VANISHES still counts as live for PUSH_GRACE_S. Switching to dumpsys for those
+        seconds re-lists the whole shade under keys of its own (a dumpsys item and the daemon's item of the same
+        notification do not share a key), and the UI shows every notification as a new message — once going, once coming
+        back. The new daemon's greeting carries a full snapshot in the old key space, which reconciles without a sound."""
+        if self._daemon is None:
+            return False
+        if getattr(self._daemon, "notification_push", False):
+            self._push_lost_at = None
+            return True
+        if self._mode_logged != "push":
+            return False
+        now = time.monotonic()
+        if self._push_lost_at is None:
+            self._push_lost_at = now
+        return now - self._push_lost_at < self.PUSH_GRACE_S
+
+    def _daemon_pushing(self) -> bool:
+        """The daemon is connected with its listener open right now (``push_live`` is also true while it is on its way back)."""
         return self._daemon is not None and bool(getattr(self._daemon, "notification_push", False))
 
     @property
@@ -129,10 +153,12 @@ class NotificationSupervisor:
         self._task = self._poll_task = self._activity_task = None
         await self._stop_logcat_streams()
 
+        self._push_lost_at = None
         if clear_cache:
             self._notifications.clear()
             self._dismissed_signatures.clear()
             self._raw.clear()
+            self._mode_logged = None  # a new device is nothing to wait for: its first source is chosen afresh
             log.debug("[NotificationService] Bildirim onbellegi temizlendi.")
         else:
             log.info("[NotificationService] Handover: Bildirim onbellegi korundu (Duplicate Toast onlendi).")
@@ -383,6 +409,7 @@ class NotificationSupervisor:
             return
         items = [it for it in data.get("items") or [] if isinstance(it, dict) and it.get("key")]
         self._raw = {it["key"]: it for it in items}
+        self._push_lost_at = None
         # Push is live from now on: the fallback's `logcat` processes on the phone are no longer needed.
         await self._stop_logcat_streams()
         if self._mode_logged != "push":
@@ -411,13 +438,15 @@ class NotificationSupervisor:
         if not self._serial:
             return
         if self.push_live:
+            if not self._daemon_pushing():
+                return  # the daemon is on its way back: its greeting re-lists everything (see push_live)
             resp = await self._daemon.notifications_list()
             if resp is not None:
                 items = [it for it in resp.get("items") or [] if isinstance(it, dict) and it.get("key")]
                 self._raw = {it["key"]: it for it in items}
                 await self._apply(notifications_from_daemon(self._raw.values()))
                 return
-        out = await self._adb.shell("dumpsys notification --noredact", serial=self._serial)
+        out =await self._adb.shell("dumpsys notification --noredact", serial=self._serial)
         await self._apply(parse_dumpsys_notifications(out))
 
     async def _apply(self, parsed: dict[str, RichNotificationItem]) -> None:

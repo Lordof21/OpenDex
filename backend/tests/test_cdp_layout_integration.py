@@ -21,12 +21,17 @@ import pytest
 from app.config import Settings
 from app.schemas.settings import ProjectSettings
 from app.windows.cdp_refresher import (
+    _build_auto_nudge_script,
     _build_nudge_script,
     _find_active_page_target,
     _send_cdp,
     capture_browser_scroll_state,
+    get_browser_auto_attach_watcher,
     open_cdp_session,
     refresh_browser_layout_inplace,
+    start_browser_auto_attach_watcher,
+    stop_browser_auto_attach_watcher,
+    BrowserTabAutoAttachWatcher,
 )
 from app.windows.density_reconciler import DensityReconciler
 from app.windows.handoff_manager import HandoffManager
@@ -278,13 +283,17 @@ async def test_refresh_browser_layout_inplace_command_sequence():
     active_methods = [m.get("method") for m in active_ws.sent_messages]
     assert "Emulation.setPageScaleFactor" in active_methods
     assert "Emulation.resetPageScaleFactor" in active_methods
+    # The init script dies with the DevTools session that added it; this short session closes right away, so it is not sent
+    # (only the watcher's persistent session registers it).
+    assert "Page.addScriptToEvaluateOnNewDocument" not in active_methods
     assert "Network.clearBrowserCache" not in active_methods  # Cache and images must be preserved!
     assert "Runtime.evaluate" in active_methods
 
-    # Inspect background tab also got scale lock
+    # Inspect background tab also got the scale lock
     bg_methods = [m.get("method") for m in bg_ws.sent_messages]
     assert "Emulation.setPageScaleFactor" in bg_methods
     assert "Emulation.resetPageScaleFactor" in bg_methods
+    assert "Page.addScriptToEvaluateOnNewDocument" not in bg_methods
 
 
 def test_build_nudge_script_element_anchoring_and_text_size_adjust():
@@ -383,3 +392,166 @@ async def test_bidirectional_handoff_and_reclaim_cdp_integration():
         mock_capture.assert_awaited()
         mock_refresh.assert_awaited_with(fake_adb, "SER", "chrome_devtools_remote", saved_scroll=captured_scroll)
         daemon.restart_task_activity.assert_not_called()
+
+
+class FakeBrowserWatcherWebSocket:
+    def __init__(self, target_events: list[dict]):
+        self.sent_messages: list[dict] = []
+        self.target_events = target_events
+        self.closed = False
+
+    async def send(self, data: str):
+        msg = json.loads(data)
+        self.sent_messages.append(msg)
+
+    async def recv(self) -> str:
+        if self.target_events:
+            ev = self.target_events.pop(0)
+            return json.dumps(ev)
+        await asyncio.sleep(10.0)
+        return json.dumps({})
+
+    async def close(self):
+        self.closed = True
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+
+
+@pytest.mark.asyncio
+async def test_build_auto_nudge_script_neutralizes_tablet_factor():
+    """Validates the auto-nudge script handles phone screen detection and 1.20x tablet zoom neutralization."""
+    script = _build_auto_nudge_script()
+    assert "3.20625 / window.devicePixelRatio" in script
+    assert "webkitTextSizeAdjust = '100%'" in script
+    assert "overflowAnchor = 'none'" in script
+    assert "normZoom.toFixed(6)" in script
+
+
+@pytest.mark.asyncio
+async def test_browser_tab_auto_attach_watcher_intercepts_popup_tabs():
+    """Validates that BrowserTabAutoAttachWatcher automatically intercepts new popup tabs via Target.setAutoAttach."""
+    fake_adb = FakeCdpAdb()
+    version_json = json.dumps({
+        "Browser": "Chrome/154.0.0.0",
+        "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/browser",
+    })
+
+    events = [
+        {"id": 1, "result": {}},
+        {
+            "method": "Target.attachedToTarget",
+            "params": {
+                "sessionId": "SES_POPUP_123",
+                "targetInfo": {
+                    "targetId": "TAB_99",
+                    "type": "page",
+                    "url": "https://mangaruhu.com/popup-ad",
+                    "title": "Ad Popup",
+                },
+            },
+        },
+    ]
+
+    fake_ws = FakeBrowserWatcherWebSocket(events)
+
+    with (
+        patch("urllib.request.urlopen", return_value=MagicMock(read=lambda: version_json.encode())),
+        patch("websockets.connect", return_value=fake_ws),
+    ):
+        watcher = start_browser_auto_attach_watcher(fake_adb, "SERIAL_123", "chrome_devtools_remote", "win-chrome-1")
+        assert get_browser_auto_attach_watcher("win-chrome-1") is watcher
+
+        # Wait briefly for event loop to process the attached event
+        for _ in range(15):
+            sent_methods = [m.get("method") for m in fake_ws.sent_messages]
+            if "Page.addScriptToEvaluateOnNewDocument" in sent_methods:
+                break
+            await asyncio.sleep(0.04)
+
+        # Verify initial setAutoAttach was sent with flatten: true
+        assert fake_ws.sent_messages[0]["method"] == "Target.setAutoAttach"
+        assert fake_ws.sent_messages[0]["params"]["flatten"] is True
+
+        # Verify child session intercepted with Page.enable, addScriptToEvaluateOnNewDocument, and scale factors
+        sent_sessions = [m.get("sessionId") for m in fake_ws.sent_messages if "sessionId" in m]
+        assert "SES_POPUP_123" in sent_sessions
+
+        child_methods = [m.get("method") for m in fake_ws.sent_messages if m.get("sessionId") == "SES_POPUP_123"]
+        assert "Page.enable" in child_methods
+        assert "Page.addScriptToEvaluateOnNewDocument" in child_methods
+        assert "Emulation.setPageScaleFactor" in child_methods
+        assert "Emulation.resetPageScaleFactor" in child_methods
+        assert "Runtime.evaluate" in child_methods
+
+        # Stop watcher
+        stop_browser_auto_attach_watcher("win-chrome-1")
+        assert get_browser_auto_attach_watcher("win-chrome-1") is None
+
+
+
+class _HangingConnect:
+    """A tab whose renderer never answers: the websocket handshake does not finish (a frozen / discarded tab)."""
+
+    async def __aenter__(self):
+        await asyncio.sleep(60)
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+def _many_tabs(count):
+    return [
+        {
+            "id": f"tab_{i}", "title": f"Tab {i}", "type": "page", "url": f"https://site{i}.example/",
+            "webSocketDebuggerUrl": f"ws://127.0.0.1:9222/devtools/page/tab_{i}",
+        }
+        for i in range(count)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_frozen_tabs_cannot_hold_the_refresh_for_seconds():
+    """Handoff holds the window lifecycle lock while this runs: with 16 tabs, 15 of them frozen, the refresh finishes within
+    its budget (it used to take ~0.4-0.7 s PER unresponsive tab, i.e. 7-10 s per Chrome handoff)."""
+    import time
+
+    fake_adb = FakeCdpAdb()
+    tabs = _many_tabs(16)
+    active_ws = FakeWebSocket("tab_9", is_visible=True)
+
+    def fake_connect(url, *args, **kwargs):
+        return active_ws if "tab_9" in url else _HangingConnect()
+
+    with (
+        patch("urllib.request.urlopen", return_value=MagicMock(read=lambda: json.dumps(tabs).encode())),
+        patch("websockets.connect", side_effect=fake_connect),
+    ):
+        started = time.monotonic()
+        ok = await refresh_browser_layout_inplace(fake_adb, "SERIAL_123", "chrome_devtools_remote")
+        elapsed = time.monotonic() - started
+
+    assert ok is True
+    assert elapsed < 3.0, f"frozen tabs held the refresh for {elapsed:.1f}s"
+    assert "Runtime.evaluate" in [m.get("method") for m in active_ws.sent_messages]   # the visible tab was found and nudged
+
+
+@pytest.mark.asyncio
+async def test_active_tab_is_found_even_when_earlier_tabs_do_not_answer():
+    from app.windows.cdp_refresher import _find_active_page_target
+
+    tabs = _many_tabs(6)
+    visible_ws = FakeWebSocket("tab_4", is_visible=True)
+    hidden_ws = FakeWebSocket("hidden", is_visible=False)
+
+    def fake_connect(url, *args, **kwargs):
+        if "tab_4" in url:
+            return visible_ws
+        return hidden_ws if "tab_5" in url else _HangingConnect()
+
+    with patch("websockets.connect", side_effect=fake_connect):
+        found = await _find_active_page_target(9222, tabs, timeout_s=0.5)
+    assert found["id"] == "tab_4"

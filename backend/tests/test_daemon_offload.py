@@ -300,6 +300,50 @@ async def test_without_the_daemon_the_supervisor_falls_back_to_dumpsys():
     assert bus.types() == ["notification_received"]
 
 
+async def test_a_daemon_that_vanishes_for_a_moment_does_not_flood_the_ui_with_old_notifications():
+    """The phone's adbd restarts on a screen lock / cable change and takes the daemon with it. Falling back to dumpsys for
+    those seconds re-lists the shade under other keys (every notification "new" — twice: going and coming back)."""
+    daemon = FakeDaemon()
+    sup, adb, bus = _supervisor(daemon, RecordingAdb({"dumpsys notification": WA_DUMPSYS}))
+    await daemon.push("notifications_update", {"ok": True, "items": [wa_item()]})
+    assert bus.types() == ["notification_received"]
+
+    daemon.is_connected = False                       # adbd restarted: the daemon is gone
+    assert sup.push_live and sup.source == "daemon"   # …but it is waited for, not replaced
+    await sup._refresh_notifications()
+    assert adb.commands == [] and bus.types() == ["notification_received"]
+
+    daemon.is_connected = True                        # the replacement greets with the same list, same keys
+    await daemon.push("notifications_update", {"ok": True, "items": [wa_item()]})
+    assert bus.types() == ["notification_received"]   # not a single new / cleared event
+    assert sup.push_live and sup._push_lost_at is None
+
+
+async def test_a_daemon_that_stays_gone_hands_over_to_dumpsys_after_the_grace(monkeypatch):
+    daemon = FakeDaemon()
+    sup, adb, bus = _supervisor(daemon, RecordingAdb({"dumpsys notification": WA_DUMPSYS}))
+    monkeypatch.setattr(sup, "PUSH_GRACE_S", 0.0)
+    await daemon.push("notifications_update", {"ok": True, "items": [wa_item()]})
+    daemon.is_connected = False
+    assert not sup.push_live and sup.source == "dumpsys"
+    await sup._refresh_notifications()
+    assert adb.commands == ["dumpsys notification --noredact"]
+
+
+async def test_the_grace_belongs_to_one_outage_not_to_all_of_them():
+    daemon = FakeDaemon()
+    sup, _, _ = _supervisor(daemon)
+    await daemon.push("notifications_update", {"ok": True, "items": [wa_item()]})
+    daemon.is_connected = False
+    assert sup.push_live and sup._push_lost_at is not None
+    sup._push_lost_at -= sup.PUSH_GRACE_S + 1         # this outage has run out of patience…
+    assert not sup.push_live
+    daemon.is_connected = True
+    await daemon.push("notifications_update", {"ok": True, "items": [wa_item()]})   # …the daemon is back
+    daemon.is_connected = False                       # a later, separate outage starts with a fresh grace
+    assert sup.push_live
+
+
 async def test_the_listed_age_label_is_fresh_even_without_repolling():
     daemon = FakeDaemon()
     sup, _, _ = _supervisor(daemon)

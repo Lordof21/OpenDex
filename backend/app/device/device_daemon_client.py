@@ -47,6 +47,7 @@ _HANDSHAKE_TIMEOUT_S = 8.0
 # After start() a freshly spawned daemon needs a few seconds (jar check, JVM, handshake). Inside this window the loops that
 # would otherwise poll the phone through adb (thermal, notifications, load) wait for it — see wait_ready.
 STARTUP_WINDOW_S = 10.0
+_RECONNECT_AFTER_LOSS_S = 0.25  # pause before replacing a daemon that was serving us and vanished
 # The health check bind_device runs before anything polls the phone (Docker's healthcheck: retries × interval). A daemon
 # that is already running answers the first try in milliseconds; a fresh spawn (JVM + handshake) within the first two.
 HEALTH_CHECK_ATTEMPTS = 3
@@ -401,9 +402,11 @@ class DeviceDaemonClient:
                     await asyncio.sleep(backoff)
                     backoff = min(backoff * 1.5, 5.0)
                 else:
+                    # A daemon that WAS serving us and is gone (adbd restarted on a screen lock / cable change and took it
+                    # along): its replacement is spawned at once — every second here is a second without the phone's push.
                     backoff = 1.0
                     _consecutive_fails = 0
-                    await asyncio.sleep(1.0)
+                    await asyncio.sleep(_RECONNECT_AFTER_LOSS_S)
             except asyncio.CancelledError:
                 log.debug("[OpenDexDaemon:DIAG] Connection supervisor task cancelled")
                 break
