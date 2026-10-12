@@ -34,6 +34,8 @@ function renderPanel() {
 
 const setWindows = (windows) => act(() => useWindowStore.setState({ windows }));
 const scopeHeading = (container, scope) => container.querySelector(`[data-scope="${scope}"]`);
+const pane = (container, id) => container.querySelector(`#dex-pane-${id}`);
+const openTab = (getByRole, name) => fireEvent.click(getByRole('tab', { name }));
 
 describe('DexSettings — kapsam bölümleri', () => {
   beforeEach(() => {
@@ -62,23 +64,45 @@ describe('DexSettings — kapsam bölümleri', () => {
     expect(scopeHeading(container, 'window')).not.toHaveTextContent('Uygulama A');
   });
 
-  it('pencereye özel ayarlar (DPI, Target DP, çözünürlük, sığdırma, DP kilidi, başlık) "Bu pencere" içinde; genel varsayılanlar "Tüm pencereler" içinde durur', () => {
+  it('pencereye özel ayarlar (DPI, Target DP, çözünürlük, sığdırma, DP kilidi, başlık) "Bu pencere" sekmelerinde; genel varsayılanlar "Tüm pencereler" sekmelerinde durur', () => {
     const { container, getByText } = renderPanel();
-    const win = scopeHeading(container, 'window');
-    const all = scopeHeading(container, 'global');
-    const after = (a, b) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const windowPanes = ['density', 'window'].map((id) => pane(container, id));
+    const globalPanes = ['general', 'stream', 'system'].map((id) => pane(container, id));
+    const within_ = (panes, el) => panes.some((p) => p.contains(el));
 
     const perWindow = ['Özel DPI Yoğunluğu', 'Mantıksal Alan (Target DP)', 'Çözünürlük Stratejisi', 'Görüntü Sığdırma',
       'Flex DP Kilidi', 'Başlık Çubuğu'].map((t) => getByText(t));
     for (const el of perWindow) {
-      expect(after(win, el)).toBe(true); // "Bu pencere"den sonra
-      expect(after(el, all)).toBe(true); // "Tüm pencereler"den ÖNCE
+      expect(within_(windowPanes, el)).toBe(true);
+      expect(within_(globalPanes, el)).toBe(false);
     }
     const globals = ['Varsayılan Çözünürlük Stratejisi', 'Varsayılan Görüntü Sığdırma', 'Varsayılan Flex DP Kilidi',
       'Video Bit Hızı'].map((t) => getByText(t));
     for (const el of globals) {
-      expect(after(all, el)).toBe(true); // genel varsayılanlar "Tüm pencereler"den sonra
+      expect(within_(globalPanes, el)).toBe(true);
+      expect(within_(windowPanes, el)).toBe(false);
     }
+  });
+
+  it('beş sekme: ilk ikisi pencereye, son üçü tüm pencerelere ait; odaktaki pencere ayarlanabiliyorsa Yoğunluk açılır', () => {
+    const { getAllByRole, getByRole, container } = renderPanel();
+    expect(getAllByRole('tab').map((t) => t.textContent)).toEqual(['Yoğunluk', 'Pencere', 'Genel', 'Akış', 'Sistem']);
+    expect(getByRole('tab', { name: 'Yoğunluk' })).toHaveAttribute('aria-selected', 'true');
+    expect(pane(container, 'density')).not.toHaveAttribute('hidden');
+    expect(pane(container, 'system')).toHaveAttribute('hidden');
+
+    fireEvent.click(getByRole('tab', { name: 'Sistem' }));
+    expect(pane(container, 'system')).not.toHaveAttribute('hidden');
+    expect(pane(container, 'density')).toHaveAttribute('hidden');
+    fireEvent.keyDown(getByRole('tablist'), { key: 'ArrowLeft' });          // klavyeyle de gezilir
+    expect(getByRole('tab', { name: 'Akış' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('odaklı pencere yokken Genel sekmesi açılır; pencere sekmeleri açıklama gösterir', () => {
+    setWindows([]);
+    const { getByRole, container } = renderPanel();
+    expect(getByRole('tab', { name: 'Genel' })).toHaveAttribute('aria-selected', 'true');
+    expect(pane(container, 'density')).toHaveTextContent('Açık pencere yok');
   });
 
   it('açık pencere yokken pencere ayarları gösterilmez, açıklama gösterilir', () => {
@@ -148,7 +172,7 @@ describe('DexSettings — kapsam bölümleri', () => {
       left: 0, width: 200, right: 200, top: 0, bottom: 32, height: 32, x: 0, y: 0, toJSON() {},
     });
     const start = Number(slider.getAttribute('aria-valuenow'));
-    const thumbX = ((start - 160) / (340 - 160)) * 200;
+    const thumbX = ((start - 130) / (340 - 130)) * 200;
 
     fireEvent.pointerDown(slider, { pointerId: 1, button: 0, clientX: thumbX });
     fireEvent.pointerMove(slider, { pointerId: 1, clientX: thumbX + 20 });
@@ -218,6 +242,7 @@ describe('DexSettings — kapsam bölümleri', () => {
     getSettings.mockResolvedValueOnce({ dynamic_resolution_enabled: true, phone_handoff_windowing: 'freeform' });
     const { getByRole } = renderPanel();
     await act(async () => {});
+    openTab(getByRole, 'Sistem');
 
     // (grup başlığındaki değer rozeti de aynı metni taşıdığından düğmeler erişilebilir adla aranır)
     expect(getByRole('button', { name: /Serbest pencere/ })).toHaveAttribute('aria-pressed', 'true');
@@ -270,7 +295,8 @@ describe('DexSettings — pencere başına çözünürlük, sığdırma, DP kili
       { ...WIN_A, overrides: { resolution_mode: '1080p' } },
       { ...WIN_B, overrides: {} },
     ]);
-    const { getByText } = renderPanel();
+    const { getByText, getByRole } = renderPanel();
+    openTab(getByRole, 'Pencere');
     const chip = (label) => within(group(getByText, 'Çözünürlük Stratejisi')).getByRole('button', { name: new RegExp(label) });
     expect(chip('1080p')).toHaveAttribute('aria-pressed', 'true');
 
@@ -299,5 +325,19 @@ describe('DexSettings — pencere başına çözünürlük, sığdırma, DP kili
     const { getByText } = renderPanel();
     fireEvent.click(within(group(getByText, 'Görüntü Sığdırma')).getByText('1.25× yakın'));
     expect(spy).toHaveBeenCalledWith('wa', 'zoom125');
+  });
+});
+
+describe('DexSettings — Yoğunluk okuma şeridi', () => {
+  beforeEach(() => useWindowStore.setState({ windows: [{ ...WIN_A, dpiPolicy: { mode: 'target', dp: 480 } }, WIN_B] }));
+  afterEach(cleanup);
+
+  it('Target DP "en küçük genişlik"tir: şerit 480 dp seçilince ~480 gösterir (genişlik dp\'si DEĞİL)', () => {
+    const { getByText } = renderPanel();
+    const tile = getByText('En küçük genişlik').parentElement;
+    const shown = Number(tile.textContent.replace('En küçük genişlik', '').replace('dp', ''));
+    // DPI tam sayıya yuvarlandığından ±%3 pay; genişlik dp'si (≈1,6–2 kat) bu aralığa asla girmez.
+    expect(shown).toBeGreaterThan(480 * 0.97);
+    expect(shown).toBeLessThan(480 * 1.03);
   });
 });

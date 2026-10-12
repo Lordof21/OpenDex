@@ -8,7 +8,8 @@ import { cn } from '../lib/utils.js';
 const COLS = { 1: 'grid-cols-1', 2: 'grid-cols-2', 3: 'grid-cols-3', 4: 'grid-cols-4', 5: 'grid-cols-5' };
 const SM_COLS = { 1: '', 2: 'sm:grid-cols-2', 3: 'sm:grid-cols-3' };
 
-export function ChoiceChip({ label, hint, active, onClick, disabled = false, className }) {
+// `dense`: sabit boyutlu panellerde (DeX ayarları) tek satırlık, ~28 px yüksekliğinde çip; ipucu varsa 2 satır ~32 px.
+export function ChoiceChip({ label, hint, active, onClick, disabled = false, dense = false, className }) {
   return (
     <button
       type="button"
@@ -16,14 +17,15 @@ export function ChoiceChip({ label, hint, active, onClick, disabled = false, cla
       disabled={disabled}
       aria-pressed={Boolean(active)}
       className={cn(
-        'flex min-h-9 flex-col items-center justify-center rounded-[6px] border border-border/70 bg-background px-1.5 py-1.5 text-center text-[10px] font-medium leading-[12px] transition-colors hover:bg-accent/60 cursor-pointer',
+        'flex flex-col items-center justify-center rounded-[6px] border border-border/70 bg-background px-1.5 text-center text-[10px] font-medium leading-[12px] transition-colors hover:bg-accent/60 cursor-pointer',
+        dense ? (hint ? 'min-h-8 py-1' : 'min-h-7 py-1') : 'min-h-9 py-1.5',
         active && 'border-primary bg-primary text-primary-foreground hover:bg-primary',
         disabled && 'cursor-not-allowed opacity-50 hover:bg-background',
         className,
       )}
     >
       <span className="max-w-full truncate">{label}</span>
-      {hint && <span className={cn('mt-0.5 text-[8px] font-normal', active ? 'text-primary-foreground/75' : 'text-muted-foreground')}>{hint}</span>}
+      {hint && <span className={cn('max-w-full truncate text-[8px] font-normal', dense ? 'leading-[9px]' : 'mt-0.5', active ? 'text-primary-foreground/75' : 'text-muted-foreground')}>{hint}</span>}
     </button>
   );
 }
@@ -33,15 +35,16 @@ export function ChoiceChip({ label, hint, active, onClick, disabled = false, cla
  * isActive: özel eşleşme gerekiyorsa (ör. sayı/metin karışık) (option) => boolean
  * Diğer props (ör. data-window-setting) kapsayıcı <div>'e geçer.
  */
-export function ChoiceGrid({ options, value, onChange, columns = 2, isActive, className, ...rest }) {
+export function ChoiceGrid({ options, value, onChange, columns = 2, isActive, dense = false, className, ...rest }) {
   return (
-    <div className={cn('grid gap-1.5', COLS[columns] || COLS[2], className)} {...rest}>
+    <div className={cn('grid', dense ? 'gap-1' : 'gap-1.5', COLS[columns] || COLS[2], className)} {...rest}>
       {options.map((opt) => (
         <ChoiceChip
           key={String(opt.value)}
           label={opt.label}
           hint={opt.hint}
           disabled={opt.disabled}
+          dense={dense}
           active={isActive ? isActive(opt) : value === opt.value}
           onClick={() => onChange(opt.value)}
         />
@@ -55,7 +58,7 @@ export function ChoiceGrid({ options, value, onChange, columns = 2, isActive, cl
  *  variant="plain"    → QuickSettings `QuickIconTile` (yuvarlak ikon + başlık + durum)
  *  variant="outlined" → DexSettings `DexIconTile` (çerçeveli kutu)
  */
-export function IconTile({ icon: Icon, title, status, active, onClick, variant = 'plain', className }) {
+export function IconTile({ icon: Icon, title, status, active, onClick, variant = 'plain', dense = false, className }) {
   if (variant === 'outlined') {
     return (
       <button
@@ -64,7 +67,8 @@ export function IconTile({ icon: Icon, title, status, active, onClick, variant =
         aria-pressed={Boolean(active)}
         title={`${title}${status ? ` — ${status}` : ''}`}
         className={cn(
-          'flex min-h-[64px] flex-col items-center justify-center gap-1 rounded-[6px] border border-border/70 bg-background px-1.5 py-2 text-center transition-colors hover:bg-accent/60 cursor-pointer',
+          'flex flex-col items-center justify-center gap-1 rounded-[6px] border border-border/70 bg-background px-1.5 text-center transition-colors hover:bg-accent/60 cursor-pointer',
+          dense ? 'min-h-[52px] py-1.5' : 'min-h-[64px] py-2',
           active && 'border-primary bg-primary/10',
           className,
         )}

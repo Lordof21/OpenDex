@@ -32,10 +32,11 @@ export function Badge({ tone = 'background', mono = false, className, children, 
   );
 }
 
-export function SettingsGroup({ icon: Icon, title, value, mono, className, children }) {
+// `dense`: sabit boyutlu panellerde (DeX ayarları) daha dar iç boşluk ve başlık aralığı.
+export function SettingsGroup({ icon: Icon, title, value, mono, dense = false, className, children }) {
   return (
-    <section className={cn('rounded-md border border-border/70 bg-muted/40 p-2.5', className)}>
-      <div className="mb-2 flex items-start justify-between gap-2">
+    <section className={cn('rounded-md border border-border/70 bg-muted/40', dense ? 'p-2' : 'p-2.5', className)}>
+      <div className={cn('flex items-start justify-between gap-2', dense ? 'mb-1.5' : 'mb-2')}>
         <span className="flex min-w-0 items-center gap-2">
           {Icon && <Icon className="size-3.5 shrink-0 text-muted-foreground" />}
           <h3 className="truncate text-[11px] font-semibold">{title}</h3>

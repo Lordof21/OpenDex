@@ -1,53 +1,57 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+// OpenDeX Ayarları penceresi: yüzen, sürüklenip boyutlandırılabilen kabuk + ayarların kendisi.
+//
+// Yerleşim üç biçimde (pencere genişliğine göre — görünüm penceresine değil, çünkü pencere yüzer):
+//   wide    etiketli, gruplu kenar çubuğu + sürekli görünen arama (masaüstü / DeX)
+//   rail    yalnız ikonlu ray (orta boy pencere)
+//   narrow  telefon: kategori listesi → ayrıntı sayfası, geri düğmesiyle (iOS/Android ayarları gibi)
+// Ekran 640 px'in altındaysa pencere tam ekran sayfaya dönüşür (sürükleme/boyutlandırma yok).
+//
+// Arama (Ctrl/⌘+K): tüm ayarlarda başlık, açıklama ve anahtar sözcüklerle (aksan duyarsız) arar; sonuca basınca ilgili
+// bölüme gider, satıra kayar ve kısa süre vurgular.
+
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import {
-  Activity,
-  AudioLines,
+  AppWindow,
   BatteryCharging,
-  Blocks,
-  Check,
+  ChevronLeft,
   ChevronRight,
-  Code2,
-  Cpu,
-  Crop,
-  Gauge,
   Info,
+  LayoutDashboard,
   Maximize2,
   Minus,
   Monitor,
-  MonitorCog,
   Palette,
   Radio,
-  RefreshCw,
-  ShieldCheck,
-  Smartphone,
-  Sparkles,
+  Search,
+  SearchX,
   Speaker,
-  Volume2,
+  Stethoscope,
   X,
-  Zap,
 } from 'lucide-react';
 
-import Button from '../ui/Button.jsx';
 import { IconButton } from '../ui/IconButton.jsx';
-import { InfoCard } from '../ui/Card.jsx';
-import { OptionGroup } from '../ui/Choice.jsx';
-import { SwitchRow } from '../ui/Switch.jsx';
-import { PanelHeader } from '../ui/Typography.jsx';
 import { pushEscapeHandler } from '../lib/escapeStack.js';
-import { useTheme } from '../state/ThemeContext.jsx';
 import { cn } from '../lib/utils.js';
 import { useSystemStore } from '../state/systemStore.js';
-import { FIT_MODES, modeOf, targetDisplaySizeForWindow, useWindowStore } from '../window/windowStore.js';
-import { updateSettings, useLiveSettings } from './liveSettings.js';
-import { api } from '../lib/api.js';
-import { logger } from '../lib/logger.js';
-import { copyDiagnosticsReport } from '../lib/diagnosticsReport.js';
-import { sessionAudioPlayer } from '../media/audioPlayer.js';
-import { isLegacyAudioMode, useAudioMixerStore } from '../state/audioMixerStore.js';
-import { PrecisionSlider } from '../ui/PrecisionSlider.jsx';
-import { ROUTE_OPTIONS } from '../ui/audioRouting.jsx';
-import SyncFineTune from '../taskbar/SyncFineTune.jsx';
+import { Chip, Highlight, SettingsUiProvider } from './controls.jsx';
+import { useSettingsController } from './useSettingsController.js';
+import { useLiveSettings } from './liveSettings.js';
+import {
+  DEFAULT_SECTION,
+  SECTIONS,
+  SECTION_GROUPS,
+  isSection,
+  layoutForWidth,
+  recommendations,
+  searchSettings,
+  sectionSummary,
+} from './settingsModel.js';
+import { OverviewSection } from './sections/overview.jsx';
+import { DisplaySection } from './sections/display.jsx';
+import { AudioSection, StreamSection } from './sections/stream.jsx';
+import { AppearanceSection, PowerSection, WindowsSection } from './sections/windows.jsx';
+import { AboutSection, AdvancedSection } from './sections/system.jsx';
 
 export const OPENDEX_SETTINGS_EVENT = 'opendex:open-settings';
 
@@ -55,129 +59,275 @@ export function openOpenDexSettings() {
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(OPENDEX_SETTINGS_EVENT));
 }
 
-const SECTIONS = [
-  { id: 'display', label: 'Görüntü & Çözünürlük', icon: Monitor },
-  { id: 'stream', label: 'Yayın Kalitesi', icon: Radio },
-  { id: 'fit', label: 'Görüntü Sığdırma (Fit)', icon: Crop },
-  { id: 'audio', label: 'Ses & Aktarım', icon: Speaker },
-  { id: 'power', label: 'Performans & Pil', icon: BatteryCharging },
-  { id: 'theme', label: 'Arayüz & Tema', icon: Palette },
-  { id: 'developer', label: 'Geliştirici (Beta)', icon: Code2 },
-  { id: 'notes', label: 'Geliştirici Notları', icon: Info },
-  { id: 'system', label: 'Sistem & Teşhis', icon: Activity },
-];
-
-const RESOLUTION_OPTIONS = [
-  { value: 'dynamic', label: 'Dinamik', description: 'Pencerenin o anki boyutlarına otomatik uyum sağlar. Ekstra konfigürasyon gerektirmez.', tag: 'Otomatik Esnek' },
-  { value: 'phone_scale', label: 'Telefon ölçeği (Zoom)', description: 'Uygulamalar telefondaki düzeniyle açılır. Pencereyi büyütmek yakınlaştırır, kareye yaklaştırmak tablet düzenine geçirir. Telefon ölçüleri cihaz bağlanınca okunur.', tag: 'Telefon Düzeni' },
-  { value: 'dynamic_fix', label: 'Dinamik‑Fix (Tam Oturtma)', description: 'Pencerenin video alanının en/boy oranını birebir takip eder. Siyah çubuk ve esneme kalmaz; çözünürlük kodlayıcı uyumlu 8 katına hizalanır.', tag: 'Sıfır Boşluk / Tam Oran' },
-  { value: '1080p', label: 'Sabit 1080p Standart', description: '16:9 Widescreen standart masaüstü görünümü ve kristal netlik.', tag: '1920x1080 @ 240 DPI' },
-  { value: 'tablet', label: 'Tablet Modu (Yüksek Dikey İçerik)', description: '960 dp dikey alan ile tek ekranda 2 kat daha fazla metin, kod ve web içeriği.', tag: '1920x1200 @ 200 DPI' },
-  { value: '2k', label: 'Sabit 2K Masaüstü', description: 'Ultra HD geniş ekran ve 2K monitörler için yüksek piksel netliği.', tag: '2560x1440 @ 210 DPI' },
-  { value: '2.5k', label: '2.5K Tablet (Maks Doygunluk)', description: '1422 dp dikey alan ile maksimum sayfa ve doküman okuma doygunluğu.', tag: '2560x1600 @ 180 DPI' },
-];
-
-const DPI_OPTIONS = [
-  { value: 'auto', label: 'Otomatik (Canlı: 120 DPI)', description: 'Oxford modeline göre 180‑220 DPI arasında canlı ergonomik ölçekleme.', tag: 'Oto (120 DPI)' },
-  { value: '180', label: '180 DPI (DeX Masaüstü)', description: 'Geniş çalışma alanı, çok sütunlu masaüstü görünümü (~920+ dp).', tag: 'Masaüstü' },
-  { value: '200', label: '200 DPI (Ergonomik Optimum)', description: '1080p panelde ISO 9241‑303 standardına göre altın oran (~20 arcmin).', tag: 'Optimum' },
-  { value: '220', label: '220 DPI (Tablet / Kompakt)', description: 'Dengeli yazı boyutu, rahat okunabilirlik ve tablet görünümü (~720 dp).', tag: 'Kompakt' },
-  { value: '240', label: '240 DPI (Büyük & Rahat)', description: 'Gözü yormayan geniş dokunmatik hedefler ve büyük metinler (~600 dp).', tag: 'Büyük Metin' },
-  { value: '320', label: '320 DPI (Erişilebilirlik)', description: 'Maksimum büyüklükte ikon ve metinler, üst düzey okunabilirlik.', tag: 'Erişilebilirlik' },
-];
-
-const TARGET_DP_OPTIONS = [
-  { value: 'auto', label: 'Otomatik (Dinamik Ergonomik)', description: 'Oxford ergonomik modeline göre 180‑220 DPI arasında gözü yormayan altın oranda kesintisiz ölçekler.', tag: 'Önerilen' },
-  { value: '600', label: '600 dp (Tablet ‑ Çift Panel)', description: "Android tablet modunu (master‑detail / iki sütun) kilitler (~210‑240 DPI).", tag: '600 dp' },
-  { value: '720', label: '720 dp (Masaüstü DeX ‑ Standart)', description: 'Samsung DeX tarzı çok sütunlu standart masaüstü arayüzü sağlar (~200‑220 DPI).', tag: '720 dp' },
-  { value: '840', label: '840 dp (Geniş Masaüstü)', description: 'Geniş ekranlarda maksimum üretkenlik ve okunabilirlik dengesi (~180‑190 DPI).', tag: '840 dp' },
-  { value: '960', label: '960 dp (Yüksek Yoğunluk)', description: '16:10 dikey alan ve maksimum içerik görünürlüğü (~180 DPI tabanı).', tag: '960 dp' },
-];
-
-const CODEC_OPTIONS = [
-  { value: 'auto', label: 'Otomatik (H.265 DeX Kalitesi)', description: 'Cihazın donanımına göre en net H.265 (HEVC) kodlayıcıyı otomatik başlatır.', tag: 'Önerilen' },
-  { value: 'h265', label: 'H.265 (HEVC Donanım)', description: 'Samsung DeX standardı: %50 daha keskin metinler, sıfır renk kanaması ve yüksek kontrast.', tag: 'Maksimum Netlik' },
-  { value: 'av1', label: 'AV1 (Yeni Nesil)', description: 'Modern açık kaynaklı ultra‑verimli kodek. Yalnızca destekleyen işlemcilerde aktiftir.', tag: 'Yeni Nesil' },
-  { value: 'h264', label: 'H.264 (Klasik)', description: 'Eski donanımlar için evrensel uyumluluk modu.', tag: 'Klasik' },
-];
-
-const SHARPEN_OPTIONS = [
-  { value: 'smart', label: 'Akıllı DeX Keskinliği', description: 'Gözü yormadan doğal ve temiz kenar netliği.', tag: 'Önerilen' },
-  { value: 'ultra', label: 'Ultra Keskin (Lanczos/CAS)', description: 'Yüksek kontrastlı kristal harfler.', tag: 'Ultra' },
-  { value: 'off', label: 'Kapalı (Standart)', description: 'Filtresiz düz çizim.', tag: 'Standart' },
-];
-
-const FPS_OPTIONS = [
-  { value: '15', label: '15 FPS', description: 'Düşük veri kullanımı', tag: 'Tasarruf' },
-  { value: '30', label: '30 FPS', description: 'Standart akıcılık', tag: 'Dengeli' },
-  { value: '60', label: '60 FPS', description: 'Maksimum akıcılık', tag: 'Önerilen' },
-];
-
-const BITRATE_OPTIONS = [
-  { value: '2', label: '2 Mbps', description: 'Zayıf ağ için', tag: 'Düşük' },
-  { value: '4', label: '4 Mbps', description: 'Orta kalite', tag: 'Dengeli' },
-  { value: '8', label: '8 Mbps', description: 'Kristal netlik', tag: 'Varsayılan' },
-  { value: '12', label: '12 Mbps', description: 'Ultra HD', tag: 'Maksimum' },
-  { value: '16', label: '16 Mbps', description: '2K netlik için önerilen', tag: 'RTX Önerilen' },
-  { value: '20', label: '20 Mbps', description: 'RTX 30xx+ için', tag: 'RTX Güçlü' },
-];
-
-const WINDOW_LIMIT_OPTIONS = [
-  { value: 'auto', label: 'Otomatik (Donanım Limiti)', description: 'Cihazın test/donanım sınırını otomatik kullanır.', tag: 'Donanım Sınırı' },
-  { value: '2', label: '2 Pencere', description: 'Yan yana 2 aktif canlı pencere.', tag: '2 Aktif' },
-  { value: '3', label: '3 Pencere', description: 'Dengeli kaynak kullanımı.', tag: '3 Aktif' },
-  { value: '4', label: '4 Pencere', description: 'Çoklu görev için ideal.', tag: '4 Aktif' },
-  { value: '6', label: '6 Pencere', description: 'Yüksek performanslı cihazlar.', tag: '6 Aktif' },
-  { value: '16', label: '16 Pencere', description: 'Maksimum donanım kapasitesi.', tag: 'Maks. 16' },
-];
-
-const FIT_OPTIONS = [
-  { value: 'fill', label: FIT_MODES.fill.label, description: 'Pencereyi %100 kenardan kenara doldurur. Yanlarda hiç siyah boşluk kalmaz, tüm uygulama butonları görünür.', tag: 'Varsayılan (Önerilen)' },
-  { value: 'contain', label: FIT_MODES.fit.label, description: 'Görüntü oranını (16:10 / 16:9) %100 korur, uzatma yapmaz (yanlarda siyah çubuk kalabilir, %100 içerik netliği).', tag: 'Sıfır Esneme' },
-  { value: 'cover', label: FIT_MODES.cover.label, description: 'Görüntüyü uzatmadan pencereye zoom yapar. Siyah çubuk kalmaz; ancak pencere oranına göre kenardaki butonlar dışarı taşabilir.', tag: 'Zoom / Kenar Kırpma' },
-];
-
-// The default route of apps that have no route of their own — the same Telefon / DeX / İkisi as everywhere (ui/audioRouting).
-const AUDIO_ROUTE_TEXT = {
-  phone: { description: 'Ses aktarımı kapatılır; sesler telefonun kendi hoparlöründen veya telefona bağlı kulaklıktan çalar.', tag: 'Telefonda Çal' },
-  pc: { description: 'Tüm Android sesleri bilgisayarınıza (DeX) aktarılır. Telefonun kendi hoparlörü sessiz kalır.', tag: 'Önerilen (Masaüstü)' },
-  both: { description: 'Sesler aynı anda hem telefondan hem DeX\'ten çalar; iki çıkış aynı ana hizalanır.', tag: 'Eşzamanlı' },
+const SECTION_ICONS = {
+  overview: LayoutDashboard,
+  display: Monitor,
+  stream: Radio,
+  audio: Speaker,
+  windows: AppWindow,
+  appearance: Palette,
+  power: BatteryCharging,
+  advanced: Stethoscope,
+  about: Info,
 };
-const AUDIO_ROUTE_OPTIONS = ROUTE_OPTIONS.map(({ value, label }) => ({ value, label, ...AUDIO_ROUTE_TEXT[value] }));
-
-const AUDIO_CODEC_OPTIONS = [
-  { value: 'pcm', label: 'Raw PCM', description: 'Sıfır gecikmeli direkt işlenebilir ham PCM ses akışı.', tag: 'Sıfır Gecikme (Varsayılan)' },
-  { value: 'opus', label: 'Opus Codec', description: 'Düşük bant genişliği kullanan sıkıştırılmış ses akışı.', tag: 'Düşük Veri' },
-];
-
-const THEME_OPTIONS = [
-  { value: 'light', label: 'Açık Mod (Gri‑Beyaz)', description: 'Free‑React Admin paleti: temiz gri‑beyaz duvar kağıdı, yüksek okunabilirlik.', tag: 'Varsayılan Hakim Mod' },
-  { value: 'dark', label: 'Karanlık Mod (Gece Mavisi)', description: 'Derin gece mavisi ve antrasit cam efekti.', tag: 'Dark Glassmorphic' },
-];
-
-const SYSTEM_ROWS = [
-  { label: 'OpenDeX Sürümü', value: 'v4.2', hint: 'Engine v4.2' },
-  { label: 'Scrcpy Core', value: 'v4.1' },
-  { label: 'A/V Senkronizasyon Saati', value: 'PTS Monotonic Sync' },
-  { label: 'Ses Aktarım Protokolü', value: '48kHz PCM Dual Playback' },
-  { label: 'Encoder Limiti', value: '16', hint: 'doğrulanmış' },
-  { label: 'Esnek Ekran Boyutlandırma', value: 'Destekleniyor' },
-];
-
-// Ayrıntılı akış loglarını konsola/terminale açan izleme kategorileri (tarayıcı + backend aynı anda).
-const TRACE_CHOICES = [
-  { id: 'handoff', label: 'Telefon ⟷ PC geçişi' },
-  { id: 'applock', label: 'Uygulama kilidi' },
-  { id: 'teleport', label: 'Workspace taşıma' },
-  { id: 'workspace', label: 'Workspace' },
-  { id: 'power', label: 'Ekran gücü' },
-  { id: 'supervisor', label: 'Bağlantı denetçisi' },
-  { id: 'media', label: 'Medya' },
-  { id: 'video', label: 'Yayın (video)' },
-];
 
 const MIN_W = 460;
 const MIN_H = 340;
+const SHEET_MAX_VIEWPORT_PX = 640;
+const FLASH_MS = 1700;
+
+const viewport = () => ({
+  width: typeof window !== 'undefined' ? window.innerWidth : 1200,
+  height: typeof window !== 'undefined' ? window.innerHeight : 800,
+});
+
+/** Başlangıç çerçevesi: küçük ekranda tam ekran sayfa (`sheet`), aksi hâlde ortalanmış yüzen pencere. */
+function defaultFrame() {
+  const { width: sw, height: sh } = viewport();
+  if (sw < SHEET_MAX_VIEWPORT_PX) return { x: 0, y: 0, width: sw, height: sh, sheet: true };
+  const width = Math.min(1080, Math.max(MIN_W, sw - 48));
+  const height = Math.min(720, Math.max(MIN_H, sh - 120));
+  return {
+    x: Math.max(12, Math.round((sw - width) / 2)),
+    y: Math.max(12, Math.round((sh - height) / 2 - 20)),
+    width,
+    height,
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────────────────────────── Bölüm gövdesi
+
+// Denetleyici (pencere deposuna abone) yalnız pencere AÇIKKEN bağlanır: kapalı ayarlar penceresi her pencere
+// hareketinde yeniden çizilmez.
+function ControlledSection({ section, go }) {
+  const ctl = useSettingsController();
+  return <SectionBody section={section} ctl={ctl} go={go} />;
+}
+
+function SectionBody({ section, ctl, go }) {
+  switch (section) {
+    case 'display': return <DisplaySection ctl={ctl} />;
+    case 'stream': return <StreamSection ctl={ctl} />;
+    case 'audio': return <AudioSection ctl={ctl} />;
+    case 'windows': return <WindowsSection ctl={ctl} />;
+    case 'appearance': return <AppearanceSection ctl={ctl} />;
+    case 'power': return <PowerSection ctl={ctl} />;
+    case 'advanced': return <AdvancedSection ctl={ctl} />;
+    case 'about': return <AboutSection />;
+    default: return <OverviewSection ctl={ctl} go={go} />;
+  }
+}
+
+// ───────────────────────────────────────────────────────────────────────────────────────── Arama
+
+function SearchField({ value, onChange, inputRef, onSubmit, compact = false, autoFocus = false }) {
+  return (
+    <label className={cn('relative flex min-w-0 items-center', compact ? 'w-full' : 'w-full max-w-[400px]')}>
+      <span className="sr-only">Ayarlarda ara</span>
+      <Search className="pointer-events-none absolute left-2.5 size-3.5 text-muted-foreground" aria-hidden="true" />
+      <input
+        ref={inputRef}
+        type="search"
+        value={value}
+        autoFocus={autoFocus}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') onSubmit?.();
+        }}
+        placeholder="Ayarlarda ara…"
+        autoComplete="off"
+        spellCheck={false}
+        className="h-8 w-full rounded-lg border border-border/70 bg-background/80 pl-8 pr-14 text-[12px] text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary/50 focus:bg-background focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-search-cancel-button]:hidden"
+      />
+      {value ? (
+        <button
+          type="button"
+          aria-label="Aramayı temizle"
+          onClick={() => onChange('')}
+          className="absolute right-1.5 grid size-5 cursor-pointer place-items-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <X className="size-3" />
+        </button>
+      ) : (
+        !compact && <kbd className="pointer-events-none absolute right-2 rounded border border-border/70 bg-muted/60 px-1 font-mono text-[9px] font-semibold text-muted-foreground">Ctrl K</kbd>
+      )}
+    </label>
+  );
+}
+
+const SEARCH_SUGGESTIONS = ['DPI', 'FPS', 'Ses', 'Tema', 'Telefona aktar', 'Pil'];
+
+function SearchResults({ query, results, onOpen, onSuggest }) {
+  if (!results.length) {
+    return (
+      <div className="mx-auto flex max-w-[460px] flex-col items-center gap-2 px-4 py-12 text-center">
+        <span className="grid size-12 place-items-center rounded-2xl bg-muted text-muted-foreground" aria-hidden="true">
+          <SearchX className="size-6" strokeWidth={1.6} />
+        </span>
+        <p className="text-[14px] font-semibold text-foreground">«{query.trim()}» için sonuç yok</p>
+        <p className="text-[12px] leading-[17px] text-muted-foreground">Farklı bir sözcük deneyin ya da bir konu seçin:</p>
+        <div className="mt-1 flex flex-wrap justify-center gap-1.5">
+          {SEARCH_SUGGESTIONS.map((word) => (
+            <button
+              key={word}
+              type="button"
+              onClick={() => onSuggest(word)}
+              className="cursor-pointer rounded-full border border-border/70 bg-background px-2.5 py-1 text-[11px] font-medium text-muted-foreground outline-none transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {word}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <section aria-label="Arama sonuçları" className="mx-auto w-full max-w-[720px] space-y-2">
+      <p className="px-1 text-[11px] text-muted-foreground" role="status">
+        {results.length} sonuç
+      </p>
+      <ul className="divide-y divide-border/60 overflow-hidden rounded-xl border border-border/70 bg-muted/30">
+        {results.map((result) => {
+          const Icon = SECTION_ICONS[result.section];
+          return (
+            <li key={result.id}>
+              <button
+                type="button"
+                onClick={() => onOpen(result)}
+                className="flex w-full cursor-pointer items-start gap-3 px-3.5 py-2.5 text-left outline-none transition-colors hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              >
+                <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-background/80 text-muted-foreground" aria-hidden="true">
+                  <Icon className="size-3.5" strokeWidth={1.8} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[12.5px] font-semibold leading-[17px] text-foreground">
+                    <Highlight text={result.title} query={query} />
+                  </span>
+                  <span className="mt-0.5 line-clamp-2 block text-[11.5px] leading-[16px] text-muted-foreground">
+                    <Highlight text={result.description} query={query} />
+                  </span>
+                </span>
+                <Chip className="mt-0.5">{SECTIONS[result.section].label}</Chip>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+// ───────────────────────────────────────────────────────────────────────────────────────── Gezinti
+
+function NavButton({ id, active, layout, badge, onSelect }) {
+  const Icon = SECTION_ICONS[id];
+  const label = SECTIONS[id].label;
+  const rail = layout === 'rail';
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      aria-current={active ? 'page' : undefined}
+      onClick={() => onSelect(id)}
+      className={cn(
+        'relative flex shrink-0 cursor-pointer items-center rounded-lg text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
+        rail ? 'size-9 justify-center' : 'h-9 w-full gap-2.5 px-2.5',
+        active ? 'bg-primary/10 font-semibold text-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
+      )}
+    >
+      {active && <span className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-primary" aria-hidden="true" />}
+      <Icon className={cn('size-4 shrink-0', active && 'text-primary')} strokeWidth={active ? 2 : 1.8} aria-hidden="true" />
+      {!rail && <span className="min-w-0 flex-1 truncate text-[12px] leading-[16px]">{label}</span>}
+      {badge > 0 && (
+        <span
+          className={cn(
+            'grid min-w-4 place-items-center rounded-full bg-warning/20 px-1 text-[9px] font-bold leading-4 text-warning',
+            rail && 'absolute -right-0.5 -top-0.5',
+          )}
+          aria-label={`${badge} öneri`}
+        >
+          {badge}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function SideNav({ layout, section, tipCount, onSelect }) {
+  const onKeyDown = (event) => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    const items = [...event.currentTarget.querySelectorAll('button[aria-label]')];
+    const at = items.indexOf(document.activeElement);
+    if (at < 0) return;
+    event.preventDefault();
+    items[(at + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus();
+  };
+  return (
+    <nav
+      aria-label="Ayar bölümleri"
+      onKeyDown={onKeyDown}
+      className={cn(
+        'flex shrink-0 flex-col overflow-y-auto border-r border-border/60 bg-muted/20 select-none',
+        layout === 'rail' ? 'w-[52px] items-center gap-1 p-1.5' : 'w-[232px] gap-3 p-2.5',
+      )}
+    >
+      {SECTION_GROUPS.map((group) => (
+        <div key={group.id} className={cn('flex flex-col', layout === 'rail' ? 'items-center gap-1' : 'gap-0.5')}>
+          {group.label && layout !== 'rail' && (
+            <p className="px-2.5 pb-1 pt-1 text-[9.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">{group.label}</p>
+          )}
+          {group.label && layout === 'rail' && <span className="my-0.5 h-px w-5 bg-border/70" aria-hidden="true" />}
+          {group.sections.map((id) => (
+            <NavButton key={id} id={id} layout={layout} active={section === id} badge={id === 'overview' ? tipCount : 0} onSelect={onSelect} />
+          ))}
+        </div>
+      ))}
+      {layout === 'wide' && (
+        <p className="mt-auto px-2.5 pt-2 text-[10px] leading-[14px] text-muted-foreground/80">OpenDeX Engine v4.2 · Scrcpy v4.1</p>
+      )}
+    </nav>
+  );
+}
+
+/** Telefon: kategori listesi. Her satır bölümün canlı özetini taşır; dokununca ayrıntı sayfası açılır. */
+function MobileList({ live, tipCount, onSelect }) {
+  return (
+    <div className="space-y-4">
+      {SECTION_GROUPS.map((group) => (
+        <section key={group.id} aria-label={group.label || 'Ayarlar'} className="space-y-1.5">
+          {group.label && <h3 className="px-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{group.label}</h3>}
+          <ul className="divide-y divide-border/60 overflow-hidden rounded-xl border border-border/70 bg-muted/30">
+            {group.sections.map((id) => {
+              const Icon = SECTION_ICONS[id];
+              const summary = id === 'overview' ? (tipCount ? `${tipCount} öneri` : SECTIONS[id].subtitle) : sectionSummary(id, live) || SECTIONS[id].subtitle;
+              return (
+                <li key={id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelect(id)}
+                    className="flex min-h-[52px] w-full cursor-pointer items-center gap-3 px-3.5 py-2 text-left outline-none transition-colors active:bg-accent/60 hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                  >
+                    <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-background/80 text-muted-foreground" aria-hidden="true">
+                      <Icon className="size-4" strokeWidth={1.8} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[13px] font-semibold leading-[18px] text-foreground">{SECTIONS[id].label}</span>
+                      <span className="block truncate text-[11px] leading-[15px] text-muted-foreground">{summary}</span>
+                    </span>
+                    <ChevronRight className="size-4 shrink-0 text-muted-foreground/60" aria-hidden="true" />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+// ───────────────────────────────────────────────────────────────────────────────────────── Pencere
 
 export default function SettingsPanel() {
   const reduceMotion = useReducedMotion();
@@ -193,54 +343,41 @@ export default function SettingsPanel() {
     focusSettings,
     closeSettings,
   } = useSystemStore();
+  const connectionState = useSystemStore((s) => s.connectionState);
 
-  const [section, setSection] = useState('display');
+  const live = useLiveSettings() || {};
+  const tips = useMemo(() => recommendations(live), [live]);
+
+  const [section, setSection] = useState(DEFAULT_SECTION);
+  const [mobileScreen, setMobileScreen] = useState('list'); // narrow: 'list' | 'detail'
+  const [query, setQuery] = useState('');
+  const [flashId, setFlashId] = useState(null);
   const [frame, setFrame] = useState(null);
   const contentRef = useRef(null);
   const stageRef = useRef(null);
   const restoreRef = useRef(null);
+  const searchRef = useRef(null);
+  const queryRef = useRef('');
+  queryRef.current = query;
 
   const stageSize = () => {
     const rect = stageRef.current?.getBoundingClientRect();
-    return {
-      width: rect?.width ?? (typeof window !== 'undefined' ? window.innerWidth : 1200),
-      height: rect?.height ?? (typeof window !== 'undefined' ? window.innerHeight : 800),
-    };
+    const vp = viewport();
+    return { width: rect?.width || vp.width, height: rect?.height || vp.height };
   };
 
   const openWindow = useCallback(() => {
     openSettings();
     restoreSettings();
     focusSettings();
-    setSection('display');
-    setFrame((current) => {
-      if (current) return current;
-      const sw = typeof window !== 'undefined' ? window.innerWidth : 1200;
-      const sh = typeof window !== 'undefined' ? window.innerHeight : 800;
-      const width = Math.min(1040, Math.max(MIN_W, sw - 48));
-      const height = Math.min(680, Math.max(MIN_H, sh - 120));
-      return {
-        x: Math.max(12, Math.round((sw - width) / 2)),
-        y: Math.max(12, Math.round((sh - height) / 2 - 20)),
-        width,
-        height,
-      };
-    });
-  }, [restoreSettings, focusSettings]);
+    setSection(DEFAULT_SECTION);
+    setMobileScreen('list');
+    setQuery('');
+    setFrame((current) => current || defaultFrame());
+  }, [openSettings, restoreSettings, focusSettings]);
 
   useEffect(() => {
-    if (settingsOpen && !frame) {
-      const sw = typeof window !== 'undefined' ? window.innerWidth : 1200;
-      const sh = typeof window !== 'undefined' ? window.innerHeight : 800;
-      const width = Math.min(1040, Math.max(MIN_W, sw - 48));
-      const height = Math.min(680, Math.max(MIN_H, sh - 120));
-      setFrame({
-        x: Math.max(12, Math.round((sw - width) / 2)),
-        y: Math.max(12, Math.round((sh - height) / 2 - 20)),
-        width,
-        height,
-      });
-    }
+    if (settingsOpen && !frame) setFrame(defaultFrame());
   }, [settingsOpen, frame]);
 
   useEffect(() => {
@@ -249,18 +386,81 @@ export default function SettingsPanel() {
     return () => window.removeEventListener(OPENDEX_SETTINGS_EVENT, onOpen);
   }, [openWindow]);
 
-  // Esc yalnız en üstteki katmanı kapatır (lib/escapeStack): açık bir panel/menü varsa önce o kapanır.
+  // Ekran dönünce / yeniden boyutlanınca: tam ekran sayfa ekrana uyar; ekran büyüyünce yüzen pencereye döner.
+  useEffect(() => {
+    const onResize = () => {
+      setFrame((current) => {
+        if (!current) return current;
+        const vp = viewport();
+        if (vp.width < SHEET_MAX_VIEWPORT_PX) return { x: 0, y: 0, width: vp.width, height: vp.height, sheet: true };
+        if (current.sheet) return defaultFrame();
+        return current;
+      });
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  // Esc yalnız en üstteki katmanı kapatır (lib/escapeStack): önce arama temizlenir, sonra pencere kapanır.
   useEffect(() => {
     if (!settingsOpen || settingsMinimized) return undefined;
-    return pushEscapeHandler(() => closeSettings());
+    return pushEscapeHandler(() => {
+      if (queryRef.current) setQuery('');
+      else closeSettings();
+    });
   }, [settingsOpen, settingsMinimized, closeSettings]);
 
+  // Ctrl/⌘+K: aramaya odaklan (pencere odaktayken).
   useEffect(() => {
-    contentRef.current?.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' });
-  }, [section, reduceMotion]);
+    if (!settingsOpen || settingsMinimized) return undefined;
+    const onKey = (event) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'k') return;
+      if (!useSystemStore.getState().settingsFocused) return;
+      event.preventDefault();
+      searchRef.current?.focus();
+      searchRef.current?.select?.();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [settingsOpen, settingsMinimized]);
+
+  const layout = layoutForWidth(frame?.width ?? 1200);
+  const sheet = Boolean(frame?.sheet);
+  const searching = query.trim().length > 0;
+  const results = useMemo(() => searchSettings(query), [query]);
+
+  // Bölüm değişince sayfa başa kaydırılır (arama sonucuna gidişte satıra kaydırma bunu ezer).
+  useEffect(() => {
+    if (flashId) return;
+    contentRef.current?.scrollTo?.({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' });
+  }, [section, mobileScreen, reduceMotion, flashId]);
+
+  // Arama sonucundan gelinen ayar: satıra kaydır, kısa süre vurgula.
+  useEffect(() => {
+    if (!flashId) return undefined;
+    const raf = requestAnimationFrame(() => {
+      const el = contentRef.current?.querySelector(`[data-setting-id="${flashId}"]`);
+      el?.scrollIntoView?.({ block: 'center', behavior: reduceMotion ? 'auto' : 'smooth' });
+    });
+    const timer = setTimeout(() => setFlashId(null), FLASH_MS);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(timer);
+    };
+  }, [flashId, section, reduceMotion]);
+
+  const go = useCallback((id, itemId = null) => {
+    if (!isSection(id)) return;
+    setQuery('');
+    setSection(id);
+    setMobileScreen('detail');
+    setFlashId(itemId);
+  }, []);
+
+  const openResult = useCallback((result) => go(result.section, result.id), [go]);
 
   const startMove = (event) => {
-    if (settingsMaximized || !frame) return;
+    if (settingsMaximized || sheet || !frame) return;
     if (event.button !== 0) return;
     if (event.target.closest('button') || event.target.closest('input')) return;
     focusSettings();
@@ -282,7 +482,7 @@ export default function SettingsPanel() {
   };
 
   const startResize = (dir) => (event) => {
-    if (settingsMaximized || !frame) return;
+    if (settingsMaximized || sheet || !frame) return;
     if (event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
@@ -323,12 +523,14 @@ export default function SettingsPanel() {
       restoreRef.current = frame;
       const stage = stageSize();
       setFrame({ x: 0, y: 0, width: stage.width, height: stage.height });
-    } else {
-      if (restoreRef.current) setFrame(restoreRef.current);
+    } else if (restoreRef.current) {
+      setFrame(restoreRef.current);
     }
   };
 
-  const isCompact = (frame?.width ?? 1200) < 540;
+  const narrow = layout === 'narrow';
+  const showList = narrow && mobileScreen === 'list' && !searching;
+  const connected = connectionState === 'connected';
 
   return (
     <div ref={stageRef} className="pointer-events-none fixed inset-0 z-[70] overflow-hidden">
@@ -340,8 +542,9 @@ export default function SettingsPanel() {
             aria-label="Tüm OpenDeX ayarları"
             onPointerDown={focusSettings}
             className={cn(
-              'pointer-events-auto absolute flex flex-col overflow-hidden rounded-xl border border-border/80 bg-popover/95 backdrop-blur-2xl transition-shadow duration-200 select-none shadow-none',
-              settingsFocused ? 'ring-1 ring-primary/20' : 'opacity-95'
+              'pointer-events-auto absolute flex flex-col overflow-hidden border border-border/80 bg-popover/95 backdrop-blur-2xl transition-shadow duration-200 select-none shadow-none',
+              sheet ? 'rounded-none' : 'rounded-xl',
+              settingsFocused ? 'ring-1 ring-primary/20' : 'opacity-95',
             )}
             style={{ left: frame.x, top: frame.y, width: frame.width, height: frame.height }}
             initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 18, scale: 0.985 }}
@@ -349,86 +552,98 @@ export default function SettingsPanel() {
             exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 12, scale: 0.985 }}
             transition={{ type: 'spring', stiffness: 420, damping: 40, mass: 0.8 }}
           >
-            {/* Window Header */}
+            {/* Üst çubuk: marka · (geniş/orta) arama · pencere denetimleri */}
             <header
               onPointerDown={startMove}
-              className="flex h-11 shrink-0 items-center gap-2 border-b border-border/70 bg-muted/40 px-3 select-none cursor-default"
+              className="flex h-12 shrink-0 items-center gap-3 border-b border-border/70 bg-muted/40 px-3 select-none cursor-default"
             >
-              <span className="grid size-6 shrink-0 place-items-center rounded-[7px] bg-primary text-[10px] font-semibold text-primary-foreground">
+              <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-primary text-[11px] font-bold text-primary-foreground" aria-hidden="true">
                 D
               </span>
-              <div className="min-w-0 flex-1 select-none">
-                <p className="truncate text-[12px] font-semibold leading-none text-foreground">
-                  OpenDeX Ayarları
-                </p>
-                <p className="mt-0.5 truncate text-[9px] text-muted-foreground">
-                  Zero‑APK · saf ADB köprüsü · Engine v4.2
-                </p>
+              <div className={cn('min-w-0 select-none', narrow ? 'flex-1' : layout === 'rail' ? 'w-[110px] shrink-0' : 'w-[170px] shrink-0')}>
+                <p className="truncate text-[12.5px] font-semibold leading-none text-foreground">{narrow ? 'Ayarlar' : 'OpenDeX Ayarları'}</p>
+                {!narrow && <p className="mt-1 truncate text-[9.5px] leading-none text-muted-foreground">Zero‑APK · saf ADB köprüsü</p>}
               </div>
-              <span className="hidden shrink-0 items-center gap-1.5 rounded-full bg-background px-2 py-1 text-[9px] font-medium text-muted-foreground sm:inline-flex">
-                <span className="size-1.5 rounded-full bg-status-active" />
-                Bağlı · Dinamik‑Fix
-              </span>
-              <IconButton label="Simge durumuna küçült" size="sm" tooltipPosition="bottom" onClick={minimizeSettings}>
-                <Minus />
-              </IconButton>
-              <IconButton
-                label={settingsMaximized ? 'Küçült' : 'Tam ekran'}
-                aria-pressed={settingsMaximized}
-                size="sm"
-                tooltipPosition="bottom"
-                onClick={toggleMaximize}
-              >
-                <Maximize2 />
-              </IconButton>
-              <IconButton label="Kapat" size="sm" danger="close" tooltipPosition="bottom" tooltipAlign="end" onClick={closeSettings}>
-                <X />
-              </IconButton>
+              {!narrow && (
+                <div className="flex min-w-0 flex-1 justify-center">
+                  <SearchField value={query} onChange={setQuery} inputRef={searchRef} onSubmit={() => results[0] && openResult(results[0])} />
+                </div>
+              )}
+              {layout === 'wide' && (
+                <span className="hidden shrink-0 items-center gap-1.5 rounded-full bg-background px-2.5 py-1 text-[10px] font-medium text-muted-foreground lg:inline-flex">
+                  <span className={cn('size-1.5 rounded-full', connected ? 'bg-status-active' : 'bg-muted-foreground')} />
+                  {connected ? 'Bağlı' : 'Bağlı değil'}
+                </span>
+              )}
+              <div className="flex shrink-0 items-center">
+                <IconButton label="Simge durumuna küçült" size="sm" tooltipPosition="bottom" onClick={minimizeSettings}>
+                  <Minus />
+                </IconButton>
+                {!sheet && (
+                  <IconButton
+                    label={settingsMaximized ? 'Küçült' : 'Tam ekran'}
+                    aria-pressed={settingsMaximized}
+                    size="sm"
+                    tooltipPosition="bottom"
+                    onClick={toggleMaximize}
+                  >
+                    <Maximize2 />
+                  </IconButton>
+                )}
+                <IconButton label="Kapat" size="sm" danger="close" tooltipPosition="bottom" tooltipAlign="end" onClick={closeSettings}>
+                  <X />
+                </IconButton>
+              </div>
             </header>
 
-            {/* Window Content */}
             <div className="flex min-h-0 flex-1 flex-row">
-              <nav
-                aria-label="Ayar bölümleri"
-                className={cn(
-                  'flex w-11 shrink-0 flex-col gap-1 overflow-hidden border-r border-border/60 p-1.5 bg-muted/20 select-none',
-                  !isCompact && 'md:w-52'
-                )}
-              >
-                {SECTIONS.map((item) => {
-                  const active = section === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      title={item.label}
-                      aria-label={item.label}
-                      onClick={() => setSection(item.id)}
-                      aria-current={active ? 'page' : undefined}
-                      className={cn(
-                        'flex h-9 w-full shrink-0 flex-1 items-center gap-2 rounded-md px-1 transition-colors cursor-pointer',
-                        isCompact ? 'justify-center' : 'justify-center px-2.5 py-1.5 md:justify-start',
-                        active
-                          ? 'bg-primary text-primary-foreground font-semibold shadow-xs'
-                          : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'
-                      )}
-                    >
-                      <item.icon className={cn('shrink-0', isCompact ? 'size-[18px]' : 'size-[18px] md:size-3.5')} />
-                      <span className={cn('text-[11px] font-semibold leading-[14px]', isCompact ? 'sr-only' : 'hidden md:block md:truncate')}>
-                        {item.label}
-                      </span>
-                    </button>
-                  );
-                })}
-              </nav>
+              {!narrow && <SideNav layout={layout} section={section} tipCount={tips.length} onSelect={go} />}
 
-              <div ref={contentRef} className="dex-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 sm:p-5 [scrollbar-gutter:stable]">
-                <SectionBody section={section} />
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                {narrow && (
+                  <div className="shrink-0 space-y-2 border-b border-border/60 bg-muted/20 px-3 py-2">
+                    {!showList && !searching && (
+                      <button
+                        type="button"
+                        onClick={() => setMobileScreen('list')}
+                        className="-ml-1 inline-flex cursor-pointer items-center gap-1 rounded-md px-1 py-0.5 text-[12px] font-semibold text-primary outline-none transition-colors hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <ChevronLeft className="size-4" aria-hidden="true" />
+                        Ayarlar
+                        <span className="ml-1 font-normal text-muted-foreground">/ {SECTIONS[section].label}</span>
+                      </button>
+                    )}
+                    <SearchField value={query} onChange={setQuery} inputRef={searchRef} compact onSubmit={() => results[0] && openResult(results[0])} />
+                  </div>
+                )}
+
+                <div
+                  ref={contentRef}
+                  className={cn('dex-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]', narrow ? 'p-3' : 'p-4 sm:p-6')}
+                >
+                  <SettingsUiProvider value={{ layout, flashId }}>
+                    {/* Yalnız giriş animasyonu (opaklık + 6 px): çıkış beklenmez, geçiş anında yanıt verir. */}
+                    <motion.div
+                      key={searching ? 'search' : showList ? 'list' : section}
+                      initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.16, ease: 'easeOut' }}
+                    >
+                      {searching ? (
+                        <SearchResults query={query} results={results} onOpen={openResult} onSuggest={setQuery} />
+                      ) : showList ? (
+                        <MobileList live={live} tipCount={tips.length} onSelect={go} />
+                      ) : (
+                        <ControlledSection section={section} go={go} />
+                      )}
+                    </motion.div>
+                  </SettingsUiProvider>
+                </div>
               </div>
             </div>
 
-            {/* 8-Direction Resizers */}
-            {!settingsMaximized && (
+            {/* 8 yönlü boyutlandırma tutamaçları */}
+            {!settingsMaximized && !sheet && (
               <>
                 <div onPointerDown={startResize('n')} className="absolute inset-x-3 top-0 h-1.5 cursor-ns-resize" />
                 <div onPointerDown={startResize('s')} className="absolute inset-x-3 bottom-0 h-1.5 cursor-ns-resize" />
@@ -444,561 +659,5 @@ export default function SettingsPanel() {
         )}
       </AnimatePresence>
     </div>
-  );
-}
-
-function SectionBody({ section }) {
-  const { theme, setTheme } = useTheme();
-  const pushToast = useSystemStore((s) => s.pushToast);
-
-  // Genel ayarlar tek canlı kaynaktan türetilir (settings/liveSettings): DeX paneliyle her an aynı değer,
-  // değişiklik anında görünür, kayıtlar sıralı. Backend ⟷ arayüz değer dönüşümleri burada tek yerde.
-  const live = useLiveSettings() || {};
-  const flag = (key, fallback) => (live[key] === undefined ? fallback : Boolean(live[key]));
-  const smartResize = flag('dynamic_resolution_enabled', true);
-  const resolution = live.resolution_mode || 'dynamic_fix';
-  const dpi = live.custom_dpi > 0 ? String(live.custom_dpi) : 'auto';
-  const targetDp = live.target_dp > 0 ? String(live.target_dp) : 'auto';
-  const codec = live.video_codec || 'auto';
-  const subpixel = flag('pixel_perfect_dpr', true);
-  const instantResize = flag('resize_instant_apply', false);
-  const sharpenRaw = live.sharpening_mode || live.sharpening;
-  const sharpen = sharpenRaw ? (sharpenRaw === 'adaptive' ? 'smart' : sharpenRaw) : 'smart';
-  const stealth = flag('stealth_dpi_enabled', true);
-  const densityRefresh = flag('density_refresh_enabled', true);
-  const densityRefreshHard = flag('density_refresh_hard', false);
-  const handoffPrelanding = flag('handoff_prelanding', true);
-  const fps = live.max_fps ? String(live.max_fps) : '60';
-  const bitrate = live.video_bit_rate !== undefined ? String(Math.round(live.video_bit_rate / 1_000_000)) : '8';
-  const windowLimit = live.custom_encoder_limit > 0 ? String(live.custom_encoder_limit) : 'auto';
-  const fit = live.video_fit_mode || live.video_fit || 'fill';
-  const audioRoute = live.audio_output_mode || 'pc';
-  const audioCodec = live.audio_codec ? (live.audio_codec === 'raw' ? 'pcm' : live.audio_codec) : 'pcm';
-  const dimPhone = flag('screen_off_while_mirroring', false);
-  const ambient = flag('ambient_backdrop', true);
-  const rememberDevices = flag('remember_devices', true);
-
-  // Yalnız bu oturumda tutulan (backend'e yazılmayan) anahtarlar.
-  const [inspector, setInspector] = useState(false);
-  const [testState, setTestState] = useState('idle');
-  const [logState, setLogState] = useState('idle'); // idle | busy | done | failed
-  const [logInfo, setLogInfo] = useState('');
-  const [traceSel, setTraceSel] = useState(() => logger.getTrace());
-
-  // Son kaydetme sözü: pencere yeniden hesabı KAYDEDİLMİŞ ayarı okur (eskiden kayıt bitmeden hesaplanıyordu).
-  const lastSave = useRef(Promise.resolve());
-  const handleUpdate = (patch) => {
-    lastSave.current = updateSettings(patch).catch(() => {});
-    return lastSave.current;
-  };
-
-  const windows = useWindowStore((s) => s.windows);
-  // Odaktaki pencere: store'da `activeWindowId` alanı YOK (DexSettings ile aynı kural: `focused` bayrağı) — eskiden
-  // gösterge her zaman listedeki ilk pencerenin DPI'ını gösteriyordu.
-  const activeWindow = windows.find((w) => w.focused && !w.minimized) || windows.find((w) => !w.minimized);
-  // Gösterge: odaktaki pencerenin GERÇEK yoğunluğu (kendi DPI politikası ve başlık durumu tek fonksiyondan).
-  const liveEffectiveDpi = activeWindow
-    ? (targetDisplaySizeForWindow(
-        activeWindow,
-        {
-          resolution_mode: resolution || 'dynamic_fit',
-          custom_dpi: dpi === 'auto' ? 0 : Number(dpi),
-          target_dp: targetDp === 'auto' ? 0 : Number(targetDp),
-        },
-        {
-          w: activeWindow.w || (typeof window !== 'undefined' ? window.innerWidth : 1920),
-          h: activeWindow.h || (typeof window !== 'undefined' ? window.innerHeight - 50 : 1030),
-        },
-        { mode: modeOf(activeWindow) },
-      )?.dpi || 206)
-    : 206;
-
-  // Genel ayar değişince açık pencerelerin akışı yeniden hesaplanır: her pencere KENDİ DPI politikasını korur
-  // (genel özel DPI / Target DP yalnız YENİ pencerelerin varsayılanıdır).
-  const updateGeometry = (patch) => {
-    handleUpdate(patch);
-    if (!smartResize) return;
-    lastSave.current.then(() => useWindowStore.getState().applyDynamicResolutionToOpenWindows()).catch(() => {});
-  };
-
-  const handleResolutionChange = (val) => updateGeometry({ resolution_mode: val });
-  // Özel DPI ile Target DP birbirini dışlar: biri seçilince diğeri otomatiğe (0) döner.
-  const handleDpiChange = (val) => {
-    const num = val === 'auto' ? 0 : parseInt(val, 10);
-    updateGeometry(num > 0 ? { custom_dpi: num, target_dp: 0 } : { custom_dpi: 0 });
-  };
-  // Target DP "Oto": Target DP'nin o an ürettiği DPI özel DPI olarak korunur (yoğunluk sıçramaz; DPI onu dinler).
-  const handleTargetDpChange = (val) => {
-    const num = val === 'auto' ? 0 : parseInt(val, 10);
-    if (num > 0) return updateGeometry({ target_dp: num, custom_dpi: 0 });
-    // GENEL Target DP'nin ürettiği DPI (pencerenin kendi politikası değil) — politika açıkça verilir.
-    const heldDpi =
-      targetDp !== 'auto' && activeWindow
-        ? targetDisplaySizeForWindow(
-            activeWindow,
-            { resolution_mode: resolution || 'dynamic_fit', custom_dpi: 0, target_dp: Number(targetDp) },
-            {
-              w: activeWindow.w || (typeof window !== 'undefined' ? window.innerWidth : 1920),
-              h: activeWindow.h || (typeof window !== 'undefined' ? window.innerHeight - 50 : 1030),
-            },
-            { mode: modeOf(activeWindow), policy: { mode: 'target', dp: Number(targetDp) } },
-          )?.dpi
-        : 0;
-    return updateGeometry(heldDpi > 0 ? { target_dp: 0, custom_dpi: Math.round(heldDpi) } : { target_dp: 0 });
-  };
-  const handleCodecChange = (val) => handleUpdate({ video_codec: val });
-  const handleFpsChange = (val) => handleUpdate({ max_fps: parseInt(val, 10) });
-  const handleBitrateChange = (val) => handleUpdate({ video_bit_rate: parseInt(val, 10) * 1_000_000 });
-  const handleFitChange = (val) => handleUpdate({ video_fit_mode: val });
-  const handleSharpenChange = (val) => handleUpdate({ sharpening_mode: val === 'smart' ? 'adaptive' : val });
-  const handleWindowLimitChange = (val) => handleUpdate({ custom_encoder_limit: val === 'auto' ? 0 : parseInt(val, 10) });
-
-  const handleAudioRouteChange = (val) => {
-    // Legacy single stream (Android ≤12) only — started here so its AudioContext resumes inside this user gesture.
-    // With per-app audio this setting is the default route of apps without their own and the legacy player stays
-    // off (App.jsx owns that rule).
-    if (isLegacyAudioMode(useAudioMixerStore.getState().mode)) {
-      if (val !== 'phone') {
-        sessionAudioPlayer.start();
-        if (sessionAudioPlayer.ctx && sessionAudioPlayer.ctx.state === 'suspended') {
-          sessionAudioPlayer.ctx.resume().catch(() => {});
-        }
-      } else {
-        sessionAudioPlayer.stop();
-      }
-    }
-    handleUpdate({ audio_output_mode: val, enable_audio: val !== 'phone' });
-  };
-
-  const handleAudioCodecChange = (val) => handleUpdate({ audio_codec: val === 'pcm' ? 'raw' : val });
-  const handleSmartResizeToggle = () => handleUpdate({ dynamic_resolution_enabled: !smartResize });
-  const handleSubpixelToggle = () => handleUpdate({ pixel_perfect_dpr: !subpixel });
-  const handleInstantResizeToggle = () => handleUpdate({ resize_instant_apply: !instantResize });
-  const handleStealthToggle = () => handleUpdate({ stealth_dpi_enabled: !stealth });
-  const handleDensityRefreshToggle = () => handleUpdate({ density_refresh_enabled: !densityRefresh });
-  const handleDensityRefreshHardToggle = () => handleUpdate({ density_refresh_hard: !densityRefreshHard });
-  const handleHandoffPrelandingToggle = () => handleUpdate({ handoff_prelanding: !handoffPrelanding });
-  const handleDimPhoneToggle = () => handleUpdate({ screen_off_while_mirroring: !dimPhone });
-  const handleAmbientToggle = () => handleUpdate({ ambient_backdrop: !ambient });
-  const handleRememberDevicesToggle = () => handleUpdate({ remember_devices: !rememberDevices });
-
-  const handleCopyLogs = async () => {
-    setLogState('busy');
-    try {
-      const res = await copyDiagnosticsReport();
-      setLogState(res.ok ? 'done' : 'failed');
-      setLogInfo(res.ok ? `${res.lines} satır panoya kopyalandı` : 'Panoya yazılamadı (tarayıcı izni gerekebilir)');
-    } catch (err) {
-      setLogState('failed');
-      setLogInfo(String(err?.message || err));
-    }
-  };
-
-  const handleTraceToggle = (id) => {
-    const next = traceSel.includes(id) ? traceSel.filter((c) => c !== id) : [...traceSel, id];
-    setTraceSel(next);
-    logger.setTrace(next);
-    api.post('/api/diagnostics/log-level', { trace: next }).catch(() => {});
-  };
-
-  const runTest = async () => {
-    setTestState('running');
-    try {
-      // EncoderStressTestResult: the MEASURED limit, never a hardcoded number.
-      const res = await api.post('/api/device/encoder-stress-test');
-      setTestState('done');
-      const limit = Number(res?.measured_encoder_limit);
-      if (limit > 0) {
-        pushToast?.(
-          `Encoder kapasite testi tamamlandı: ${limit} eşzamanlı pencere destekleniyor` +
-            (res?.capped_by_safety_limit ? ' (güvenlik sınırında durduruldu).' : '.'),
-        );
-      } else {
-        pushToast?.(`Encoder kapasite testi sonuç vermedi${res?.failure_reason ? `: ${res.failure_reason}` : '.'}`);
-      }
-    } catch (err) {
-      setTestState('done');
-      pushToast?.(`Encoder kapasite testi başarısız: ${err?.detail || err?.message || 'bilinmeyen hata'}`);
-    }
-  };
-
-  if (section === 'display')
-    return (
-      <Stack>
-        <PanelHeader iconTone="soft" size="md" icon={Monitor} title="Görüntü & Çözünürlük" subtitle="Çözünürlük stratejisi, içerik yoğunluğu ve kodlayıcı" />
-        <SwitchRow
-          icon={Sparkles}
-          title="Yeniden boyutlandırmada gerçek çözünürlük iste"
-          description="Daha keskin görüntü; boyut değişiminde kısa bir donma olabilir. Zayıf cihazlarda kapalı tutulabilir."
-          checked={smartResize}
-          onToggle={handleSmartResizeToggle}
-        />
-        <SwitchRow
-          icon={Maximize2}
-          title="Anında Boyutlandır"
-          description="Pencere bırakıldığı an yeni boyuta geçer; yeni görüntü gelene kadar eski görüntü ölçeklenmiş görünür."
-          checked={instantResize}
-          onToggle={handleInstantResizeToggle}
-        />
-        <OptionGroup
-          icon={MonitorCog}
-          title="Çözünürlük ve Görünüm Stratejisi"
-          subtitle="Pencerenize uygulanacak çözünürlük, ekran oranı ve dikey içerik yoğunluğunu seçin:"
-          options={RESOLUTION_OPTIONS}
-          value={resolution}
-          onChange={handleResolutionChange}
-          columns={2}
-        />
-        <InfoCard title="Dinamik‑Fix & Oxford Ergonomik DP Modeli">
-          Çözünürlük, pencerenin video alanından (başlık çubuğu ve kenarlıklar çıkarılmış haliyle) piksel‑birebir hesaplanır. İçerik yoğunluğu (DPI), ISO 9241‑303 standardına göre 180‑220 DPI bandında dinamik olarak dengelenir; böylece yazılar asla mikro boyuta düşmez ve tam ekranda DeX çok sütunlu düzen korunur.
-        </InfoCard>
-        <OptionGroup
-          icon={Gauge}
-          title="Özel DPI / İçerik Yoğunluğu"
-          subtitle="Dinamik modda ekrandaki metin, ikon ve içerik boyutunu manuel belirleyin (Target DP yerine sabit DPI)"
-          options={DPI_OPTIONS}
-          value={dpi}
-          onChange={handleDpiChange}
-          columns={2}
-        />
-        <div className="rounded-xl border border-border/70 bg-card/60 p-3">
-          <div className="flex items-center justify-between text-xs font-semibold mb-2">
-            <span className="text-foreground">Hassas DPI Yoğunluk Ayarı</span>
-            <span className="font-mono text-primary font-bold">{dpi === 'auto' ? `Otomatik (${liveEffectiveDpi} DPI)` : `${dpi} DPI`}</span>
-          </div>
-          <PrecisionSlider
-            value={dpi === 'auto' ? liveEffectiveDpi : Number(dpi)}
-            min={140}
-            max={380}
-            step={2}
-            auto={dpi === 'auto'}
-            onCommit={(val) => handleDpiChange(String(val))}
-            onAuto={() => handleDpiChange('auto')}
-            label="Özel DPI yoğunluğu"
-            unit="DPI"
-            ticks={[160, 180, 200, 220, 240, 280, 320, 360]}
-          />
-        </div>
-
-        <OptionGroup
-          icon={Blocks}
-          title="Mantıksal DP Alan Pazarlığı (Target DP)"
-          subtitle="Dinamik‑Fix modunda pencere boyutuna göre Android'e iletilen mantıksal çalışma alanını (dp) belirleyin"
-          options={TARGET_DP_OPTIONS}
-          value={targetDp}
-          onChange={handleTargetDpChange}
-          columns={2}
-        />
-        <div className="rounded-xl border border-border/70 bg-card/60 p-3">
-          <div className="flex items-center justify-between text-xs font-semibold mb-2">
-            <span className="text-foreground">Hassas Target DP Çalışma Alanı</span>
-            <span className="font-mono text-primary font-bold">{targetDp === 'auto' ? 'Otomatik (720 dp)' : `${targetDp} dp`}</span>
-          </div>
-          <PrecisionSlider
-            value={targetDp === 'auto' ? 720 : Number(targetDp)}
-            min={350}
-            max={1200}
-            step={10}
-            auto={targetDp === 'auto'}
-            onCommit={(val) => handleTargetDpChange(String(val))}
-            onAuto={() => handleTargetDpChange('auto')}
-            label="Mantıksal alan (target dp)"
-            unit="dp"
-            ticks={[350, 480, 600, 720, 840, 960, 1080]}
-          />
-        </div>
-        <OptionGroup
-          icon={Cpu}
-          title="Video Kodlama & Sıkıştırma Motoru"
-          subtitle="Görüntü netliğini belirleyen donanım kodlayıcıyı seçin. H.265 (HEVC) metin kenarlarındaki bulanıklığı sıfırlar"
-          options={CODEC_OPTIONS}
-          value={codec}
-          onChange={handleCodecChange}
-          columns={2}
-        />
-        <SwitchRow
-          icon={Zap}
-          title="Fiziksel 1:1 Subpixel Eşleme (Pixel‑Perfect DPR)"
-          description="Windows %125 laptop ölçekleme bulanıklığını önler; telefon piksellerini doğrudan monitörün fiziksel ızgarasına kilitler."
-          checked={subpixel}
-          onToggle={handleSubpixelToggle}
-        />
-        <OptionGroup
-          icon={Sparkles}
-          title="Doku & Kenar Keskinleştirme (Sharpening Shader)"
-          subtitle="Metin ve simgelerin kenarlarındaki cıvıklığı gideren GPU doku filtreleme modu"
-          options={SHARPEN_OPTIONS}
-          value={sharpen}
-          onChange={handleSharpenChange}
-          columns={3}
-        />
-        <SwitchRow
-          icon={ShieldCheck}
-          title="Stealth DP: Telefonda Açık Uygulamayı DeX'te Açarken"
-          description="Telefonda zaten çalışan bir uygulama DeX'te açılırken sanal ekran önce telefonun DPI'ında doğar, uygulama yerleşince pencerenin DPI'ına geçer (geçiş kaplamanın arkasında olur). Telefon ↔ PC aktarımı bu ayardan bağımsızdır: orada DPI tek adımda değişir."
-          checked={stealth}
-          onToggle={handleStealthToggle}
-        />
-        <SwitchRow
-          icon={RefreshCw}
-          title="DPI Sonrası Uygulamayı Yenile"
-          description="Bir uygulama DPI değişimini yaşadıysa (telefondan pencereye taşıma, canlı DPI, telefona dönüş) arayüzünü yeni yoğunlukta yeniden kurmaya zorlar (YouTube gibi arayüzünü eski yoğunlukta tutan uygulamalar için). Uygulama kapanmaz: etkinlikler aynı süreçte, durumları korunarak yeniden kurulur. Kapatılırsa hiçbir şey yenilenmez."
-          checked={densityRefresh}
-          onToggle={handleDensityRefreshToggle}
-        />
-        <SwitchRow
-          icon={RefreshCw}
-          title="Sert Yenileme (Süreci Yeniden Başlat)"
-          description="Yalnızca yukarıdaki yenileme yetmiyorsa açın: uygulamanın süreci Android'in durum koruyan yoluyla yeniden başlatılır. Arka plan servisleri (ör. çalan müzik) kesilir."
-          checked={densityRefreshHard}
-          onToggle={handleDensityRefreshHardToggle}
-        />
-        <SwitchRow
-          icon={Smartphone}
-          title="Telefona Aktarırken Ön-İniş"
-          description="«Telefona aktar» denince boyut ve DPI değişimi telefonda değil, PC penceresinin perdesi arkasında yaşanır: sanal ekran telefonun kendi çözünürlüğüne (W×H piksel) ve yoğunluğuna tek adımda çekilir, uygulama orada yeni boyutta ve yoğunlukta yeniden kurulur (gerekirse durumu korunarak yenilenir), görev ancak ondan sonra telefona taşınır. DeX boyutlu bir pencereden bile telefonda yanlış yerleşimli bir arayüz görünmez; kendini uyarlamayan uygulamalarda aktarım birkaç saniye uzar. Geri alınca sanal ekran pencerenin boyutuna döner. Kapalıysa taşıma boyut ve DPI'ı tek adımda değiştirir."
-          checked={handoffPrelanding}
-          onToggle={handleHandoffPrelandingToggle}
-        />
-        <InfoCard title="Çift Yönlü Donanım Koruması (Demir Kale)">
-          <span className="block">• PC ➔ Telefon (Handoff): Sanal ekran PC perdesinin arkasında telefonun kendi boyutuna ve DPI'ına çekilir, uygulama orada uzlaştırılır (ön-iniş); sonra görev telefon ekranına (Display 0) taşınır, telefon uyandırılır ve uygulama öne çıkarılır.</span>
-          <span className="mt-1.5 block">• Telefon ➔ PC (Reclaim): Aktif görev DPI şoku yaşamadan sanal ekrana aktarılır ve masaüstü DPI'ına yumuşak geçiş yapar. Soğuk başlatmada doğrudan masaüstü DPI'ında başlar.</span>
-        </InfoCard>
-        <StatRow label="Aktif Stream Çözünürlüğü" value="Sınırsız (Doğal Oran)" hint="Dinamik‑Fix aktif — çözünürlük pencerenin video alanı oranına 8px hizalı olarak birebir eşlenir, ölçek küçültme uygulanmaz." />
-      </Stack>
-    );
-
-  if (section === 'stream')
-    return (
-      <Stack>
-        <PanelHeader iconTone="soft" size="md" icon={Radio} title="Yayın Kalitesi & Protokol" subtitle="Kare hızı, bant genişliği ve pencere sınırı" />
-        <OptionGroup icon={Activity} title="Maksimum FPS" subtitle="Ekran tazeleme ve kare hızını belirleyin" options={FPS_OPTIONS} value={fps} onChange={handleFpsChange} columns={3} />
-        <OptionGroup icon={AudioLines} title="Video Bit Hızı" subtitle="Görüntü netliğini ve bant genişliğini ayarlayın. 2K/4K modlarda daha yüksek değer önerilir" options={BITRATE_OPTIONS} value={bitrate} onChange={handleBitrateChange} columns={3} />
-        <OptionGroup icon={Blocks} title="Maksimum Canlı Pencere / Enkoder Sınırı" subtitle="Aynı anda aktif canlı video yayını yapacak maksimum pencere sayısını sınırlandırın" options={WINDOW_LIMIT_OPTIONS} value={windowLimit} onChange={handleWindowLimitChange} columns={3} />
-      </Stack>
-    );
-
-  if (section === 'fit')
-    return (
-      <Stack>
-        <PanelHeader iconTone="soft" size="md" icon={Crop} title="Görüntü Sığdırma (Fit)" subtitle="Ekran doldurma modu (Canvas Fit)" />
-        <InfoCard title="Dinamik‑Fix aktif">
-          Stream oranı pencerenin video alanına zaten birebir eşlendiği için aşağıdaki üç mod pratikte aynı sonucu verir: esnetilecek, çubuk bırakılacak veya kırpılacak bir fark kalmaz.
-        </InfoCard>
-        <OptionGroup icon={Maximize2} title="Kaplama Kipleri" subtitle="Pencereye görüntünün nasıl sığdırılacağını kişisel tercihinize göre belirleyin" options={FIT_OPTIONS} value={fit} onChange={handleFitChange} />
-      </Stack>
-    );
-
-  if (section === 'audio')
-    return (
-      <Stack>
-        <PanelHeader iconTone="soft" size="md" icon={Speaker} title="Ses & Aktarım" subtitle="Yönlendirme ve ses kodlayıcı" />
-        <OptionGroup icon={Volume2} title="Ses Çıkışı" subtitle="Android seslerinin nereye yönlendirileceğini belirleyin (uygulama başına Medya Merkezi / mikserden değiştirilebilir)" options={AUDIO_ROUTE_OPTIONS} value={audioRoute} onChange={handleAudioRouteChange} />
-        <SyncFineTune className="rounded-lg border border-border/60 bg-muted/35" />
-        <OptionGroup icon={AudioLines} title="Ses Kodlayıcı (Audio Codec)" subtitle="Ses iletimi için kullanılacak kodlayıcı" options={AUDIO_CODEC_OPTIONS} value={audioCodec} onChange={handleAudioCodecChange} columns={2} />
-      </Stack>
-    );
-
-  if (section === 'power')
-    return (
-      <Stack>
-        <PanelHeader iconTone="soft" size="md" icon={BatteryCharging} title="Performans & Pil" subtitle="Isı koruması ve donanım bütçesi" />
-        <SwitchRow icon={Monitor} title="Kullanırken telefon ekranını karart" description="Görüntü kalitesini ve yayını etkilemeden telefonda gerçek pil tasarrufu sağlar." checked={dimPhone} onToggle={handleDimPhoneToggle} />
-      </Stack>
-    );
-
-  if (section === 'theme')
-    return (
-      <Stack>
-        <PanelHeader iconTone="soft" size="md" icon={Palette} title="Arayüz & Tema" subtitle="Masaüstü görünümü ve kabuk davranışı" />
-        <OptionGroup icon={Palette} title="Masaüstü Görünüm Teması" subtitle="Arayüzün hakim görünüm temasını seçin" options={THEME_OPTIONS} value={theme} onChange={(val) => setTheme(val === 'dark' ? 'dark' : 'light')} columns={2} />
-        <SwitchRow icon={Sparkles} title="Sinematik Arka Plan (Ambient Glassmorphic Backdrop)" description="Sığdır (contain) modunda kenarlardaki siyah çubuklar yerine yumuşak sinematik bulanık arka plan yansıtır." checked={ambient} onToggle={handleAmbientToggle} />
-      </Stack>
-    );
-
-  if (section === 'developer')
-    return (
-      <Stack>
-        <PanelHeader iconTone="soft" size="md" icon={Code2} title="Geliştirici (Beta)" subtitle="Deneysel denetim katmanı" />
-        <SwitchRow
-          icon={Code2}
-          title="Öğeyi Denetle & XML Inspector Katmanı"
-          description="Zero‑Apps deneysel mod: seçildiğinde ADB uiautomator üzerinden ekrandaki metin ve buton koordinatlarını şeffaf DOM katmanı olarak yansıtır."
-          badge="Beta"
-          checked={inspector}
-          onToggle={() => setInspector((v) => !v)}
-        />
-      </Stack>
-    );
-
-  if (section === 'notes')
-    return (
-      <Stack>
-        <PanelHeader iconTone="soft" size="md" icon={Info} title="Geliştirici Notları" subtitle="Mimari ilkeler ve platform sınırları" />
-        <div className="rounded-lg border border-border/70 bg-muted/35 p-3.5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-[12px] font-semibold">Açık Kaynak Sistem Mimarisi</h3>
-            <span className="rounded-full bg-background px-2 py-0.5 text-[9px] font-medium text-muted-foreground">%100 Yerel Android (AOSP)</span>
-          </div>
-          <p className="mt-2 text-[11px] font-semibold">OpenDeX Temel İlkesi: “Sıfır Kurulum / Zero‑APK”</p>
-          <p className="mt-1 text-[10.5px] leading-[16px] text-muted-foreground">
-            Telefonunuza asla yabancı bir APK kurmamak, root yetkisi talep etmemek ve cihazınızın Knox / OEM garanti bütünlüğünü bozmamaktır. Sistem tak‑çalıştır mantığıyla, saf ADB köprüsü ve Android OS resmi çekirdek API'leri üzerinden çalışır.
-          </p>
-          <div className="mt-3 grid gap-2 sm:grid-cols-3">
-            <Metric value="0" label="APK Kurulumu" hint="Cihaz belleği tertemiz" />
-            <Metric value="0" label="Root / Modifikasyon" hint="Garanti & Knox bozulmaz" />
-            <Metric value="100%" label="Yerel Gizlilik" hint="Doğrudan USB / LAN transferi" />
-          </div>
-        </div>
-
-        <NoteCard
-          title="Bildirimlerden Doğrudan Yanıt (Headless Direct Reply) Neden Yapılamaz?"
-          badge="PendingIntent & RemoteInput"
-          subtitle="WhatsApp, Telegram vb. mesaj bildirimlerine pencere açmadan arkada gizlice cevap gönderme engeli"
-          blocks={[
-            { heading: 'Android İşletim Sistemi Güvenlik Bariyeri', body: 'Android\'de bildirimlerdeki “Yanıtla” eylemi arka planda bir PendingIntent ve RemoteInput taşır. SystemServer, sahte mesaj enjeksiyonunu engellemek için bu eylemi yalnızca kullanıcının Bildirim Erişimi ekranından onayladığı bir NotificationListenerService APK\'sına tanır.', footnote: '⚡ UID 2000 (ADB/Shell) bir listener APK olmadığı için sistem intent enjeksiyonunu reddeder.' },
-            { heading: 'OpenDeX\'in Doğal ve Güvenli Çözümü', body: 'Arka planda gizlice sanal pencere açıp körlemesine panodan metin yapıştırmak güvenilmezdir. OpenDeX\'te bildirime tıkladığınızda WhatsApp penceresi doğal olarak masaüstünde odaklanır; klavyeniz, fareniz ve sohbet geçmişinizle mesajınızı güvenle gönderirsiniz.', footnote: '✓ Sıfır hack, sıfır gizli pencere; %100 gerçek masaüstü ergonomisi.' },
-          ]}
-          footer="Bildirim Triyajı: Kartlardaki “Okundu İşaretle” (çift tik) bildirimi silmez; “Okunmamış” sekmesinden gizleyip geçmişte (“Tümü”) saklar. Bildirimler sistemden yalnızca “X” butonuna bastığınızda kalıcı olarak silinir."
-        />
-      </Stack>
-    );
-
-  return (
-    <Stack>
-      <PanelHeader iconTone="soft" size="md" icon={Activity} title="Sistem & Teşhis" subtitle="OpenDeX Engine v4.2 çekirdek sürümü ve encoder kapasitesi" />
-      <SwitchRow
-        icon={ShieldCheck}
-        title="Bu bilgisayarda cihazları hatırla"
-        description="Başarıyla bağlanan cihazlar Kayıtlı Cihazlar listesine eklenir ve tek tıkla yeniden bağlanabilir. Kapatırsanız yeni eşleşen cihazlar hatırlanmaz — paylaşılan bilgisayarlar için önerilir. Bağlanma her zaman elle tıklamayla olur, bu ayar sadece hatırlamayı etkiler."
-        checked={rememberDevices}
-        onToggle={handleRememberDevicesToggle}
-      />
-      <div className="overflow-hidden rounded-lg border border-border/70 bg-muted/35">
-        {SYSTEM_ROWS.map((row, index) => (
-          <div key={row.label} className={cn('flex items-center justify-between gap-3 px-3.5 py-2.5', index > 0 && 'border-t border-border/60')}>
-            <span className="text-[11px] font-medium">{row.label}</span>
-            <span className="flex items-center gap-1.5">
-              <span className="font-mono text-[11px] font-semibold tabular-nums text-foreground">{row.value}</span>
-              {row.hint && <span className="rounded-full bg-background px-2 py-0.5 text-[9px] text-muted-foreground">{row.hint}</span>}
-            </span>
-          </div>
-        ))}
-      </div>
-      <div className="rounded-lg border border-border/70 bg-muted/35 p-3.5">
-        <h3 className="text-[12px] font-semibold">Tanılama Günlüğü</h3>
-        <p className="mt-1 text-[10.5px] leading-[16px] text-muted-foreground">
-          Bir sorunu yeniden ürettikten hemen sonra “Logları kopyala”ya basın: tarayıcı logu, backend log dosyasının sonu
-          (<span className="font-mono">backend/logs/</span>), yayın sağlığı ve telefon ekran durumu tek parça panoya alınır.
-        </p>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Button onClick={handleCopyLogs} disabled={logState === 'busy'}>
-            {logState === 'busy' ? 'Hazırlanıyor…' : 'Logları kopyala'}
-          </Button>
-          {(logState === 'done' || logState === 'failed') && (
-            <span className="flex items-center gap-1.5 rounded-full bg-background px-2.5 py-1 text-[10px] font-medium text-muted-foreground">
-              {logState === 'done' && <Check className="size-3 text-status-active" />} {logInfo}
-            </span>
-          )}
-        </div>
-        <p className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Ayrıntılı izleme (konsol + backend terminali)
-        </p>
-        <div className="mt-1.5 flex flex-wrap gap-1.5">
-          {TRACE_CHOICES.map((choice) => {
-            const active = traceSel.includes(choice.id);
-            return (
-              <button
-                key={choice.id}
-                type="button"
-                aria-pressed={active}
-                onClick={() => handleTraceToggle(choice.id)}
-                className={cn(
-                  'cursor-pointer rounded-full border px-2.5 py-1 text-[10px] font-medium transition-colors',
-                  active
-                    ? 'border-primary bg-primary text-primary-foreground'
-                    : 'border-border/70 bg-background text-muted-foreground hover:bg-accent/55',
-                )}
-              >
-                {choice.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-      <div className="rounded-lg border border-border/70 bg-muted/35 p-3.5">
-        <h3 className="text-[12px] font-semibold">Encoder Kapasite Testi</h3>
-        <p className="mt-1 text-[10.5px] leading-[16px] text-muted-foreground">
-          Cihazın aynı anda kaç pencere destekleyebildiğini gerçek cihazda ölçer. Test için önce açık pencereleri kapatın.
-        </p>
-        <div className="mt-3 flex items-center gap-2">
-          <Button onClick={runTest} disabled={testState === 'running'}>
-            {testState === 'running' ? 'Ölçülüyor…' : 'Test Et'}
-          </Button>
-          {testState === 'done' && (
-            <span className="flex items-center gap-1.5 rounded-full bg-background px-2.5 py-1 text-[10px] font-medium text-muted-foreground">
-              <Check className="size-3 text-status-active" /> 16 eşzamanlı pencere doğrulandı
-            </span>
-          )}
-        </div>
-      </div>
-    </Stack>
-  );
-}
-
-function Stack({ children }) {
-  return <div className="mx-auto flex w-full max-w-[680px] flex-col gap-3">{children}</div>;
-}
-
-function StatRow({ label, value, hint }) {
-  return (
-    <div className="rounded-lg border border-border/70 bg-muted/35 p-3">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] font-semibold text-foreground">{label}</span>
-        <span className="font-mono text-[10px] font-semibold tabular-nums text-primary">{value}</span>
-      </div>
-      <p className="mt-1 text-[10px] leading-[14px] text-muted-foreground">{hint}</p>
-    </div>
-  );
-}
-
-function Metric({ value, label, hint }) {
-  return (
-    <div className="rounded-md border border-border/60 bg-background/70 p-2.5 text-center">
-      <p className="font-mono text-[18px] font-semibold leading-none tabular-nums text-primary">{value}</p>
-      <p className="mt-1.5 text-[10.5px] font-semibold text-foreground">{label}</p>
-      <p className="mt-0.5 text-[9px] text-muted-foreground">{hint}</p>
-    </div>
-  );
-}
-
-function NoteCard({
-  title,
-  badge,
-  subtitle,
-  blocks,
-  footer,
-}) {
-  return (
-    <section className="rounded-lg border border-border/70 bg-muted/35 p-3.5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-[12px] font-semibold leading-[16px] text-foreground">{title}</h3>
-        <span className="rounded-full bg-background px-2 py-0.5 font-mono text-[9px] text-muted-foreground">{badge}</span>
-      </div>
-      <p className="mt-1 text-[10px] text-muted-foreground">{subtitle}</p>
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        {blocks.map((block) => (
-          <div key={block.heading} className="rounded-md border border-border/60 bg-background/70 p-2.5">
-            <p className="text-[10.5px] font-semibold leading-[14px] text-foreground">{block.heading}</p>
-            <p className="mt-1 text-[10px] leading-[15px] text-muted-foreground">{block.body}</p>
-            <p className="mt-2 rounded-md bg-muted px-2 py-1 text-[9.5px] leading-[13px] text-foreground/80">{block.footnote}</p>
-          </div>
-        ))}
-      </div>
-      <p className="mt-2.5 flex gap-1.5 text-[10px] leading-[15px] text-muted-foreground">
-        <ChevronRight className="mt-0.5 size-3 shrink-0 text-primary" />
-        {footer}
-      </p>
-    </section>
   );
 }

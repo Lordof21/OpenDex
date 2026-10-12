@@ -1,8 +1,9 @@
-import React, { useState, forwardRef } from 'react';
+import React, { useCallback, useRef, useState, forwardRef } from 'react';
+import { motion } from 'framer-motion';
 import {
   Activity,
+  AppWindow,
   AudioLines,
-  ChevronDown,
   ExternalLink,
   Film,
   Gauge,
@@ -16,6 +17,7 @@ import {
   Palette,
   Ruler,
   ScanSearch,
+  SlidersHorizontal,
   Smartphone,
   Sparkles,
   Zap,
@@ -78,18 +80,16 @@ const THEME_SEGMENTS = [
   { value: 'light', label: 'Açık' },
 ];
 
+// Tek sıra, artan: beş hazır yoğunluk 372 px'lik satıra sığar (eskiden 3+2 iki satırdı).
 const DPI_PRESETS = [
   { value: '180', label: '180 DPI', hint: 'DeX' },
   { value: '200', label: '200 DPI', hint: 'Optimum' },
-  { value: '240', label: '240 DPI', hint: 'Rahat' },
-];
-
-const DPI_PRESETS_EXTRA = [
   { value: '220', label: '220 DPI', hint: 'Tablet' },
+  { value: '240', label: '240 DPI', hint: 'Rahat' },
   { value: '340', label: '340 DPI', hint: 'Erişim' },
 ];
 
-const DPI_MIN = 160;
+const DPI_MIN = 130;
 const DPI_MAX = 340;
 const DPI_STEP = 2;
 const DPI_AUTO = 206;
@@ -116,16 +116,16 @@ const FPS_OPTIONS = [
 ];
 
 const TARGET_DP = [
-  { value: '600', label: '600 dp (Tablet)' },
-  { value: '720', label: '720 dp (Masaüstü)' },
-  { value: '840', label: '840 dp (Geniş DeX)' },
-  { value: '960', label: '960 dp (Yoğun)' },
+  { value: '600', label: '600 dp', hint: 'Tablet' },
+  { value: '720', label: '720 dp', hint: 'Masaüstü' },
+  { value: '840', label: '840 dp', hint: 'Geniş DeX' },
+  { value: '960', label: '960 dp', hint: 'Yoğun' },
 ];
 
 // Telefona aktarılan uygulamanın pencereleme kipi: tek GLOBAL ayar (pencere başına değil).
 const HANDOFF_WINDOWING = [
   { value: 'fullscreen', label: 'Tam ekran', hint: 'Önerilen' },
-  { value: 'freeform', label: 'Serbest pencere', hint: 'Deneysel' },
+  { value: 'freeform', label: 'Serbest pencere', hint: 'Küçük pencere' },
 ];
 
 // Pencerenin uygulaması TELEFONDA kapatılınca: pencere kapanır ya da yeniden açma kartı gösterir.
@@ -141,7 +141,9 @@ const DP_AUTO = 720;
 
 export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionProps }, ref) {
   const { theme, setTheme } = useTheme();
-  const [advancedOpen, setAdvancedOpen] = useState(false);
+  // Sekme: seçilmediyse odaktaki pencere ayarlanabiliyorsa "Yoğunluk", değilse "Genel" (aşağıda `tab`).
+  const [pickedTab, setPickedTab] = useState(null);
+  const scrollRef = useRef(null);
 
   // Genel ayarlar tek canlı kaynaktan türetilir (settings/liveSettings): Ayarlar penceresiyle her an aynı değer,
   // değişiklik anında görünür, kayıtlar sıralı (art arda iki değişiklik birbirini ezmez).
@@ -184,8 +186,8 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
   const dpValue = policy.mode === 'target' ? policy.dp : DP_AUTO;
 
   // Otomatik (özel DPI olmadan) hesaplanan canlı DPI: pencerenin kendi kipi, başlık durumu ve Target DP'si dahil.
-  const liveCalculatedDpi = activeWindow
-    ? (targetDisplaySizeForWindow(
+  const liveGeometry = activeWindow
+    ? targetDisplaySizeForWindow(
         activeWindow,
         { resolution_mode: resolution || 'dynamic_fit', header_hover_mode: dragTitle },
         {
@@ -193,15 +195,26 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
           h: activeWindow.h || (typeof window !== 'undefined' ? window.innerHeight - 50 : 1030),
         },
         { mode: modeOf(activeWindow), policy: policy.mode === 'target' || policy.mode === 'phone' ? policy : { mode: 'auto' } },
-      )?.dpi || DPI_AUTO)
-    : DPI_AUTO;
+      )
+    : null;
+  const liveCalculatedDpi = liveGeometry?.dpi || DPI_AUTO;
 
   const dpiValue = policy.mode === 'custom' ? policy.dpi : (activeWindow?.dpi || liveCalculatedDpi || DPI_AUTO);
   const effectiveDpi = dpiAuto ? liveCalculatedDpi : dpiValue;
+  // Etkin "en küçük genişlik" (sw dp) = min(en, boy) px × 160 / DPI: Target DP'nin ölçtüğü ve Android'in sw niteleyicisinin
+  // (sw600dp…) baktığı değer — GENİŞLİK dp'si değil (windowMath.densityForTabletTarget aynı formülü kullanır).
+  const liveSwDp = liveGeometry?.w > 0 && liveGeometry?.h > 0 && effectiveDpi > 0
+    ? Math.round((Math.min(liveGeometry.w, liveGeometry.h) * 160) / effectiveDpi)
+    : null;
 
   // Kapsam: "Bu pencere" bölümü odaktaki pencereye, "Tüm pencereler" genel varsayılanlara aittir.
   const windowName = activeWindow ? activeWindow.title || activeWindow.package || 'Pencere' : null;
   const canTuneWindow = Boolean(activeWindow) && !activeWindow.isEcoWorkspace;
+  const tab = pickedTab ?? (canTuneWindow ? 'density' : 'general');
+  const selectTab = useCallback((id) => {
+    setPickedTab(id);
+    scrollRef.current?.scrollTo?.({ top: 0 });   // yeni sekme hep başından açılır (jsdom'da scrollTo yok)
+  }, []);
   const headerMode = normalizeHeaderMode(activeWindow?.headerMode);
   const headerLocked = Boolean(activeWindow) && isMirrorPackage(activeWindow.package);
   // Pencerenin genel ayarın üstündeki kendi değerleri (windowModel.settingsForWindow): yoksa "Genele uy".
@@ -307,400 +320,513 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
       ref={ref} {...motionProps}
       className="right-4 flex h-[min(620px,calc(100vh-82px))] w-[min(400px,calc(100vw-32px))] flex-col p-0 sm:right-28"
     >
-      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/70 px-3.5 py-3">
+      <div className="flex shrink-0 items-center justify-between gap-3 px-3 pb-1.5 pt-2.5">
         <PanelHeader
           icon={MonitorCog}
+          iconTone="soft"
+          size="md"
           title="DeX ayarları"
           subtitle="Bu pencere ve tüm pencereler"
         />
-        <span className="rounded-full bg-muted px-2 py-1 font-mono text-[9px] font-semibold tabular-nums text-muted-foreground">
+        <span className="rounded-full bg-muted px-2 py-1 font-mono text-[9px] font-semibold tabular-nums text-muted-foreground" title="Bu cihazın destekleyebildiği bağımsız pencere sayısı">
           ~16 VD
         </span>
       </div>
 
-      <div className="dex-scroll min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-3.5 py-3">
-        {/* ─── Bu pencere: yalnız odaktaki pencereyi etkiler ─── */}
-        <ScopeHeading
-          scope="window"
-          icon={
-            canTuneWindow ? (
-              <AppIcon pkg={activeWindow.package} displayName={windowName} size={18} />
-            ) : (
-              <Monitor className="size-4 shrink-0 text-muted-foreground" />
-            )
-          }
-          title="Bu pencere"
-          name={windowName}
-        />
-        {canTuneWindow ? (
-          <>
-            {!smartResize && (
-              <p className="rounded-md border border-dashed border-border/70 px-2.5 py-1.5 text-[9px] leading-[12px] text-muted-foreground">
-                «Gerçek Çözünürlük» kapalı: DPI ve Target DP bu pencereye uygulanmaz. Aşağıdaki «Tüm pencereler» bölümünden açın.
-              </p>
-            )}
-            <SettingsGroup icon={Gauge} title="Özel DPI Yoğunluğu" value={dpiLabel} mono>
-              <div className="grid grid-cols-3 gap-1.5">
-                {DPI_PRESETS.map((item) => (
-                  <ChoiceChip
-                    key={item.value}
-                    label={item.label}
-                    hint={item.hint}
-                    active={!dpiAuto && dpiValue === Number(item.value)}
-                    onClick={() => setDpi(Number(item.value))}
-                  />
-                ))}
-              </div>
-              <div className="mt-1.5 grid grid-cols-2 gap-1.5">
-                {DPI_PRESETS_EXTRA.map((item) => (
-                  <ChoiceChip
-                    key={item.value}
-                    label={item.label}
-                    hint={item.hint}
-                    active={!dpiAuto && dpiValue === Number(item.value)}
-                    onClick={() => setDpi(Number(item.value))}
-                  />
-                ))}
-              </div>
-              <PrecisionSlider
-                value={effectiveDpi}
-                min={DPI_MIN}
-                max={DPI_MAX}
-                step={DPI_STEP}
-                auto={dpiAuto}
-                onCommit={setDpi}
-                onAuto={handleDpiAuto}
-                label="Özel DPI yoğunluğu"
-                unit="DPI"
-                ticks={[160, 180, 200, 220, 240, 280, 320, 340]}
-                className="mt-2"
-              />
-            </SettingsGroup>
+      <DexTabs
+        tabs={DEX_TABS}
+        active={tab}
+        onChange={selectTab}
+        windowIcon={
+          canTuneWindow ? (
+            <AppIcon pkg={activeWindow.package} displayName={windowName} size={14} />
+          ) : (
+            <Monitor className="size-3.5 shrink-0 text-muted-foreground" />
+          )
+        }
+        windowName={windowName}
+      />
 
-            <SettingsGroup icon={Ruler} title="Mantıksal Alan (Target DP)" value={targetLabel} mono>
-              <div className="grid grid-cols-2 gap-1.5">
-                {TARGET_DP.map((item) => (
-                  <ChoiceChip
-                    key={item.value}
-                    label={item.label}
-                    active={!dpAuto && dpValue === Number(item.value)}
-                    onClick={() => setDp(Number(item.value))}
-                  />
-                ))}
-              </div>
-              <PrecisionSlider
-                value={dpValue}
-                min={DP_MIN}
-                max={DP_MAX}
-                step={DP_STEP}
-                auto={dpAuto}
-                onCommit={setDp}
-                onAuto={handleDpAuto}
-                label="Mantıksal alan (target dp)"
-                unit="dp"
-                ticks={[350, 480, 600, 720, 840, 960, 1080]}
-                className="mt-2"
-              />
-            </SettingsGroup>
-
-            <SettingsGroup
-              icon={Smartphone}
-              title="Telefon Ölçeği (Zoom)"
-              value={phoneScaleActive ? `Açık · ${liveCalculatedDpi} DPI` : 'Kapalı'}
-            >
-              <ChoiceChip
-                label={phoneScaleActive ? 'Telefon ölçeği açık' : 'Telefon ölçeğini aç'}
-                hint={phoneMetricsReady ? 'Bu pencere' : 'Cihaz bağlanınca kullanılabilir'}
-                active={phoneScaleActive}
-                disabled={!phoneMetricsReady && !phoneScaleActive}
-                onClick={togglePhoneScale}
-              />
-              <p className="mt-2 text-[9px] leading-[13px] text-muted-foreground">
-                Uygulama telefondaki düzeniyle açılır. Pencereyi büyütmek yakınlaştırır, kareye yaklaştırmak tablet
-                düzenine geçirir. Özel DPI ya da Target DP seçmek bunu kapatır.
-              </p>
-            </SettingsGroup>
-
-            <SettingsGroup
-              icon={Monitor}
-              title="Çözünürlük Stratejisi"
-              value={
-                resolutionLocked
-                  ? (userDisplayLock ? 'Ekran kilitli' : 'Telefon ekranı')
-                  : windowResolution === FOLLOW
-                    ? `Genele uy · ${resolutionLabelOf(resolution)}`
-                    : resolutionLabelOf(windowResolution)
-              }
-            >
-              {resolutionLocked ? (
-                <p className="text-[9px] leading-[12px] text-muted-foreground">
-                  {userDisplayLock
-                    ? 'Bu pencerenin görüntü boyutu (px) ve DPI\'ı kilitli: pencereyi boyutlandırmak, kaplamak ya da ayar değiştirmek akışı değiştirmez. Kilidi pencere Hub\'ından (Ekran kilidi) kaldırabilirsin.'
-                    : 'Bu pencere telefonun kendi ekranını gösterir; çözünürlüğü telefon belirler.'}
+      <div ref={scrollRef} className="dex-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-2.5">
+        {/* ─── Bu pencere · Yoğunluk ─── */}
+        <TabPane id="density" active={tab === 'density'}>
+          {canTuneWindow ? (
+            <>
+              {!smartResize && (
+                <p className="rounded-md border border-dashed border-border/70 px-2.5 py-1.5 text-[9px] leading-[12px] text-muted-foreground">
+                  «Gerçek Çözünürlük» kapalı: DPI ve Target DP bu pencereye uygulanmaz. «Genel» sekmesinden açın.
                 </p>
-              ) : (
-                <div className="grid grid-cols-2 gap-1.5" data-window-setting="resolution_mode">
-                  <ChoiceChip
-                    label="Genele uy"
-                    hint={`Genel: ${resolutionLabelOf(resolution)}`}
-                    active={windowResolution === FOLLOW}
-                    onClick={() => setWindowOverride('resolution_mode', FOLLOW)}
-                  />
-                  {RESOLUTION_OPTIONS.map((item) => (
+              )}
+              <Readout
+                items={[
+                  { label: 'Etkin DPI', value: String(Math.round(effectiveDpi)), unit: 'DPI' },
+                  { label: 'En küçük genişlik', value: liveSwDp ? String(liveSwDp) : '—', unit: 'dp' },
+                  { label: 'Yoğunluk kipi', value: DENSITY_MODE_LABEL[policy.mode] || 'Oto' },
+                ]}
+              />
+
+              <SettingsGroup dense icon={Gauge} title="Özel DPI Yoğunluğu" value={dpiLabel} mono>
+                <ChoiceGrid
+                  dense
+                  columns={5}
+                  options={DPI_PRESETS}
+                  isActive={(item) => !dpiAuto && dpiValue === Number(item.value)}
+                  onChange={(value) => setDpi(Number(value))}
+                />
+                <PrecisionSlider
+                  value={effectiveDpi}
+                  min={DPI_MIN}
+                  max={DPI_MAX}
+                  step={DPI_STEP}
+                  auto={dpiAuto}
+                  onCommit={setDpi}
+                  onAuto={handleDpiAuto}
+                  label="Özel DPI yoğunluğu"
+                  unit="DPI"
+                  ticks={[130, 160, 180, 200, 220, 240, 280, 320, 340]}
+                  className="mt-1.5"
+                />
+              </SettingsGroup>
+
+              <SettingsGroup dense icon={Ruler} title="Mantıksal Alan (Target DP)" value={targetLabel} mono>
+                <ChoiceGrid
+                  dense
+                  columns={4}
+                  options={TARGET_DP}
+                  isActive={(item) => !dpAuto && dpValue === Number(item.value)}
+                  onChange={(value) => setDp(Number(value))}
+                />
+                <PrecisionSlider
+                  value={dpValue}
+                  min={DP_MIN}
+                  max={DP_MAX}
+                  step={DP_STEP}
+                  auto={dpAuto}
+                  onCommit={setDp}
+                  onAuto={handleDpAuto}
+                  label="Mantıksal alan (target dp)"
+                  unit="dp"
+                  ticks={[350, 480, 600, 720, 840, 960, 1080]}
+                  className="mt-1.5"
+                />
+              </SettingsGroup>
+
+              <section className="overflow-hidden rounded-md border border-border/70 bg-muted/40">
+                <SwitchRow
+                  variant="row"
+                  icon={Smartphone}
+                  title="Telefon Ölçeği (Zoom)"
+                  description={
+                    phoneScaleActive
+                      ? `Açık · ${liveCalculatedDpi} DPI — telefondaki düzenle`
+                      : phoneMetricsReady
+                        ? 'Telefondaki düzenle açılır · DPI/Target DP\'yi kapatır'
+                        : 'Cihaz bağlanınca kullanılabilir'
+                  }
+                  checked={phoneScaleActive}
+                  disabled={!phoneMetricsReady && !phoneScaleActive}
+                  onToggle={togglePhoneScale}
+                  className="border-t-0"
+                />
+              </section>
+
+              {!resolutionLocked && (
+                <InlineChoice
+                  title="Flex DP Kilidi"
+                  dataSetting="dp_lock_enabled"
+                  options={[
+                    { value: FOLLOW, label: 'Genele uy', hint: `Genel: ${flexLock ? 'Kilitli' : 'Serbest'}` },
+                    { value: true, label: 'Kilitli' },
+                    { value: false, label: 'Serbest' },
+                  ]}
+                  value={windowDpLock}
+                  onChange={(value) => setWindowOverride('dp_lock_enabled', value)}
+                />
+              )}
+            </>
+          ) : (
+            <p className="rounded-md border border-dashed border-border/70 px-2.5 py-2 text-[10px] leading-[14px] text-muted-foreground">
+              {windowScopeHint}
+            </p>
+          )}
+        </TabPane>
+
+        {/* ─── Bu pencere · Pencere (çözünürlük, sığdırma, başlık) ─── */}
+        <TabPane id="window" active={tab === 'window'}>
+          {canTuneWindow ? (
+            <>
+              <SettingsGroup
+                dense
+                icon={Monitor}
+                title="Çözünürlük Stratejisi"
+                value={
+                  resolutionLocked
+                    ? (userDisplayLock ? 'Ekran kilitli' : 'Telefon ekranı')
+                    : windowResolution === FOLLOW
+                      ? `Genele uy · ${resolutionLabelOf(resolution)}`
+                      : resolutionLabelOf(windowResolution)
+                }
+              >
+                {resolutionLocked ? (
+                  <p className="text-[9px] leading-[12px] text-muted-foreground">
+                    {userDisplayLock
+                      ? 'Bu pencerenin görüntü boyutu (px) ve DPI\'ı kilitli: pencereyi boyutlandırmak, kaplamak ya da ayar değiştirmek akışı değiştirmez. Kilidi pencere Hub\'ından (Ekran kilidi) kaldırabilirsin.'
+                      : 'Bu pencere telefonun kendi ekranını gösterir; çözünürlüğü telefon belirler.'}
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-3 gap-1" data-window-setting="resolution_mode">
                     <ChoiceChip
+                      dense
+                      label="Genele uy"
+                      hint={`Genel: ${resolutionLabelOf(resolution)}`}
+                      active={windowResolution === FOLLOW}
+                      onClick={() => setWindowOverride('resolution_mode', FOLLOW)}
+                    />
+                    {RESOLUTION_OPTIONS.map((item) => (
+                      <ChoiceChip
+                        dense
+                        key={item.value}
+                        label={item.label}
+                        active={windowResolution === item.value}
+                        onClick={() => setWindowOverride('resolution_mode', item.value)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </SettingsGroup>
+
+              <SettingsGroup
+                dense
+                icon={Maximize2}
+                title="Görüntü Sığdırma"
+                value={windowFit === 'auto' ? `Genele uy · ${FIT_MODES[canvasFit]?.label ?? ''}` : FIT_MODES[windowFit].label}
+              >
+                <div className="grid grid-cols-3 gap-1" data-window-setting="video_fit_mode">
+                  <ChoiceChip
+                    dense
+                    label="Genele uy"
+                    hint={`Genel: ${FIT_MODES[canvasFit]?.label ?? ''}`}
+                    active={windowFit === 'auto'}
+                    onClick={() => setWindowFit('auto')}
+                  />
+                  {WINDOW_FIT.map((item) => (
+                    <ChoiceChip
+                      dense
                       key={item.value}
                       label={item.label}
-                      active={windowResolution === item.value}
-                      onClick={() => setWindowOverride('resolution_mode', item.value)}
+                      active={windowFit === item.value}
+                      onClick={() => setWindowFit(item.value)}
                     />
                   ))}
                 </div>
-              )}
-            </SettingsGroup>
-
-            <SettingsGroup
-              icon={Maximize2}
-              title="Görüntü Sığdırma"
-              value={windowFit === 'auto' ? `Genele uy · ${FIT_MODES[canvasFit]?.label ?? ''}` : FIT_MODES[windowFit].label}
-            >
-              <div className="grid grid-cols-3 gap-1.5" data-window-setting="video_fit_mode">
-                <ChoiceChip
-                  label="Genele uy"
-                  hint={`Genel: ${FIT_MODES[canvasFit]?.label ?? ''}`}
-                  active={windowFit === 'auto'}
-                  onClick={() => setWindowFit('auto')}
-                />
-                {WINDOW_FIT.map((item) => (
-                  <ChoiceChip
-                    key={item.value}
-                    label={item.label}
-                    active={windowFit === item.value}
-                    onClick={() => setWindowFit(item.value)}
-                  />
-                ))}
-              </div>
-            </SettingsGroup>
-
-            {!resolutionLocked && (
-              <SettingsGroup
-                icon={Lock}
-                title="Flex DP Kilidi"
-                value={windowDpLock === FOLLOW ? `Genele uy · ${flexLock ? 'Kilitli' : 'Serbest'}` : windowDpLock ? 'Kilitli' : 'Serbest'}
-              >
-                <div className="grid grid-cols-3 gap-1.5" data-window-setting="dp_lock_enabled">
-                  <ChoiceChip
-                    label="Genele uy"
-                    hint={`Genel: ${flexLock ? 'Kilitli' : 'Serbest'}`}
-                    active={windowDpLock === FOLLOW}
-                    onClick={() => setWindowOverride('dp_lock_enabled', FOLLOW)}
-                  />
-                  <ChoiceChip label="Kilitli" active={windowDpLock === true} onClick={() => setWindowOverride('dp_lock_enabled', true)} />
-                  <ChoiceChip label="Serbest" active={windowDpLock === false} onClick={() => setWindowOverride('dp_lock_enabled', false)} />
-                </div>
-              </SettingsGroup>
-            )}
-
-            <SettingsGroup icon={GripHorizontal} title="Başlık Çubuğu" value={headerLocked ? 'Gizli' : HEADER_MODE_LABELS[headerMode]}>
-              {headerLocked ? (
-                <p className="text-[9px] leading-[12px] text-muted-foreground">
-                  Telefon ekranı yansıtılırken başlık her zaman gizlidir.
-                </p>
-              ) : (
-                <div className="grid grid-cols-3 gap-1.5">
-                  {HEADER_MODES.map((mode) => (
-                    <ChoiceChip
-                      key={mode}
-                      label={HEADER_MODE_LABELS[mode]}
-                      hint={mode === 'follow' ? `Genel: ${dragTitle ? 'Hover' : 'Sabit'}` : undefined}
-                      active={headerMode === mode}
-                      onClick={() => setHeaderMode(mode)}
-                    />
-                  ))}
-                </div>
-              )}
-            </SettingsGroup>
-          </>
-        ) : (
-          <p className="rounded-md border border-dashed border-border/70 px-2.5 py-2 text-[10px] leading-[14px] text-muted-foreground">
-            {windowScopeHint}
-          </p>
-        )}
-
-        {/* ─── Tüm pencereler: genel varsayılanlar ─── */}
-        <ScopeHeading
-          scope="global"
-          icon={<Layers className="size-4 shrink-0 text-muted-foreground" />}
-          title="Tüm pencereler"
-          hint="Yeni açılan pencerelere, oturumun geneline ve «Genele uy» diyen pencerelere uygulanır."
-        />
-
-        <section className="overflow-hidden rounded-md border border-border/70 bg-muted/40">
-          <div className="flex items-center justify-between gap-2 px-2.5 py-2">
-            <span className="flex min-w-0 items-center gap-2">
-              <Palette className="size-3.5 shrink-0 text-muted-foreground" />
-              <span className="truncate text-[11px] font-semibold">Görünüm Teması</span>
-            </span>
-            <SegmentedControl
-              size="md"
-              label="Görünüm teması"
-              options={THEME_SEGMENTS}
-              value={theme}
-              onChange={setTheme}
-            />
-          </div>
-          <SwitchRow
-            variant="row"
-            icon={ScanSearch}
-            title="Gerçek Çözünürlük"
-            description="Akıllı ekran yeniden boyutlama"
-            checked={smartResize}
-            onToggle={handleSmartResizeToggle}
-          />
-          <SwitchRow
-            variant="row"
-            icon={GripHorizontal}
-            title="Sürükleyici Başlık (varsayılan)"
-            description="«Genele uy» pencerelerde başlık hover ile açılır"
-            checked={dragTitle}
-            onToggle={handleDragTitleToggle}
-          />
-          <SwitchRow
-            variant="row"
-            icon={MonitorOff}
-            title="Telefon Ekranını Kapat"
-            description="DeX çalışırken telefon uyur"
-            checked={phoneScreenOff}
-            onToggle={handlePhoneScreenOffToggle}
-          />
-        </section>
-
-        <SettingsGroup icon={Monitor} title="Varsayılan Çözünürlük Stratejisi" value={resolutionTag} mono>
-          <ChoiceGrid columns={2} options={RESOLUTION_OPTIONS} value={resolution} onChange={handleResolutionChange} />
-        </SettingsGroup>
-
-        <SwitchRow
-          variant="panel"
-          icon={Lock}
-          title="Varsayılan Flex DP Kilidi"
-          description="Boyutlandırmada DPI'ı sabit tutar (Sıfır Donma)"
-          state={flexLock ? 'Kilitli' : 'Serbest'}
-          checked={flexLock}
-          onToggle={handleFlexLockToggle}
-        />
-
-        <SettingsGroup
-          icon={Maximize2}
-          title="Varsayılan Görüntü Sığdırma"
-          value={CANVAS_FIT.find((item) => item.value === canvasFit)?.label ?? ''}
-        >
-          <ChoiceGrid columns={3} options={CANVAS_FIT} value={canvasFit} onChange={handleCanvasFitChange} />
-        </SettingsGroup>
-
-        <SettingsGroup icon={AudioLines} title="Video Bit Hızı" value={`${bitrate} Mbps`} mono>
-          <ChoiceGrid columns={5} options={BITRATE_OPTIONS} value={bitrate} onChange={handleBitrateChange} />
-        </SettingsGroup>
-
-        <SettingsGroup
-          icon={Layers}
-          title="Varsayılan Pencereleme Davranışı"
-          value={WINDOW_MODES.find((item) => item.value === windowMode)?.label ?? ''}
-        >
-          <div className="grid grid-cols-3 gap-1.5">
-            {WINDOW_MODES.map((item) => (
-              <IconTile
-                variant="outlined"
-                key={item.value}
-                icon={item.icon}
-                title={item.label}
-                status={item.hint}
-                active={windowMode === item.value}
-                onClick={() => handleWindowModeChange(item.value)}
-              />
-            ))}
-          </div>
-          <p className="mt-2 text-[9px] leading-[13px] text-muted-foreground">
-            Bu cihaz <strong className="font-semibold text-foreground">~16</strong> bağımsız pencere destekliyor.
-          </p>
-        </SettingsGroup>
-
-        <SettingsGroup
-          icon={Smartphone}
-          title="Telefona Aktarma Kipi"
-          value={HANDOFF_WINDOWING.find((item) => item.value === handoffWindowing)?.label ?? ''}
-        >
-          <ChoiceGrid columns={2} options={HANDOFF_WINDOWING} value={handoffWindowing} onChange={handleHandoffWindowingChange} />
-          <p className="mt-2 text-[9px] leading-[13px] text-muted-foreground">
-            Tam ekran: uygulama telefonun ekranını tamamen kaplar. Serbest pencere deneyseldir; üretici ölçeği nedeniyle
-            telefonda küçük görünebilir. Taşıma/boyutlandırma tutamacını OpenDeX değil telefonun kendi arayüzü çizer —
-            üretici (ör. HyperOS) bu pencerelere tutamaç koymayabilir; pencere yine de ekranın ortasına yerleştirilir.
-          </p>
-        </SettingsGroup>
-
-        <SettingsGroup
-          icon={Smartphone}
-          title="Uygulama Telefonda Kapatılınca"
-          value={APP_CLOSED_BEHAVIOR.find((item) => item.value === appClosedBehavior)?.label ?? ''}
-        >
-          <ChoiceGrid columns={2} options={APP_CLOSED_BEHAVIOR} value={appClosedBehavior} onChange={handleAppClosedBehaviorChange} />
-          <p className="mt-2 text-[9px] leading-[13px] text-muted-foreground">
-            Pencerede açık bir uygulama telefonun Son Kullanılanlar ekranından kapatılırsa: pencere kapanır ya da
-            üstünde "Yeniden aç" kartı gösterilir. Çalışma Alanı görevleri her zaman kapanır.
-          </p>
-        </SettingsGroup>
-
-        {/* Gelişmiş Ayarlar: FPS + kodek — nadiren değiştirilir, varsayılan kapalı. */}
-        <section className="overflow-hidden rounded-md border border-border/70 bg-muted/40">
-          <button
-            type="button"
-            onClick={() => setAdvancedOpen((o) => !o)}
-            aria-expanded={advancedOpen}
-            className="flex w-full items-center justify-between gap-2 px-2.5 py-2.5 text-left cursor-pointer"
-          >
-            <span className="flex min-w-0 items-center gap-2">
-              <Activity className="size-3.5 shrink-0 text-muted-foreground" />
-              <span className="truncate text-[11px] font-semibold">Gelişmiş Ayarlar</span>
-            </span>
-            <span className="flex shrink-0 items-center gap-1.5 text-[9px] font-medium text-muted-foreground">
-              {`${fps} FPS · ${codecLabel}`}
-              <ChevronDown className={cn('size-3.5 transition-transform', advancedOpen && 'rotate-180')} />
-            </span>
-          </button>
-          {advancedOpen && (
-            <div className="space-y-2.5 border-t border-border/60 p-2.5">
-              <SettingsGroup icon={Activity} title="Maksimum FPS" value={`${fps} FPS`} mono>
-                <ChoiceGrid columns={3} options={FPS_OPTIONS} value={fps} onChange={handleFpsChange} />
               </SettingsGroup>
 
-              <SettingsGroup icon={Film} title="Video Kodek (DeX Kalitesi)" value={codecLabel}>
-                <ChoiceGrid columns={4} options={CODECS} value={codec} onChange={handleCodecChange} />
+              <SettingsGroup dense icon={GripHorizontal} title="Başlık Çubuğu" value={headerLocked ? 'Gizli' : HEADER_MODE_LABELS[headerMode]}>
+                {headerLocked ? (
+                  <p className="text-[9px] leading-[12px] text-muted-foreground">
+                    Telefon ekranı yansıtılırken başlık her zaman gizlidir.
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-3 gap-1">
+                    {HEADER_MODES.map((mode) => (
+                      <ChoiceChip
+                        dense
+                        key={mode}
+                        label={HEADER_MODE_LABELS[mode]}
+                        hint={mode === 'follow' ? `Genel: ${dragTitle ? 'Hover' : 'Sabit'}` : undefined}
+                        active={headerMode === mode}
+                        onClick={() => setHeaderMode(mode)}
+                      />
+                    ))}
+                  </div>
+                )}
               </SettingsGroup>
-            </div>
+            </>
+          ) : (
+            <p className="rounded-md border border-dashed border-border/70 px-2.5 py-2 text-[10px] leading-[14px] text-muted-foreground">
+              {windowScopeHint}
+            </p>
           )}
-        </section>
+        </TabPane>
 
-        <Button variant="outline" size="lg" className="w-full text-[11px]" startIcon={<ExternalLink className="size-3.5" />} onClick={handleOpenAllSettings}>
-          Tüm OpenDeX Ayarlarını Aç
-        </Button>
+        {/* ─── Tüm pencereler · Genel ─── */}
+        <TabPane id="general" active={tab === 'general'}>
+          <section className="overflow-hidden rounded-md border border-border/70 bg-muted/40">
+            <div className="flex items-center justify-between gap-2 px-2.5 py-1.5">
+              <span className="flex min-w-0 items-center gap-2">
+                <Palette className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="truncate text-[11px] font-semibold">Görünüm Teması</span>
+              </span>
+              <SegmentedControl
+                size="md"
+                label="Görünüm teması"
+                options={THEME_SEGMENTS}
+                value={theme}
+                onChange={setTheme}
+              />
+            </div>
+            <SwitchRow
+              variant="row"
+              icon={ScanSearch}
+              title="Gerçek Çözünürlük"
+              description="Akıllı ekran yeniden boyutlama"
+              checked={smartResize}
+              onToggle={handleSmartResizeToggle}
+              className="py-1.5"
+            />
+            <SwitchRow
+              variant="row"
+              icon={GripHorizontal}
+              title="Sürükleyici Başlık (varsayılan)"
+              description="«Genele uy» pencerelerde başlık hover ile açılır"
+              checked={dragTitle}
+              onToggle={handleDragTitleToggle}
+              className="py-1.5"
+            />
+            <SwitchRow
+              variant="row"
+              icon={MonitorOff}
+              title="Telefon Ekranını Kapat"
+              description="DeX çalışırken telefon uyur"
+              checked={phoneScreenOff}
+              onToggle={handlePhoneScreenOffToggle}
+              className="py-1.5"
+            />
+            <SwitchRow
+              variant="row"
+              icon={Lock}
+              title="Varsayılan Flex DP Kilidi"
+              description={flexLock ? 'Boyutlandırmada DPI sabit (Sıfır Donma)' : 'Boyutlandırmada DPI serbest'}
+              checked={flexLock}
+              onToggle={handleFlexLockToggle}
+              className="py-1.5"
+            />
+          </section>
+
+          <SettingsGroup dense icon={Monitor} title="Varsayılan Çözünürlük Stratejisi" value={resolutionTag} mono>
+            <ChoiceGrid dense columns={3} options={RESOLUTION_OPTIONS} value={resolution} onChange={handleResolutionChange} />
+          </SettingsGroup>
+
+          <SettingsGroup
+            dense
+            icon={Maximize2}
+            title="Varsayılan Görüntü Sığdırma"
+            value={CANVAS_FIT.find((item) => item.value === canvasFit)?.label ?? ''}
+          >
+            <ChoiceGrid dense columns={3} options={CANVAS_FIT} value={canvasFit} onChange={handleCanvasFitChange} />
+          </SettingsGroup>
+
+          <p className="px-0.5 text-[9px] leading-[12px] text-muted-foreground">
+            Bu sekme yeni açılan pencerelere, oturumun geneline ve «Genele uy» diyen pencerelere uygulanır.
+          </p>
+        </TabPane>
+
+        {/* ─── Tüm pencereler · Akış ─── */}
+        <TabPane id="stream" active={tab === 'stream'}>
+          <Readout
+            items={[
+              { label: 'Kodek', value: CODEC_SHORT[codec] || 'Oto' },
+              { label: 'Bit hızı', value: bitrate, unit: 'Mbps' },
+              { label: 'Kare hızı', value: fps, unit: 'FPS' },
+            ]}
+          />
+          <SettingsGroup dense icon={AudioLines} title="Video Bit Hızı" value={`${bitrate} Mbps`} mono>
+            <ChoiceGrid dense columns={5} options={BITRATE_OPTIONS} value={bitrate} onChange={handleBitrateChange} />
+          </SettingsGroup>
+          <SettingsGroup dense icon={Activity} title="Maksimum FPS" value={`${fps} FPS`} mono>
+            <ChoiceGrid dense columns={3} options={FPS_OPTIONS} value={fps} onChange={handleFpsChange} />
+          </SettingsGroup>
+          <SettingsGroup dense icon={Film} title="Video Kodek (DeX Kalitesi)" value={codecLabel}>
+            <ChoiceGrid dense columns={4} options={CODECS} value={codec} onChange={handleCodecChange} />
+          </SettingsGroup>
+        </TabPane>
+
+        {/* ─── Tüm pencereler · Sistem ─── */}
+        <TabPane id="system" active={tab === 'system'}>
+          <SettingsGroup dense icon={Smartphone} title="Telefona Aktarma Kipi">
+            <ChoiceGrid dense columns={2} options={HANDOFF_WINDOWING} value={handoffWindowing} onChange={handleHandoffWindowingChange} />
+            <p className="mt-1.5 text-[9px] leading-[12px] text-muted-foreground">
+              Yalnız «Telefona aktar» düğmesinin varsayılanı. Tek seferlik seçim için pencere başlığına sağ tıkla; telefonda
+              kendin açtığın uygulamalar her zaman tam ekran açılır. Serbest pencere HyperOS&apos;un kendi küçük penceresidir.
+            </p>
+          </SettingsGroup>
+
+          <SettingsGroup dense icon={Smartphone} title="Uygulama Telefonda Kapatılınca">
+            <ChoiceGrid dense columns={2} options={APP_CLOSED_BEHAVIOR} value={appClosedBehavior} onChange={handleAppClosedBehaviorChange} />
+            <p className="mt-1.5 text-[9px] leading-[12px] text-muted-foreground">
+              Son Kullanılanlar&apos;dan kapatılan uygulamanın penceresi kapanır ya da «Yeniden aç» kartı gösterir. Çalışma
+              Alanı görevleri her zaman kapanır.
+            </p>
+          </SettingsGroup>
+
+          <SettingsGroup
+            dense
+            icon={Layers}
+            title="Varsayılan Pencereleme Davranışı"
+            value={WINDOW_MODES.find((item) => item.value === windowMode)?.label ?? ''}
+          >
+            <div className="grid grid-cols-3 gap-1">
+              {WINDOW_MODES.map((item) => (
+                <IconTile
+                  variant="outlined"
+                  dense
+                  key={item.value}
+                  icon={item.icon}
+                  title={item.label}
+                  status={item.hint}
+                  active={windowMode === item.value}
+                  onClick={() => handleWindowModeChange(item.value)}
+                />
+              ))}
+            </div>
+            <p className="mt-1.5 text-[9px] leading-[12px] text-muted-foreground">
+              Bu cihaz <strong className="font-semibold text-foreground">~16</strong> bağımsız pencere destekliyor.
+            </p>
+          </SettingsGroup>
+
+          <Button variant="outline" size="lg" className="w-full text-[11px]" startIcon={<ExternalLink className="size-3.5" />} onClick={handleOpenAllSettings}>
+            Tüm OpenDeX Ayarlarını Aç
+          </Button>
+        </TabPane>
       </div>
     </PanelShell>
   );
 });
 
-function ScopeHeading({ scope, icon, title, name, hint }) {
+// ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+// Sekmeler: sabit boyutlu panel uzun bir kaydırma listesi yerine beş odaklı sekmeye bölünür; her sekme tek ekrana sığar.
+// İlk ikisi ODAKTAKİ pencereye, son üçü tüm pencerelere aittir (kapsam etiketi sekmelerin üstünde, hep görünür).
+// Bütün sekme gövdeleri bağlı kalır (yalnız `hidden`): kaydırıcı/odak durumu sekme değişince kaybolmaz.
+
+const DEX_TABS = [
+  { id: 'density', scope: 'window', label: 'Yoğunluk', icon: Gauge },
+  { id: 'window', scope: 'window', label: 'Pencere', icon: AppWindow },
+  { id: 'general', scope: 'global', label: 'Genel', icon: SlidersHorizontal },
+  { id: 'stream', scope: 'global', label: 'Akış', icon: Activity },
+  { id: 'system', scope: 'global', label: 'Sistem', icon: Smartphone },
+];
+
+const DENSITY_MODE_LABEL = { auto: 'Oto', custom: 'Özel', target: 'Target', phone: 'Telefon' };
+const CODEC_SHORT = { auto: 'Oto', h265: 'H.265', av1: 'AV1', h264: 'H.264' };
+
+function DexTabs({ tabs, active, onChange, windowIcon, windowName }) {
+  const activeScope = tabs.find((t) => t.id === active)?.scope;
+  const onKeyDown = (event) => {
+    if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft' && event.key !== 'Home' && event.key !== 'End') return;
+    event.preventDefault();
+    const at = tabs.findIndex((t) => t.id === active);
+    const next = event.key === 'Home' ? 0
+      : event.key === 'End' ? tabs.length - 1
+      : (at + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+    onChange(tabs[next].id);
+    event.currentTarget.querySelectorAll('[role="tab"]')[next]?.focus();
+  };
+
   return (
-    <div data-scope={scope} className="pt-0.5">
-      <div className="flex items-center gap-2 px-0.5">
-        {icon}
-        <h3 className="flex min-w-0 items-baseline gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-          <span className="shrink-0">{title}</span>
-          {name && (
-            <span className="truncate text-[11px] font-semibold normal-case tracking-normal text-foreground">{name}</span>
-          )}
-        </h3>
-        <span className="h-px min-w-4 flex-1 bg-border/70" aria-hidden="true" />
+    <div className="shrink-0 border-b border-border/70 px-3">
+      <div className="grid grid-cols-[2fr_3fr]">
+        <ScopeLabel scope="window" active={activeScope === 'window'} icon={windowIcon} title="Bu pencere" name={windowName} />
+        <ScopeLabel
+          scope="global"
+          active={activeScope === 'global'}
+          title="Tüm pencereler"
+          hint="Yeni açılan pencerelere, oturumun geneline ve «Genele uy» diyen pencerelere uygulanır."
+        />
       </div>
-      {hint && <p className="mt-0.5 px-0.5 text-[9px] leading-[12px] text-muted-foreground">{hint}</p>}
+      <div role="tablist" aria-label="DeX ayar bölümleri" onKeyDown={onKeyDown} className="grid grid-cols-5">
+        {tabs.map((tab, index) => {
+          const selected = tab.id === active;
+          const Icon = tab.icon;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              id={`dex-tab-${tab.id}`}
+              aria-selected={selected}
+              aria-controls={`dex-pane-${tab.id}`}
+              tabIndex={selected ? 0 : -1}
+              onClick={() => onChange(tab.id)}
+              className={cn(
+                'relative flex h-8 cursor-pointer items-center justify-center gap-1 text-[10px] font-semibold outline-none transition-colors focus-visible:bg-accent/60',
+                selected ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+                index === 2 && 'border-l border-border/70',
+              )}
+            >
+              <Icon className="size-3.5 shrink-0" strokeWidth={selected ? 2.2 : 1.8} />
+              <span>{tab.label}</span>
+              {selected && (
+                <motion.span
+                  layoutId="dex-tab-indicator"
+                  transition={{ type: 'spring', stiffness: 520, damping: 40 }}
+                  className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-primary"
+                  aria-hidden="true"
+                />
+              )}
+            </button>
+          );
+        })}
+      </div>
     </div>
+  );
+}
+
+function ScopeLabel({ scope, icon, title, name, hint, active }) {
+  return (
+    <div data-scope={scope} title={hint} className={cn('flex min-w-0 items-center gap-1.5 pb-1 pr-2 transition-opacity', active ? 'opacity-100' : 'opacity-55')}>
+      {icon}
+      <h3 className="flex min-w-0 items-baseline gap-1.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
+        <span className="shrink-0">{title}</span>
+        {name && <span className="truncate text-[10.5px] font-semibold normal-case tracking-normal text-foreground">{name}</span>}
+      </h3>
+    </div>
+  );
+}
+
+function TabPane({ id, active, children }) {
+  // `hidden` kökte kalır (bir display sınıfı onu ezmesin); düzen iç sarmalayıcıdadır.
+  return (
+    <div role="tabpanel" id={`dex-pane-${id}`} aria-labelledby={`dex-tab-${id}`} hidden={!active}>
+      <div className="space-y-2">{children}</div>
+    </div>
+  );
+}
+
+/** Üç hücrelik canlı okuma şeridi: etkin değerler ayarın hemen üstünde, kaydırmadan görünür. */
+function Readout({ items }) {
+  return (
+    <div className="grid grid-cols-3 gap-1">
+      {items.map(({ label, value, unit }) => (
+        <div key={label} className="min-w-0 rounded-md border border-border/60 bg-background/70 px-2 py-1">
+          <div className="truncate text-[8px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
+          <div className="flex items-baseline gap-0.5 truncate font-mono text-[13px] font-semibold leading-[17px] tabular-nums">
+            {value}
+            {unit && <span className="text-[8px] font-medium text-muted-foreground">{unit}</span>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Başlık solda, 3 seçenek sağda: tek satırlık üç durumlu ayar (<section>: başlık ve seçenekler aynı kapsayıcıda). */
+function InlineChoice({ title, options, value, onChange, dataSetting }) {
+  return (
+    <section className="flex items-center justify-between gap-2 rounded-md border border-border/70 bg-muted/40 p-2">
+      <h3 className="min-w-0 shrink text-[11px] font-semibold leading-[13px]">{title}</h3>
+      <div className="grid w-[236px] shrink-0 grid-cols-3 gap-1" data-window-setting={dataSetting}>
+        {options.map((option) => (
+          <ChoiceChip
+            dense
+            key={String(option.value)}
+            label={option.label}
+            hint={option.hint}
+            active={value === option.value}
+            onClick={() => onChange(option.value)}
+          />
+        ))}
+      </div>
+    </section>
   );
 }
 

@@ -45,6 +45,8 @@ beforeEach(async () => {
 });
 afterEach(cleanup);
 
+const openSection = (name) => fireEvent.click(screen.getByRole('button', { name }));
+
 const flushSaves = async () => {
   await act(async () => {
     const pending = saveResolvers;
@@ -77,11 +79,12 @@ describe('ayar senkronizasyonu (Ayarlar penceresi ⟷ DeX paneli)', () => {
     currentServer = { ...BASE, target_dp: 840 };
     renderBoth();
     await act(async () => {});
+    openSection('Görüntü');
     const dpiGroup = screen.getByText('Özel DPI / İçerik Yoğunluğu').closest('section');
-    fireEvent.click(within(dpiGroup).getByRole('button', { name: /200 DPI \(Ergonomik Optimum\)/ }));
+    fireEvent.click(within(dpiGroup).getByRole('button', { name: /^200 DPI/ }));
     expect(saveSettings).toHaveBeenCalledWith({ custom_dpi: 200, target_dp: 0 });
     const targetGroup = screen.getByText('Mantıksal DP Alan Pazarlığı (Target DP)').closest('section');
-    expect(within(targetGroup).getByRole('button', { name: /Otomatik \(Dinamik Ergonomik\)/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(targetGroup).getByRole('button', { name: /^Otomatik/ })).toHaveAttribute('aria-pressed', 'true');
     await flushSaves();
   });
 
@@ -94,6 +97,7 @@ describe('ayar senkronizasyonu (Ayarlar penceresi ⟷ DeX paneli)', () => {
       </ThemeProvider>,
     );
     await act(async () => {});
+    openSection('Görüntü');
     const targetBox = screen.getByText('Hassas Target DP Çalışma Alanı').closest('div.rounded-xl');
     fireEvent.click(within(targetBox).getByRole('button', { name: /Oto/ }));
     expect(saveSettings).toHaveBeenCalledTimes(1);
@@ -116,9 +120,9 @@ describe('ayar senkronizasyonu (Ayarlar penceresi ⟷ DeX paneli)', () => {
       </ThemeProvider>,
     );
     await act(async () => {});
-    fireEvent.click(screen.getByRole('button', { name: 'Ses & Aktarım' }));
+    openSection('Ses');
     expect(screen.getByRole('button', { name: /^DeX/ })).toHaveAttribute('aria-pressed', 'true'); // audio_output_mode 'pc' = DeX
-    fireEvent.click(screen.getByRole('button', { name: 'Yayın Kalitesi' }));
+    openSection('Yayın');
     expect(screen.getByRole('button', { name: /^30 FPS/ })).toHaveAttribute('aria-pressed', 'true');
   });
 });
