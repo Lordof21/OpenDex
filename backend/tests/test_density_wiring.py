@@ -123,7 +123,8 @@ async def _open_cold_then_app_starts(manager, phone, package):
     phone.alive = False
     handle = await manager.open_window(package)
     phone.reborn()
-    await asyncio.sleep(0.05)
+    await asyncio.sleep(0.6)
+    await manager._density.wait_idle()
     return handle
 
 
@@ -219,7 +220,10 @@ async def test_resize_without_a_density_change_never_probes_the_process(monkeypa
     daemon = FakeDaemon(phone)
     manager = await _manager(monkeypatch, tmp_db, phone, daemon)
     handle = await _open_cold_then_app_starts(manager, phone, "com.app.a")
+    await manager._density.wait_idle()
+    manager._reconfigure._flex_resize = AsyncMock(return_value=True)
     phone.commands.clear()
+    phone.relaunch_cmds.clear()
 
     await manager.resize_window(handle.window_id, 1920, 1032, dpi=None)  # same density: only the size changes
     await manager._density.wait_idle()
@@ -325,7 +329,9 @@ async def test_the_cleanup_discards_the_process_once_the_display_is_gone(monkeyp
 # ---------------------------------------------------------------- Workspace (task-level density)
 
 
-async def test_workspace_task_density_change_settles_on_the_workspace_display(monkeypatch, tmp_db, tasks):
+async def test_workspace_task_density_change_applies_inplace_without_reconciler_restart(monkeypatch, tmp_db, tasks):
+    """Eco Workspace içindeki görevlerin DPI değişimleri Android WCT (setDensityDpi) üzerinden in-place
+    uygulanır. Bağımsız VD'ler için yazılmış DensityReconciler süreci öldürüp yeniden başlatmamalıdır."""
     phone = Phone("com.app.w")
     daemon = FakeDaemon(phone)
     manager = await _manager(monkeypatch, tmp_db, phone, daemon)
@@ -339,8 +345,8 @@ async def test_workspace_task_density_change_settles_on_the_workspace_display(mo
     assert await manager.set_workspace_task_density("w1", 260) is True
     await manager._density.wait_idle()
 
-    assert daemon.info_calls == ["900"]  # the task was resolved on the Workspace display
-    assert len(phone.relaunch_cmds) == 1
+    # Görev in-place adapte olur; DensityReconciler devreye girip süreci veya activity'yi yeniden kurmaz
+    assert daemon.restarts == [] and phone.relaunch_cmds == []
 
 
 async def test_workspace_same_density_is_a_noop(monkeypatch, tmp_db, tasks):

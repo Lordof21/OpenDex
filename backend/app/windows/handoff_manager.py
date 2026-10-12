@@ -29,7 +29,12 @@ from ..device.adb import Adb
 from ..events import EventBus, spawn_background
 from ..logging_config import window_logger
 from ..telemetry import markers as load_markers
-from .cdp_refresher import capture_browser_scroll_state, refresh_browser_layout_inplace
+from .cdp_refresher import (
+    capture_browser_scroll_state,
+    refresh_browser_layout_inplace,
+    start_browser_auto_attach_watcher,
+    stop_browser_auto_attach_watcher,
+)
 from .display_ids import is_virtual_display_id, known_display_id
 from .mirror_packages import is_internal_package, is_launcher_package, is_mirror_package
 from .task_movement import move_task_to_display
@@ -396,18 +401,73 @@ class HandoffManager:
         session.target_display_w, session.target_display_h, session.dpi = window.width, window.height, window.dpi
         session.state.width, session.state.height = window.width, window.height
 
-    async def _settle_phone_windowing(self, pkg: str, task_id: str | int | None, serial: str) -> None:
+    # `am start --windowingMode 5` görevi HyperOS'un küçük varsayılan kutusuna (588×1220 → sw183dp) koyar; uygulama o kutuda
+    # telefonun düzeniyle DEĞİL, sıkışık çizilir. Kullanıcı bu geçici hâli görür: bu yüzden doğru kutu, görev serbest kipe
+    # girer girmez verilir (cihazda ölçüldü: ~0,25 sn'de verilen kutu kalıcıdır) ve sonra doğrulanır (settle_task_windowing).
+    # Bunun arkasında CDP yenilemesi / yeniden kurma gibi saniyelerce süren işler BEKLEMEZ.
+    _FREEFORM_ENTRY_TIMEOUT_S = 1.5
+    _FREEFORM_ENTRY_POLL_S = 0.04
+
+    async def _await_freeform_entered(self, task_id: str | int, serial: str) -> bool:
+        """Waits until the task reads as freeform (the system's entry has begun and the box can be given). False: it did not
+        within the budget or could not be read — the caller goes on (settle_task_windowing verifies and corrects)."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._FREEFORM_ENTRY_TIMEOUT_S
+        while loop.time() < deadline:
+            state = await read_task_windowing(self._adb, serial, str(task_id))
+            if not state.found:
+                return False
+            if state.windowing_mode == 5:
+                return True
+            await asyncio.sleep(self._FREEFORM_ENTRY_POLL_S)
+        return False
+
+    async def _enter_freeform_via_shell(self, pkg: str, task_id: str | int, serial: str) -> None:
+        """Tam ekrandaki görevi serbest kipe HyperOS'un KENDİ geçişiyle alır: `am start --windowingMode 5` Shell'de
+        FULLSCREEN_TO_FREEFORM geçişini (MiuiFreeformModeAnimation) çalıştırır ve SystemUI görevi kaydeder.
+        WCT ile (geçişsiz) freeform'a almak çerçeve çizdirir ama miuiFreeformTaskInfo oluşmaz: sürükleme/boyutlandırma ölü,
+        içerik beyaz kalır (ekran kapat-aç düzeltir). Görev zaten serbestse hiçbir şey gönderilmez."""
+        with contextlib.suppress(Exception):
+            current = await read_task_windowing(self._adb, serial, str(task_id))
+            if current.found and current.windowing_mode == 5:
+                return
+        top_component = None
+        daemon = self._daemon_client_getter() if callable(self._daemon_client_getter) else None
+        if daemon is not None:
+            with contextlib.suppress(Exception):
+                import inspect
+                t_call = daemon.task_info(task_id) if hasattr(daemon, "task_info") else None
+                t_info = await t_call if inspect.isawaitable(t_call) else t_call
+                if isinstance(t_info, dict) and isinstance(t_info.get("top"), str):
+                    top_component = t_info["top"]
+        try:
+            await android_shell.bring_to_front(
+                self._adb, serial, pkg, "0", reorder_only=True, component=top_component, windowing_mode=5,
+            )
+            if not await self._await_freeform_entered(task_id, serial):
+                log.debug("[HANDOFF] %s serbest kipe girdiği okunamadı — kutu yine de verilip doğrulanacak", pkg)
+        except Exception as exc:  # noqa: BLE001 — WCT yedeği (settle_task_windowing) devralır
+            log.warning("⚠️ [HANDOFF] %s serbest kip geçişi (am start --windowingMode 5) başarısız: %s", pkg, exc)
+
+    async def _settle_phone_windowing(
+        self, pkg: str, task_id: str | int | None, serial: str, *, phone_size: tuple[int, int] | None = None,
+        windowing: str | None = None,
+    ) -> None:
         """Telefona aktarılan görevin pencereleme kipini seçilen ayara göre doğrular/oturtur. Görev zaten
         hedefteyse HİÇBİR komut gitmez (`skip_if_ok`); uygulama ASLA yeniden başlatılmaz (Workspace'ten farklı olarak
         bu görev hiç freeform olmadı). Geçiş raporu (`[TRANSFER]`) logda."""
         try:
+            target = windowing or "fullscreen"
+            if windowing is None:  # no choice made for THIS handoff: the user's setting
+                with contextlib.suppress(Exception):
+                    from app.storage import settings_db
+                    target = (await settings_db.get_project_settings()).phone_handoff_windowing
             from app.device.deep_navigator import find_task_id_for_package
-            from app.storage import settings_db
-
-            target = (await settings_db.get_project_settings()).phone_handoff_windowing
             tid = task_id or await find_task_id_for_package(self._adb, pkg, display_id="0", serial=serial)
             if not tid:
                 return
+            if target == "freeform":
+                await self._enter_freeform_via_shell(pkg, tid, serial)
             await settle_task_windowing(
                 self._adb, serial, str(tid), pkg, target=target, display_id="0",
                 daemon=self._daemon_client_getter(), wlog=log, skip_if_ok=True,
@@ -427,6 +487,7 @@ class HandoffManager:
         serial: str,
         task_id: str | int | None = None,
         source: str = "pc",
+        windowing: str | None = None,
     ) -> None:
         """PC ➔ telefon (Display 0) — PC'deki "Telefona Aktar" ya da uygulamanın telefonda açılması (focus olayı /
         watchdog):
@@ -437,7 +498,14 @@ class HandoffManager:
            sanal ekranın geometrisine DOKUNULMAZ: taşıma boyut + yoğunluk değişimini tek adımda taşır.
         2. Tam ekran yığınına oturtulur, pencereleme kipi doğrulanır, telefon uyandırılır.
         3. density_reconciler: uygulama kendini yeniden kurduysa hiçbir şey yapılmaz; kurmadıysa bir kez, doğrulanmış
-           olarak yenilenir (arka planda — küresel kilit tutulmaz)."""
+           olarak yenilenir (arka planda — küresel kilit tutulmaz).
+
+        Pencereleme kipi önceliği (özel > genel): bu aktarım için seçilen kip (`windowing`, başlık menüsü) > Ayarlar'daki
+        varsayılan (`phone_handoff_windowing`, YALNIZ kaynak="pc": kullanıcının "Telefona aktar" düğmesi) > tam ekran.
+        Uygulama telefonda Android'in ya da kullanıcının eliyle açıldıysa (display0 / watchdog) HER ZAMAN tam ekrandır:
+        serbest pencere ayarı kendi başına açılan uygulamaya uygulanmaz."""
+        if windowing is None and source != "pc":
+            windowing = "fullscreen"
         veiled = False  # PC penceresinin üstündeki "Görünüm Optimize Ediliyor" perdesi açıldı mı (ön-iniş)
         try:
             from app.device.deep_navigator import find_task_id_for_package
@@ -497,7 +565,9 @@ class HandoffManager:
                     pkg, window_dpi, phys_dpi, lookback_s=self._ALREADY_MOVED_LOOKBACK_S if moved_by_android else 0.0,
                 )
 
-            # 1. Görevi telefon ekranına (Display 0) taşı
+            # 1. Görevi telefon ekranına (Display 0) TAM EKRAN taşı. Serbest kip burada (WCT ile) verilmez: HyperOS
+            # SystemUI'ı kipi yalnız kendi Shell geçişinden (FULLSCREEN_TO_FREEFORM) tanır; geçişsiz WCT ile freeform'a
+            # alınan görevde çerçeve çizilir ama miuiFreeformTaskInfo oluşmaz (sürükleme ölü, içerik beyaz).
             if task_id:
                 log.info("🚚 [HANDOFF: GÖREV TAŞIMA] Task %s Display %s'den Display 0'a taşınıyor", task_id, disp_id)
                 try:
@@ -518,17 +588,38 @@ class HandoffManager:
             session.state.handoff_to_phone = True
 
             # 2. Android'in tam ekran yığınına oturmasını sağla & HyperOS Jest Kilidini Çöz
+            launch_mode = None
             try:
-                if await android_shell.is_miui_or_hyperos(self._adb, serial):
-                    await android_shell.unlock_display0_gesture_navigation(self._adb, serial, pkg)
-                    log.info("🧭 [HANDOFF: HYPEROS JEST KİLİDİ] onForegroundChanged tetiklendi, GestureStub açıldı (%s)", pkg)
-                else:
-                    out_start = await android_shell.bring_to_front(
-                        self._adb, serial, pkg, "0", reorder_only=bool(task_id),
-                    )
-                    log.info("🎯 [HANDOFF] am start --display 0 tamamlandı: '%s'", out_start.strip() if out_start else "OK")
+                top_component = None
+                daemon = self._daemon_client_getter() if callable(self._daemon_client_getter) else None
+                if daemon and task_id:
+                    with contextlib.suppress(Exception):
+                        import inspect
+                        t_call = daemon.task_info(task_id) if hasattr(daemon, "task_info") else None
+                        t_info = await t_call if inspect.isawaitable(t_call) else t_call
+                        if isinstance(t_info, dict) and isinstance(t_info.get("top"), str):
+                            top_component = t_info["top"]
+
+                target_windowing = windowing or "fullscreen"
+                if windowing is None:
+                    with contextlib.suppress(Exception):
+                        from app.storage import settings_db
+                        target_windowing = (await settings_db.get_project_settings()).phone_handoff_windowing
+                launch_mode = 5 if target_windowing == "freeform" else None
+
+                out_start = await android_shell.bring_to_front(
+                    self._adb, serial, pkg, "0", reorder_only=bool(task_id), component=top_component,
+                    windowing_mode=launch_mode,
+                )
+                log.info("🎯 [HANDOFF] am start --display 0 tamamlandı (comp=%s mode=%s): '%s'", top_component or "auto", launch_mode, out_start.strip() if out_start else "OK")
             except Exception as exc:
                 log.warning("⚠️ [HANDOFF] am start --display 0 uyarısı: %s", exc)
+
+            # 2a. Serbest kip: doğru pencere kutusu HEMEN verilir — aşağıdaki saniyelerce süren işler (CDP yenilemesi, yeniden
+            # kurma) bitene kadar kullanıcı sıkışık varsayılan kutuyu görmesin. Tam ekranda bu adım 4'te kalır.
+            if launch_mode == 5 and task_id:
+                await self._await_freeform_entered(task_id, serial)
+                await self._settle_phone_windowing(pkg, task_id, serial, phone_size=phone_size, windowing=windowing)
 
             # 2b. Display 0 Odak Senkronizasyonu (zararlı dokunuş/yayınlar kaldırıldı)
             focus_coords = (phone_size[0] // 2, phone_size[1] // 2) if phone_size and len(phone_size) == 2 else None
@@ -556,6 +647,10 @@ class HandoffManager:
                         "✨ [HANDOFF: CANLI DÜRTME] %s web sitesi layout'u CDP ile canlı tazelendi — süreç ve sekmeler korundu",
                         pkg,
                     )
+                    with contextlib.suppress(Exception):
+                        start_browser_auto_attach_watcher(
+                            self._adb, serial, runtime_profile.cdp_socket, session.state.window_id,
+                        )
                 if not cdp_ok:
                     # CDP dürtmesi yanıt vermezse ve ön-iniş yapılmadıysa güvenli geri çekilme (restart fallback)
                     if not prelanded and task_id and self._daemon_client_getter:
@@ -563,18 +658,20 @@ class HandoffManager:
                         if daemon and hasattr(daemon, "restart_task_activity"):
                             restarted = await daemon.restart_task_activity(task_id)
 
-            elif runtime_profile.is_pure_native and not is_web_rendered_app(pkg) and prelanded:
-                # ── KADEME 2: Saf Yerel Uygulama (Play Store, WhatsApp, Gallery, Udemy, vb.) ──
+            elif prelanded and not is_web_rendered_app(pkg):
+                # ── KADEME 2: Ön-İnişli Yerel ve Hibrit Uygulamalar (Sıfır Durum Kaybı) ──
+                # (Gallery, Dosya Yöneticisi, X/Twitter, Google Analytics, WhatsApp, Instagram vb.)
                 # Ön-iniş zaten yapıldı, arayüz telefon DPI'ına kusursuz oturdu.
-                # Süreç ASLA öldürülmez — scroll, oynatılan medya, form verisi %100 KORUNUR!
+                # İster 0 ister 10 WebView içersin, süreç ve aktivite ASLA öldürülmez!
+                # Scroll, açık fotoğraf, klasör konumu, form verisi %100 KORUNUR!
                 log.info(
-                    "🛡️ [HANDOFF: DURUM KORUNDU] %s saf yerel uygulama — konum ve scroll kaybını önlemek için restart atlandı",
+                    "🛡️ [HANDOFF: DURUM KORUNDU] %s yerel/hibrit uygulama — konum ve durum kaybını önlemek için restart atlandı",
                     pkg,
                 )
 
             else:
-                # ── KADEME 3: Hibrit / Ön-inişsiz / Gömülü WebView Uygulamaları ──
-                should_reinflate = not prelanded or runtime_profile.has_web_engine or is_web_rendered_app(pkg)
+                # ── KADEME 3: Ön-İnişsiz Geçişler veya CDP'siz Web Tarayıcıları ──
+                should_reinflate = not prelanded or is_web_rendered_app(pkg)
                 if should_reinflate and task_id and self._daemon_client_getter:
                     try:
                         daemon = self._daemon_client_getter()
@@ -582,14 +679,14 @@ class HandoffManager:
                             restarted = await daemon.restart_task_activity(task_id)
                             if restarted:
                                 log.info(
-                                    "🎯 [HANDOFF: REINFLATE] %s View ağacı Display 0 üzerinde telefon düzenine göre yeniden oluşturuldu (webviews=%d)",
-                                    pkg, runtime_profile.webview_count,
+                                    "🎯 [HANDOFF: REINFLATE] %s View ağacı Display 0 üzerinde telefon düzenine göre yeniden oluşturuldu",
+                                    pkg,
                                 )
                     except Exception as exc:
                         log.debug("restart_task_activity atlandı/uyarı: %s", exc)
 
             # 4. Pencereleme kipi: seçilen aktarma kipine (tam ekran | serbest) göre doğrula/oturt.
-            await self._settle_phone_windowing(pkg, task_id, serial)
+            await self._settle_phone_windowing(pkg, task_id, serial, phone_size=phone_size, windowing=windowing)
 
             # 5. Re-inflate başarılı olduysa redundant settle yapılmaz; olmadıysa reconciler'a bırak
             if restarted:
@@ -608,7 +705,7 @@ class HandoffManager:
                 with contextlib.suppress(Exception):
                     await self._events.emit("vd_phase", window_id=session.state.window_id, package=pkg, phase="live")
 
-    async def handoff_to_phone(self, window_id: str) -> bool:
+    async def handoff_to_phone(self, window_id: str, windowing: str | None = None) -> bool:
         """PC ➔ Telefon Handoff (bkz. _execute_to_phone). Sanal ekran pencerenin yoğunluğunda kalır: geri alındığında
         (reclaim) görev aynı ekrana, aynı yoğunluğa döner."""
         serial = self._serial_getter()
@@ -628,7 +725,7 @@ class HandoffManager:
             wlog = window_logger(__name__, window_id)
             wlog.info("📱 [HANDOFF TO PHONE] %s telefona aktarılıyor (disp_id=%s)...", pkg, disp_id)
 
-            await self._execute_to_phone(session, pkg, disp_id, serial, source="pc")
+            await self._execute_to_phone(session, pkg, disp_id, serial, source="pc", windowing=windowing)
             session.state.handoff_to_phone = True
             load_markers.record("handoff", package=pkg)
 
@@ -785,6 +882,10 @@ class HandoffManager:
                 wlog.info("✨ [RECLAIM: SANAL EKRANDA ÖNE ÇIKARMA] %s Display %s üzerinde öne çıkarılıyor", pkg, disp_id)
                 with contextlib.suppress(Exception):
                     await android_shell.bring_to_front(self._adb, serial, pkg, disp_id, reorder_only=bool(task_id))
+
+                # Telefon tarafındaki otomatik popup/tab dinleyicisini durdur
+                with contextlib.suppress(Exception):
+                    stop_browser_auto_attach_watcher(window_id)
 
                 # Tarayıcı layout'u ve (0,0) çıpasını PC penceresinde canlı olarak tazele
                 if runtime_profile.is_browser_cdp and runtime_profile.cdp_socket:

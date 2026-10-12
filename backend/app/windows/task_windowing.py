@@ -130,8 +130,14 @@ def _covers_display(bounds: Rect, size: tuple[int, int]) -> bool:
     return bw >= dw * (1 - _COVER_TOLERANCE) and bh >= dh * (1 - _COVER_TOLERANCE)
 
 
-def verify_windowing(state: TaskWindowingState | None, target: str, display_size: tuple[int, int] | None) -> str:
-    """"ok" | "bad" | "unknown". Yalnız POZİTİF okunan uyumsuzluk "bad"dir."""
+def verify_windowing(
+    state: TaskWindowingState | None, target: str, display_size: tuple[int, int] | None,
+    freeform_size: tuple[int, int] | None = None,
+) -> str:
+    """"ok" | "bad" | "unknown". Yalnız POZİTİF okunan uyumsuzluk "bad"dir.
+    `freeform_size`: serbest kipte görevin MANTIKSAL boyutu (en, boy). Verilirse kip doğru olsa da boyut tutmuyorsa "bad":
+    HyperOS'ta kabuktan serbest kipe alınan görev AOSP'nin küçük varsayılan kutusunu alır (~%48 genişlik → ~183 dp) ve
+    uygulama telefonun düzeniyle çizilmez."""
     if state is None or not state.found or state.windowing_mode is None:
         return "unknown"
     want = TARGET_MODES[target]
@@ -139,15 +145,48 @@ def verify_windowing(state: TaskWindowingState | None, target: str, display_size
         return "bad"
     if target == "fullscreen" and state.bounds and display_size and not _covers_display(state.bounds, display_size):
         return "bad"  # kip doğru ama görev ekranı doldurmuyor (kalıntı bounds / letterbox)
+    if target == "freeform" and freeform_size and state.bounds:
+        bw, bh = state.bounds[2] - state.bounds[0], state.bounds[3] - state.bounds[1]
+        if (
+            abs(bw - freeform_size[0]) > freeform_size[0] * _FREEFORM_SIZE_TOLERANCE
+            or abs(bh - freeform_size[1]) > freeform_size[1] * _FREEFORM_SIZE_TOLERANCE
+        ):
+            return "bad"
     return "ok"
 
 
-def freeform_box_for(display_size: tuple[int, int] | None, margin: float = 0.1) -> Rect | None:
-    """Telefonda serbest pencere için ekranın ~%80'i, ortalı (deneysel)."""
+# HyperOS'un KENDİ serbest penceresi (cihazda ölçüldü, POCO 2412DPC0AG / HyperOS Android 16): görevin mantıksal kutusu
+# ekran genişliğinde ve onun 1,6 katı yüksekliktedir (1220×1952 → sw381dp: uygulama telefonun tam düzenini çizer); sistem
+# onu 0,7 ölçekle, kutunun sol üst köşesinden küçülterek gösterir. Kabuktan (`am start --windowingMode 5`) gelen görev bu
+# boyutu ALMAZ, AOSP'nin küçük varsayılan kutusunu (588×1220 → sw183dp) alır; 0,7 ölçek yine uygulandığından pencere hem
+# küçük hem sıkışık (düşük dp) görünür.
+HYPEROS_FREEFORM_SCALE = 0.7
+HYPEROS_FREEFORM_ASPECT = 1.6
+_FREEFORM_SIZE_TOLERANCE = 0.03
+_FREEFORM_CONFIRM_S = 0.7  # kutu verildikten sonra sistemin geri yazıp yazmadığını görmek için bekleme
+
+
+def freeform_size_for(display_size: tuple[int, int] | None) -> tuple[int, int] | None:
+    """Telefonda serbest pencerenin mantıksal boyutu (HyperOS'un yerel serbest penceresiyle aynı): kısa kenar ekran kadar,
+    uzun kenar onun 1,6 katı (ekranı aşmaz). Yatay ekranda yön çevrilir."""
     if not display_size:
         return None
     w, h = display_size
-    return (round(w * margin), round(h * margin), round(w * (1 - margin)), round(h * (1 - margin)))
+    if w <= h:
+        return (w, min(round(w * HYPEROS_FREEFORM_ASPECT), h))
+    return (min(round(h * HYPEROS_FREEFORM_ASPECT), w), h)
+
+
+def freeform_box_for(display_size: tuple[int, int] | None) -> Rect | None:
+    """Telefonda serbest pencerenin kutusu: `freeform_size_for` boyutunda; sistemin 0,7 ölçekle gösterdiği görünür pencere
+    ekranda ortalanacak biçimde yerleşir."""
+    size = freeform_size_for(display_size)
+    if size is None or not display_size:
+        return None
+    w, h = size
+    left = round((display_size[0] - w * HYPEROS_FREEFORM_SCALE) / 2)
+    top = round((display_size[1] - h * HYPEROS_FREEFORM_SCALE) / 2)
+    return (left, top, left + w, top + h)
 
 
 # ---------------------------------------------------------------- cihaz okuma / uygulama
@@ -205,10 +244,14 @@ async def _apply_mode(task_id: str, mode: int, daemon: Any, box: Rect | None) ->
     return ("daemon", placed) if ok else ("none", False)
 
 
-async def _relayout(adb: Any, serial: str, package: str, display_id: str | int, mode: int) -> None:
+async def _relayout(
+    adb: Any, serial: str, package: str, display_id: str | int, mode: int, *, component: str | None = None,
+) -> None:
     """Görevi hedef kipte yeniden yerleştirir (aktiviteyi hedef display'de öne alır)."""
     with contextlib.suppress(Exception):
-        await android_shell.bring_to_front(adb, serial, package, display_id, windowing_mode=mode)
+        await android_shell.bring_to_front(
+            adb, serial, package, display_id, windowing_mode=mode, reorder_only=True, component=component,
+        )
 
 
 async def _sf_summary(adb: Any, serial: str, task_id: str) -> str:
@@ -256,7 +299,7 @@ async def settle_task_windowing(
     `skip_if_ok`: görev ZATEN hedefteyse (pozitif okundu) hiçbir komut gönderilmez — Workspace'e hiç girmemiş normal
     pencerelerin aktarımı gereksiz komut/gecikme almasın.
     `freeform_bounds`: serbest kipte görevin yeri (Android px; Workspace'e dönüşte pencerenin kutusu). Verilmezse
-    ekranın ~%80'i (telefonda serbest pencere)."""
+    HyperOS'un yerel serbest pencere boyutu (`freeform_box_for`: ekran genişliği × 1,6 katı, 0,7 ölçekle ortalı)."""
     if target not in TARGET_MODES:
         raise ValueError(f"bilinmeyen hedef pencereleme kipi: {target!r}")
     wlog = wlog or log
@@ -266,7 +309,11 @@ async def settle_task_windowing(
     before = await read_task_windowing(adb, serial, task_id)
     report_line(wlog, package, task_id, "before", before, f"target={target} display_size={display_size}")
 
-    if skip_if_ok and verify_windowing(before, target, display_size) == "ok":
+    # Telefon tarafı varsayılan serbest penceresinde boyut da doğrulanır (kabuktan gelen küçük kutu "ok" sayılmaz);
+    # çağıranın verdiği kutuda (Workspace) yalnız kip.
+    want_size = freeform_size_for(display_size) if target == "freeform" and freeform_bounds is None else None
+
+    if skip_if_ok and verify_windowing(before, target, display_size, want_size) == "ok":
         report_line(wlog, package, task_id, "after", before, f"target={target} verdict=ok attempts=0 method=none (zaten hedefte)")
         return WindowingReport(
             task_id=str(task_id), target=target, verdict="ok", attempts=0, method="none", relayout=False,
@@ -278,18 +325,37 @@ async def settle_task_windowing(
     used = 0
     for attempt in range(1, max(1, attempts) + 1):
         used = attempt
-        method, placed = await _apply_mode(task_id, mode, daemon, box)
+        if want_size is not None:
+            # Telefondaki varsayılan serbest pencere: kutu `cmd activity task resize` (ATMS.resizeTask) ile verilir, WCT ile
+            # DEĞİL. HyperOS kendi serbest pencere kaydını yalnız bu yolla günceller (cihazda ölçüldü): WCT ile verilen kutuyu
+            # sistem, görev öne alınınca / Chrome'un CDP adımında eski küçük kutuya geri çekiyor ve içerik eski boyutta kalıyor;
+            # kabuk ile verilen kutu kalıyor. Kip zaten hedefteyse WCT'ye de gerek yok.
+            current = after if after is not None and after.found else before
+            if current is not None and current.found and current.windowing_mode == mode:
+                method, placed = "shell", False
+            else:
+                method, _ = await _apply_mode(task_id, mode, daemon, None)
+                placed = False
+        else:
+            method, placed = await _apply_mode(task_id, mode, daemon, box)
         if box is not None and not placed:
             with contextlib.suppress(Exception):
                 await adb.shell(
                     f"cmd activity task resize {task_id} {box[0]} {box[1]} {box[2]} {box[3]}", serial=serial, timeout_s=2.0,
                 )
-        if attempt >= 2:
+        # Serbest kipte kip tutuyor, yalnız boyut tutmuyorsa (HyperOS giriş animasyonu kutuyu geri yazdı) yeniden yerleşim YAPILMAZ:
+        # `am start` animasyonu baştan başlatıp aynı ezmeyi tekrarlar; kutuyu yeniden vermek yeter.
+        if attempt >= 2 and not (want_size is not None and after.found and after.windowing_mode == mode):
             relayout = True
             await _relayout(adb, serial, package, display_id, mode)
         await sleep(settle_s)
         after = await read_task_windowing(adb, serial, task_id)
-        verdict = verify_windowing(after, target, display_size)
+        verdict = verify_windowing(after, target, display_size, want_size)
+        if verdict == "ok" and want_size is not None:
+            # Sistem kutuyu birkaç yüz ms sonra geri yazabiliyor: ilk okuma değil, durulmuş okuma geçerlidir.
+            await sleep(_FREEFORM_CONFIRM_S)
+            after = await read_task_windowing(adb, serial, task_id)
+            verdict = verify_windowing(after, target, display_size, want_size)
         if verdict != "bad":
             break  # ok ya da okunamıyor — tekrarın anlamı yok
 

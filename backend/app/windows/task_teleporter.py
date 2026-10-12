@@ -359,8 +359,11 @@ class TaskTeleporter:
     # Uygulamanın telefonda yeniden başlatılıp yerleşmesi için (son çare yolunda) bekleme.
     _RELAUNCH_WAIT_S = 0.8
 
-    async def _phone_windowing_target(self) -> str:
-        """Kullanıcının seçtiği aktarma kipi (`phone_handoff_windowing`); okunamazsa güvenli varsayılan tam ekran."""
+    async def _phone_windowing_target(self, override: str | None = None) -> str:
+        """Bu aktarım için seçilen kip (`override`), yoksa kullanıcının ayarı (`phone_handoff_windowing`); okunamazsa güvenli
+        varsayılan tam ekran."""
+        if override:
+            return override
         try:
             from ..storage import settings_db
 
@@ -369,12 +372,12 @@ class TaskTeleporter:
             return "fullscreen"
 
     async def _settle_on_phone(
-        self, task_id: str, pkg: str, serial: str, daemon: Any, wlog: logging.Logger,
+        self, task_id: str, pkg: str, serial: str, daemon: Any, wlog: logging.Logger, windowing: str | None = None,
     ) -> tuple[str, bool]:
         """Görev telefona TAŞINDIKTAN SONRA hedef kipe (tam ekran | serbest) oturtulur ve doğrulanır.
         Tam ekranda pozitif olarak doğrulanamazsa (kalıntı tüm denemelerde sürdü) SON ÇARE: uygulama telefonda sıfırdan
         başlatılır. Döner: (görevin GÜNCEL kimliği, yeniden başlatıldı mı)."""
-        target = await self._phone_windowing_target()
+        target = await self._phone_windowing_target(windowing)
         report = await settle_task_windowing(
             self._adb, serial, task_id, pkg, target=target, display_id="0", daemon=daemon, wlog=wlog,
         )
@@ -399,7 +402,9 @@ class TaskTeleporter:
             )
         return task_id, True
 
-    async def workspace_to_phone(self, window_id: str, *, already_on_phone: bool = False) -> bool:
+    async def workspace_to_phone(
+        self, window_id: str, *, already_on_phone: bool = False, windowing: str | None = None,
+    ) -> bool:
         """Eco Workspace üyesini telefonun kendi ekranına (Display 0) aktarır.
 
         Üye Workspace'ten SİLİNMEZ, "park edilir": defter kaydı (bounds, yoğunluk
@@ -407,12 +412,17 @@ class TaskTeleporter:
         bıraktığı yere koyabilir. Geriye canlı üye kalmazsa paylaşımlı VD + encoder
         hemen serbest bırakılır (park edilmiş üye encoder maliyeti doğurmaz).
 
+        `windowing`: bu aktarımın kipi; verilmezse Ayarlar'daki varsayılan — task telefonda kendiliğinden açıldıysa
+        (`already_on_phone`) HER ZAMAN tam ekran (serbest pencere ayarı yalnız "Telefona aktar" düğmesi içindir).
+
         `already_on_phone=True`: task'ı kullanıcı/sistem zaten telefona taşıdı
         (Display 0 odak olayı) — taşıma/öne çıkarma/uyandırma atlanır, sadece
         bookkeeping + task-düzeyi kalıntı temizliği yapılır.
 
         İdempotent: zaten park edilmişse True döner (açık istek ile olay-tetikli yol
         çakışabilir). Çağıran WindowManager kilidini tutmalıdır."""
+        if windowing is None and already_on_phone:
+            windowing = "fullscreen"
         serial = self._serial_getter()
         session = self._sessions.get(window_id)
         if session is None or not serial:
@@ -454,7 +464,7 @@ class TaskTeleporter:
 
         # Taşımadan SONRA: Workspace'ten kalan freeform/override bounds temizlenir ve doğrulanır,
         # seçilen aktarma kipi uygulanır.
-        task_id, relaunched = await self._settle_on_phone(task_id, pkg, serial, daemon, wlog)
+        task_id, relaunched = await self._settle_on_phone(task_id, pkg, serial, daemon, wlog, windowing)
         if density_overridden:
             # The pin only existed to keep the move itself density-neutral; from here the app follows the phone.
             density_before, changed_at = await self._release_phone_density_pin(

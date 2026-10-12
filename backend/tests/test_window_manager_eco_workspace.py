@@ -970,6 +970,9 @@ def _phone_state(manager, *, stubborn=False, initial="freeform", task="task-com.
                 state["mode"], state["bounds"] = "fullscreen", (0, 0, 1080, 2400)
             elif "--windowingMode 5" in cmd:
                 state["mode"], state["bounds"] = "freeform", (108, 240, 972, 2160)
+        resize = re.match(rf"cmd activity task resize {re.escape(task)} (\d+) (\d+) (\d+) (\d+)$", cmd)
+        if resize and state["mode"] == "freeform":
+            state["bounds"] = tuple(int(v) for v in resize.groups())
         if cmd.startswith(f"dumpsys activity activities {task}"):
             return out + _window_block(task, state["mode"], state["bounds"])
         return out
@@ -1026,7 +1029,7 @@ async def test_workspace_to_phone_does_not_relaunch_when_state_cannot_be_read(ma
     assert calls.count("WCT windowing task-com.app.a 1") == 1  # tek deneme
 
 
-async def test_phone_handoff_freeform_setting_applies_mode_5_with_a_centered_box(manager):
+async def test_phone_handoff_freeform_setting_applies_mode_5_with_the_native_hyperos_box(manager):
     from app.storage import settings_db
 
     project = await settings_db.get_project_settings()
@@ -1039,7 +1042,8 @@ async def test_phone_handoff_freeform_setting_applies_mode_5_with_a_centered_box
     await manager.handoff_window_to_phone(a.window_id)
 
     calls = _shell_calls(manager)[before:]
-    assert "WCT windowing task-com.app.a 5 108,240,972,2160" in calls  # ekranın ~%80'i, ortalı — kip ile aynı işlemde
+    # HyperOS yerel boyutu (genişlik × 1,6, 0,7 ölçekle ortalı); kip zaten serbest → WCT yok, kutu ATMS.resizeTask ile.
+    assert "cmd activity task resize task-com.app.a 162 595 1242 2323" in calls
     assert not any(c == "WCT windowing task-com.app.a 1" for c in calls)
     assert state["mode"] == "freeform"
 
@@ -1079,7 +1083,7 @@ async def test_freeform_target_that_cannot_be_verified_is_only_logged_never_rela
     await manager.handoff_window_to_phone(a.window_id)
 
     calls = _shell_calls(manager)[before:]
-    assert calls.count("WCT windowing task-com.app.a 5 108,240,972,2160") == 3
+    assert calls.count("WCT windowing task-com.app.a 5") == 3
     assert not any("force-stop" in c for c in calls)
     assert manager.get_session(a.window_id).state.locus == "phone"
 

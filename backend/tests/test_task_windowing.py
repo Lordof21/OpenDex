@@ -15,6 +15,7 @@ from app.windows.task_windowing import (
     TaskWindowingState,
     cold_relaunch,
     freeform_box_for,
+    freeform_size_for,
     parse_display_size,
     parse_task_windowing,
     read_task_windowing,
@@ -128,9 +129,25 @@ class TestVerify:
         assert verify_windowing(self.fs((0, 0, 1080, 2400)), "freeform", PHONE) == "bad"
 
 
-def test_freeform_kutusu_ekranin_yuzde_seksen_ortali():
-    assert freeform_box_for(PHONE) == (108, 240, 972, 2160)
+def test_freeform_kutusu_hyperos_yerel_boyutunda_ve_olcekli_gorunumle_ortali():
+    # Ekran genişliği × 1,6 katı; sistem 0,7 ölçekle gösterdiğinden görünür pencere (756×1210) ekranda ortalı.
+    assert freeform_box_for(PHONE) == (162, 595, 1242, 2323)
+    assert freeform_box_for((1220, 2712)) == (183, 673, 1403, 2625)  # cihazda ölçülen yerel: 1220×1952 (sw381dp)
     assert freeform_box_for(None) is None
+
+
+def test_freeform_boyutu_yatay_ekranda_yon_cevrilir_ve_ekrani_asmaz():
+    assert freeform_size_for((1080, 1200)) == (1080, 1200)  # 1,6 kat ekranı aşardı
+    assert freeform_size_for((2400, 1080)) == (1728, 1080)
+
+
+def test_freeform_kipi_dogru_ama_kutu_kucukse_bad():
+    # Kabuktan (am start --windowingMode 5) gelen görev AOSP'nin küçük kutusunu alır: 183 dp, sıkışık düzen.
+    small = TaskWindowingState("12", found=True, windowing_mode=FREEFORM, bounds=(316, 785, 904, 2005))
+    native = TaskWindowingState("12", found=True, windowing_mode=FREEFORM, bounds=(183, 673, 1403, 2625))
+    assert verify_windowing(small, "freeform", (1220, 2712), (1220, 1952)) == "bad"
+    assert verify_windowing(native, "freeform", (1220, 2712), (1220, 1952)) == "ok"
+    assert verify_windowing(small, "freeform", (1220, 2712)) == "ok"  # boyut istenmediyse (Workspace kutusu) yalnız kip
 
 
 # ------------------------------------------------------------------ durumu tutan sahte cihaz
@@ -297,15 +314,16 @@ async def test_daemon_basarisizsa_yeniden_yerlesim_devralir(failure):
 
 
 @pytest.mark.asyncio
-async def test_freeform_hedefi_kip_5_ve_kutu_ayni_islemde():
+async def test_freeform_hedefi_kip_wct_ile_kutu_kabukla_verilir():
     dev = _Device(mode="fullscreen", bounds=(0, 0, *PHONE))
     daemon = _Daemon(dev)
 
     report = await _settle(dev, target="freeform", daemon=daemon)
 
     assert report.verdict == "ok" and report.after.windowing_mode == FREEFORM
-    assert daemon.calls == [("12", FREEFORM, False, (108, 240, 972, 2160))]
-    assert not any("task resize" in c for c in dev.calls)  # kutu işlemle geldi
+    # Kip WCT ile; kutu ATMS.resizeTask ile (HyperOS serbest pencere kaydını yalnız o yolla günceller — WCT kutusu geri çekiliyor).
+    assert daemon.calls == [("12", FREEFORM, False, None)]
+    assert "cmd activity task resize 12 162 595 1242 2323" in dev.calls
 
 
 @pytest.mark.asyncio
@@ -390,4 +408,64 @@ async def test_cold_relaunch_once_durdurur_sonra_hedef_display_de_baslatir():
     await cold_relaunch(dev, "SER", "com.app.a", "0")
 
     assert dev.calls[0] == "am force-stop com.app.a"
-    assert dev.calls[1].startswith("am start --display 0") and "-p com.app.a" in dev.calls[1]
+    assert any(c.startswith("am start --display 0") and "-p com.app.a" in c for c in dev.calls)
+
+
+
+@pytest.mark.asyncio
+async def test_kabuktan_gelen_kucuk_serbest_kutu_skip_if_ok_olsa_da_yerel_boyuta_getirilir():
+    # `am start --windowingMode 5` görevi serbest kipe alır ama AOSP'nin küçük kutusuyla (~%48 genişlik, 183 dp):
+    # kip hedefte olsa da boyut tutmadığından "zaten hedefte" sayılmaz, mantıksal boyut yerel serbest pencereye çekilir.
+    dev = _Device(mode="freeform", bounds=(316, 785, 904, 2005), display=(1220, 2712))
+    daemon = _Daemon(dev)
+
+    report = await _settle(dev, target="freeform", skip_if_ok=True, daemon=daemon)
+
+    assert report.verdict == "ok" and report.attempts == 1
+    assert daemon.calls == []  # kip zaten serbest: WCT'ye gerek yok, yalnız kutu
+    assert "cmd activity task resize 12 183 673 1403 2625" in dev.calls
+    assert report.after.bounds == (183, 673, 1403, 2625)
+
+
+@pytest.mark.asyncio
+async def test_yerel_boyuttaki_serbest_pencereye_dokunulmaz():
+    dev = _Device(mode="freeform", bounds=(183, 673, 1403, 2625), display=(1220, 2712))
+    daemon = _Daemon(dev)
+
+    report = await _settle(dev, target="freeform", skip_if_ok=True, daemon=daemon)
+
+    assert (report.verdict, report.attempts) == ("ok", 0)
+    assert daemon.calls == []
+
+
+class _RevertingDevice(_Device):
+    """HyperOS'un serbest kip giriş animasyonu: bizim kutu oturur, sonraki ilk okumadan önce sistem küçük kutuyu geri yazar."""
+
+    SMALL = (1191, 217, 1522, 1082)
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.reverts_left = 1
+        self.armed = False
+
+    async def shell(self, cmd, *, serial, timeout_s=3.0):
+        if cmd.startswith("dumpsys activity activities") and self.armed and self.reverts_left:
+            self.armed, self.reverts_left = False, self.reverts_left - 1
+            self.bounds = self.SMALL
+        out = await super().shell(cmd, serial=serial, timeout_s=timeout_s)
+        if "task resize" in cmd:
+            self.armed = True  # sistem kutuyu bir sonraki okumadan önce geri yazar
+        return out
+
+
+@pytest.mark.asyncio
+async def test_sistem_kutuyu_geri_yazarsa_dogrulama_yakalar_ve_yeniden_verir_am_start_olmadan():
+    dev = _RevertingDevice(mode="freeform", bounds=(316, 785, 904, 2005), display=(1220, 2712))
+    daemon = _Daemon(dev)
+
+    report = await _settle(dev, target="freeform", skip_if_ok=True, daemon=daemon)
+
+    assert report.verdict == "ok" and report.attempts == 2
+    assert dev.calls.count("cmd activity task resize 12 183 673 1403 2625") == 2
+    assert report.after.bounds == (183, 673, 1403, 2625)
+    assert _relayouts(dev) == [] and report.relayout is False  # mod tuttuğu için animasyonu baştan başlatan am start yok

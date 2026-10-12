@@ -446,4 +446,110 @@ async def test_browser_with_cdp_triggers_live_nudge_without_restarting_process(m
     density.schedule_settle.assert_not_called()
 
 
+@pytest.mark.asyncio
+async def test_handoff_to_phone_moves_fullscreen_then_settles_freeform(mock_adb, events, settings):
+    """WCT ile doğrudan freeform taşımak HyperOS Shell geçişini atladığı için içerik beyaz kalır.
+    Bu nedenle görev önce tam ekran taşınır, ardından _settle_phone_windowing içinde HyperOS geçişi tetiklenir."""
+    from app.schemas.settings import ProjectSettings
 
+    handoff, session, density, _log, _phases, patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=False)
+    daemon_client = handoff._daemon_client_getter()
+    daemon_client.move_task_wct = AsyncMock(return_value=True)
+
+    freeform_settings = ProjectSettings(handoff_prelanding=False, phone_handoff_windowing="freeform")
+    patches[2] = patch("app.storage.settings_db.get_project_settings", AsyncMock(return_value=freeform_settings))
+
+    with (
+        patches[0], patches[1], patches[2],
+        patch("app.device.android_shell.phone_size", AsyncMock(return_value=(1220, 2712))),
+        patch("app.device.android_shell.bring_to_front", AsyncMock(return_value="OK")) as mock_bring_to_front,
+        patch.object(handoff, "_await_freeform_entered", AsyncMock(return_value=True)) as mock_entered,
+        patch.object(handoff, "_settle_phone_windowing", AsyncMock()) as mock_settle,
+    ):
+        assert await handoff.handoff_to_phone("win-3") is True
+
+    daemon_client.move_task_wct.assert_awaited_once_with(
+        "888", "0", mode=1, clear_bounds=True, bounds=None,
+    )
+    mock_bring_to_front.assert_awaited_once_with(
+        mock_adb, "S", "com.google.android.youtube", "0",
+        reorder_only=True, component=None, windowing_mode=5,
+    )
+    # Doğru kutu serbest kipe girer girmez (CDP yenilemesi / yeniden kurma BEKLENMEDEN) verilir; 4. adımda yeniden doğrulanır.
+    mock_entered.assert_awaited_once_with("888", "S")
+    assert mock_settle.await_count == 2
+    mock_settle.assert_awaited_with("com.google.android.youtube", "888", "S", phone_size=None, windowing=None)
+
+
+@pytest.mark.asyncio
+async def test_enter_freeform_via_shell_triggers_mode_5_transition(mock_adb, events, settings):
+    """_enter_freeform_via_shell, tam ekrandaki görevi am start --windowingMode 5 ile HyperOS Shell geçişine sokar."""
+    handoff, session, density, _log, _phases, patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=False)
+    with (
+        patch("app.windows.handoff_manager.read_task_windowing", AsyncMock(return_value=MagicMock(found=True, windowing_mode=1))),
+        patch("app.device.android_shell.bring_to_front", AsyncMock(return_value="OK")) as mock_bring_to_front,
+        patch("asyncio.sleep", AsyncMock()),
+    ):
+        await handoff._enter_freeform_via_shell("com.google.android.youtube", "888", "S")
+
+    mock_bring_to_front.assert_awaited_once_with(
+        mock_adb, "S", "com.google.android.youtube", "0",
+        reorder_only=True, component=None, windowing_mode=5,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("setting", "choice", "launch_mode", "settled_with"),
+    [
+        ("fullscreen", "freeform", 5, "freeform"),    # başlık çubuğu menüsünden "Serbest pencere": ayar tam ekran olsa da
+        ("freeform", "fullscreen", None, "fullscreen"),  # ... ve tersi
+        ("freeform", None, 5, None),                   # seçim yok: kullanıcının ayarı
+    ],
+)
+async def test_handoff_windowing_choice_overrides_the_setting_for_this_handoff_only(
+    mock_adb, events, settings, setting, choice, launch_mode, settled_with,
+):
+    from app.schemas.settings import ProjectSettings
+
+    handoff, session, density, _log, _phases, patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=False)
+    daemon_client = handoff._daemon_client_getter()
+    daemon_client.move_task_wct = AsyncMock(return_value=True)
+    patches[2] = patch(
+        "app.storage.settings_db.get_project_settings",
+        AsyncMock(return_value=ProjectSettings(handoff_prelanding=False, phone_handoff_windowing=setting)),
+    )
+
+    with (
+        patches[0], patches[1], patches[2],
+        patch("app.device.android_shell.phone_size", AsyncMock(return_value=(1220, 2712))),
+        patch("app.device.android_shell.bring_to_front", AsyncMock(return_value="OK")) as mock_bring_to_front,
+        patch.object(handoff, "_await_freeform_entered", AsyncMock(return_value=True)),
+        patch.object(handoff, "_settle_phone_windowing", AsyncMock()) as mock_settle,
+    ):
+        assert await handoff.handoff_to_phone("win-3", windowing=choice) is True
+
+    assert mock_bring_to_front.await_args.kwargs["windowing_mode"] == launch_mode
+    assert mock_settle.await_args.kwargs["windowing"] == settled_with
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["display0", "watchdog"])
+async def test_app_opened_on_the_phone_is_always_fullscreen_whatever_the_freeform_setting(mock_adb, events, settings, source):
+    """Ayar "serbest pencere" olsa da telefonda kendiliğinden açılan/taşınan uygulama tam ekran kalır (kural yalnız PC düğmesi içindir)."""
+    from app.schemas.settings import ProjectSettings
+
+    handoff, session, density, _log, _phases, patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=False)
+    patches[2] = patch(
+        "app.storage.settings_db.get_project_settings",
+        AsyncMock(return_value=ProjectSettings(handoff_prelanding=False, phone_handoff_windowing="freeform")),
+    )
+    with (
+        patches[0], patches[1], patches[2],
+        patch("app.device.android_shell.bring_to_front", AsyncMock(return_value="OK")) as mock_bring_to_front,
+        patch.object(handoff, "_settle_phone_windowing", AsyncMock()) as mock_settle,
+    ):
+        await handoff._execute_to_phone(session, "com.google.android.youtube", None, "S", task_id="888", source=source)
+
+    assert mock_bring_to_front.await_args.kwargs["windowing_mode"] is None
+    assert mock_settle.await_args.kwargs["windowing"] == "fullscreen"

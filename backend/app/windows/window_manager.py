@@ -69,6 +69,7 @@ from .eco_workspace import ANCHOR_MARKER, EcoWorkspaceManager, MemberCheck
 from .encoder_stress_test import StressTestBusyError, run_encoder_stress_test  # noqa: F401 (StressTestBusyError re-exported: app/api/v1/endpoints/devices.py imports it from here)
 from .app_presence import AppPresenceMonitor
 from .app_restart import AppRestartOutcome, restart_app
+from .cdp_refresher import stop_browser_auto_attach_watcher
 from .handoff_manager import HandoffManager
 from .mirror_packages import is_internal_package, is_mirror_package
 from .resize_gate import ResizeGate
@@ -912,6 +913,8 @@ class WindowManager:
             return
 
         self._sessions.pop(window_id, None)
+        with contextlib.suppress(Exception):
+            stop_browser_auto_attach_watcher(window_id)
         window_logger(__name__, window_id).info("🚪 [WindowManager:CLOSE ❌] Window %s (%s) kapatılıyor", window_id, session.state.package)
         self._broadcasters.remove(window_id)  # WS endpoints observe and close
         await cancel_and_wait(session.pump_task)
@@ -1021,16 +1024,19 @@ class WindowManager:
     # `_sessions` dict by reference and reads `_serial` live via a getter, so
     # it always observes the exact state these locked wrappers are guarding.
 
-    async def handoff_window_to_phone(self, window_id: str) -> bool:
+    async def handoff_window_to_phone(self, window_id: str, windowing: str | None = None) -> bool:
         """PC ➔ phone handoff, Stealth DPI (see HandoffManager.handoff_to_phone).
+
+        `windowing` ("fullscreen" | "freeform"): how THIS handoff lands on the phone; None = the user's setting
+        (`phone_handoff_windowing`).
 
         Eco Workspace üyesi ise TEK fark: görev telefona "park edilir" (yeri korunur) —
         bkz. TaskTeleporter.workspace_to_phone. Çağıran için fiil aynıdır (tek buton)."""
         async with self._lock:
             session = self._sessions.get(window_id)
             if session is not None and session.state.workspace_id == "eco":
-                return await self._teleporter.workspace_to_phone(window_id)
-            return await self._handoff.handoff_to_phone(window_id)
+                return await self._teleporter.workspace_to_phone(window_id, windowing=windowing)
+            return await self._handoff.handoff_to_phone(window_id, windowing=windowing)
 
     async def reclaim_window(self, window_id: str, bounds: tuple[int, int, int, int] | None = None) -> bool:
         """Phone ➔ PC reclaim, Stealth DPI (see HandoffManager.reclaim). Görev DOĞDUĞU YERE
@@ -1239,13 +1245,10 @@ class WindowManager:
             if not go:
                 return None
             async with self._lock:
-                before = await self._workspace_density_snapshot(window_id, density)
                 effective = await self._eco_workspace.resize_task(
                     window_id, bounds, density=density, density_mode=density_mode,
                 )
                 self._sync_task_state(window_id)
-                if before:
-                    self._schedule_workspace_settle(window_id, *before)
             return effective
 
     async def verify_workspace_task(self, window_id: str) -> MemberCheck:
@@ -1259,33 +1262,29 @@ class WindowManager:
             return check
 
     async def set_workspace_task_density(self, window_id: str, density: int, mode: str = "manual") -> bool:
-        """Eco Workspace içindeki bir görevin (task) densityDpi Configuration override'ını ayarlar."""
+        """Eco Workspace içindeki bir görevin (task) densityDpi Configuration override'ını ayarlar.
+
+        Freeform görevler tek bir paylaşımlı Virtual Display üzerinde yaşar. Boyut ve DPI değişimleri
+        Android WCT (setDensityDpi) ve ConfigurationChanged üzerinden in-place (süreci öldürmeden)
+        uygulanır; bağımsız VD'ler için yazılmış yıkıcı DensityReconciler döngüsü (restart_task_activity)
+        burada çalıştırılmaz."""
         async with self._lock:
-            before = await self._workspace_density_snapshot(window_id, density)
             ok = await self._eco_workspace.set_task_density(window_id, density, mode=mode)
             if ok:
                 self._sync_task_state(window_id)
-                self._schedule_workspace_settle(window_id, *before)
             return ok
 
     async def _workspace_density_snapshot(
         self, window_id: str, new_density: int | None,
     ) -> tuple[Snapshot | None, float | None]:
-        """(process identity, device-clock mark) of a Workspace member right BEFORE its task density changes;
-        (None, None) when no change is about to happen."""
-        task = self._eco_workspace.get_task(window_id)
-        if task is None or task.parked or not new_density or new_density <= 0 or new_density == task.density:
-            return None, None
-        return await self._density.snapshot(task.package), await self._density.mark()
+        """Geriye dönük uyumluluk: Freeform görevler in-place adapte olduğu için
+        reconciler snapshot'ı alınmaz."""
+        return None, None
 
     def _schedule_workspace_settle(self, window_id: str, before: Snapshot | None, changed_at: float | None) -> None:
-        """A task-level density change reaches the app's process exactly like a display-level one."""
-        if before is None:
-            return
-        self._density.schedule_settle(
-            window_id, before.package, before,
-            display=lambda: self._eco_workspace.display_id, reason="workspace_density", changed_at=changed_at,
-        )
+        """Geriye dönük uyumluluk: Freeform görevler Android WCT ve ConfigurationChanged ile
+        in-place adapte olur; DensityReconciler'ın süreci öldürmesi engellenmiştir."""
+        return
 
     async def _learn_inplace_relaunch(self, works: bool) -> None:
         """DensityReconciler learned whether `am update-appinfo` relaunches activities on this device: kept in the device

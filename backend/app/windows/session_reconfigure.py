@@ -610,7 +610,10 @@ class SessionReconfigurer:
         previous_video_bit_rate = session.video_bit_rate
 
         project = project or await settings_db.get_project_settings()
-        target_dpi = negotiate_dpi(width, height, dpi, project, session.dpi or self._settings.VIRTUAL_DISPLAY_DPI)
+        target_dpi = negotiate_dpi(
+            width, height, dpi, project, session.dpi or self._settings.VIRTUAL_DISPLAY_DPI,
+            auto_target_dp=False,
+        )
 
         # Live density needs THIS window's display id, as reported by its own server. The old `dumpsys display | grep
         # scrcpy` fallback took the FIRST scrcpy display — with several windows open, another window's display.

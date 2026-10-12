@@ -45,6 +45,8 @@ class ReclaimWindowRequest(BaseModel):
 
 class HandoffWindowRequest(BaseModel):
     window_id: str
+    # Bu aktarımın telefondaki kipi (başlık çubuğu sağ tık menüsü). Verilmezse kullanıcının ayarı (phone_handoff_windowing).
+    windowing: Literal["fullscreen", "freeform"] | None = None
 
 
 class RefreshDensityRequest(BaseModel):
@@ -195,7 +197,7 @@ async def handoff_window(body: HandoffWindowRequest, ctx: AppContextDep):
     density equalization; see HandoffManager.handoff_to_phone)."""
     log.info("[Window:HANDOFF 📱] win=%s telefona aktarılıyor", body.window_id)
     try:
-        ok = await ctx.window_manager.handoff_window_to_phone(body.window_id)
+        ok = await ctx.window_manager.handoff_window_to_phone(body.window_id, windowing=body.windowing)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"ok": ok}

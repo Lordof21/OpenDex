@@ -82,6 +82,9 @@ def test_bring_to_front_command():
     assert android_shell.bring_to_front_command("com.a", 0, reorder_only=True) == (
         "am start --display 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p com.a -f 0x10020000 --activity-reorder-to-front"
     )
+    assert android_shell.bring_to_front_command("com.a", 0, reorder_only=True, component="com.a/.MainActivity") == (
+        "am start --display 0 -n com.a/.MainActivity -f 0x10020000 --activity-reorder-to-front"
+    )
 
 
 async def test_sync_display0_focus_is_harmless_noop():
@@ -102,11 +105,9 @@ async def test_is_miui_or_hyperos():
 
 async def test_unlock_display0_gesture_navigation():
     adb = _Adb("")
-    await android_shell.unlock_display0_gesture_navigation(adb, "SER", "com.android.chrome")
+    await android_shell.unlock_display0_gesture_navigation(adb, "SER", "com.android.chrome", component="com.android.chrome/.Main")
     assert adb.calls == [
-        "am start --display 0 -a android.intent.action.MAIN -c android.intent.category.HOME; "
-        "sleep 0.15; "
-        "am start --display 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p com.android.chrome -f 0x10000000"
+        "am start --display 0 -n com.android.chrome/.Main -f 0x10020000 --activity-reorder-to-front"
     ]
 
 

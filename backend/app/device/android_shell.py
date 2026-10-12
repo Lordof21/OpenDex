@@ -326,16 +326,41 @@ def forget_display_density(display_id: str | int) -> None:
 # ---------------------------------------------------------------- launching
 
 
+async def resolve_package_component(adb: Any, serial: str, package: str, *, timeout_s: float = 1.0) -> str | None:
+    """Resolves the canonical launcher entrypoint component ('pkg/cls') for `package` via cmd package."""
+    if not package or not serial:
+        return None
+    try:
+        out = await adb.shell(f"cmd package resolve-activity --brief {package}", serial=serial, timeout_s=timeout_s)
+        if out and isinstance(out, str):
+            for line in out.strip().splitlines():
+                line = line.strip()
+                if "/" in line and not line.startswith("priority="):
+                    return line
+    except Exception:
+        pass
+    return None
+
+
 def bring_to_front_command(
-    package: str, display_id: str | int, windowing_mode: int | None = None, *, reorder_only: bool = False,
+    package: str,
+    display_id: str | int,
+    windowing_mode: int | None = None,
+    *,
+    reorder_only: bool = False,
+    component: str | None = None,
 ) -> str:
     mode = f" --windowingMode {windowing_mode}" if windowing_mode is not None else ""
+    if component:
+        # Explicit component (-n pkg/cls) — avoids intent resolution failures (e.g. X, Google Analytics)
+        # and brings the exact task/activity to front without resetting internal activity stack
+        if reorder_only:
+            return f"am start --display {display_id}{mode} -n {component} -f 0x10020000 --activity-reorder-to-front"
+        return f"am start --display {display_id}{mode} -n {component} -f 0x10000000"
+
     if reorder_only:
         # Taşıma sonrası zaten çalışan görevi öne getirirken sıfırdan LAUNCHER intent'i pompalamaz;
         # URL/input odağını, sayfa geçmişini ve pencere durumunu korur.
-        # KRİTİK: -a MAIN -c LAUNCHER verilmesi zorunludur. Aksi halde Android birden fazla export
-        # edilmiş aktivitesi olan uygulamalarda (Chrome -> ResolverActivity / 'complete action using',
-        # Gallery -> GallerySettingsActivity) yanlış aktivite açar veya chooser diyaloğu çıkarır.
         return (
             f"am start --display {display_id}{mode} -a android.intent.action.MAIN "
             f"-c android.intent.category.LAUNCHER -p {package} -f 0x10020000 --activity-reorder-to-front"
@@ -347,13 +372,28 @@ def bring_to_front_command(
 
 
 async def bring_to_front(
-    adb: Any, serial: str, package: str, display_id: str | int, *,
-    windowing_mode: int | None = None, timeout_s: float = 2.0, reorder_only: bool = False,
+    adb: Any,
+    serial: str,
+    package: str,
+    display_id: str | int,
+    *,
+    windowing_mode: int | None = None,
+    timeout_s: float = 2.0,
+    reorder_only: bool = False,
+    component: str | None = None,
 ) -> str:
-    """Starts the app's launcher activity on `display_id` — an existing task is brought to the front (NEW_TASK), so
-    this also 'resumes' a task that was just moved there. Returns `am start` output; raises on adb failure."""
+    """Starts or brings the app's task/activity to the front on `display_id`.
+
+    If `component` is not provided, dynamically resolves the canonical launcher entrypoint
+    to guarantee explicit component matching on modern Android (Android 14/15/16) and
+    prevent 'unable to resolve Intent' failures.
+    """
+    comp = component
+    if not comp and serial:
+        comp = await resolve_package_component(adb, serial, package, timeout_s=timeout_s)
+
     return await adb.shell(
-        bring_to_front_command(package, display_id, windowing_mode, reorder_only=reorder_only),
+        bring_to_front_command(package, display_id, windowing_mode, reorder_only=reorder_only, component=comp),
         serial=serial,
         timeout_s=timeout_s,
     )
@@ -383,6 +423,7 @@ async def unlock_display0_gesture_navigation(
     package: str,
     *,
     timeout_s: float = 2.0,
+    component: str | None = None,
 ) -> None:
     """HyperOS / MIUI üzerinde kenar geri jestlerini (GestureStubLeft/Right) dokunuşa açar.
 
@@ -390,20 +431,13 @@ async def unlock_display0_gesture_navigation(
     HyperOS RecentsImpl (com.miui.home / com.mi.android.globallauncher), kenar geri jestlerini
     (GestureStubView) yalnızca Display 0 üzerinde gerçek bir ön plan değişimi (onForegroundChanged)
     aldığında 'setBackTouchable(true)' ve 'showGestureStub' yaparak açar.
-    Görevin sanal ekrandan WCT ile Display 0'a doğrudan taşınması ATMS tarafında yeni bir
-    ön-plan geçişi üretmediği için jestler Home önde durumunda (view_touch_disabled) kilitli kalır.
-
-    Bu fonksiyon Display 0 üzerinde Home -> Hedef Paket geçişi yaşatarak ATMS'in gerçek bir
-    onForegroundChanged üretmesini ve GestureStubView'in anında açılmasını sağlar.
-    Hiçbir dokunma enjeksiyonu veya zararlı yayın yapmaz; süreç, DOM durumu ve scroll %100 korunur.
+    Görevin doğru bileşeniyle (explicit component) Display 0 üzerinde reorder-to-front yapılması
+    RecentsImpl'in onForegroundChanged olayını doğal yolla almasını ve GestureStub'ın anında
+    açılmasını sağlar. Ana ekrana (HOME) gidip kullanıcıyı ana ekranda bırakmak kesinlikle yasaktır.
     """
     with contextlib.suppress(Exception):
-        await adb.shell(
-            f"am start --display 0 -a android.intent.action.MAIN -c android.intent.category.HOME; "
-            f"sleep 0.15; "
-            f"am start --display 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p {package} -f 0x10000000",
-            serial=serial,
-            timeout_s=timeout_s,
+        await bring_to_front(
+            adb, serial, package, "0", reorder_only=True, component=component, timeout_s=timeout_s,
         )
 
 
