@@ -9,7 +9,7 @@ vi.mock('../src/lib/api.js', () => ({
   wsUrl: (p) => `ws://test${p}`,
 }));
 
-import { MediaCenter } from '../src/taskbar/MediaCenter.jsx';
+import { MediaCenter } from '../src/taskbar/media-center/MediaCenter.jsx';
 import { MediaWidget } from '../src/taskbar/MediaWidget.jsx';
 import { useSystemStore } from '../src/state/systemStore.js';
 

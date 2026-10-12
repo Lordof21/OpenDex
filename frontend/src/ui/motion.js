@@ -193,7 +193,12 @@ export const centerCardVariants = {
     scale: 1,
     transition: { ...cardSpring, delay: Math.min(order, 6) * 0.045, staggerChildren: 0.035, delayChildren: 0.03 },
   }),
-  exit: { opacity: 0, x: 36, scale: 0.97, transition: { duration: 0.16, ease: easeInExit } },
+  // Çıkışın nedeni `custom` ile gelir: 'sink' = aynı uygulamadan yeni bildirim geldi, bu kart yığının ARKASINA geçiyor
+  // (geriye doğru küçülüp söner); diğer her şey (kapatma, temizleme) = sağa kayarak gider.
+  exit: (custom) =>
+    custom === 'sink'
+      ? { opacity: 0, y: 6, scale: 0.95, transition: { duration: 0.2, ease: easeInExit } }
+      : { opacity: 0, x: 36, scale: 0.97, transition: { duration: 0.16, ease: easeInExit } },
 };
 
 /** Kart ikonu: küçük bir dönüşle "pop". */

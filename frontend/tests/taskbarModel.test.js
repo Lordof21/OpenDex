@@ -69,3 +69,108 @@ describe('Çalışma Alanı ikon anahtarı', () => {
     expect(isWorkspacePackage('com.opendex.files')).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------- görev çubuğu: ızgara, taşma, sürükleme, rozet, menü, hover niyeti
+import {
+  HOVER_OPEN_DELAY_MS,
+  HOVER_SWITCH_GRACE_MS,
+  TASKBAR_GAP_PX,
+  TASKBAR_ITEM_PX,
+  TASKBAR_SLOT_PX,
+  appMenuModel,
+  appSlotsAvailable,
+  applyVisibleOrder,
+  badgeLabel,
+  movedIds,
+  neighbourShift,
+  notificationCounts,
+  previewOpenDelay,
+  slotIndexFor,
+  splitForOverflow,
+} from '../src/taskbar/taskbarModel.js';
+
+describe('ızgara: 44 px düğme + 4 px aralık = 48 px yuva', () => {
+  it('yuva = düğme + aralık (sürükleme ve taşma hesabı buna dayanır)', () => {
+    expect([TASKBAR_ITEM_PX, TASKBAR_GAP_PX, TASKBAR_SLOT_PX]).toEqual([44, 4, 48]);
+  });
+});
+
+describe('taşma: sığmayanlar "+N" düğmesine', () => {
+  it('kapasite: çubuk iç genişliği − 2 × geniş yan − nefes payı − başlatıcı; ölçülemiyorsa sınırsız', () => {
+    expect(appSlotsAvailable({ navWidth: 0 })).toBe(Infinity);
+    // 1920 − 2·16 (dolgu) − 2·560 (sağ küme) − 24 (nefes) − 57 (başlatıcı) = 687 → (687 + 4) / 48 = 14,4 → 14
+    expect(appSlotsAvailable({ navWidth: 1920, paddingX: 16, sideWidth: 560, launcherWidth: 57 })).toBe(14);
+    expect(appSlotsAvailable({ navWidth: 800, paddingX: 16, sideWidth: 560, launcherWidth: 57 })).toBe(0);
+  });
+
+  it('hepsi sığıyorsa taşma yok; sığmıyorsa "+N" düğmesi bir yuva tutar', () => {
+    expect(splitForOverflow(5, 5)).toEqual({ visible: 5, overflow: 0 });
+    expect(splitForOverflow(5, Infinity)).toEqual({ visible: 5, overflow: 0 });
+    expect(splitForOverflow(8, 5)).toEqual({ visible: 4, overflow: 4 });
+    expect(splitForOverflow(3, 0)).toEqual({ visible: 0, overflow: 3 });
+    expect(splitForOverflow(0, 4)).toEqual({ visible: 0, overflow: 0 });
+  });
+});
+
+describe('sürükleyerek yeniden sıralama', () => {
+  it('sürüklenen düğmenin düştüğü yuva, uçlara kenetlenir', () => {
+    expect(slotIndexFor(1, 0, 4)).toBe(1);
+    expect(slotIndexFor(1, 25, 4)).toBe(2); // yarım yuvadan fazlası bir yuva ilerletir
+    expect(slotIndexFor(1, 23, 4)).toBe(1);
+    expect(slotIndexFor(1, -60, 4)).toBe(0);
+    expect(slotIndexFor(1, 999, 4)).toBe(3);
+    expect(slotIndexFor(0, -999, 1)).toBe(0);
+  });
+
+  it('komşular: sürüklenen sağa geçerken arada kalanlar sola, sola geçerken sağa bir yuva kayar', () => {
+    const shifts = (start, over) => [0, 1, 2, 3].map((i) => neighbourShift(i, start, over));
+    expect(shifts(0, 2)).toEqual([0, -48, -48, 0]);
+    expect(shifts(3, 1)).toEqual([0, 48, 48, 0]);
+    expect(shifts(1, 1)).toEqual([0, 0, 0, 0]);
+  });
+
+  it('movedIds: öğeyi yeni yuvaya taşır, girdiyi bozmaz', () => {
+    const ids = ['a', 'b', 'c', 'd'];
+    expect(movedIds(ids, 0, 2)).toEqual(['b', 'c', 'a', 'd']);
+    expect(movedIds(ids, 3, 1)).toEqual(['a', 'd', 'b', 'c']);
+    expect(ids).toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('applyVisibleOrder: görünen pencereler kendi yuvalarında yer değiştirir, gizliler yerinde kalır; uyuşmazlıkta dokunulmaz', () => {
+    const items = ['a', 'b', 'c', 'd', 'e'].map((id) => ({ id }));
+    expect(applyVisibleOrder(items, ['c', 'a', 'b']).map((i) => i.id)).toEqual(['c', 'a', 'b', 'd', 'e']);
+    expect(applyVisibleOrder(items, ['a', 'zzz'])).toBe(items);
+    expect(applyVisibleOrder(items, ['a', 'a'])).toBe(items);
+  });
+});
+
+describe('rozet ve bağlam menüsü modeli', () => {
+  it('bildirimler pakete göre sayılır; paketsiz kayıt yok sayılır', () => {
+    const counts = notificationCounts([{ package: 'a' }, { package: 'a' }, { package: 'b' }, {}, null]);
+    expect([counts.get('a'), counts.get('b'), counts.get('c')]).toEqual([2, 1, undefined]);
+    expect(notificationCounts(undefined).size).toBe(0);
+  });
+
+  it('rozet metni: 0 yok, 1 nokta, 2–9 sayı, 10+ "9+"', () => {
+    expect([badgeLabel(0), badgeLabel(1), badgeLabel(2), badgeLabel(9), badgeLabel(10), badgeLabel(120)]).toEqual([null, '', '2', '9', '9+', '9+']);
+  });
+
+  it('menü: gerçek oturumlu pencere tüm eylemleri sunar; telefondaysa "geri al"; oturumsuz pencerede yalnız küçült/kapat', () => {
+    const live = { focused: true, minimized: false };
+    expect(appMenuModel(live, { hasSession: true })).toMatchObject({ toggle: 'minimize', toggleLabel: 'Küçült', canHandoff: true, canReclaim: false, canRestart: true, closeAllCount: 0 });
+    expect(appMenuModel({ ...live, handoffToPhone: true }, { hasSession: true })).toMatchObject({ canHandoff: false, canReclaim: true });
+    expect(appMenuModel({ minimized: true }, { hasSession: false })).toMatchObject({ toggle: 'restore', toggleLabel: 'Geri yükle', canHandoff: false, canReclaim: false, canRestart: false });
+    expect(appMenuModel({ focused: false }, { hasSession: true, sameAppCount: 3 })).toMatchObject({ toggle: 'focus', closeAllCount: 3 });
+  });
+});
+
+describe('hover niyeti: kart yanıp sönmez, komşuya geçiş anında', () => {
+  it('ilk kart bekler; kart açıkken, az önce kapanmışken ya da klavye odağında beklemez', () => {
+    expect(previewOpenDelay()).toBe(HOVER_OPEN_DELAY_MS);
+    expect(previewOpenDelay({ previewOpen: true })).toBe(0);
+    expect(previewOpenDelay({ immediate: true })).toBe(0);
+    expect(previewOpenDelay({ closedAgoMs: HOVER_SWITCH_GRACE_MS - 1 })).toBe(0);
+    expect(previewOpenDelay({ closedAgoMs: HOVER_SWITCH_GRACE_MS + 1 })).toBe(HOVER_OPEN_DELAY_MS);
+    expect(previewOpenDelay({ closedAgoMs: null })).toBe(HOVER_OPEN_DELAY_MS);
+  });
+});

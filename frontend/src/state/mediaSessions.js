@@ -40,6 +40,9 @@ const trackKeyOf = (session) => `${session.id}|${session.title}|${session.artist
 
 const hasContent = (title, artist, duration, playing) => Boolean(title || artist || duration > 0 || playing);
 
+/** Daemon oturum durumunu `state` ile gönderir (PLAYING/PAUSED/STOPPED/BUFFERING); arabellek arayüzde ayrıca gösterilir. */
+const isBuffering = (state) => String(state || '').toUpperCase() === 'BUFFERING';
+
 function fromDaemon(s, idx, mediaStatusByPkg) {
   const pkgStatus = (s.package && mediaStatusByPkg?.[s.package]) || s;
   const playing = typeof pkgStatus.is_playing === 'boolean' ? pkgStatus.is_playing : Boolean(s.is_playing);
@@ -51,6 +54,7 @@ function fromDaemon(s, idx, mediaStatusByPkg) {
     source: appNameOf(s.package),
     title: s.title || pkgStatus.title || 'Müzik Akışı',
     artist: s.artist || pkgStatus.artist || 'Android Medya',
+    album: s.album || pkgStatus.album || '',
     art: artOf(s.album_art, s.art, s.picture, s.artwork, pkgStatus.album_art),
     artPending: Boolean(pkgStatus.art_pending ?? s.art_pending),
     progress: dur > 0 ? Math.min(100, Math.round((pos / dur) * 100)) : 0,
@@ -59,6 +63,7 @@ function fromDaemon(s, idx, mediaStatusByPkg) {
     elapsed: formatTime(pos),
     duration: formatTime(dur),
     is_playing: playing,
+    buffering: isBuffering(pkgStatus.state ?? s.state),
   };
 }
 
@@ -73,6 +78,7 @@ function fromNotification(n, mediaStatusByPkg) {
     source: appNameOf(n.package, n.appName),
     title: n.title || 'Medya',
     artist: n.text || n.artist || 'Android Medya',
+    album: '',
     art: artOf(n.picture, n.large_icon, n.album_art, n.extra_picture, n.art, pkgStatus?.album_art),
     artPending: false,
     progress: dur > 0 ? Math.min(100, Math.round((pos / dur) * 100)) : 0,
@@ -81,6 +87,7 @@ function fromNotification(n, mediaStatusByPkg) {
     elapsed: formatTime(pos),
     duration: formatTime(dur),
     is_playing: playing,
+    buffering: isBuffering(pkgStatus?.state),
   };
 }
 
@@ -108,6 +115,8 @@ export function assembleMediaSessions({ mediaStatus, mediaStatusByPkg, notificat
         source: appNameOf(mediaStatus.package),
         title: mediaStatus.title || 'Müzik Akışı',
         artist: mediaStatus.artist || 'Android Medya',
+        album: mediaStatus.album || '',
+        buffering: isBuffering(mediaStatus.state),
         art: artOf(mediaStatus.album_art, mediaStatus.art, mediaStatus.picture, mediaStatus.album_art_uri, mediaStatus.artwork, mediaStatus.large_icon),
         artPending: Boolean(controller?.artPending),
         progress: controller?.progressPct ?? 0,

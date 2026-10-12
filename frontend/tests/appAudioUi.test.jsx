@@ -302,3 +302,22 @@ describe('event routing', () => {
     expect(useAudioMixerStore.getState().apps).toEqual({});
   });
 });
+
+describe('Media Center RouteChip — menü medya merkezinin rengini taşır', () => {
+  it('rozet bir .media-scope içindeyse menü aynı ortam rengiyle açılır; seçili yolda onay vardır', () => {
+    seed([app()]);
+    render(
+      <div className="media-scope" data-accent="on" style={{ '--media-accent': 'oklch(0.6 0.12 30)' }}>
+        <RouteChip pkg="com.google.android.youtube" />
+      </div>,
+    );
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Ses: DeX' }));
+    const menu = screen.getByRole('menu', { name: 'Ses nerede çalsın' });
+    const scope = menu.closest('[data-taskbar-portal]');
+    expect(scope).toHaveClass('media-scope');
+    expect(scope).toHaveAttribute('data-accent', 'on');
+    expect(scope.style.getPropertyValue('--media-accent')).toBe('oklch(0.6 0.12 30)');
+    expect(within(menu).getByRole('menuitemradio', { name: /^DeX/ })).toHaveAttribute('aria-checked', 'true');
+    expect(within(menu).queryByText(/Basılı tut/)).toBeNull();
+  });
+});

@@ -1,11 +1,19 @@
-// Bildirim merkezinin listesi: uygulamaya göre gruplar, grup kapalıyken iOS yığını (en yeni kart + arkasında tabaklar),
-// açılınca kartlar dalga halinde iner. Her kart NotificationCard'dır — toast ile aynı dil ve aynı eylemler.
-import React, { forwardRef, useMemo, useState } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+// Bildirim merkezinin listesi: uygulamaya göre gruplar. Her kart NotificationCard'dır — toast ile aynı dil ve aynı eylemler.
+// Hareket kuralları ve süreler: notificationMotion.js. Özet:
+//
+//   gelen bildirim  kendine yer açarak gelir (alttakiler aşağı kayar); kapatılan kart sağa kayar, sonra yeri kapanır
+//   grup kapalı     başlık (ad · sayı · +N ⌄) · en yeni kart · arkasında 1–2 tabak (alt pay 6 / 12 px)
+//   grup açılır     arkadaki kartlar öndekinin ARKASINDAN sırayla çıkar (50 ms arayla), tabaklar kartın arkasına saklanır,
+//                   alt pay aynı eğriyle kapanır — alan 420 ms'de kayarak açılır, alttaki her şey akışla kayar
+//   grup kapanır    kartların alanı 300 ms'de kapanır, tabaklar kartlar toplandıktan sonra (120 ms) geri gelir
+//   yeni bildirim   aynı uygulamadan gelince eski en-öndeki kart yığının arkasına "batar", yenisi önüne düşer
+// Merkezde FLIP (`layout`) yoktur: zıplama ve ezilme olmadan, yalnız yükseklik + transform/opacity.
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { BellRing, ChevronDown, X } from 'lucide-react';
-import { cn } from '../lib/utils.js';
-import { cardSpring, centerCardVariants } from '../ui/motion.js';
+import { cardSpring } from '../ui/motion.js';
 import NotificationCard from './NotificationCard.jsx';
+import { EASE_IN_OUT, EASE_OUT, EASE_SLIDE, MS, PLATE_PEEK_PX, emerge, heightPresence, platePose, restPresence } from './notificationMotion.js';
 
 function groupByApp(models) {
   const order = [];
@@ -28,6 +36,16 @@ function toggle(set, id) {
   return next;
 }
 
+/** Listeye giren/çıkan her öğenin kabı: yükseklik akışla açılır/kapanır; 8 px aralık da onunla birlikte (pb-2 içeride,
+ *  listenin kendisi -mb-2: son öğenin altında boşluk kalmaz ve son öğe değişince hiçbir şey sıçramaz). */
+const Slot = React.forwardRef(function Slot({ children }, ref) {
+  return (
+    <motion.div ref={ref} {...heightPresence}>
+      <div className="pb-2">{children}</div>
+    </motion.div>
+  );
+});
+
 export default function NotificationCenterList({ models, privacy, onOpen, onDismiss, onDismissMany, onMarkRead, onAction }) {
   const groups = useMemo(() => groupByApp(models), [models]);
   const [openGroups, setOpenGroups] = useState(() => new Set());
@@ -48,14 +66,11 @@ export default function NotificationCenterList({ models, privacy, onOpen, onDism
   if (models.length === 0) return <EmptyState />;
 
   return (
-    <div className="flex flex-col gap-2">
-      <AnimatePresence initial={false} mode="popLayout">
-        {groups.map(({ key, items }, gi) =>
-          items.length === 1 ? (
-            <NotificationCard key={items[0].id} {...cardProps(items[0], gi)} />
-          ) : (
-            <NotificationStack
-              key={`group:${key}`}
+    <div className="-mb-2 flex flex-col">
+      <AnimatePresence initial={false}>
+        {groups.map(({ key, items }, gi) => (
+          <Slot key={`group:${key}`}>
+            <GroupBlock
               items={items}
               order={gi}
               open={openGroups.has(key)}
@@ -63,132 +78,171 @@ export default function NotificationCenterList({ models, privacy, onOpen, onDism
               onClear={() => onDismissMany?.(items)}
               cardProps={cardProps}
             />
-          ),
-        )}
+          </Slot>
+        ))}
       </AnimatePresence>
     </div>
   );
 }
 
-// A forwardRef: AnimatePresence (mode="popLayout") measures its direct child through a ref.
-const NotificationStack = forwardRef(function NotificationStack({ items, order, open, onToggle, onClear, cardProps }, ref) {
+/**
+ * Bir uygulamanın bildirimleri. Tek bildirimde yalnız kart; iki ve fazlasında başlık + yığın. Kabın anahtarı uygulamadır:
+ * 1 ⇄ 2 bildirim arasında geçişte en öndeki kart yerinden oynamaz, yalnız başlık ve tabaklar belirir/kaybolur.
+ */
+function GroupBlock({ items, order, open, onToggle, onClear, cardProps }) {
+  const reduce = useReducedMotion();
   const [first, ...rest] = items;
-  const plates = Math.min(rest.length, 2);
+  const multi = rest.length > 0;
+  const expanded = open && multi;
+  const plateCount = expanded ? 0 : Math.min(rest.length, 2);
+
+  // En öndeki kart değiştiyse: eskisi hâlâ listedeyse yığının arkasına geçti ('sink'), yoksa kapatıldı (sağa kayar).
+  const prevFirst = useRef(first.id);
+  const firstExit = prevFirst.current !== first.id && items.some((m) => m.id === prevFirst.current) ? 'sink' : 'dismiss';
+  useEffect(() => {
+    prevFirst.current = first.id;
+  });
 
   return (
-    <motion.section
-      ref={ref}
-      layout
-      variants={centerCardVariants}
-      initial="hidden"
-      animate="visible"
-      exit="exit"
-      custom={order}
-      transition={cardSpring}
-      className="group/stack relative"
-      aria-label={`${first.appName}, ${items.length} bildirim`}
-    >
-      {/* Group header: app · count, then collapse / clear */}
-      <motion.div layout="position" className="mb-1.5 flex h-6 items-center gap-2 px-1">
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-expanded={open}
-          className="flex min-w-0 items-center gap-1.5 rounded-full py-0.5 pr-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <span className="truncate text-[11.5px] font-semibold text-notification-foreground/80">{first.appName}</span>
-          <motion.span
-            key={items.length}
-            initial={{ scale: 0.6, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={cardSpring}
-            className="rounded-full bg-notification-hover px-1.5 py-px font-mono text-[9.5px] font-semibold tabular-nums text-notification-foreground/70"
-          >
-            {items.length}
-          </motion.span>
-        </button>
-        <span className="ml-auto flex items-center gap-1">
-          <button
-            type="button"
-            onClick={onClear}
-            aria-label={`${first.appName} bildirimlerinin tümünü temizle`}
-            title="Grubu temizle"
-            className="grid size-6 place-items-center rounded-full text-notification-foreground/50 opacity-0 transition-all hover:bg-notification-hover hover:text-notification-foreground focus-visible:opacity-100 group-hover/stack:opacity-100"
-          >
-            <X className="size-3" strokeWidth={2.4} />
-          </button>
-          <button
-            type="button"
-            onClick={onToggle}
-            aria-label={open ? 'Grubu daralt' : 'Grubu genişlet'}
-            className="notif-pill flex h-6 items-center gap-1 rounded-full px-2 text-[10.5px] font-semibold text-notification-foreground/75"
-          >
-            <AnimatePresence mode="wait" initial={false}>
-              <motion.span
-                key={open ? 'less' : 'more'}
-                initial={{ opacity: 0, y: 3 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -3 }}
-                transition={{ duration: 0.14 }}
-              >
-                {open ? 'Daralt' : `+${rest.length}`}
-              </motion.span>
-            </AnimatePresence>
-            <motion.span animate={{ rotate: open ? 180 : 0 }} transition={cardSpring} className="grid place-items-center">
-              <ChevronDown className="size-3" />
-            </motion.span>
-          </button>
-        </span>
-      </motion.div>
+    <section className="group/stack relative" aria-label={multi ? `${first.appName}, ${items.length} bildirim` : undefined}>
+      <AnimatePresence initial={false}>
+        {multi && (
+          <motion.div key="header" {...heightPresence}>
+            <div className="pb-1.5">
+              <GroupHeader appName={first.appName} count={items.length} restCount={rest.length} open={expanded} onToggle={onToggle} onClear={onClear} />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {/* Newest card on top; collapsed: plates peek underneath (click = expand) */}
-      <div className={cn('relative', !open && plates > 0 && (plates > 1 ? 'pb-3' : 'pb-1.5'))}>
+      <div className="relative">
         <div className="relative z-10">
-          <NotificationCard {...cardProps(first, 0)} />
+          {/* propagate: grup listeden kalkarsa (kapatma/temizleme) en öndeki kart da kendi çıkışını (sağa kayma) oynar */}
+          <AnimatePresence mode="popLayout" custom={firstExit} propagate>
+            <NotificationCard key={first.id} {...cardProps(first, order)} />
+          </AnimatePresence>
         </div>
-        <AnimatePresence initial={false}>
-          {!open &&
-            Array.from({ length: plates }, (_, i) => (
-              <motion.button
-                key={`plate-${i}`}
-                type="button"
-                tabIndex={-1}
-                aria-hidden="true"
-                onClick={onToggle}
-                initial={{ opacity: 0, y: -8 }}
-                animate={{ opacity: 1 - i * 0.35, y: 0 }}
-                exit={{ opacity: 0, y: -10, transition: { duration: 0.12 } }}
-                transition={{ ...cardSpring, delay: 0.04 * i }}
-                className="notif-plate absolute bottom-0 h-10 cursor-pointer rounded-xl"
-                style={{ left: 10 + i * 10, right: 10 + i * 10, bottom: i === 0 ? (plates > 1 ? 6 : 0) : 0, zIndex: 5 - i }}
-              />
-            ))}
-        </AnimatePresence>
+        {/* Tabaklar: kartın arkasında, alt kenarından 6 / 12 px taşar. Hep yerinde; görünürlükleri canlanır. */}
+        {[0, 1].map((i) => (
+          <motion.button
+            key={i}
+            type="button"
+            tabIndex={-1}
+            aria-hidden="true"
+            onClick={onToggle}
+            initial={false}
+            animate={platePose(i, i < plateCount, reduce)}
+            className="notif-plate absolute h-6 cursor-pointer rounded-xl"
+            style={{
+              left: 8 + i * 8,
+              right: 8 + i * 8,
+              bottom: -PLATE_PEEK_PX * (i + 1),
+              zIndex: 5 - i,
+              pointerEvents: i < plateCount ? 'auto' : 'none',
+            }}
+          />
+        ))}
       </div>
 
+      {/* Tabakların taştığı pay: tabaklar kadar yer ayrılır; açılınca aynı eğriyle kapanır (sıçrama yok). */}
+      <motion.div
+        aria-hidden="true"
+        initial={false}
+        animate={{ height: plateCount * PLATE_PEEK_PX }}
+        transition={{ duration: expanded ? MS.open : MS.close, ease: expanded ? EASE_SLIDE : EASE_IN_OUT }}
+      />
+
       <AnimatePresence initial={false}>
-        {open && (
-          <motion.div
-            key="rest"
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0, transition: { duration: 0.18 } }}
-            transition={cardSpring}
-            className="overflow-hidden"
-          >
-            <div className="flex flex-col gap-2 pt-2">
-              <AnimatePresence initial={false} mode="popLayout">
+        {expanded && (
+          <motion.div key="rest" {...restPresence}>
+            <div className="-mb-2 pt-2">
+              <AnimatePresence initial={false}>
                 {rest.map((m, i) => (
-                  <NotificationCard key={m.id} {...cardProps(m, i + 1)} />
+                  <Slot key={m.id}>
+                    <Emerge index={i} reduce={reduce}>
+                      <NotificationCard {...cardProps(m, i + 1)} />
+                    </Emerge>
+                  </Slot>
                 ))}
               </AnimatePresence>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
-    </motion.section>
+    </section>
   );
-});
+}
+
+/** Grup açılınca kartın öndekinin arkasından çıkışı (anahtar kare: alan ilk belirdiğinde de çalışır, bir kez). */
+function Emerge({ index, reduce, children }) {
+  const pose = useMemo(() => emerge(index, reduce), []); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <motion.div animate={pose.animate} transition={pose.transition} style={{ transformOrigin: '50% 0%' }}>
+      {children}
+    </motion.div>
+  );
+}
+
+/** Başlık: uygulama · sayı (değişince yumuşak "pop") · üzerine gelince temizle · "+N ⌄" / "Daralt ⌃" (sabit genişlik). */
+function GroupHeader({ appName, count, restCount, open, onToggle, onClear }) {
+  return (
+    <div className="flex h-6 items-center gap-2 pl-1 pr-0.5">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex min-w-0 items-center gap-1.5 rounded-full py-0.5 pr-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <span className="truncate text-[11.5px] font-semibold text-notification-foreground/80">{appName}</span>
+        <motion.span
+          key={count}
+          initial={{ scale: 0.6, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={cardSpring}
+          className="rounded-full bg-notification-hover px-1.5 py-px font-mono text-[9.5px] font-semibold tabular-nums text-notification-foreground/70"
+        >
+          {count}
+        </motion.span>
+      </button>
+      <span className="ml-auto flex items-center gap-1">
+        <button
+          type="button"
+          onClick={onClear}
+          aria-label={`${appName} bildirimlerinin tümünü temizle`}
+          title="Grubu temizle"
+          className="grid size-6 place-items-center rounded-full text-notification-foreground/50 opacity-0 transition-[opacity,background-color,color] duration-150 hover:bg-notification-hover hover:text-notification-foreground focus-visible:opacity-100 group-hover/stack:opacity-100"
+        >
+          <X className="size-3" strokeWidth={2.4} />
+        </button>
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-label={open ? 'Grubu daralt' : 'Grubu genişlet'}
+          aria-expanded={open}
+          className="notif-pill relative flex h-6 min-w-[68px] items-center justify-center gap-1 overflow-hidden rounded-full px-2 text-[10.5px] font-semibold text-notification-foreground/75 active:scale-95"
+        >
+          <span className="relative grid h-4 min-w-[38px] place-items-center">
+            <AnimatePresence initial={false}>
+              <motion.span
+                key={open ? 'less' : 'more'}
+                initial={{ opacity: 0, y: open ? 6 : -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: open ? -6 : 6 }}
+                transition={{ duration: 0.18, ease: EASE_OUT }}
+                className="absolute"
+              >
+                {open ? 'Daralt' : `+${restCount}`}
+              </motion.span>
+            </AnimatePresence>
+          </span>
+          <motion.span animate={{ rotate: open ? 180 : 0 }} transition={{ duration: open ? MS.open : MS.close, ease: open ? EASE_SLIDE : EASE_IN_OUT }} className="grid place-items-center">
+            <ChevronDown className="size-3" />
+          </motion.span>
+        </button>
+      </span>
+    </div>
+  );
+}
 
 function EmptyState() {
   return (

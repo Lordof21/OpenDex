@@ -19,6 +19,8 @@ const SIZES = {
   // sm: düzende 10px yer tutar (görev çubuğu kartı 44px), tıklama alanı ::before ile 22px'e genişler
   sm: { hit: 'h-2.5 before:absolute before:inset-x-0 before:-inset-y-[6px] before:content-[\'\']', track: 'h-[3px] group-hover/scrub:h-[5px] group-focus-visible/scrub:h-[5px]', thumb: 'size-2.5' },
   md: { hit: 'h-6', track: 'h-1.5 group-hover/scrub:h-2 group-focus-visible/scrub:h-2', thumb: 'size-3.5' },
+  // lg: medya merkezi afişi — ince iz (4 px) üzerine gelince 6 px'e kalınlaşır, tıklama alanı 28 px
+  lg: { hit: 'h-7', track: 'h-1 group-hover/scrub:h-1.5 group-focus-visible/scrub:h-1.5', thumb: 'size-3.5' },
 };
 const TRACKS = {
   panel: 'bg-foreground/15',
@@ -36,6 +38,7 @@ export function Scrubber({
   size = 'md',
   tone = 'panel',
   showTimes = false,
+  timesLayout = 'stack', // 'stack' → sürelerin satırı kaydırıcının altında · 'inline' → kaydırıcının iki yanında
   live = false,
   className,
 }) {
@@ -116,9 +119,32 @@ export function Scrubber({
   const totalText = durationMs > 0
     ? (remaining ? `-${formatTime(Math.max(0, durationMs - elapsedMs))}` : formatTime(durationMs))
     : (live ? 'Canlı' : '--:--');
+  const inline = showTimes && timesLayout === 'inline';
+
+  const elapsedEl = (
+    <span className={cn(inline && 'w-10 shrink-0 text-right', drag !== null && 'font-semibold text-foreground')}>{formatTime(elapsedMs)}</span>
+  );
+  const totalEl = durationMs > 0 ? (
+    <button
+      type="button"
+      onClick={() => setRemaining((r) => !r)}
+      className={cn(
+        'rounded transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        inline ? 'w-10 shrink-0 text-left' : 'px-1',
+      )}
+      title={remaining ? 'Toplam süreyi göster' : 'Kalan süreyi göster'}
+      aria-label={remaining ? 'Toplam süreyi göster' : 'Kalan süreyi göster'}
+    >
+      {totalText}
+    </button>
+  ) : (
+    <span className={cn(inline && 'w-10 shrink-0 text-left', live && 'font-semibold text-[var(--media-ink)]')}>{totalText}</span>
+  );
+  const timeText = 'font-mono text-[11px] font-medium tabular-nums text-muted-foreground';
 
   return (
-    <div className={className}>
+    <div className={cn(inline && cn('flex items-center gap-2.5', timeText), className)}>
+      {inline && elapsedEl}
       <div
         ref={trackRef}
         role="slider"
@@ -139,6 +165,7 @@ export function Scrubber({
         onBlur={() => { if (typed !== null) flushTyped(typed); }}
         className={cn(
           'group/scrub relative flex w-full touch-none select-none items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          inline && 'min-w-0 flex-1',
           dims.hit,
           seekable ? 'cursor-pointer' : 'cursor-default',
         )}
@@ -168,22 +195,11 @@ export function Scrubber({
           </span>
         )}
       </div>
-      {showTimes && (
-        <div className="mt-0.5 flex items-center justify-between font-mono text-[11px] font-medium tabular-nums text-muted-foreground">
-          <span className={cn(drag !== null && 'font-semibold text-foreground')}>{formatTime(elapsedMs)}</span>
-          {durationMs > 0 ? (
-            <button
-              type="button"
-              onClick={() => setRemaining((r) => !r)}
-              className="rounded px-1 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              title={remaining ? 'Toplam süreyi göster' : 'Kalan süreyi göster'}
-              aria-label={remaining ? 'Toplam süreyi göster' : 'Kalan süreyi göster'}
-            >
-              {totalText}
-            </button>
-          ) : (
-            <span className={cn(live && 'font-semibold text-[var(--media-ink)]')}>{totalText}</span>
-          )}
+      {inline && totalEl}
+      {showTimes && !inline && (
+        <div className={cn('mt-0.5 flex items-center justify-between', timeText)}>
+          {elapsedEl}
+          {totalEl}
         </div>
       )}
     </div>

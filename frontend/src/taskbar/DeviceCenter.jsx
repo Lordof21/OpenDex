@@ -38,7 +38,7 @@ const STATUS_LABEL = {
   disconnected: 'Cihaz bağlı değil',
 };
 
-export function DeviceTrayButton({ hub, open, onOpen }) {
+export function DeviceTrayButton({ hub, open, onOpen, className }) {
   const { active } = hub;
   const wireless = active.link === 'wifi';
   const noDevice = active.status === 'disconnected';
@@ -55,12 +55,14 @@ export function DeviceTrayButton({ hub, open, onOpen }) {
       }
       data-tooltip={noDevice ? 'Cihaz bağlı değil' : `${active.model} · ${wireless ? `Wi-Fi ${active.ip || ''}` : 'USB'}`}
       className={cn(
-        'relative inline-flex h-9 self-center shrink-0 items-center gap-1.5 rounded-lg px-2.5 mx-0.5 text-taskbar-foreground transition-colors hover:bg-accent/65 cursor-pointer select-none',
-        open && 'bg-accent text-accent-foreground'
+        // Sağ küme kuralları (Taskbar.jsx): 10 px yarıçap, dış boşluk yok (aralığı kapsül ya da küme verir), klavye odak halkası.
+        'relative inline-flex h-9 shrink-0 cursor-pointer select-none items-center gap-1.5 self-center rounded-[10px] px-2 text-taskbar-foreground outline-none transition-colors duration-150 hover:bg-accent/65 focus-visible:ring-2 focus-visible:ring-ring',
+        open && 'bg-accent text-accent-foreground',
+        className
       )}
     >
       <span className="relative grid place-items-center">
-        <Smartphone className="size-[15px]" strokeWidth={1.8} />
+        <Smartphone className="size-[17px]" strokeWidth={1.8} />
         <span
           className={cn(
             'absolute -bottom-1 -right-1.5 grid size-[11px] place-items-center rounded-full bg-taskbar ring-1',

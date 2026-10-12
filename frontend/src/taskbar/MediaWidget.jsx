@@ -39,7 +39,7 @@ export function MediaWidget({
       role="group"
       aria-label="Medya oynatıcı"
       className={cn(
-        'media-scope group/media relative hidden h-11 select-none items-center gap-1 self-center justify-self-start rounded-2xl border pl-1 pr-1.5 shadow-sm transition-colors duration-200 min-[430px]:flex',
+        'media-scope group/media relative hidden h-11 select-none items-center gap-1 self-center justify-self-start rounded-[14px] border pl-1 pr-1.5 shadow-sm transition-colors duration-200 min-[430px]:flex',
         active ? 'border-[var(--media-ink-soft)]' : 'border-taskbar-border/50 hover:border-taskbar-border/80',
       )}
       data-accent={accent ? 'on' : undefined}
@@ -118,7 +118,7 @@ export function MediaWidget({
         />
       </span>
 
-      <TransportControls variant="taskbar" playing={playing} onToggle={onToggle} onStep={onStep} className="max-md:hidden" />
+      <TransportControls playing={playing} onToggle={onToggle} onStep={onStep} className="max-md:hidden" />
     </div>
   );
 }

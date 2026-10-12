@@ -34,6 +34,7 @@ import { isMirrorPackage } from '../mirrorPackage.js';
 import { resolveAppDisplayName } from '../../desktop/appRegistry.js';
 import { clearWindowThumbnail } from '../../state/windowThumbnailCache.js';
 import { logger } from '../../lib/logger.js';
+import { applyVisibleOrder } from '../../taskbar/taskbarModel.js';
 
 // Package -> in-flight openWindow() promise. Not store state on purpose: it's
 // an implementation guard, not something a component should ever render from.
@@ -571,6 +572,17 @@ export function createLifecycleSlice(set, get) {
         const [moved] = next.splice(fromIndex, 1);
         next.splice(toIndex, 0, moved);
         return { windows: next };
+      });
+    },
+
+    /**
+     * Görev çubuğunda sürükleyerek yeniden sıralama: yalnız GÖRÜNEN düğmelerin yeni sırası verilir. Bu pencereler dizide kendi
+     * yuvalarında kalıp aralarında yer değiştirir; taşma menüsündeki pencerelerin yeri değişmez. Kimlikler uyuşmuyorsa dokunmaz.
+     */
+    reorderWindowsByIds(orderedIds) {
+      set((s) => {
+        const next = applyVisibleOrder(s.windows, orderedIds);
+        return next === s.windows ? s : { windows: next };
       });
     },
 

@@ -1,6 +1,8 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import {
+  BatteryCharging,
+  BatteryLow,
   BatteryMedium,
   ChevronUp,
   Grip,
@@ -23,12 +25,11 @@ import { assembleMediaSessions, pickActiveSessionId } from '../state/mediaSessio
 import { fetchAppList, STATIC_APPS } from '../desktop/appRegistry.js';
 import { cn } from '../lib/utils.js';
 
-import AppIcon from '../ui/AppIcon.jsx';
 import { DeviceCenter, DeviceTrayButton } from './DeviceCenter.jsx';
 import { DeviceLoadPanel, DeviceLoadTrayButton } from '../telemetry/DeviceLoadPanel.jsx';
 import { useDeviceHub } from './useDeviceHub.js';
 import { MediaWidget } from './MediaWidget.jsx';
-import { MediaCenter } from './MediaCenter.jsx';
+import { MediaCenter } from './media-center/MediaCenter.jsx';
 import { AppLauncher } from './AppLauncher.jsx';
 import { QuickSettings } from './QuickSettings.jsx';
 import { usePanelMotion } from '../ui/motion.js';
@@ -36,7 +37,24 @@ import { openOpenDexSettings } from '../settings/SettingsPanel.jsx';
 import { ClockCalendar, INITIAL_NOTIFICATIONS } from './ClockCalendar.jsx';
 import { HiddenTray } from './HiddenTray.jsx';
 import { WindowPreview } from './WindowPreview.jsx';
-import { isWindowActive, toggleActionFor } from './taskbarModel.js';
+import { TaskbarApp } from './TaskbarApp.jsx';
+import { TaskbarAppMenu } from './TaskbarAppMenu.jsx';
+import { OverflowButton, OverflowPanel } from './TaskbarOverflow.jsx';
+import { useTaskbarReorder } from './useTaskbarReorder.js';
+import {
+  HOVER_CLOSE_DELAY_MS,
+  TASKBAR_GAP_PX,
+  appMenuModel,
+  appSlotsAvailable,
+  isWindowActive,
+  notificationCounts,
+  previewOpenDelay,
+  splitForOverflow,
+  toggleActionFor,
+} from './taskbarModel.js';
+import { restartDoneToast, restartFailedToast } from '../window/appRestart.js';
+import { isFrontendOnlyWindow } from '../window/frontendOnly.js';
+import { isMirrorPackage } from '../window/mirrorPackage.js';
 import { iconPackageOf } from '../window/workspacePackage.js';
 import { formatRelativeTime } from '../desktop/notifications/timeUtils.js';
 import { Z_INDEX } from '../ui/zIndex.js';
@@ -140,6 +158,10 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
 
   const [previewApp, setPreviewApp] = useState(null);
   const [previewAnchorX, setPreviewAnchorX] = useState(null);
+  // Uygulama düğmesinin bağlam menüsü ({ id, anchorX }) ve "+N" taşma listesinin hizası; ikisi de `surface` yüzeyleridir.
+  const [appMenu, setAppMenu] = useState(null);
+  const [overflowAnchorX, setOverflowAnchorX] = useState(null);
+  const menuOriginRef = useRef(null);
 
   // Hardware states and Volume integration
   const isWifiOn = hardwareStates?.wifi !== false;
@@ -254,10 +276,45 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
     focusRemaining % 60
   ).padStart(2, '0')}`;
 
-  const previewTimerRef = useRef(null);
+  const previewTimerRef = useRef(null);      // kartı KAPATAN gecikme (fare düğmeden kartın üstüne geçerken kapanmasın)
+  const hoverOpenTimerRef = useRef(null);    // kartı AÇAN niyet gecikmesi (fare çubuğun üstünden geçerken kart yanıp sönmesin)
+  const previewClosedAtRef = useRef(null);   // kartın en son kapandığı an: hemen ardından gelen komşuya geçiş gecikmesizdir
+  const surfaceRef = useRef(null);
   const now = useClock();
 
+  // Düzen ölçümü: merkez kümeye kaç düğme sığar (taskbarModel.appSlotsAvailable). Ölçüm yapılamıyorsa (ilk çizim, jsdom) sınırsız.
+  const navRef = useRef(null);
+  const leftRef = useRef(null);
+  const rightRef = useRef(null);
+  const launcherRef = useRef(null);
+  const measureRef = useRef(null);
+  const [appSlots, setAppSlots] = useState(Infinity);
+  useLayoutEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return undefined;
+    const widthOf = (el) => (el ? el.getBoundingClientRect().width : 0);
+    const measure = () => {
+      const paddingX = parseFloat(window.getComputedStyle(nav).paddingLeft) || 0;
+      const next = appSlotsAvailable({
+        navWidth: nav.clientWidth,
+        paddingX,
+        sideWidth: Math.max(widthOf(leftRef.current?.firstElementChild), widthOf(rightRef.current)),
+        launcherWidth: widthOf(launcherRef.current),
+      });
+      setAppSlots((current) => (current === next ? current : next));
+    };
+    measureRef.current = measure;
+    measure();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(measure);
+    [nav, leftRef.current, leftRef.current?.firstElementChild, rightRef.current, launcherRef.current]
+      .filter(Boolean)
+      .forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
+  }, []);
+
   const isLauncherOpen = surface === 'launcher' || launchpadOpen;
+  surfaceRef.current = surface;
 
   // Outside click & Escape to close popovers
   useEffect(() => {
@@ -293,7 +350,23 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
 
   useEffect(() => () => {
     if (previewTimerRef.current !== null) window.clearTimeout(previewTimerRef.current);
+    if (hoverOpenTimerRef.current !== null) window.clearTimeout(hoverOpenTimerRef.current);
   }, []);
+
+  // Kartın kapanış anı: hemen ardından başka düğmeye geçiş kartı gecikmesiz açar (previewOpenDelay).
+  const lastPreviewRef = useRef(null);
+  useEffect(() => {
+    // Yalnız AÇIKTAN kapalıya geçiş "az önce kapandı" sayılır (ilk çizimdeki null bir kapanış değildir).
+    if (lastPreviewRef.current !== null && previewApp === null) {
+      previewClosedAtRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    }
+    lastPreviewRef.current = previewApp;
+  }, [previewApp]);
+
+  // Bağlam menüsü yalnız `appmenu` yüzeyiyle yaşar: yüzey değişince (dışarı tıklama, Esc, başka panel) menü verisi de gider.
+  useEffect(() => {
+    if (surface !== 'appmenu' && appMenu) setAppMenu(null);
+  }, [surface, appMenu]);
 
   // DeX hızlı ayar paneli DexQuickPanelHost'ta yaşar (tam ekranda da açılabilsin diye); yine de aynı anda tek yüzey açık.
   useEffect(() => {
@@ -313,7 +386,7 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
   };
 
   const toggleSurface = (next) => {
-    setPreviewApp(null);
+    closePreview();
     if (next === 'launcher') {
       if (isLauncherOpen) {
         setSurface(null);
@@ -329,7 +402,7 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
   };
 
   const openQuick = (view) => {
-    setPreviewApp(null);
+    closePreview();
     setLaunchpadOpen(false);
     setQuickView(view);
     setSurface((current) => (current === 'quick' && quickView === view ? null : 'quick'));
@@ -388,27 +461,55 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
   };
 
   const closeTaskbarApp = (id) => {
-    setPreviewApp(null);
+    closePreview();
     const targetWin = windows.find((w) => w.id === id || w.appId === id || w.package === id);
     if (targetWin) closeWindow(targetWin.id);
   };
 
-  const showPreview = (id, targetEl = null) => {
+  const clearHoverOpen = () => {
+    if (hoverOpenTimerRef.current !== null) window.clearTimeout(hoverOpenTimerRef.current);
+    hoverOpenTimerRef.current = null;
+  };
+
+  // Kartı hemen kapatır: bekleyen açma niyeti de iptal edilir (sürükleme başlarken, menü açılırken, pencere kapanırken).
+  const closePreview = () => {
     if (previewTimerRef.current !== null) window.clearTimeout(previewTimerRef.current);
-    if (surface === null) {
+    previewTimerRef.current = null;
+    clearHoverOpen();
+    setPreviewApp(null);
+  };
+
+  // Üzerine gelme: ilk kart kısa bir niyet gecikmesiyle açılır; kart açıkken ya da az önce kapanmışken komşuya geçiş anında olur.
+  // Klavye odağı (`immediate`) beklemez.
+  const showPreview = (id, targetEl = null, { immediate = false } = {}) => {
+    if (previewTimerRef.current !== null) window.clearTimeout(previewTimerRef.current);
+    previewTimerRef.current = null;
+    clearHoverOpen();
+    if (surfaceRef.current !== null) return;
+    const open = () => {
+      if (surfaceRef.current !== null) return; // beklerken başka bir yüzey açıldı
       if (targetEl) {
         const rect = targetEl.getBoundingClientRect();
         setPreviewAnchorX(rect.left + rect.width / 2);
       }
       setPreviewApp(id);
-    }
+    };
+    const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const delay = previewOpenDelay({
+      previewOpen: previewApp !== null,
+      closedAgoMs: previewClosedAtRef.current === null ? null : nowMs - previewClosedAtRef.current,
+      immediate,
+    });
+    if (delay === 0) open();
+    else hoverOpenTimerRef.current = window.setTimeout(open, delay);
   };
 
   const schedulePreviewClose = (id) => {
+    clearHoverOpen(); // fare kartı açılmadan ayrıldı: açılmasın
     if (previewTimerRef.current !== null) window.clearTimeout(previewTimerRef.current);
     previewTimerRef.current = window.setTimeout(() => {
       setPreviewApp((current) => (current === id ? null : current));
-    }, 180);
+    }, HOVER_CLOSE_DELAY_MS);
   };
 
   // Combine builtin pinned apps + running window apps
@@ -436,15 +537,102 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
       pinned: false,
       isOpen: true,
       isActive: isWindowActive(w),
+      isMinimized: Boolean(w.minimized),
+      onPhone: Boolean(w.handoffToPhone),
+      notifyPackage: w.package || null, // rozet: bildirimler gerçek paket adıyla gelir (ikon anahtarı farklı olabilir)
       windowTitle: w.title,
     }));
 
-  const allVisibleApps = [...visibleBuiltins, ...dynamicWindowApps].slice(0, 8);
+  // Sıra = pencere dizisinin sırası (açılış sırası; yalnız kullanıcı sürükleyince değişir). Tümü listelenir: sığmayanlar "+N" listesine gider.
+  const allApps = [...visibleBuiltins, ...dynamicWindowApps];
+  const { visible: visibleCount } = splitForOverflow(allApps.length, appSlots);
+  const shownApps = allApps.slice(0, visibleCount);
+  const hiddenApps = allApps.slice(visibleCount);
+  const hiddenHasActive = hiddenApps.some((app) => app.isActive);
+  // Sol (medya) ya da sağ küme genişleyince/daralınca kapasite yeniden ölçülür (ResizeObserver sonradan eklenen medya kartını göremez).
+  const hasMediaCard = Boolean(activeMedia);
+  useLayoutEffect(() => {
+    measureRef.current?.();
+  }, [allApps.length, hasMediaCard, focusActive]);
+  const unreadByPackage = useMemo(() => notificationCounts(realNotifications), [realNotifications]);
 
   const previewAppData = previewApp
-    ? allVisibleApps.find((app) => app.id === previewApp || app.package === previewApp) ||
+    ? allApps.find((app) => app.id === previewApp || app.package === previewApp) ||
       BUILTIN_TASKBAR_APPS.find((app) => app.id === previewApp || app.package === previewApp)
     : undefined;
+
+  const reorder = useTaskbarReorder({
+    ids: shownApps.map((app) => app.id),
+    onCommit: (orderedIds) => useWindowStore.getState().reorderWindowsByIds(orderedIds),
+    onDragStart: () => {
+      closePreview();
+      setSurface((current) => (current === 'appmenu' ? null : current));
+    },
+  });
+
+  // ---- bağlam menüsü (basılı tut / sağ tık) ve "+N" listesi
+  const menuWin = appMenu ? windows.find((w) => w.id === appMenu.id) || null : null;
+  useEffect(() => {
+    // Menünün penceresi menü açıkken kapandı (uygulama telefonda kapandı, başka yerden kapatıldı): menü de gider.
+    if (appMenu && !menuWin) setSurface((current) => (current === 'appmenu' ? null : current));
+  }, [appMenu, menuWin]);
+
+  const openAppMenu = (id, el) => {
+    closePreview();
+    setLaunchpadOpen(false);
+    menuOriginRef.current = el;
+    const rect = el.getBoundingClientRect();
+    setAppMenu({ id, anchorX: rect.left + rect.width / 2 });
+    setSurface('appmenu');
+  };
+
+  const dismissAppMenu = () => {
+    setSurface((current) => (current === 'appmenu' ? null : current));
+    menuOriginRef.current?.focus?.({ preventScroll: true }); // klavyeyle kapatılınca odak düğmesine döner
+  };
+
+  const toggleOverflow = (el) => {
+    closePreview();
+    setLaunchpadOpen(false);
+    if (el) {
+      const rect = el.getBoundingClientRect();
+      setOverflowAnchorX(rect.left + rect.width / 2);
+    }
+    setSurface((current) => (current === 'overflow' ? null : 'overflow'));
+  };
+
+  const hasAppSession = (w) => !w.isEcoWorkspace && !isFrontendOnlyWindow(w) && !isMirrorPackage(w.package);
+
+  const restartMenuApp = async (id) => {
+    try {
+      const result = await useWindowStore.getState().restartWindowApp(id);
+      useSystemStore.getState().pushToast?.(restartDoneToast(result));
+    } catch (err) {
+      useSystemStore.getState().pushToast?.(restartFailedToast(err));
+    }
+  };
+
+  const closeAllOfApp = (w) => {
+    closePreview();
+    windows.filter((x) => x.package && x.package === w.package).forEach((x) => closeWindow(x.id));
+  };
+
+  // ← → Home End: çubuktaki düğmeler arasında gezinme (roving odak yerine basit ve tahmin edilebilir: odak zaten düğmelerde).
+  const onStripKeyDown = (event) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    const items = [...event.currentTarget.querySelectorAll('[data-taskbar-launcher], [data-taskbar-item]')];
+    if (!items.length) return;
+    const at = items.indexOf(document.activeElement);
+    let next = null;
+    if (event.key === 'Home') next = items[0];
+    else if (event.key === 'End') next = items[items.length - 1];
+    else if (at === -1) next = items[0];
+    else next = items[Math.max(0, Math.min(items.length - 1, at + (event.key === 'ArrowRight' ? 1 : -1)))];
+    if (next) {
+      event.preventDefault();
+      next.focus();
+    }
+  };
 
   const batteryPercent = batteryInfo?.level ?? 68;
 
@@ -504,11 +692,12 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
       style={{ zIndex: Z_INDEX.taskbar }}
     >
       <nav
+        ref={navRef}
         aria-label="DeX görev çubuğu"
-        className="taskbar-surface relative grid h-[50px] w-full grid-cols-[1fr_auto_1fr] items-center border-t border-taskbar-border bg-taskbar px-3 shadow-taskbar backdrop-blur-2xl sm:px-4"
+        className="taskbar-surface relative grid h-[50px] w-full grid-cols-[1fr_auto_1fr] items-center border-t border-taskbar-border bg-taskbar px-2.5 shadow-taskbar backdrop-blur-2xl sm:px-3"
       >
         {/* LEFT: Media Player Widget */}
-        <div className="flex items-center justify-start min-w-0">
+        <div ref={leftRef} className="flex min-w-0 items-center justify-start">
           <MediaWidget
             media={activeMedia}
             playing={isMediaPlaying}
@@ -521,156 +710,185 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
           />
         </div>
 
-        {/* CENTER: Apps Launcher (<Grip />) + App Icons */}
+        {/* CENTER: başlatıcı (<Grip />) | uygulama düğmeleri (44 px, aralık 4 px) · taşanlar "+N" */}
         <div
-          className="flex min-w-0 items-center justify-center gap-0.5 sm:gap-1"
+          className="flex min-w-0 items-center justify-center"
+          role="toolbar"
           aria-label="Uygulamalar"
+          aria-orientation="horizontal"
+          onKeyDown={onStripKeyDown}
         >
-          <TaskbarButton
-            className="hidden min-[430px]:flex"
-            active={isLauncherOpen}
-            label="Uygulamalar"
-            onClick={() => toggleSurface('launcher')}
-          >
-            <Grip />
-          </TaskbarButton>
+          <div ref={launcherRef} className="hidden items-center min-[430px]:flex">
+            <TaskbarButton
+              active={isLauncherOpen}
+              label="Uygulamalar"
+              onClick={() => toggleSurface('launcher')}
+              data-taskbar-launcher=""
+            >
+              <Grip />
+            </TaskbarButton>
+            {/* Sistem girişi ile çalışan pencereler arasında ince ayraç: 6 + 1 + 6 px */}
+            {allApps.length > 0 && <span aria-hidden="true" className="mx-1.5 h-6 w-px shrink-0 rounded-full bg-taskbar-border/70" />}
+          </div>
 
-          {allVisibleApps.map((app, index) => {
-            const isAppOpen =
-              app.isOpen ??
-              (openAppIds.includes(app.id) ||
-                windows.some((w) => w.appId === app.id || w.package === app.id));
-            const isAppActive =
-              app.isActive ??
-              (app.id === 'opendex'
-                ? settingsFocused && !settingsMinimized
-                : windows.some((w) => (w.appId === app.id || w.package === app.id) && isWindowActive(w)));
+          <div className="flex items-center" style={{ gap: TASKBAR_GAP_PX }}>
+            {shownApps.map((app, index) => {
+              const isAppOpen =
+                app.isOpen ??
+                (openAppIds.includes(app.id) ||
+                  windows.some((w) => w.appId === app.id || w.package === app.id));
+              const isAppActive =
+                app.isActive ??
+                (app.id === 'opendex'
+                  ? settingsFocused && !settingsMinimized
+                  : windows.some((w) => (w.appId === app.id || w.package === app.id) && isWindowActive(w)));
 
-            return (
-              <TaskbarApp
-                key={app.id}
-                app={app}
-                isOpen={isAppOpen}
-                isActive={isAppActive}
-                className={
-                  index > 0
-                    ? index > 3
-                      ? 'max-[899px]:hidden'
-                      : 'max-[599px]:hidden'
-                    : ''
-                }
-                // Önizleme kartı açıkken adı zaten gösterir; ayrıca tooltip kartın altında taşıp çakışıyordu.
-                showTooltip={previewApp !== app.id}
-                onActivate={() => launchApp(app.id)}
-                onPreview={(el) => showPreview(app.id, el)}
-                onLeave={() => schedulePreviewClose(app.id)}
+              return (
+                <TaskbarApp
+                  key={app.id}
+                  app={app}
+                  isOpen={isAppOpen}
+                  isActive={isAppActive}
+                  isMinimized={Boolean(app.isMinimized)}
+                  onPhone={Boolean(app.onPhone)}
+                  badge={app.notifyPackage ? unreadByPackage.get(app.notifyPackage) || 0 : 0}
+                  menuOpen={surface === 'appmenu' && appMenu?.id === app.id}
+                  dragging={reorder.draggingId === app.id}
+                  reorder={reorder.bind(app.id, index)}
+                  style={reorder.styleFor(app.id, index)}
+                  onActivate={() => launchApp(app.id)}
+                  onMenu={(el) => openAppMenu(app.id, el)}
+                  onPreview={(el, opts) => showPreview(app.id, el, opts)}
+                  onLeave={() => schedulePreviewClose(app.id)}
+                />
+              );
+            })}
+            {hiddenApps.length > 0 && (
+              <OverflowButton
+                count={hiddenApps.length}
+                open={surface === 'overflow'}
+                hasActive={hiddenHasActive}
+                onClick={(event) => toggleOverflow(event.currentTarget)}
               />
-            );
-          })}
+            )}
+          </div>
         </div>
 
-        {/* RIGHT: System Tray Cluster */}
+        {/* RIGHT: sistem tepsisi — 4 grup, aralarında ince ayraç: [masaüstü] · [bağlantı] · [telefon] · [saat].
+            Tüm tek düğmeler 36 px (rounded 10), kapsül içindekiler 32 px (rounded 10) + 2 px iç boşluk = kapsül 36 px (rounded 12, eş merkezli). */}
         <div
-          className="flex h-full shrink-0 items-center justify-end justify-self-end gap-1 sm:gap-1.5 pl-2"
+          ref={rightRef}
+          className="flex h-full shrink-0 items-center justify-end justify-self-end gap-0.5 pl-1"
           aria-label="Sistem tepsisi"
         >
-          <SystemTrayButton
-            className="hidden sm:inline-flex"
-            label="Gizli simgeleri göster"
-            active={surface === 'hidden'}
-            onClick={() => toggleSurface('hidden')}
-          >
-            <ChevronUp />
-          </SystemTrayButton>
-
-          <SystemTrayButton
-            className="inline-flex"
-            label={isBrowserFullscreen ? 'Pencere moduna dön (F11)' : 'Masaüstünü tam ekran yap (F11)'}
-            active={isBrowserFullscreen}
-            onClick={toggleBrowserFullscreen}
-          >
-            {isBrowserFullscreen ? <Minimize2 /> : <Maximize2 />}
-          </SystemTrayButton>
-
-          <SystemTrayButton
-            className="inline-flex"
-            label="DeX hızlı ayarları (Ctrl+Alt+D)"
-            active={dexQuickOpen}
-            data-dex-quick-toggle=""
-            onClick={() => {
-              setPreviewApp(null);
-              setSurface(null);
-              toggleDexQuickPanel();
-            }}
-          >
-            <MonitorCog />
-          </SystemTrayButton>
-
-          {/* Unified Connectivity Pill (Sound, Wi-Fi, Signal, Battery) */}
-          <div
-            className={cn(
-              'group/connectivity flex h-9 self-center items-center gap-0.5 rounded-xl border border-taskbar-border/50 bg-foreground/[0.03] px-1 transition-colors duration-150 hover:border-taskbar-border/80 hover:bg-accent/65',
-              surface === 'quick' &&
-                'border-taskbar-border/70 bg-accent text-accent-foreground'
-            )}
-            aria-label="Bağlantı, ses ve pil durumu"
-          >
+          <div className="flex items-center">
             <SystemTrayButton
-              className="h-8 w-8 hover:bg-transparent [&_svg]:size-4"
+              className="hidden sm:inline-flex"
+              label="Gizli simgeleri göster"
+              active={surface === 'hidden'}
+              onClick={() => toggleSurface('hidden')}
+            >
+              <ChevronUp />
+            </SystemTrayButton>
+
+            <SystemTrayButton
+              className="max-[599px]:hidden"
+              label={isBrowserFullscreen ? 'Pencere moduna dön (F11)' : 'Masaüstünü tam ekran yap (F11)'}
+              active={isBrowserFullscreen}
+              onClick={toggleBrowserFullscreen}
+            >
+              {isBrowserFullscreen ? <Minimize2 /> : <Maximize2 />}
+            </SystemTrayButton>
+
+            <SystemTrayButton
+              label="DeX hızlı ayarları (Ctrl+Alt+D)"
+              active={dexQuickOpen}
+              data-dex-quick-toggle=""
+              onClick={() => {
+                closePreview();
+                setSurface(null);
+                toggleDexQuickPanel();
+              }}
+            >
+              <MonitorCog />
+            </SystemTrayButton>
+          </div>
+
+          <TrayDivider />
+
+          {/* Bağlantı kapsülü: ses · Wi-Fi · sinyal · pil — her düğme ayrı vurgulanır (hangisinin açık olduğu belli) */}
+          <div className={TRAY_PILL} role="group" aria-label="Bağlantı, ses ve pil durumu">
+            <SystemTrayButton
+              className={PILL_BUTTON}
               label="Ses ayarları ve mikser"
-              active={false}
+              active={surface === 'quick' && quickView === 'mixer'}
               onClick={() => openQuick('mixer')}
             >
               <Volume2 />
             </SystemTrayButton>
 
             <SystemTrayButton
-              className="h-8 w-8 hover:bg-transparent [&_svg]:size-4"
+              className={PILL_BUTTON}
               label={isWifiOn ? 'Wi-Fi bağlı' : 'Wi-Fi kapalı'}
-              active={false}
+              active={surface === 'quick' && quickView === 'wifi'}
               onClick={() => openQuick('wifi')}
             >
               {isWifiOn ? <Wifi /> : <WifiOff />}
             </SystemTrayButton>
 
             <SystemTrayButton
-              className="hidden h-8 w-7 hover:bg-transparent sm:inline-flex [&_svg]:size-4"
+              className={cn(PILL_BUTTON, 'hidden sm:inline-flex')}
               label="Mobil sinyal"
-              active={false}
+              active={surface === 'quick' && quickView === 'main'}
               onClick={() => openQuick('main')}
             >
               <Signal />
             </SystemTrayButton>
 
             <SystemTrayButton
-              className="h-8 w-12 gap-1 px-1.5 hover:bg-transparent"
+              // Sabit genişlik: yüzde 99 → 100 olunca (ve rakam sayısı değişince) soldaki her şey kaymasın.
+              className={cn(PILL_BUTTON, 'w-12 gap-1 px-0')}
               label={`Pil yüzde ${batteryPercent}, ${batteryInfo?.is_charging ? 'şarj oluyor' : 'pilde'}`}
-              active={false}
+              active={surface === 'quick' && quickView === 'battery'}
               onClick={() => openQuick('battery')}
             >
-              <BatteryMedium className="scale-x-110 size-4 text-status-active" />
-              <span className="font-mono text-[10px] font-semibold tabular-nums">
+              <BatteryGlyph percent={batteryPercent} charging={Boolean(batteryInfo?.is_charging)} />
+              <span
+                className={cn(
+                  'font-mono text-[10px] font-semibold tabular-nums',
+                  !batteryInfo?.is_charging && batteryPercent <= 20 && 'text-destructive'
+                )}
+              >
                 {batteryPercent}
               </span>
             </SystemTrayButton>
           </div>
 
-          {/* Telefon Yükü: felt temperature at a glance, the load panel on click */}
-          <DeviceLoadTrayButton open={surface === 'load'} onOpen={() => toggleSurface('load')} />
+          <TrayDivider />
 
-          {/* Multi-Device Management (Device Hub) */}
-          <DeviceTrayButton
-            hub={deviceHub}
-            open={surface === 'devices'}
-            onOpen={() => toggleSurface('devices')}
-          />
+          {/* Telefon kapsülü: sıcaklık (yük paneli) · cihaz merkezi. Dar çubukta yük düğmesi gizlenir, cihaz düğmesi kalır. */}
+          <div className={TRAY_PILL} role="group" aria-label="Telefon">
+            <DeviceLoadTrayButton
+              className={cn(PILL_HEIGHT, 'max-[899px]:hidden')}
+              open={surface === 'load'}
+              onOpen={() => toggleSurface('load')}
+            />
+            <DeviceTrayButton
+              className={PILL_HEIGHT}
+              hub={deviceHub}
+              open={surface === 'devices'}
+              onOpen={() => toggleSurface('devices')}
+            />
+          </div>
 
-          {/* Focus Timer Indicator Pill */}
+          <TrayDivider />
+
+          {/* Odak zamanlayıcısı kapsülü (yalnız oturum açıkken) */}
           {focusActive && (
             <button
               type="button"
               onClick={() => toggleSurface('clock')}
-              className="mx-0.5 hidden h-[28px] shrink-0 items-center gap-1.5 self-center rounded-full border border-status-active/40 bg-status-active/15 px-2.5 text-status-active transition-colors hover:bg-status-active/25 sm:inline-flex cursor-pointer"
+              className="hidden h-[28px] shrink-0 cursor-pointer items-center gap-1.5 self-center rounded-full border border-status-active/40 bg-status-active/15 px-2.5 text-status-active outline-none transition-colors hover:bg-status-active/25 focus-visible:ring-2 focus-visible:ring-ring sm:inline-flex"
               aria-label={`Odak oturumu, kalan süre ${focusClock}`}
             >
               <Timer className="size-3.5" />
@@ -683,7 +901,7 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
           {/* Digital Clock & Date */}
           <div
             className={cn(
-              'group/clock flex h-9 shrink-0 items-center rounded-xl px-2.5 transition-colors hover:bg-accent/65 cursor-pointer',
+              'group/clock flex h-9 shrink-0 cursor-pointer items-center rounded-[10px] px-2 transition-colors hover:bg-accent/65',
               surface === 'clock' && 'bg-accent text-accent-foreground'
             )}
           >
@@ -843,7 +1061,7 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
               app={previewAppData}
               anchorX={previewAnchorX}
               onActivate={() => {
-                setPreviewApp(null); // Windows gibi: önizlemeye basınca kart kapanır, eylem (küçült / geri yükle / öne getir) uygulanır
+                closePreview(); // Windows gibi: önizlemeye basınca kart kapanır, eylem (küçült / geri yükle / öne getir) uygulanır
                 launchApp(previewApp);
               }}
               onClose={() => closeTaskbarApp(previewApp)}
@@ -851,7 +1069,38 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
                 if (previewTimerRef.current !== null)
                   window.clearTimeout(previewTimerRef.current);
               }}
-              onLeave={() => setPreviewApp(null)}
+              onLeave={() => closePreview()}
+            />
+          )}
+
+          {surface === 'appmenu' && appMenu && menuWin && (
+            <TaskbarAppMenu
+              key={`menu-${appMenu.id}`}
+              {...panelMotion}
+              name={menuWin.title || menuWin.display_name || menuWin.package || 'Uygulama'}
+              model={appMenuModel(menuWin, {
+                hasSession: hasAppSession(menuWin),
+                sameAppCount: windows.filter((w) => w.package && w.package === menuWin.package).length,
+              })}
+              anchorX={appMenu.anchorX}
+              onToggle={() => launchApp(menuWin.id)}
+              // DeX-içi kırpma penceresinde aktarılan şey kaynak Workspace görevidir (title bar ile aynı kural).
+              onHandoff={() => useWindowStore.getState().handoffWindowToPhone(menuWin.sourceTaskId || menuWin.id)}
+              onReclaim={() => useWindowStore.getState().reclaimWindow(menuWin.id)}
+              onRestart={() => restartMenuApp(menuWin.id)}
+              onClose={() => closeTaskbarApp(menuWin.id)}
+              onCloseAll={() => closeAllOfApp(menuWin)}
+              onDismiss={dismissAppMenu}
+            />
+          )}
+
+          {surface === 'overflow' && hiddenApps.length > 0 && (
+            <OverflowPanel
+              key="overflow"
+              {...panelMotion}
+              items={hiddenApps}
+              anchorX={overflowAnchorX}
+              onActivate={(id) => launchApp(id)}
             />
           )}
         </AnimatePresence>
@@ -860,35 +1109,37 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
   );
 }
 
-function TaskbarButton({ label, active, className, onClick, children }) {
+// ---------------------------------------------------------------- yardımcı parçalar (çubuğa özgü)
+
+// Sağ küme geometrisi: kapsül 36 px (rounded 12) = 2 px iç boşluk + 32 px düğme (rounded 10) — dış yarıçap = iç yarıçap + boşluk (eş merkezli).
+const TRAY_PILL = 'flex h-9 shrink-0 items-center gap-0.5 self-center rounded-xl border border-taskbar-border/50 bg-foreground/[0.03] p-0.5';
+const PILL_BUTTON = 'h-8 w-8';
+const PILL_HEIGHT = 'h-8'; // metin taşıyan kapsül düğmeleri (sıcaklık, cihaz): yükseklik sabit, genişlik içeriğe göre
+
+function TrayDivider({ className }) {
+  return <span aria-hidden="true" className={cn('mx-0 h-5 w-px shrink-0 self-center rounded-full bg-taskbar-border/70', className)} />;
+}
+
+/** Pil simgesi: şarjda şarj simgesi, %20 ve altında alçak pil (kırmızı), diğer durumda normal; yüzdeyle birlikte okunur. */
+function BatteryGlyph({ percent, charging }) {
+  if (charging) return <BatteryCharging className="size-[17px] text-status-active" />;
+  if (percent <= 20) return <BatteryLow className="size-[17px] text-destructive" />;
+  return <BatteryMedium className="size-[17px] text-status-active" />;
+}
+
+// Başlatıcı (Grip): uygulama düğmeleriyle AYNI 44 px hedef ve 10 px yarıçap.
+function TaskbarButton({ label, active, className, onClick, children, ...rest }) {
   return (
     <button
       type="button"
       className={cn(
-        'relative flex size-[42px] shrink-0 items-center justify-center rounded-[10px] text-taskbar-foreground/75 transition-all duration-150 hover:bg-accent/65 hover:text-taskbar-foreground [&_svg]:size-[20px] [&_svg]:stroke-[2.1] cursor-pointer select-none',
+        'relative flex h-[44px] w-[44px] shrink-0 cursor-pointer select-none items-center justify-center rounded-[10px] text-taskbar-foreground/75 outline-none transition-colors duration-150 hover:bg-accent/65 hover:text-taskbar-foreground focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-[20px] [&_svg]:stroke-[2.1]',
         active && 'bg-accent/80 text-taskbar-foreground shadow-xs',
         className
       )}
       onClick={onClick}
       aria-label={label}
-      data-tooltip={label}
-    >
-      {children}
-    </button>
-  );
-}
-
-function SystemTrayButton({ label, active, className, onClick, children, ...rest }) {
-  return (
-    <button
-      type="button"
-      className={cn(
-        'relative flex h-9 w-9 shrink-0 items-center justify-center self-center rounded-lg px-0 text-taskbar-foreground/85 transition-colors hover:bg-accent/65 hover:text-taskbar-foreground [&_svg]:size-[17px] [&_svg]:stroke-[1.9] cursor-pointer select-none',
-        active && 'bg-accent text-accent-foreground',
-        className
-      )}
-      onClick={onClick}
-      aria-label={label}
+      aria-pressed={active ? true : undefined}
       data-tooltip={label}
       {...rest}
     >
@@ -897,43 +1148,23 @@ function SystemTrayButton({ label, active, className, onClick, children, ...rest
   );
 }
 
-function TaskbarApp({ app, isOpen, isActive, className, showTooltip = true, onActivate, onPreview, onLeave }) {
-  const name = app.name || app.display_name || 'Uygulama';
-  const targetPkg = app.package || app.id;
-
+// Sistem tepsisi düğmesi: 36 px, 10 px yarıçap, 17 px simge (kapsül içinde `PILL_BUTTON` ile 32 px).
+function SystemTrayButton({ label, active, className, onClick, children, ...rest }) {
   return (
     <button
       type="button"
       className={cn(
-        // `className` ile gelen görünürlük sınıfı DISPLAY'i değiştirmemeli (eskiden `inline-flex` grid'i eziyor, ikon ve çizgi sola kayıyordu):
-        // düzen sabit flex + ortalama, gizleme bir max-genişlik eşiğiyle (örn. 599 piksel) sağlanır.
-        // UYARI — burada "max" ile köşeli parantez açılışını ve ardından iki nokta üst üsteyi bitişik yazmayın: Tailwind'in
-        // içerik tarayıcısı yorumları da ham metin olarak okur; parantez içine birim taşımayan bir örnek (üç nokta vb.)
-        // koymak TÜM projede min/max keyfi değişkenlerini sessizce devre dışı bırakır (tailwindcss screenVariants: "mixed units").
-        'group/app relative flex size-[42px] shrink-0 items-center justify-center rounded-[10px] transition-all duration-150 hover:bg-accent/65 cursor-pointer select-none',
-        isActive && 'bg-accent/80 shadow-xs',
+        'relative flex h-9 w-9 shrink-0 cursor-pointer select-none items-center justify-center self-center rounded-[10px] px-0 text-taskbar-foreground/85 outline-none transition-colors duration-150 hover:bg-accent/65 hover:text-taskbar-foreground focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-[17px] [&_svg]:stroke-[1.9]',
+        active && 'bg-accent text-accent-foreground',
         className
       )}
-      onClick={onActivate}
-      onPointerEnter={(e) => onPreview?.(e.currentTarget)}
-      onPointerLeave={onLeave}
-      onFocus={(e) => onPreview?.(e.currentTarget)}
-      aria-label={`${name}${isOpen ? ', açık' : ''}`}
-      aria-current={isActive ? 'true' : undefined}
-      data-tooltip={showTooltip ? name : undefined}
+      onClick={onClick}
+      aria-label={label}
+      aria-pressed={active ? true : undefined}
+      data-tooltip={label}
+      {...rest}
     >
-      <span className="flex items-center justify-center transition-transform duration-150 ease-out group-active/app:scale-95 pointer-events-none">
-        <AppIcon app={app} pkg={targetPkg} displayName={name} size="taskbar" />
-      </span>
-      {isOpen && (
-        <span
-          className={cn(
-            // Açıkça ortalı: konum ne `display`e ne de akışa bağlıdır.
-            'absolute bottom-0.5 left-1/2 h-[3px] -translate-x-1/2 rounded-full bg-status-active shadow-sm transition-[width] duration-200 pointer-events-none',
-            isActive ? 'w-4' : 'w-1.5'
-          )}
-        />
-      )}
+      {children}
     </button>
   );
 }

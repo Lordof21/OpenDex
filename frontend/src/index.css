@@ -4,6 +4,7 @@
 @import '@fontsource/ibm-plex-mono/600.css';
 @import '@fontsource/ibm-plex-mono/700.css';
 @import '@fontsource/instrument-serif';
+@import '@fontsource/instrument-serif/400-italic.css';
 
 @tailwind base;
 @tailwind components;
@@ -336,8 +337,8 @@
       inset 0 1px 0 var(--taskbar-inset),
       0 1px 2px var(--window-shadow-tight),
       0 8px 22px color-mix(in oklab, var(--notification-shadow) 55%, transparent);
-    backdrop-filter: blur(28px) saturate(1.5);
-    -webkit-backdrop-filter: blur(28px) saturate(1.5);
+    /* Bildirim merkezinde kart, zaten bulanık panelin içinde: ikinci bir backdrop-filter her kaymada her kartı her karede
+       yeniden bulanıklaştırıyordu (grup açılırken takılmanın ana nedeni). Bulanıklık yalnız toast'ta (masaüstü üstünde). */
     transition: background-color 180ms ease, border-color 180ms ease, box-shadow 220ms ease;
   }
   .notif-card:hover {
@@ -354,6 +355,8 @@
   .notif-card--toast:hover {
     background: color-mix(in oklab, var(--notification-raised) 97%, transparent);
     box-shadow: inset 0 1px 0 var(--taskbar-inset), var(--shadow-notification);
+    backdrop-filter: blur(28px) saturate(1.5);
+    -webkit-backdrop-filter: blur(28px) saturate(1.5);
   }
   /* Grup kapalıyken arkada duran "tabaklar" (iOS yığını) */
   .notif-plate {
@@ -479,11 +482,74 @@
   0%, 100% { transform: scaleY(0.3); }
   50% { transform: scaleY(1); }
 }
-.media-breathe { animation: media-breathe 4.5s ease-in-out infinite; }
-@keyframes media-breathe {
-  0%, 100% { opacity: 0.5; transform: scale(1); }
-  50% { opacity: 0.85; transform: scale(1.04); }
+/* ── Medya merkezi "Afiş" (MEDYA_MERKEZI_TASARIM_PLANI.md) ── yalnız transform/opacity canlanır; hiçbir blur canlanmaz.
+   --media-surface : panel zemini = popover + kapak renginin %9'u (kapaktan renk alan kâğıt)
+   --media-on-ink  : vurgu renginin (oynat düğmesi) üstündeki simge; kapak rengi L=0.6 sabit olduğundan açık renk,
+                     kapak yoksa vurgu sistemin --primary'sidir ve onun karşıtı kullanılır (koyu temada koyu simge). */
+.media-scope {
+  --media-surface: color-mix(in oklab, var(--media-ink) 9%, var(--popover));
+  --media-on-ink: var(--primary-foreground);
 }
+.media-scope[data-accent='on'] { --media-on-ink: var(--scrim-foreground); }
+/* Kapağın erimesi: üstte rozetler için hafif gölge; kapağın üst %55'i tamamen açık, yalnız alt kısım panel yüzeyine
+   erir (başlık kapağa 48 px biner — 294 px kapakta alt %16 — o bölge ≈%80+ yüzeydir — okunurluk korunur, kapak "beyazlamaz"). */
+.media-poster-fade {
+  background: linear-gradient(180deg,
+    color-mix(in oklab, var(--scrim) 38%, transparent) 0%,
+    transparent 22%,
+    transparent 55%,
+    color-mix(in oklab, var(--media-surface) 30%, transparent) 70%,
+    color-mix(in oklab, var(--media-surface) 80%, transparent) 84%,
+    var(--media-surface) 100%);
+}
+/* Kapak yoksa: kapak renginden iki yumuşak ışık (statik) — boş gri kutu yerine. */
+.media-poster-fallback {
+  background:
+    radial-gradient(120% 90% at 28% 18%, var(--media-ink-soft), transparent 62%),
+    radial-gradient(90% 80% at 82% 88%, var(--media-ink-faint), transparent 70%),
+    var(--media-surface);
+}
+/* Yaşayan kapak: çalarken yavaş Ken Burns kayması (tek compositor katmanı), duraklayınca olduğu yerde donar. */
+.media-kenburns {
+  transform-origin: 50% 38%;
+  animation: media-kenburns 26s ease-in-out infinite alternate;
+  animation-play-state: paused;
+  will-change: transform;
+}
+.media-kenburns[data-running='true'] { animation-play-state: running; }
+@keyframes media-kenburns {
+  from { transform: scale(1.02) translate3d(0, 0, 0); }
+  to { transform: scale(1.09) translate3d(-1.5%, -1.2%, 0); }
+}
+/* "Diğer akışlar" satırı (taskbar/media-center/SessionSheet.jsx): üzerine gelince ad 4 px yükselir, alt satır yukarı
+   kayıp söner, yerine konum kaydırıcısı aşağıdan gelir. Yalnız transform/opacity; satır yüksekliği sabit (2,5 satır kuralı).
+   Giriş gecikmeli (fare satırların üstünden geçerken titremesin: 70/110 ms), çıkış anında. Klavye odağında ve sürüklerken
+   (imleç satırdan çıksa bile) açık kalır. Dokunmatikte (hover yok) hiç açılmaz. */
+.media-row-title,
+.media-row-sub,
+.media-row-scrub {
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 160ms ease-out;
+}
+.media-row-scrub { opacity: 0; transform: translateY(6px); pointer-events: none; }
+@media (hover: hover) {
+  .media-row:is(:hover, :has(:focus-visible), :has([data-dragging])) .media-row-title {
+    transform: translateY(-4px);
+    transition-delay: 70ms;
+  }
+  .media-row:is(:hover, :has(:focus-visible), :has([data-dragging])) .media-row-sub {
+    opacity: 0;
+    transform: translateY(-6px);
+    transition-delay: 70ms;
+  }
+  .media-row:is(:hover, :has(:focus-visible), :has([data-dragging])) .media-row-scrub {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+    transition-delay: 110ms;
+  }
+}
+/* Oynat ⇄ Duraklat: üçgen ikiye ayrılıp iki çubuğa dönüşür (yollar mediaCenterModel.js'te, komut sayıları eşit). */
+.media-glyph-path { transition: d 220ms cubic-bezier(0.22, 1, 0.36, 1); }
 /* Theme-matching custom tooltip for placeholder/hover descriptions */
 [data-tooltip] {
   position: relative;
@@ -542,6 +608,23 @@
   transform: translateX(-50%) translateY(0);
 }
 
+/* Görev çubuğunda ipucu niyet gecikmesiyle açılır: fare çubuğun üstünden geçerken her düğmede yanıp sönmesin. Gecikme yalnız AÇILIŞTA
+   uygulanır (hedef durumun geçişi); kapanış anında, klavye odağı (focus-visible) gecikmesiz kalır. */
+.taskbar-surface [data-tooltip]:hover::after,
+.taskbar-surface [data-tooltip]:hover::before {
+  transition-delay: 380ms;
+}
+.taskbar-surface [data-tooltip]:focus-visible::after,
+.taskbar-surface [data-tooltip]:focus-visible::before {
+  transition-delay: 0ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-tooltip]::after,
+  [data-tooltip]::before {
+    transition-duration: 0.01ms;
+  }
+}
+
 [data-tooltip-align="end"]::after,
 [data-tooltip-align="end"]::before {
   left: auto;
@@ -591,4 +674,16 @@
 
 .animate-scanline {
   animation: scanline 2.2s ease-in-out infinite alternate;
+}
+
+/* Ayarlar araması: sonuca gidilen ayar satırı kısa süre vurgulanır (settings/controls.jsx `data-setting-id`). Tek seferlik,
+   kısa; hareket azaltma açıksa yalnız sabit bir arka plan tonu kalır. */
+@keyframes settings-flash {
+  0% { background-color: color-mix(in oklab, var(--primary) 16%, transparent); box-shadow: 0 0 0 0 color-mix(in oklab, var(--primary) 40%, transparent); }
+  60% { box-shadow: 0 0 0 5px transparent; }
+  100% { background-color: transparent; box-shadow: 0 0 0 0 transparent; }
+}
+.settings-flash { animation: settings-flash 1.5s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .settings-flash { animation: none; background-color: color-mix(in oklab, var(--primary) 12%, transparent); }
 }

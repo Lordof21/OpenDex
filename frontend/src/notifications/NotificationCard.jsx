@@ -6,7 +6,7 @@
 //   * üzerine gel                  → zamanın yerini "okundu" ve "kapat" alır
 //   * ⌄                            → uzun metni aç/kapat (yalnız merkez; genişletilebilir içerik varsa)
 //   * eylem hapları                → bildirimin kendi Android eylemleri
-import React, { useRef } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import { motion, useMotionValue, useReducedMotion, useTransform } from 'framer-motion';
 import { Check, ChevronDown, X } from 'lucide-react';
 import { cn } from '../lib/utils.js';
@@ -22,6 +22,114 @@ import { categoryMeta } from './notificationVisuals.js';
 
 const DISMISS_OFFSET = 96;
 const DISMISS_VELOCITY = 520;
+
+// Gövde metni: 12/17 px. Kapalıyken en fazla 2 satır (34 px) + "…"; açıkken tam metin (+ satır listesi).
+const BODY_LINE_PX = 17;
+const BODY = 'whitespace-pre-line text-[12px] leading-[17px] text-notification-foreground/75';
+const TEXT_EASE = 'cubic-bezier(0.3, 0, 0.15, 1)'; // notificationMotion EASE_SLIDE (büyük alan kayması)
+const TEXT_EASE_CLOSE = 'cubic-bezier(0.4, 0, 0.2, 1)';
+
+/**
+ * Uzun metnin açılıp kapanması — ölçülmüş yükseklikle, sıçramasız:
+ *   açılış  : yükseklik o anki değerine kilitlenir → içerik tam metne geçer → tam yüksekliğe 380 ms'de kayar → `auto`
+ *   kapanış : tam metin görünürken yükseklik kapalı boya (iki satır) 280 ms'de iner → BİTİNCE iki satır + "…" olur
+ * Yarıda tersine çevrilirse o anki yükseklikten devam eder. "Hareketi azalt"ta anlık. Yükseklik DOM'a doğrudan yazılır
+ * (her karede React render'ı yok); geçiş sonu `transitionend` ya da süre + 60 ms güvencesiyle yakalanır.
+ */
+function ExpandableText({ expanded, collapsed, full }) {
+  const reduce = useReducedMotion();
+  const outerRef = useRef(null);
+  const innerRef = useRef(null);
+  const collapsedPx = useRef(null);
+  const afterRef = useRef(null);
+  const timerRef = useRef(null);
+  const pendingOpen = useRef(false);
+  const mounted = useRef(false);
+  const [showFull, setShowFull] = useState(expanded);
+
+  const settle = () => {
+    clearTimeout(timerRef.current);
+    timerRef.current = null;
+    const then = afterRef.current;
+    afterRef.current = null;
+    if (then) then();
+    else {
+      const el = outerRef.current;
+      if (el) Object.assign(el.style, { height: '', transition: '', overflow: '' });
+    }
+  };
+
+  const slideTo = (target, ms, ease, then = null) => {
+    const el = outerRef.current;
+    if (!el) return;
+    const from = el.getBoundingClientRect().height;
+    clearTimeout(timerRef.current);
+    Object.assign(el.style, { transition: 'none', overflow: 'hidden', height: `${from}px` });
+    void el.offsetHeight; // başlangıç boyunu uygula, sonra geçişi başlat
+    Object.assign(el.style, { transition: `height ${ms}ms ${ease}`, height: `${target}px` });
+    afterRef.current = then;
+    timerRef.current = setTimeout(settle, ms + 60);
+  };
+
+  // Kapalı ve dururken iki satırlık boyu hatırla (kapanışın hedefi).
+  useLayoutEffect(() => {
+    const el = outerRef.current;
+    if (el && !showFull && !el.style.height) collapsedPx.current = el.offsetHeight;
+  });
+
+  useLayoutEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true;
+      return;
+    }
+    if (reduce) {
+      setShowFull(expanded);
+      return;
+    }
+    if (expanded) {
+      if (showFull) {
+        slideTo(innerRef.current?.offsetHeight ?? 0, MS_TEXT.open, TEXT_EASE);
+      } else {
+        const el = outerRef.current;
+        if (el) Object.assign(el.style, { transition: 'none', overflow: 'hidden', height: `${el.offsetHeight}px` });
+        pendingOpen.current = true;
+        setShowFull(true);
+      }
+    } else {
+      const target = collapsedPx.current ?? BODY_LINE_PX * 2;
+      slideTo(target, MS_TEXT.close, TEXT_EASE_CLOSE, () => setShowFull(false));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded]);
+
+  useLayoutEffect(() => {
+    if (showFull && pendingOpen.current) {
+      pendingOpen.current = false;
+      slideTo(innerRef.current?.offsetHeight ?? 0, MS_TEXT.open, TEXT_EASE);
+    } else if (!showFull) {
+      // Kapanış bitti ve iki satıra dönüldü: kilidi aynı karede kaldır (arada tam metin bir kare bile görünmez).
+      const el = outerRef.current;
+      if (el) Object.assign(el.style, { height: '', transition: '', overflow: '' });
+    }
+  }, [showFull]);
+
+  useLayoutEffect(() => () => clearTimeout(timerRef.current), []);
+
+  return (
+    <div
+      ref={outerRef}
+      className="mt-0.5"
+      data-text-state={showFull ? 'full' : 'clamped'}
+      onTransitionEnd={(e) => {
+        if (e.target === outerRef.current && e.propertyName === 'height' && timerRef.current) settle();
+      }}
+    >
+      <div ref={innerRef}>{showFull ? full : collapsed}</div>
+    </div>
+  );
+}
+
+const MS_TEXT = { open: 380, close: 280 }; // notificationMotion MS.textOpen / textClose
 
 // A forwardRef: AnimatePresence (mode="popLayout") measures its direct child through a ref.
 function NotificationCard({
@@ -52,8 +160,7 @@ function NotificationCard({
   const isToast = variant === 'toast';
   const meta = categoryMeta(model.category);
   const Badge = meta.Icon;
-  const body = expanded ? model.bigText || model.text : model.text;
-  const extraLines = expanded && !model.bigText && model.lines.length > 1 ? model.lines : null;
+  const body = model.text;
   const expandable = !isToast && Boolean(model.bigText || model.lines.length > 1 || (model.text && model.text.length > 90));
   const label = [model.appName, privacy ? 'gizli bildirim' : model.title, model.time].filter(Boolean).join(', ');
 
@@ -72,7 +179,9 @@ function NotificationCard({
   return (
     <motion.div
       ref={ref}
-      layout
+      // FLIP yalnız toast yığınında (kartlar yer değiştirir, boyları değişmez). Merkezde FLIP, metin açılırken kartı
+      // ölçekleyip yazıyı eziyordu; orada yükseklik ölçülerek akışla değişir (ExpandableText, NotificationCenterList).
+      layout={isToast}
       variants={isToast ? toastCardVariants : centerCardVariants}
       initial={reduced ? false : 'hidden'}
       animate={animate ?? 'visible'}
@@ -115,7 +224,7 @@ function NotificationCard({
       }}
       className={cn(
         'notif-card group/card relative cursor-pointer select-none overflow-hidden text-notification-foreground outline-none',
-        isToast ? 'notif-card--toast rounded-2xl p-3.5' : 'rounded-xl p-3',
+        isToast ? 'notif-card--toast rounded-2xl p-3.5' : 'rounded-[14px] p-3',
       )}
     >
       {/* Content fades out when the card is only a plate of a stack (its surface stays) */}
@@ -190,9 +299,8 @@ function NotificationCard({
           {model.title && (
             <motion.h4
               variants={cardLineVariants}
-              layout="position"
               className={cn(
-                'mt-0.5 truncate text-[13px] font-semibold leading-snug text-notification-foreground',
+                'mt-0.5 truncate text-[13px] font-semibold leading-[18px] text-notification-foreground',
                 privacy && 'select-none blur-[4px]',
               )}
             >
@@ -201,32 +309,32 @@ function NotificationCard({
           )}
 
           {(body || !model.title) && (
-            <motion.p
-              variants={cardLineVariants}
-              layout="position"
-              className={cn(
-                'mt-0.5 whitespace-pre-line text-[12px] leading-[1.45] text-notification-foreground/75',
-                expanded ? 'line-clamp-none' : 'line-clamp-2',
-                privacy && 'select-none blur-[5px]',
+            <motion.div variants={cardLineVariants}>
+              {privacy ? (
+                <p className={cn('mt-0.5 line-clamp-2 select-none blur-[5px]', BODY)}>İçerik gizli — göstermek için gizliliği kapatın</p>
+              ) : expandable ? (
+                <ExpandableText
+                  expanded={expanded}
+                  collapsed={<p className={cn('line-clamp-2', BODY)}>{model.text || 'Açmak için dokunun'}</p>}
+                  full={
+                    <>
+                      <p className={BODY}>{model.bigText || model.text}</p>
+                      {!model.bigText && model.lines.length > 1 && (
+                        <ul className="mt-1.5 space-y-1 border-l-2 border-notification-border/60 pl-2 text-[11.5px] leading-[16px] text-notification-foreground/70">
+                          {model.lines.map((line, i) => <li key={i}>{line}</li>)}
+                        </ul>
+                      )}
+                    </>
+                  }
+                />
+              ) : (
+                <p className={cn('mt-0.5 line-clamp-2', BODY)}>{body || 'Açmak için dokunun'}</p>
               )}
-            >
-              {privacy ? 'İçerik gizli — göstermek için gizliliği kapatın' : body || 'Açmak için dokunun'}
-            </motion.p>
-          )}
-
-          {extraLines && !privacy && (
-            <motion.ul
-              layout="position"
-              initial={{ opacity: 0, y: -4 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="mt-1.5 space-y-1 border-l-2 border-notification-border/60 pl-2 text-[11.5px] leading-snug text-notification-foreground/70"
-            >
-              {extraLines.map((line, i) => <li key={i}>{line}</li>)}
-            </motion.ul>
+            </motion.div>
           )}
 
           {model.actions.length > 0 && interactive && (
-            <motion.div variants={cardLineVariants} layout="position" className="mt-2 flex flex-wrap gap-1.5">
+            <motion.div variants={cardLineVariants} className="mt-2.5 flex flex-wrap gap-1.5">
               {model.actions.slice(0, 3).map((act) => (
                 <button
                   key={act.action_id}
@@ -247,9 +355,9 @@ function NotificationCard({
             onClick={stop(() => onToggleExpand?.(model))}
             aria-label={expanded ? 'Metni daralt' : 'Metnin tamamını göster'}
             aria-expanded={expanded}
-            className="mt-5 grid size-6 shrink-0 place-items-center rounded-full text-notification-foreground/55 transition-colors hover:bg-notification-hover hover:text-notification-foreground"
+            className="mt-[15px] grid size-6 shrink-0 place-items-center rounded-full text-notification-foreground/55 outline-none transition-[background-color,color,transform] duration-150 hover:bg-notification-hover hover:text-notification-foreground active:scale-90 focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <motion.span animate={{ rotate: expanded ? 180 : 0 }} transition={cardSpring} className="grid place-items-center">
+            <motion.span animate={{ rotate: expanded ? 180 : 0 }} transition={{ duration: expanded ? 0.38 : 0.28, ease: expanded ? [0.3, 0, 0.15, 1] : [0.4, 0, 0.2, 1] }} className="grid place-items-center">
               <ChevronDown className="size-3.5" />
             </motion.span>
           </button>

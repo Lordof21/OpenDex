@@ -547,7 +547,7 @@ export function DeviceLoadPanel(motionProps) {
 }
 
 /** Taskbar entry: the felt temperature at a glance; a status dot only when it matters. */
-export function DeviceLoadTrayButton({ open, onOpen }) {
+export function DeviceLoadTrayButton({ open, onOpen, className }) {
   const latest = useDeviceLoadStore((s) => s.samples[s.samples.length - 1]);
   const insights = useDeviceLoadStore((s) => s.insights);
   const temp = bodyTemp(latest);
@@ -560,11 +560,13 @@ export function DeviceLoadTrayButton({ open, onOpen }) {
       aria-label={`Telefon yükü${temp != null ? `, ${fmt(temp, 1)} derece` : ''}${alert ? `, ${SEVERITY[worst].label.toLowerCase()}` : ''}`}
       data-tooltip={temp != null ? `Telefon ${fmt(temp, 1)} °C · yük paneli` : 'Telefon yükü'}
       className={cn(
-        'relative inline-flex h-9 shrink-0 items-center gap-1 self-center rounded-lg px-2 mx-0.5 text-taskbar-foreground transition-colors hover:bg-accent/65 cursor-pointer select-none',
+        // Sağ küme kuralları (Taskbar.jsx): 10 px yarıçap, dış boşluk yok, klavye odak halkası.
+        'relative inline-flex h-9 shrink-0 cursor-pointer select-none items-center gap-1 self-center rounded-[10px] px-1.5 text-taskbar-foreground outline-none transition-colors duration-150 hover:bg-accent/65 focus-visible:ring-2 focus-visible:ring-ring',
         open && 'bg-accent text-accent-foreground',
+        className,
       )}
     >
-      <Thermometer className="size-[16px]" strokeWidth={1.9} aria-hidden="true" />
+      <Thermometer className="size-[17px]" strokeWidth={1.9} aria-hidden="true" />
       <span className="font-mono text-[10px] font-semibold tabular-nums">{temp != null ? `${fmt(temp, 0)}°` : '—'}</span>
       {alert && (
         <span
