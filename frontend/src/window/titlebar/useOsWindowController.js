@@ -189,7 +189,8 @@ export function useOsWindowController({ win, pipWindow, setPipWindow }) {
     closeWindow(win.id);
   };
 
-  const handleHandoffToPhone = () => {
+  /** `windowing` ('fullscreen' | 'freeform'): bu aktarımın kipi (başlık menüsü); düğme tıklaması olay nesnesi verir → varsayılan. */
+  const handleHandoffToPhone = (windowing) => {
     if (pipWindow) {
       if (pipWindow === window && isTauriHost()) {
         import('@tauri-apps/api/webviewWindow').then((m) => m.getCurrentWebviewWindow().close()).catch(logger.swallow('oswindow', 'Tauri pencere işlemi'));
@@ -199,7 +200,9 @@ export function useOsWindowController({ win, pipWindow, setPipWindow }) {
       setPipWindow(null);
     }
     // DeX-içi kırpma penceresinde aktarılan şey kaynak Workspace görevidir.
-    useWindowStore.getState().handoffWindowToPhone(win.sourceTaskId || win.id);
+    const target = win.sourceTaskId || win.id;
+    if (windowing === 'fullscreen' || windowing === 'freeform') useWindowStore.getState().handoffWindowToPhone(target, windowing);
+    else useWindowStore.getState().handoffWindowToPhone(target);
   };
 
   return {

@@ -15,6 +15,8 @@ import { api } from '../lib/api.js';
 import { useOsWindowController } from './titlebar/useOsWindowController.js';
 import SnapLayoutMenu from './titlebar/SnapLayoutMenu.jsx';
 import AudioButton from './titlebar/AudioButton.jsx';
+import HandoffMenu from './titlebar/HandoffMenu.jsx';
+import { useLongPress } from '../ui/useLongPress.js';
 import { WindowControl } from '../ui/IconButton.jsx';
 import { isFilesWindow } from './filesWindow.js';
 import { iconPackageOf } from './workspacePackage.js';
@@ -47,6 +49,9 @@ export default function TitleBar({
   const barRef = useRef(null);
   const [snapMenuOpen, setSnapMenuOpen] = useState(false);
   const snapMenuTimeoutRef = useRef(null);
+  // "Telefona nasıl aktarılsın" menüsü: başlığa sağ tık → imlecin yanında; "Telefona aktar" düğmesine basılı tut → düğmenin altında.
+  const [handoffMenuAnchor, setHandoffMenuAnchor] = useState(null);
+  const closeHandoffMenu = React.useCallback(() => setHandoffMenuAnchor(null), []);
 
   const handleAndroidBack = async () => {
     try {
@@ -73,11 +78,17 @@ export default function TitleBar({
     applySnapZone(win.id, zone);
   };
 
+  const handoffPress = useLongPress({
+    onClick: () => handleHandoffToPhone(),
+    onLongPress: (element) => setHandoffMenuAnchor(element),
+  });
+
   const isMaximized = Boolean(win.maximized);
   // Dosyalar penceresi bir telefon uygulaması değildir: Android Geri, pencere sesi ve "telefona aktar" anlamsızdır.
   const isFiles = isFilesWindow(win);
 
   return (
+    <>
     <div
       ref={barRef}
       style={{ touchAction: 'none', userSelect: 'none' }}
@@ -88,6 +99,12 @@ export default function TitleBar({
       // Kaplanmış / snap'li pencere de başlıktan taşınır (eski boyuta döner); mutlak tam ekran taşınmaz.
       onPointerDown={isPip || win.fullscreen ? undefined : onDragStart}
       onDoubleClick={isPip ? undefined : () => toggleMaximize(win.id)}
+      onContextMenu={(event) => {
+        if (event.defaultPrevented) return;   // düğmenin kendi sağ tık menüsü zaten açıldı
+        event.preventDefault();
+        if (isPip || isFiles) return;         // Dosyalar penceresi / PiP telefona aktarılmaz; yine de tarayıcı menüsü çıkmasın
+        setHandoffMenuAnchor({ x: event.clientX, y: event.clientY });
+      }}
     >
       {/* LEFT: App Icon & Title */}
       <div className="flex min-w-0 items-center gap-2.5 pointer-events-none">
@@ -135,7 +152,7 @@ export default function TitleBar({
 
         {/* Transfer to Phone */}
         {!isFiles && (
-          <WindowControl label="Telefona aktar" onClick={handleHandoffToPhone}>
+          <WindowControl label="Telefona aktar" aria-haspopup="menu" aria-expanded={Boolean(handoffMenuAnchor)} {...handoffPress}>
             <Smartphone className="size-4" />
           </WindowControl>
         )}
@@ -187,5 +204,17 @@ export default function TitleBar({
         </WindowControl>
       </div>
     </div>
+      {/* Menü başlığın KARDEŞİ: portal olsa da React olayları üst ağaçtan geçer; başlığın sürükleme/çift tık işleyicileri menüye basışı pencere sürüklemesi sanmasın. */}
+      {handoffMenuAnchor && (
+        <HandoffMenu
+          anchor={handoffMenuAnchor}
+          onClose={closeHandoffMenu}
+          onPick={(windowing) => {
+            closeHandoffMenu();
+            handleHandoffToPhone(windowing);
+          }}
+        />
+      )}
+    </>
   );
 }

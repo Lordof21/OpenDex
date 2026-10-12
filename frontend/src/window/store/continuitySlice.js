@@ -121,18 +121,20 @@ export function createContinuitySlice(set, get) {
     // A/B karşılaştırıldı, Stealth bir tık daha iyi sonuç verdi (bkz. backend
     // handoff_manager.py'nin dosya başındaki Karar notu). Aktif sistem artık
     // sadece bunu kullanıyor.
-    async handoffWindowToPhone(windowId) {
+    /** `windowing` ('fullscreen' | 'freeform'): bu aktarımın telefondaki kipi; verilmezse Ayarlar'daki varsayılan. */
+    async handoffWindowToPhone(windowId, windowing) {
       // Akış numarası: tık → istek → backend logu tek zaman çizelgesinde eşleşir (Sistem & Teşhis → Logları kopyala).
       const op = newOpId();
       const L = logger.withOp(op);
       const started = Date.now();
       try {
-        L.info('handoff', 'to_phone_clicked', { windowId });
+        L.info('handoff', 'to_phone_clicked', { windowId, windowing: windowing || 'default' });
         // Optimistic update so UI immediately responds
         get().setHandoff(windowId, true, 'Uygulama telefonunuza aktarılıyor...');
         // /api/windows/handoff responds with a bare {ok} object — api.post()
         // already returns the parsed body itself, never {data: ...}.
-        const res = await api.post('/api/windows/handoff', { window_id: windowId }, { opId: op });
+        const body = windowing ? { window_id: windowId, windowing } : { window_id: windowId };
+        const res = await api.post('/api/windows/handoff', body, { opId: op });
         if (!res?.ok) {
           L.warn('handoff', 'to_phone_rejected', { windowId, res });
         } else {
