@@ -14,6 +14,7 @@ import { Equalizer } from '../../ui/media/Equalizer.jsx';
 import { Scrubber } from '../../ui/media/Scrubber.jsx';
 import { useSessionClock } from '../../ui/media/useSessionClock.js';
 import { cn } from '../../lib/utils.js';
+import { t } from '../../i18n/index.js';
 
 // 2,5 satır: 2 × 56 + yarım satır 28 + iki aralık (4 px) = 148 px
 export const ROW_PX = 56;
@@ -25,9 +26,9 @@ const RING_C = 2 * Math.PI * RING_R;
 function SessionRow({ session, onSelect, onToggle, onSeek }) {
   const clock = useSessionClock(session);
   const playing = Boolean(session.is_playing);
-  const title = session.title || 'Medya';
-  const artist = session.artist || 'Android Medya';
-  const label = playing ? 'Duraklat' : 'Oynat';
+  const title = session.title || t('taskbar.medya');
+  const artist = session.artist || t('common.android_medya');
+  const label = playing ? t('common.duraklat') : t('common.oynat');
 
   return (
     <div
@@ -41,8 +42,8 @@ function SessionRow({ session, onSelect, onToggle, onSeek }) {
         type="button"
         onClick={() => onSelect?.(session.id)}
         className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        aria-label={`${title} — ${artist}, ana oynatıcıya taşı`}
-        title="Ana oynatıcıya taşı"
+        aria-label={t('taskbar.title_artist_ana_oynaticiya_tasi', { title, artist })}
+        title={t('taskbar.ana_oynaticiya_tasi')}
       >
         <MediaArt
           src={session.art}
@@ -73,7 +74,7 @@ function SessionRow({ session, onSelect, onToggle, onSeek }) {
           size="sm"
           showTimes
           timesLayout="inline"
-          label={`${title} parça konumu`}
+          label={t('taskbar.title_parca_konumu', { title })}
           percent={clock.percent}
           positionMs={clock.positionMs}
           durationMs={clock.durationMs}
@@ -110,10 +111,10 @@ function SessionRow({ session, onSelect, onToggle, onSeek }) {
 export function SessionSheet({ sessions, showPauseAll, onSelect, onToggle, onSeek, onPauseAll }) {
   if (sessions.length === 0) return null;
   return (
-    <section aria-label="Diğer aktif akışlar">
+    <section aria-label={t('taskbar.diger_aktif_akislar')}>
       <div className="flex h-6 items-center justify-between">
         <h3 className="flex items-center gap-2 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-foreground/60">
-          Diğer akışlar
+          {t('taskbar.diger_akislar')}
           <span className="grid h-4 min-w-4 place-items-center rounded-full bg-foreground/[0.08] px-1 text-[9.5px] tracking-normal text-foreground/70">{sessions.length}</span>
         </h3>
         {showPauseAll && (
@@ -123,7 +124,7 @@ export function SessionSheet({ sessions, showPauseAll, onSelect, onToggle, onSee
             className="-mr-2 inline-flex h-6 cursor-pointer items-center gap-1.5 rounded-full px-2 text-[11.5px] font-semibold text-foreground/70 outline-none transition-colors hover:bg-foreground/[0.07] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
           >
             <Pause className="size-3 fill-current" />
-            Tümünü duraklat
+            {t('taskbar.tumunu_duraklat')}
           </button>
         )}
       </div>

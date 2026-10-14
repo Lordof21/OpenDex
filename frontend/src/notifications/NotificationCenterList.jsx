@@ -10,10 +10,12 @@
 // Merkezde FLIP (`layout`) yoktur: zıplama ve ezilme olmadan, yalnız yükseklik + transform/opacity.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { BellRing, ChevronDown, X } from 'lucide-react';
+import { BellRing, ChevronDown, ListFilter, X } from 'lucide-react';
 import { cardSpring } from '../ui/motion.js';
 import NotificationCard from './NotificationCard.jsx';
+import { bucketModels } from './notificationModel.js';
 import { EASE_IN_OUT, EASE_OUT, EASE_SLIDE, MS, PLATE_PEEK_PX, emerge, heightPresence, platePose, restPresence } from './notificationMotion.js';
+import { t } from '../i18n/index.js';
 
 function groupByApp(models) {
   const order = [];
@@ -46,8 +48,39 @@ const Slot = React.forwardRef(function Slot({ children }, ref) {
   );
 });
 
-export default function NotificationCenterList({ models, privacy, onOpen, onDismiss, onDismissMany, onMarkRead, onAction }) {
-  const groups = useMemo(() => groupByApp(models), [models]);
+const BUCKET_LABEL = {
+  recent: () => t('notifications.son_bir_saat'),
+  today: () => t('taskbar.bugun'),
+  yesterday: () => t('taskbar.dun'),
+  earlier: () => t('notifications.daha_eski'),
+};
+
+/** Zaman bölümünün başlığı: etiket + ince çizgi + sayı. Yalnız birden çok bölüm varken gösterilir. */
+function SectionHeader({ bucket, count }) {
+  return (
+    <div className="flex h-6 items-center gap-2 px-1 pb-1">
+      <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-notification-foreground/55">{BUCKET_LABEL[bucket]()}</span>
+      <span className="h-px flex-1 bg-notification-border/55" aria-hidden="true" />
+      <span className="font-mono text-[11px] font-semibold tabular-nums text-notification-foreground/50">{count}</span>
+    </div>
+  );
+}
+
+// Ok tuşlarıyla kartlar arasında gezinme: ↑/↓ önceki/sonraki kart (Enter açar, Delete kapatır — kartın kendi sözleşmesi).
+function onListKeyDown(event) {
+  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+  const cards = [...event.currentTarget.querySelectorAll('[data-notif-card]')];
+  const at = cards.indexOf(document.activeElement);
+  if (at === -1 && event.target !== event.currentTarget) return;
+  event.preventDefault();
+  const next = event.key === 'ArrowDown' ? Math.min(at + 1, cards.length - 1) : Math.max(at - 1, 0);
+  const card = cards[at === -1 ? 0 : next];
+  card?.focus();
+  card?.scrollIntoView?.({ block: 'nearest' });
+}
+
+export default function NotificationCenterList({ models, now, filtered = false, onResetFilter, privacy, onOpen, onDismiss, onDismissMany, onMarkRead, onAction }) {
+  const sections = useMemo(() => bucketModels(models, now ? now.getTime() : Date.now()), [models, now]);
   const [openGroups, setOpenGroups] = useState(() => new Set());
   const [openTexts, setOpenTexts] = useState(() => new Set());
 
@@ -63,21 +96,33 @@ export default function NotificationCenterList({ models, privacy, onOpen, onDism
     onAction,
   });
 
-  if (models.length === 0) return <EmptyState />;
+  if (models.length === 0) return <EmptyState filtered={filtered} onResetFilter={onResetFilter} />;
 
+  const showHeaders = sections.length > 1;
+  let order = 0;
   return (
-    <div className="-mb-2 flex flex-col">
+    <div className="-mb-2 flex flex-col" onKeyDown={onListKeyDown}>
       <AnimatePresence initial={false}>
-        {groups.map(({ key, items }, gi) => (
-          <Slot key={`group:${key}`}>
-            <GroupBlock
-              items={items}
-              order={gi}
-              open={openGroups.has(key)}
-              onToggle={() => setOpenGroups((s) => toggle(s, key))}
-              onClear={() => onDismissMany?.(items)}
-              cardProps={cardProps}
-            />
+        {sections.map(({ bucket, models: inBucket }) => (
+          <Slot key={`bucket:${bucket}`}>
+            {showHeaders && <SectionHeader bucket={bucket} count={inBucket.length} />}
+            <AnimatePresence initial={false}>
+              {groupByApp(inBucket).map(({ key, items }) => {
+                const groupId = `${bucket}:${key}`;
+                return (
+                  <Slot key={`group:${groupId}`}>
+                    <GroupBlock
+                      items={items}
+                      order={order++}
+                      open={openGroups.has(groupId)}
+                      onToggle={() => setOpenGroups((s) => toggle(s, groupId))}
+                      onClear={() => onDismissMany?.(items)}
+                      cardProps={cardProps}
+                    />
+                  </Slot>
+                );
+              })}
+            </AnimatePresence>
           </Slot>
         ))}
       </AnimatePresence>
@@ -104,7 +149,7 @@ function GroupBlock({ items, order, open, onToggle, onClear, cardProps }) {
   });
 
   return (
-    <section className="group/stack relative" aria-label={multi ? `${first.appName}, ${items.length} bildirim` : undefined}>
+    <section className="group/stack relative" aria-label={multi ? t('notifications.appname_count_bildirim', { appName: first.appName, count: items.length }) : undefined}>
       <AnimatePresence initial={false}>
         {multi && (
           <motion.div key="header" {...heightPresence}>
@@ -193,13 +238,13 @@ function GroupHeader({ appName, count, restCount, open, onToggle, onClear }) {
         aria-expanded={open}
         className="flex min-w-0 items-center gap-1.5 rounded-full py-0.5 pr-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <span className="truncate text-[11.5px] font-semibold text-notification-foreground/80">{appName}</span>
+        <span className="truncate text-[13px] font-semibold text-notification-foreground/80">{appName}</span>
         <motion.span
           key={count}
           initial={{ scale: 0.6, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={cardSpring}
-          className="rounded-full bg-notification-hover px-1.5 py-px font-mono text-[9.5px] font-semibold tabular-nums text-notification-foreground/70"
+          className="rounded-full bg-notification-hover px-1.5 py-px font-mono text-[11px] font-semibold tabular-nums text-notification-foreground/70"
         >
           {count}
         </motion.span>
@@ -208,8 +253,8 @@ function GroupHeader({ appName, count, restCount, open, onToggle, onClear }) {
         <button
           type="button"
           onClick={onClear}
-          aria-label={`${appName} bildirimlerinin tümünü temizle`}
-          title="Grubu temizle"
+          aria-label={t('notifications.appname_bildirimlerinin_tumunu_temizle', { appName })}
+          title={t('notifications.grubu_temizle')}
           className="grid size-6 place-items-center rounded-full text-notification-foreground/50 opacity-0 transition-[opacity,background-color,color] duration-150 hover:bg-notification-hover hover:text-notification-foreground focus-visible:opacity-100 group-hover/stack:opacity-100"
         >
           <X className="size-3" strokeWidth={2.4} />
@@ -217,11 +262,11 @@ function GroupHeader({ appName, count, restCount, open, onToggle, onClear }) {
         <button
           type="button"
           onClick={onToggle}
-          aria-label={open ? 'Grubu daralt' : 'Grubu genişlet'}
+          aria-label={open ? t('notifications.grubu_daralt') : t('notifications.grubu_genislet')}
           aria-expanded={open}
-          className="notif-pill relative flex h-6 min-w-[68px] items-center justify-center gap-1 overflow-hidden rounded-full px-2 text-[10.5px] font-semibold text-notification-foreground/75 active:scale-95"
+          className="notif-pill relative flex h-6 min-w-[72px] items-center justify-center gap-1 overflow-hidden rounded-full px-2 text-[12px] font-semibold text-notification-foreground/75 active:scale-95"
         >
-          <span className="relative grid h-4 min-w-[38px] place-items-center">
+          <span className="relative grid h-4 min-w-[42px] place-items-center">
             <AnimatePresence initial={false}>
               <motion.span
                 key={open ? 'less' : 'more'}
@@ -231,7 +276,7 @@ function GroupHeader({ appName, count, restCount, open, onToggle, onClear }) {
                 transition={{ duration: 0.18, ease: EASE_OUT }}
                 className="absolute"
               >
-                {open ? 'Daralt' : `+${restCount}`}
+                {open ? t('notifications.daralt') : `+${restCount}`}
               </motion.span>
             </AnimatePresence>
           </span>
@@ -244,7 +289,8 @@ function GroupHeader({ appName, count, restCount, open, onToggle, onClear }) {
   );
 }
 
-function EmptyState() {
+function EmptyState({ filtered, onResetFilter }) {
+  const Icon = filtered ? ListFilter : BellRing;
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }}
@@ -259,10 +305,22 @@ function EmptyState() {
           transition={{ scale: cardSpring, rotate: { duration: 0.9, delay: 0.15, ease: 'easeInOut' } }}
           className="mx-auto mb-3 grid size-11 place-items-center rounded-2xl bg-notification-hover text-status-active"
         >
-          <BellRing className="size-5" />
+          <Icon className="size-5" />
         </motion.span>
-        <p className="text-[12.5px] font-semibold text-notification-foreground">Her şey güncel</p>
-        <p className="mt-1 text-[10.5px] text-notification-foreground/55">Yeni bildirim yok — gelenler burada toplanır</p>
+        <p className="text-[14px] font-semibold text-notification-foreground">
+          {filtered ? t('notifications.bu_filtrede_bildirim_yok') : t('notifications.her_sey_guncel')}
+        </p>
+        {filtered ? (
+          <button
+            type="button"
+            onClick={onResetFilter}
+            className="notif-pill mt-2.5 rounded-full px-3.5 py-1.5 text-[12px] font-semibold text-notification-foreground/85 outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-95 cursor-pointer"
+          >
+            {t('notifications.filtreyi_temizle')}
+          </button>
+        ) : (
+          <p className="mt-1 text-[12px] text-notification-foreground/60">{t('notifications.yeni_bildirim_yok_gelenler_burada')}</p>
+        )}
       </div>
     </motion.div>
   );

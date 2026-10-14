@@ -14,6 +14,7 @@ import { Scrubber } from '../ui/media/Scrubber.jsx';
 import { useArtAccent } from '../ui/media/mediaAccent.js';
 import { useSessionClock } from '../ui/media/useSessionClock.js';
 import { cn, getAlbumArtUrl } from '../lib/utils.js';
+import { t } from '../i18n/index.js';
 
 export function MediaWidget({
   media,
@@ -30,14 +31,14 @@ export function MediaWidget({
   const clock = useSessionClock(media);
   if (!media) return null;
 
-  const title = media.title || 'Müzik';
-  const artist = media.artist || 'DeX Medya';
-  const openLabel = `${title} · ${artist}, medya merkezini aç`;
+  const title = media.title || t('common.muzik');
+  const artist = media.artist || t('taskbar.dex_medya');
+  const openLabel = t('taskbar.title_artist_medya_merkezini_ac', { title, artist });
 
   return (
     <div
       role="group"
-      aria-label="Medya oynatıcı"
+      aria-label={t('taskbar.medya_oynatici')}
       className={cn(
         'media-scope group/media relative hidden h-11 select-none items-center gap-1 self-center justify-self-start rounded-[14px] border pl-1 pr-1.5 shadow-sm transition-colors duration-200 min-[430px]:flex',
         active ? 'border-[var(--media-ink-soft)]' : 'border-taskbar-border/50 hover:border-taskbar-border/80',
@@ -70,7 +71,7 @@ export function MediaWidget({
         aria-label={openLabel}
         aria-haspopup="dialog"
         aria-expanded={Boolean(active)}
-        data-tooltip={active ? undefined : 'Medya merkezi'}
+        data-tooltip={active ? undefined : t('taskbar.medya_merkezi')}
       >
         <MediaArt
           src={artUrl}
@@ -83,7 +84,7 @@ export function MediaWidget({
         {count > 1 && (
           <span
             className="absolute right-[3px] top-[3px] z-20 grid h-[14px] min-w-[14px] place-items-center rounded-full bg-primary px-[3px] text-[9px] font-bold leading-none text-primary-foreground ring-[1.5px] ring-taskbar"
-            title={`${count} aktif medya oturumu`}
+            title={t('taskbar.count_aktif_medya_oturumu', { count })}
             data-testid="media-session-count"
           >
             {count}
@@ -109,7 +110,7 @@ export function MediaWidget({
           size="sm"
           tone="taskbar"
           className="w-[152px]"
-          label={`${title} parça konumu`}
+          label={t('taskbar.title_parca_konumu', { title })}
           percent={clock.percent}
           positionMs={clock.positionMs}
           durationMs={clock.durationMs}

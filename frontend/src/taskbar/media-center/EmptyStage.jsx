@@ -3,6 +3,7 @@
 
 import React from 'react';
 import { Music2, Unplug } from 'lucide-react';
+import { t } from '../../i18n/index.js';
 
 export function EmptyStage({ disconnected }) {
   const Icon = disconnected ? Unplug : Music2;
@@ -12,12 +13,12 @@ export function EmptyStage({ disconnected }) {
         <Icon className="size-7 text-[var(--media-ink)]" strokeWidth={1.6} />
       </span>
       <p className="mt-6 font-display text-[30px] italic leading-[34px] tracking-[-0.01em] text-foreground">
-        {disconnected ? 'Telefon bağlı değil' : 'Aktif medya yok'}
+        {disconnected ? t('common.telefon_bagli_degil') : t('taskbar.aktif_medya_yok')}
       </p>
       <p className="mt-2 max-w-[264px] text-[12.5px] leading-[19px] text-muted-foreground">
         {disconnected
-          ? 'Medya oturumları telefon bağlanınca burada görünür.'
-          : 'Telefonunuzda Spotify, YouTube veya Müzik uygulamasında bir şey oynattığınızda buradan yönetebilirsiniz.'}
+          ? t('taskbar.medya_oturumlari_telefon_baglaninca')
+          : t('taskbar.telefonunuzda_spotify_youtube_veya')}
       </p>
     </div>
   );

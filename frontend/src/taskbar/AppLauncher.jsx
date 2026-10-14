@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { Search, X } from 'lucide-react';
 import AppIcon from '../ui/AppIcon.jsx';
 import { Z_INDEX } from '../ui/zIndex.js';
+import { t, activeLocale } from '../i18n/index.js';
 
 export const SYSTEM_APP_PKGS = new Set([
   'com.android.settings',
@@ -49,10 +50,10 @@ export const AppLauncher = forwardRef(function AppLauncher({
 
   if (!mounted) return null;
 
-  const normalized = (query || '').toLocaleLowerCase('tr-TR');
+  const normalized = (query || '').toLocaleLowerCase(activeLocale());
   const filtered = apps.filter((app) => {
-    const name = (app.display_name || app.name || '').toLocaleLowerCase('tr-TR');
-    const pkg = (app.package || app.id || '').toLocaleLowerCase('tr-TR');
+    const name = (app.display_name || app.name || '').toLocaleLowerCase(activeLocale());
+    const pkg = (app.package || app.id || '').toLocaleLowerCase(activeLocale());
     return name.includes(normalized) || pkg.includes(normalized);
   });
 
@@ -72,23 +73,23 @@ export const AppLauncher = forwardRef(function AppLauncher({
       className="fixed inset-0 z-flyout grid place-items-center p-4 select-none"
       role="dialog"
       aria-modal="true"
-      aria-label="Uygulamalar"
+      aria-label={t('taskbar.uygulamalar')}
       data-taskbar-portal
     >
       <button
         type="button"
         className="absolute inset-0 cursor-default bg-background/50 backdrop-blur-[4px]"
         onPointerDown={onClose}
-        aria-label="Uygulamaları kapat"
+        aria-label={t('taskbar.uygulamalari_kapat')}
       />
 
       <section className="relative flex h-[min(720px,calc(100vh-96px))] w-[min(1040px,100%)] flex-col overflow-hidden rounded-2xl border border-border bg-popover text-popover-foreground shadow-window backdrop-blur-3xl">
         <div className="flex items-center justify-between border-b border-border px-6 py-3 bg-muted/40">
           <p className="text-xs font-semibold text-foreground">
-            Toplam {filtered.length} uygulama
+            {t('taskbar.toplam_count_uygulama', { count: filtered.length })}
           </p>
           <p className="text-[10px] text-muted-foreground">
-            {systemApps.length} sistem · {userApps.length} kullanıcı
+            {t('taskbar.count_sistem_count2_kullanici', { count: systemApps.length, count2: userApps.length })}
           </p>
         </div>
 
@@ -96,7 +97,7 @@ export const AppLauncher = forwardRef(function AppLauncher({
           {systemApps.length > 0 && (
             <>
               <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                Sistem uygulamaları
+                {t('taskbar.sistem_uygulamalari')}
               </p>
               <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 lg:grid-cols-9">
                 {systemApps.map((app) => {
@@ -119,7 +120,7 @@ export const AppLauncher = forwardRef(function AppLauncher({
             <>
               {systemApps.length > 0 && <div className="my-5 h-px bg-border" />}
               <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                Kullanıcı uygulamaları
+                {t('taskbar.kullanici_uygulamalari')}
               </p>
               <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 lg:grid-cols-9">
                 {userApps.map((app) => {
@@ -140,7 +141,7 @@ export const AppLauncher = forwardRef(function AppLauncher({
 
           {filtered.length === 0 && (
             <p className="py-16 text-center text-xs text-muted-foreground">
-              «{query}» ile eşleşen uygulama bulunamadı.
+              {t('taskbar.query_ile_eslesen_uygulama_bulunamadi', { query })}
             </p>
           )}
         </div>
@@ -153,13 +154,13 @@ export const AppLauncher = forwardRef(function AppLauncher({
               value={query}
               onChange={(e) => onQuery(e.target.value)}
               className="min-w-0 flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
-              placeholder="Uygulamalarda ara..."
+              placeholder={t('taskbar.uygulamalarda_ara')}
             />
             {query && (
               <button
                 type="button"
                 onClick={() => onQuery('')}
-                aria-label="Aramayı temizle"
+                aria-label={t('common.aramayi_temizle')}
                 className="size-7 flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground transition-colors"
               >
                 <X className="size-3.5" />
@@ -174,7 +175,7 @@ export const AppLauncher = forwardRef(function AppLauncher({
 });
 
 function LauncherApp({ app, isOpen, onClick }) {
-  const name = app.display_name || app.name || app.title || 'Uygulama';
+  const name = app.display_name || app.name || app.title || t('taskbar.uygulama');
 
   return (
     <button

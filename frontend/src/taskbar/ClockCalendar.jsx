@@ -1,50 +1,57 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo, forwardRef } from 'react';
+// Saat → bildirim paneli (görev çubuğunun sağında, sabit): üstte bildirim merkezi, altta "bugün" alanı (takvim + odak).
+//
+//   bildirim merkezi  başlık (yeni sayısı · gizlilik · yenile · tümünü okundu say · temizle) → süzgeç çipleri (Tümü · Okunmamış ·
+//                     uygulamalar) → zaman bölümleri (Son bir saat / Bugün / Dün / Daha eski) → uygulama yığınları
+//   silme             geri alınabilir: kart hemen gizlenir, kalıcı silme 5 sn sonra (Geri al şeridi) — bkz. useUndoableDismiss
+//   bugün alanı       tarih kartı + hafta şeridi (açılınca ay) + odak sayacı — bkz. CalendarDock
+import React, { useCallback, useEffect, useMemo, useRef, useState, forwardRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   CalendarDays,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  ChevronUp,
+  CheckCheck,
   Cloud,
   Eye,
   EyeOff,
   Image,
   Mail,
   MessageSquare,
-  Minus,
   Music4,
-  Play,
-  Plus,
   RotateCw,
   ShieldCheck,
   Sparkles,
-  Timer,
+  Trash2,
 } from 'lucide-react';
 import { cn } from '../lib/utils.js';
 import { useNotificationStore } from '../state/notificationStore.js';
 import { useWindowStore } from '../window/windowStore.js';
 import { useNotificationWindowRouting } from '../window/useNotificationWindowRouting.js';
 import NotificationCenterList from '../notifications/NotificationCenterList.jsx';
+import NotificationToolbar from '../notifications/NotificationToolbar.jsx';
+import UndoSnack from '../notifications/UndoSnack.jsx';
+import { useUndoableDismiss } from '../notifications/useUndoableDismiss.js';
+import { appFacets, applyFilter } from '../notifications/notificationModel.js';
 import { toCardModel } from '../notifications/notificationVisuals.js';
 import { cardSpring } from '../ui/motion.js';
 import { Z_INDEX } from '../ui/zIndex.js';
+import { t } from '../i18n/index.js';
+import CalendarDock from './CalendarDock.jsx';
 
 export const INITIAL_NOTIFICATIONS = [
-  { id: 'workspace', appId: 'lovable', appName: 'Lovable', headline: 'Çalışma alanınız hazır', detail: 'Lovable pencereniz kaldığınız yerden devam ediyor.', time: 'Şimdi', icon: Sparkles },
-  { id: 'review', appId: 'lovable', appName: 'Lovable', headline: 'Tasarım incelemesi güncellendi', detail: 'Pencere davranışları için iki yeni yorum çözüldü.', time: '4 dk', icon: Sparkles },
-  { id: 'message', appId: 'messages', appName: 'Mesajlar', headline: 'Ekipten yeni mesaj', detail: 'Elif: Bildirim kartlarının son haline birlikte bakalım.', time: '8 dk', icon: MessageSquare },
-  { id: 'mention', appId: 'messages', appName: 'Mesajlar', headline: 'Bir konuşmada senden bahsedildi', detail: 'Ürün ekibi, masaüstü deneyimi başlığında senden bahsetti.', time: '12 dk', icon: MessageSquare },
-  { id: 'calendar', appId: 'calendar', appName: 'Takvim', headline: 'Tasarım değerlendirmesi', detail: 'Toplantı 15 dakika içinde başlayacak.', time: '15 dk', icon: CalendarDays },
-  { id: 'mail-review', appId: 'mail', appName: 'E-posta', headline: 'İnceleme özeti hazır', detail: 'Haftalık ürün incelemesi ve açık kararlar gelen kutunuza ulaştı.', time: '24 dk', icon: Mail },
-  { id: 'mail-invite', appId: 'mail', appName: 'E-posta', headline: 'Yeni toplantı daveti', detail: 'Mobil deneyim değerlendirmesi için takvim daveti gönderildi.', time: '31 dk', icon: Mail },
-  { id: 'security-scan', appId: 'security', appName: 'Güvenlik', headline: 'Güvenlik taraması tamamlandı', detail: 'Çalışma alanında riskli bir değişiklik bulunmadı.', time: '42 dk', icon: ShieldCheck },
-  { id: 'cloud-sync', appId: 'cloud', appName: 'Bulut', headline: 'Dosyalar eşitlendi', detail: 'Son tasarım çıktıları tüm cihazlarınızda güncellendi.', time: '1 sa', icon: Cloud },
-  { id: 'music-mix', appId: 'music', appName: 'Müzik', headline: 'Yeni kişisel miks hazır', detail: 'Between Planets ve benzer sanatçılardan 18 parça eklendi.', time: '2 sa', icon: Music4 },
-  { id: 'gallery-memory', appId: 'gallery', appName: 'Galeri', headline: 'Geçen yıldan anılar', detail: 'Bugün çekilen 12 fotoğraf sizin için bir araya getirildi.', time: 'Dün', icon: Image },
+  { id: 'workspace', appId: 'lovable', appName: 'Lovable', headline: t('taskbar.calisma_alaniniz_hazir'), detail: t('taskbar.lovable_pencereniz_kaldiginiz_yerden'), time: t('taskbar.simdi'), icon: Sparkles },
+  { id: 'review', appId: 'lovable', appName: 'Lovable', headline: t('taskbar.tasarim_incelemesi_guncellendi'), detail: t('taskbar.pencere_davranislari_icin_iki_yeni'), time: '4 dk', icon: Sparkles },
+  { id: 'message', appId: 'messages', appName: t('common.mesajlar'), headline: t('taskbar.ekipten_yeni_mesaj'), detail: t('taskbar.elif_bildirim_kartlarinin_son_haline'), time: '8 dk', icon: MessageSquare },
+  { id: 'mention', appId: 'messages', appName: t('common.mesajlar'), headline: t('taskbar.bir_konusmada_senden_bahsedildi'), detail: t('taskbar.urun_ekibi_masaustu_deneyimi'), time: '12 dk', icon: MessageSquare },
+  { id: 'calendar', appId: 'calendar', appName: t('common.takvim'), headline: t('taskbar.tasarim_degerlendirmesi'), detail: t('taskbar.toplanti_15_dakika_icinde_baslayacak'), time: '15 dk', icon: CalendarDays },
+  { id: 'mail-review', appId: 'mail', appName: t('common.e_posta'), headline: t('taskbar.inceleme_ozeti_hazir'), detail: t('taskbar.haftalik_urun_incelemesi_ve_acik'), time: '24 dk', icon: Mail },
+  { id: 'mail-invite', appId: 'mail', appName: t('common.e_posta'), headline: t('taskbar.yeni_toplanti_daveti'), detail: t('taskbar.mobil_deneyim_degerlendirmesi_icin'), time: '31 dk', icon: Mail },
+  { id: 'security-scan', appId: 'security', appName: t('taskbar.guvenlik'), headline: t('taskbar.guvenlik_taramasi_tamamlandi'), detail: t('taskbar.calisma_alaninda_riskli_bir'), time: '42 dk', icon: ShieldCheck },
+  { id: 'cloud-sync', appId: 'cloud', appName: t('taskbar.bulut'), headline: t('taskbar.dosyalar_esitlendi'), detail: t('taskbar.son_tasarim_ciktilari_tum'), time: '1 sa', icon: Cloud },
+  { id: 'music-mix', appId: 'music', appName: t('common.muzik'), headline: t('taskbar.yeni_kisisel_miks_hazir'), detail: t('taskbar.between_planets_ve_benzer'), time: '2 sa', icon: Music4 },
+  { id: 'gallery-memory', appId: 'gallery', appName: t('common.galeri'), headline: t('taskbar.gecen_yildan_anilar'), detail: t('taskbar.bugun_cekilen_12_fotograf_sizin_icin'), time: t('taskbar.dun'), icon: Image },
 ];
 
 const READ_ACTION = /\b(read|okundu)/i;
+const HEADER_BUTTON = 'grid size-8 place-items-center rounded-lg text-notification-foreground/60 outline-none transition-colors hover:bg-notification-hover hover:text-notification-foreground focus-visible:ring-2 focus-visible:ring-ring cursor-pointer disabled:opacity-35 disabled:pointer-events-none';
 
 export const ClockCalendar = forwardRef(function ClockCalendar({
   now,
@@ -67,7 +74,7 @@ export const ClockCalendar = forwardRef(function ClockCalendar({
   const storeRefresh = useNotificationStore((s) => s.refreshNotifications);
   const storeMarkRead = useNotificationStore((s) => s.markRead);
   const storeInvokeAction = useNotificationStore((s) => s.invokeAction);
-  const storePrivacy = useNotificationStore((s) => s.privacyMode);
+  const privacy = useNotificationStore((s) => s.privacyMode);
   const storeTogglePrivacy = useNotificationStore((s) => s.togglePrivacyMode);
   const openWindowForNotification = useNotificationWindowRouting();
 
@@ -82,13 +89,36 @@ export const ClockCalendar = forwardRef(function ClockCalendar({
     : notifications && notifications !== INITIAL_NOTIFICATIONS
       ? notifications
       : [];
-  const models = useMemo(() => source.map(toCardModel).filter(Boolean), [source, now]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const [calendarExpanded, setCalendarExpanded] = useState(false);
-  const privacy = storePrivacy;
+  const allModels = useMemo(() => source.map(toCardModel).filter(Boolean), [source, now]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // One owner per action: the taskbar's handler when it passed one (it calls the store itself), else the store.
   const dismissOne = (id) => (onDismiss ? onDismiss(id) : storeRemove(id));
+  const handleClearAll = () => (onClear ? onClear() : storeClearAll());
+
+  // Silme geri alınabilir: kartlar hemen gizlenir, kalıcı silme gecikmeli yapılır. Her şey silinmişse tek "tümünü temizle" çağrısı.
+  const everyIdRef = useRef([]);
+  everyIdRef.current = allModels.map((m) => m.id);
+  const commitDismiss = useCallback((ids) => {
+    const gone = new Set(ids);
+    if (everyIdRef.current.length > 0 && everyIdRef.current.every((id) => gone.has(id))) handleClearAll();
+    else ids.forEach(dismissOne);
+  }, [onDismiss, onClear]); // eslint-disable-line react-hooks/exhaustive-deps
+  const undoable = useUndoableDismiss(commitDismiss);
+
+  const [filter, setFilter] = useState('all');
+  const [appFilter, setAppFilter] = useState(null);
+  const present = useMemo(() => allModels.filter((m) => !undoable.hidden.has(m.id)), [allModels, undoable.hidden]);
+  const facets = useMemo(() => appFacets(present), [present]);
+  const unreadCount = useMemo(() => present.filter((m) => m.unread).length, [present]);
+  // Süzgeç, işaret ettiği şey kalmadıysa kendiliğinden düşer (son okunmamış okundu / uygulamanın son bildirimi gitti).
+  const activeApp = facets.some((f) => f.key === appFilter) ? appFilter : null;
+  const activeFilter = filter === 'unread' && unreadCount === 0 ? 'all' : filter;
+  const models = useMemo(() => applyFilter(present, { filter: activeFilter, app: activeApp }), [present, activeFilter, activeApp]);
+  const filtered = activeFilter !== 'all' || activeApp !== null;
+  const resetFilter = () => {
+    setFilter('all');
+    setAppFilter(null);
+  };
 
   const handleOpen = async (model) => {
     if (model.raw) {
@@ -111,64 +141,10 @@ export const ClockCalendar = forwardRef(function ClockCalendar({
     if (model.raw) storeInvokeAction(model.id, action.action_id).catch(() => {});
   };
 
-  const handleClear = () => {
-    if (onClear) onClear();
-    else storeClearAll();
-  };
-
   const handleRefresh = () => {
     storeRefresh();
     onRefresh?.();
   };
-
-  const date = now ?? new Date();
-  const [cursor, setCursor] = useState(() => ({ year: date.getFullYear(), month: date.getMonth() }));
-  const [yearView, setYearView] = useState(false);
-  const wheelLockRef = useRef(0);
-
-  const shiftMonth = useCallback((step) => {
-    setCursor((current) => {
-      const next = new Date(current.year, current.month + step, 1);
-      return { year: next.getFullYear(), month: next.getMonth() };
-    });
-  }, []);
-
-  const shiftYear = useCallback((step) => {
-    setCursor((current) => ({ ...current, year: current.year + step }));
-  }, []);
-
-  const isToday = (day) =>
-    day === date.getDate() && cursor.month === date.getMonth() && cursor.year === date.getFullYear();
-
-  const onCalendarWheel = (event) => {
-    const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
-    if (Math.abs(delta) < 2) return;
-    const stamp = Date.now();
-    if (stamp - wheelLockRef.current < 140) return;
-    wheelLockRef.current = stamp;
-    const step = delta > 0 ? 1 : -1;
-    if (event.shiftKey || yearView) shiftYear(step);
-    else shiftMonth(step);
-  };
-
-  const monthLabel = new Intl.DateTimeFormat('tr-TR', { month: 'long', year: 'numeric' }).format(
-    new Date(cursor.year, cursor.month, 1)
-  );
-  const firstDay = new Date(cursor.year, cursor.month, 1).getDay();
-  const offset = firstDay === 0 ? 6 : firstDay - 1;
-  const totalDays = new Date(cursor.year, cursor.month + 1, 0).getDate();
-  const cells = Array.from({ length: 42 }, (_, index) => index - offset + 1);
-  const monthNames = Array.from({ length: 12 }, (_, index) =>
-    new Intl.DateTimeFormat('tr-TR', { month: 'short' }).format(new Date(cursor.year, index, 1))
-  );
-  const atCurrentMonth = cursor.month === date.getMonth() && cursor.year === date.getFullYear();
-  const formattedDay = new Intl.DateTimeFormat('tr-TR', {
-    day: 'numeric',
-    month: 'long',
-    weekday: 'long',
-  }).format(date);
-
-  const unreadCount = models.filter((m) => m.unread).length;
 
   const reduced = motionProps.initial === false;
   const slide = reduced
@@ -188,269 +164,103 @@ export const ClockCalendar = forwardRef(function ClockCalendar({
           : { type: 'spring', stiffness: 420, damping: 40, mass: 0.8 }
       }
       style={{ zIndex: Z_INDEX.flyout }}
-      className="absolute bottom-[calc(100%+16px)] right-4 z-flyout flex h-[min(620px,calc(100vh-82px))] w-[min(360px,calc(100vw-32px))] flex-col gap-2 text-notification-foreground"
+      className="absolute bottom-[calc(100%+16px)] right-4 z-flyout flex h-[min(720px,calc(100vh-82px))] w-[min(400px,calc(100vw-32px))] flex-col gap-2 text-notification-foreground"
     >
-      {/* Top Section: Notifications */}
-      <motion.section
-        layout
-        className="notification-panel flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-notification-border bg-notification-surface/95 shadow-none backdrop-blur-[36px] backdrop-saturate-150"
-        aria-label="Bildirimler"
+      {/* Üst: bildirim merkezi */}
+      <section
+        className="notification-panel relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-notification-border bg-notification-surface/95 shadow-none backdrop-blur-[36px] backdrop-saturate-150"
+        aria-label={t('taskbar.bildirimler')}
       >
-        <header className="group/header notification-header relative flex h-12 shrink-0 items-center justify-between border-b border-notification-border/60 px-4">
+        <header className="notification-header relative shrink-0 border-b border-notification-border/60 px-4 pb-2.5 pt-3">
           <div className="flex items-center gap-2">
-            <span className="relative grid size-2 place-items-center">
-              {unreadCount > 0 && !reduced && (
-                <span className="absolute inset-0 animate-pulse-ring rounded-full bg-notification-accent/60" />
-              )}
-              <span className="relative size-1.5 rounded-full bg-notification-accent" />
-            </span>
-            <h3 className="text-[13px] font-semibold">Bildirimler</h3>
+            <h3 className="text-[16px] font-semibold leading-6 tracking-tight">{t('taskbar.bildirimler')}</h3>
             <AnimatePresence mode="popLayout" initial={false}>
-              <motion.span
-                key={models.length}
-                initial={{ y: -6, opacity: 0, scale: 0.8 }}
-                animate={{ y: 0, opacity: 1, scale: 1 }}
-                exit={{ y: 6, opacity: 0, scale: 0.8 }}
-                transition={cardSpring}
-                className="rounded-full bg-notification-hover px-1.5 py-0.5 font-mono text-[9px] font-semibold tabular-nums"
-                aria-label={`${models.length} bildirim, ${unreadCount} okunmamış`}
-              >
-                {models.length}
-              </motion.span>
-            </AnimatePresence>
-          </div>
-          <div className="flex items-center gap-1">
-            <span
-              className={cn(
-                'flex items-center gap-0.5 transition-opacity',
-                privacy
-                  ? 'opacity-100'
-                  : 'opacity-0 group-hover/header:opacity-100 group-focus-within/header:opacity-100'
+              {unreadCount > 0 && (
+                <motion.span
+                  key={unreadCount}
+                  initial={{ y: -6, opacity: 0, scale: 0.8 }}
+                  animate={{ y: 0, opacity: 1, scale: 1 }}
+                  exit={{ y: 6, opacity: 0, scale: 0.8 }}
+                  transition={cardSpring}
+                  className="rounded-full bg-notification-accent px-2 py-0.5 text-[11px] font-semibold tabular-nums text-image-foreground"
+                  aria-label={t('taskbar.count_bildirim_unreadcount_okunmamis', { count: present.length, unreadCount })}
+                >
+                  {t('notifications.yeni_sayisi', { count: unreadCount })}
+                </motion.span>
               )}
-            >
+            </AnimatePresence>
+            <div className="ml-auto flex items-center">
               <button
                 type="button"
-                className={cn(
-                  'grid size-7 place-items-center rounded-sm text-muted-foreground hover:bg-notification-hover cursor-pointer',
-                  privacy && 'bg-notification-hover text-notification-accent'
-                )}
+                className={HEADER_BUTTON}
+                onClick={() => storeMarkRead(present.filter((m) => m.unread).map((m) => m.id))}
+                disabled={unreadCount === 0}
+                aria-label={t('notifications.tumunu_okundu_say')}
+                data-tooltip={t('notifications.tumunu_okundu_say')}
+              >
+                <CheckCheck className="size-4" />
+              </button>
+              <button
+                type="button"
+                className={cn(HEADER_BUTTON, privacy && 'bg-notification-hover text-notification-accent')}
                 onClick={storeTogglePrivacy}
-                aria-label={privacy ? 'Bildirim gizliliğini kapat' : 'Bildirim gizliliğini aç'}
+                aria-label={privacy ? t('taskbar.bildirim_gizliligini_kapat') : t('taskbar.bildirim_gizliligini_ac')}
                 aria-pressed={privacy}
+                data-tooltip={privacy ? t('taskbar.bildirim_gizliligini_kapat') : t('taskbar.bildirim_gizliligini_ac')}
               >
-                {privacy ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                {privacy ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              </button>
+              <button type="button" className={HEADER_BUTTON} onClick={handleRefresh} aria-label={t('taskbar.bildirimleri_yenile')} data-tooltip={t('taskbar.bildirimleri_yenile')}>
+                <RotateCw className="size-4" />
               </button>
               <button
                 type="button"
-                className="grid size-7 place-items-center rounded-sm text-muted-foreground hover:bg-notification-hover cursor-pointer"
-                onClick={handleRefresh}
-                aria-label="Bildirimleri yenile"
+                className={cn(HEADER_BUTTON, 'hover:text-destructive')}
+                onClick={() => undoable.hide(models.map((m) => m.id))}
+                disabled={models.length === 0}
+                aria-label={filtered ? t('notifications.gorunenleri_temizle') : t('taskbar.tumunu_temizle')}
+                data-tooltip={filtered ? t('notifications.gorunenleri_temizle') : t('taskbar.tumunu_temizle')}
               >
-                <RotateCw className="size-3.5" />
+                <Trash2 className="size-4" />
               </button>
-            </span>
-            <button
-              type="button"
-              className="h-7 rounded-sm border border-notification-border bg-notification-raised px-2.5 text-[10px] font-medium shadow-none hover:bg-notification-hover disabled:opacity-45 cursor-pointer"
-              onClick={handleClear}
-              disabled={models.length === 0}
-            >
-              Tümünü temizle
-            </button>
+            </div>
           </div>
+          <NotificationToolbar
+            total={present.length}
+            unread={unreadCount}
+            filter={activeFilter}
+            onFilter={setFilter}
+            facets={facets}
+            app={activeApp}
+            onApp={setAppFilter}
+          />
         </header>
 
-        <div className="notification-scroll min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-2 pb-2 pt-2">
+        {/* Geri al şeridi listenin son kartını örter: şerit açıkken alta pay ayrılır, kapanınca pay yumuşakça geri alınır */}
+        <div className={cn('notification-scroll min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-2 pt-2.5 transition-[padding] duration-200', undoable.count > 0 ? 'pb-14' : 'pb-2')}>
           <NotificationCenterList
             models={models}
+            now={now}
+            filtered={filtered}
+            onResetFilter={resetFilter}
             privacy={privacy}
             onOpen={handleOpen}
-            onDismiss={(model) => dismissOne(model.id)}
-            onDismissMany={(items) => items.forEach((m) => dismissOne(m.id))}
+            onDismiss={(model) => undoable.hide([model.id])}
+            onDismissMany={(items) => undoable.hide(items.map((m) => m.id))}
             onMarkRead={handleMarkRead}
             onAction={handleAction}
           />
         </div>
-      </motion.section>
 
-      {/* Bottom Section: Calendar & Focus Timer */}
-      <motion.section
-        layout
-        className="overflow-hidden rounded-lg border border-notification-border bg-notification-surface/95 shadow-none backdrop-blur-[36px] backdrop-saturate-150"
-        aria-label="Takvim"
-      >
-        <div className="flex h-12 items-center justify-between border-b border-notification-border px-4">
-          <p className="text-[12px] font-semibold capitalize">{formattedDay}</p>
-          <button
-            type="button"
-            className="grid size-7 place-items-center rounded-sm border border-notification-border bg-notification-raised shadow-none hover:bg-notification-hover cursor-pointer"
-            onClick={() => setCalendarExpanded((v) => !v)}
-            aria-label={calendarExpanded ? 'Takvimi küçült' : 'Takvimi genişlet'}
-            aria-expanded={calendarExpanded}
-          >
-            {calendarExpanded ? <ChevronDown className="size-3.5" /> : <ChevronUp className="size-3.5" />}
-          </button>
-        </div>
+        <UndoSnack count={undoable.count} round={undoable.round} onUndo={undoable.undo} />
+      </section>
 
-        <AnimatePresence initial={false}>
-          {calendarExpanded && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-              className="overflow-hidden"
-            >
-              <div className="px-4 pb-3 pt-4" onWheel={onCalendarWheel}>
-                <div className="mb-3 flex items-center justify-between gap-2">
-                  <button
-                    type="button"
-                    className="rounded-sm px-1 text-[13px] font-semibold capitalize outline-none transition-colors hover:bg-notification-hover cursor-pointer"
-                    onClick={() => setYearView((v) => !v)}
-                    aria-expanded={yearView}
-                    aria-label="Yıl ve ay seçimi"
-                  >
-                    {yearView ? cursor.year : monthLabel}
-                  </button>
-                  <div className="flex items-center gap-1">
-                    {!atCurrentMonth && !yearView && (
-                      <button
-                        type="button"
-                        className="h-7 rounded-sm px-2 text-[10px] hover:bg-notification-hover cursor-pointer font-medium"
-                        onClick={() => {
-                          setCursor({ year: date.getFullYear(), month: date.getMonth() });
-                          setYearView(false);
-                        }}
-                      >
-                        Bugün
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="grid size-7 place-items-center rounded-sm hover:bg-notification-hover cursor-pointer"
-                      onClick={() => (yearView ? shiftYear(-1) : shiftMonth(-1))}
-                      aria-label={yearView ? 'Önceki yıl' : 'Önceki ay'}
-                    >
-                      <ChevronLeft className="size-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      className="grid size-7 place-items-center rounded-sm hover:bg-notification-hover cursor-pointer"
-                      onClick={() => (yearView ? shiftYear(1) : shiftMonth(1))}
-                      aria-label={yearView ? 'Sonraki yıl' : 'Sonraki ay'}
-                    >
-                      <ChevronRight className="size-3.5" />
-                    </button>
-                  </div>
-                </div>
-
-                {yearView ? (
-                  <div className="grid grid-cols-3 gap-1">
-                    {monthNames.map((label, index) => (
-                      <button
-                        key={label}
-                        type="button"
-                        className={cn(
-                          'h-9 rounded-md text-[11px] font-medium capitalize transition-colors hover:bg-notification-hover cursor-pointer',
-                          index === cursor.month &&
-                            'bg-notification-accent text-primary-foreground hover:bg-notification-accent'
-                        )}
-                        onClick={() => {
-                          setCursor((current) => ({ ...current, month: index }));
-                          setYearView(false);
-                        }}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <>
-                    <div className="grid grid-cols-7 text-center text-[9px] font-semibold text-muted-foreground">
-                      {['Pt', 'Sa', 'Ça', 'Pe', 'Cu', 'Ct', 'Pa'].map((day) => (
-                        <span key={day} className="grid h-7 place-items-center">
-                          {day}
-                        </span>
-                      ))}
-                    </div>
-                    <div className="grid grid-cols-7 text-center text-[11px]">
-                      {cells.map((day, index) => (
-                        <span
-                          key={index}
-                          className={cn(
-                            'grid h-8 place-items-center rounded-full transition-colors hover:bg-notification-hover select-none',
-                            isToday(day) &&
-                              day >= 1 &&
-                              day <= totalDays &&
-                              'bg-notification-accent font-semibold text-image-foreground hover:bg-notification-accent',
-                            (day < 1 || day > totalDays) && 'text-muted-foreground/35'
-                          )}
-                        >
-                          {day < 1
-                            ? new Date(cursor.year, cursor.month, day).getDate()
-                            : day > totalDays
-                            ? day - totalDays
-                            : day}
-                        </span>
-                      ))}
-                    </div>
-                  </>
-                )}
-                <p className="mt-2 text-center text-[9px] text-muted-foreground">
-                  Kaydırarak ay, Shift + kaydırarak yıl değiştir
-                </p>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        <div className="flex h-12 items-center justify-between border-t border-notification-border px-4">
-          {focusActive ? (
-            <div className="flex items-center gap-2">
-              <span className="grid size-7 place-items-center rounded-full bg-status-active/15 text-status-active">
-                <Timer className="size-3.5" />
-              </span>
-              <div className="leading-tight">
-                <p className="font-mono text-[13px] font-semibold tabular-nums">{focusClock}</p>
-                <p className="text-[9px] text-muted-foreground">Bildirimler sessizde</p>
-              </div>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className="grid size-7 place-items-center rounded-sm border border-notification-border bg-notification-raised shadow-none hover:bg-notification-hover cursor-pointer"
-                onClick={() => onFocusMinutes?.(Math.max(5, focusMinutes - 5))}
-                aria-label="Odak süresini azalt"
-              >
-                <Minus className="size-3" />
-              </button>
-              <span className="w-14 text-center text-[12px]">
-                <strong>{focusMinutes}</strong> dk
-              </span>
-              <button
-                type="button"
-                className="grid size-7 place-items-center rounded-sm border border-notification-border bg-notification-raised shadow-none hover:bg-notification-hover cursor-pointer"
-                onClick={() => onFocusMinutes?.(Math.min(120, focusMinutes + 5))}
-                aria-label="Odak süresini artır"
-              >
-                <Plus className="size-3" />
-              </button>
-            </div>
-          )}
-          <button
-            type="button"
-            className={cn(
-              'flex h-7 items-center gap-1.5 rounded-sm border border-notification-border bg-notification-raised px-2.5 text-[10px] shadow-none hover:bg-notification-hover cursor-pointer font-medium',
-              focusActive && 'bg-notification-accent text-image-foreground hover:bg-notification-accent'
-            )}
-            onClick={onFocusToggle}
-          >
-            <Play className="size-3" fill="currentColor" />
-            {focusActive ? 'Durdur' : 'Odaklanma'}
-          </button>
-        </div>
-      </motion.section>
+      {/* Alt: bugün — takvim + odak */}
+      <CalendarDock
+        now={now}
+        reduced={reduced}
+        focus={{ minutes: focusMinutes, onMinutes: onFocusMinutes, active: focusActive, clock: focusClock, onToggle: onFocusToggle }}
+      />
     </motion.section>
   );
 });

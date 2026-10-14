@@ -7,6 +7,7 @@ import AppIcon from '../ui/AppIcon.jsx';
 import { LevelMeter, RouteSelector, audioErrorText } from '../ui/audioRouting.jsx';
 import { useAudioMixerStore } from '../state/audioMixerStore.js';
 import { MixerRow } from './MixerRow.jsx';
+import { t } from '../i18n/index.js';
 
 export default function AppMixerRow({ app, label }) {
   const setRoute = useAudioMixerStore((s) => s.setRoute);
@@ -16,8 +17,8 @@ export default function AppMixerRow({ app, label }) {
   const errorText = audioErrorText(app.error);
 
   let phoneNote = null;
-  if (app.on_phone) phoneNote = 'Telefonda (uygulama telefona devredildi)';
-  else if (app.route === 'phone') phoneNote = 'Yalnız telefonda çalıyor';
+  if (app.on_phone) phoneNote = t('taskbar.telefonda_uygulama_telefona_devredildi');
+  else if (app.route === 'phone') phoneNote = t('taskbar.yalniz_telefonda_caliyor');
 
   return (
     <div className="border-b border-border/55 py-2 last:border-b-0" data-testid={`app-mixer-${app.package}`}>
@@ -29,7 +30,7 @@ export default function AppMixerRow({ app, label }) {
         <RouteSelector
           value={app.route}
           onChange={(route) => setRoute(app.package, route)}
-          label={`${name} ses çıkışı`}
+          label={t('taskbar.name_ses_cikisi', { name })}
         />
       </div>
       {phoneNote ? (
@@ -44,7 +45,7 @@ export default function AppMixerRow({ app, label }) {
             value={Math.round((app.volume ?? 1) * 100)}
             max={100}
             onChange={(v) => setVolume(app.package, v / 100)}
-            label={`${name} ses düzeyi`}
+            label={t('taskbar.name_ses_duzeyi', { name })}
             muted={app.muted}
             onToggleMute={() => toggleMuted(app.package)}
             className="border-b-0 py-1.5"

@@ -1,15 +1,17 @@
 // Görev çubuğu uygulama düğmesinin bağlam menüsü (basılı tut ya da sağ tık): düğmenin tıklamasıyla AYNI eylemler + pencereye özel olanlar.
 //
-//   [ad]  Küçült / Geri yükle / Öne getir · Telefona aktar / Telefondan geri al · Uygulamayı yeniden başlat · (varsa) Hepsini kapat · Kapat
+//   [ad]  Küçült / Geri yükle / Öne getir · Telefona aktar / Telefondan geri al · (web sayfası varsa) Sayfayı yenile · Uygulamayı yeniden başlat
+//         · (varsa) Hepsini kapat · Kapat
 //
 // Hangi eylemlerin sunulacağı saf modelden gelir (taskbarModel.appMenuModel); burada yalnız çizim, klavye ve odak vardır:
 //   · açılınca ilk öğeye odak · ↑/↓/Home/End gezinir · Esc ve dışarı tıklama kapatır (Taskbar'ın yüzey mantığı) · kapanınca odak düğmeye döner.
 import React, { forwardRef, useEffect, useRef } from 'react';
-import { AppWindow, Layers, Minus, Monitor, RotateCw, Smartphone, X } from 'lucide-react';
+import { AppWindow, Globe, Layers, Minus, Monitor, RotateCw, Smartphone, X } from 'lucide-react';
 
 import { PanelShell } from './PanelShell.jsx';
 import { MenuItem, MenuLabel, MenuSeparator } from '../ui/Menu.jsx';
 import { cardLeft } from './taskbarModel.js';
+import { t } from '../i18n/index.js';
 
 const MENU_WIDTH = 232;
 
@@ -23,6 +25,7 @@ export const TaskbarAppMenu = forwardRef(function TaskbarAppMenu({
   onHandoff,
   onReclaim,
   onRestart,
+  onReloadPage,
   onClose,
   onCloseAll,
   onDismiss,
@@ -70,31 +73,34 @@ export const TaskbarAppMenu = forwardRef(function TaskbarAppMenu({
       style={{ left: `${cardLeft(anchorX, MENU_WIDTH, vw)}px`, width: `${MENU_WIDTH}px` }}
       className="rounded-xl border border-border/80 bg-popover/95 p-1 shadow-2xl backdrop-blur-3xl"
     >
-      <div ref={listRef} role="menu" aria-label={`${name} menüsü`} onKeyDown={onKeyDown}>
+      <div ref={listRef} role="menu" aria-label={t('taskbar.name_menusu', { name })} onKeyDown={onKeyDown}>
         <MenuLabel>{name}</MenuLabel>
         {model.toggleLabel && (
           <MenuItem icon={<ToggleIcon className="size-3.5" />} label={model.toggleLabel} onClick={run(onToggle)} />
         )}
         {model.canHandoff && (
-          <MenuItem icon={<Smartphone className="size-3.5" />} label="Telefona aktar" onClick={run(onHandoff)} />
+          <MenuItem icon={<Smartphone className="size-3.5" />} label={t('common.telefona_aktar')} onClick={run(onHandoff)} />
         )}
         {model.canReclaim && (
-          <MenuItem icon={<Monitor className="size-3.5" />} label="Telefondan geri al" onClick={run(onReclaim)} />
+          <MenuItem icon={<Monitor className="size-3.5" />} label={t('taskbar.telefondan_geri_al')} onClick={run(onReclaim)} />
+        )}
+        {model.canReloadPage && (
+          <MenuItem icon={<Globe className="size-3.5" />} label={t('common.sayfayi_yenile')} onClick={run(onReloadPage)} />
         )}
         {model.canRestart && (
-          <MenuItem icon={<RotateCw className="size-3.5" />} label="Uygulamayı yeniden başlat" onClick={run(onRestart)} />
+          <MenuItem icon={<RotateCw className="size-3.5" />} label={t('common.uygulamayi_yeniden_baslat')} onClick={run(onRestart)} />
         )}
         <MenuSeparator />
         {model.closeAllCount > 0 && (
           <MenuItem
             icon={<Layers className="size-3.5" />}
-            label="Tüm pencereleri kapat"
+            label={t('taskbar.tum_pencereleri_kapat')}
             hint={String(model.closeAllCount)}
             destructive
             onClick={run(onCloseAll)}
           />
         )}
-        <MenuItem icon={<X className="size-3.5" />} label="Kapat" destructive onClick={run(onClose)} />
+        <MenuItem icon={<X className="size-3.5" />} label={t('common.kapat')} destructive onClick={run(onClose)} />
       </div>
     </PanelShell>
   );

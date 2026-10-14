@@ -9,6 +9,7 @@ import React from 'react';
 import { RotateCcw, RotateCw, SkipBack, SkipForward } from 'lucide-react';
 import { cn } from '../../lib/utils.js';
 import { GLYPH_PAUSE, GLYPH_PLAY } from './mediaCenterModel.js';
+import { t } from '../../i18n/index.js';
 
 const SKIP_MS = 10_000;
 const ROUND = 'grid shrink-0 cursor-pointer place-items-center rounded-full outline-none transition-[transform,background-color,color] duration-150 ease-out focus-visible:ring-2 focus-visible:ring-ring';
@@ -50,7 +51,7 @@ function SkipButton({ dir, onClick }) {
 }
 
 function StepButton({ dir, onClick }) {
-  const label = dir < 0 ? 'Önceki parça' : 'Sonraki parça';
+  const label = dir < 0 ? t('common.onceki_parca') : t('common.sonraki_parca');
   const Icon = dir < 0 ? SkipBack : SkipForward;
   return (
     <button
@@ -70,9 +71,9 @@ function StepButton({ dir, onClick }) {
 }
 
 export function Transport({ playing, buffering = false, onToggle, onStep, onSkip }) {
-  const label = playing ? 'Duraklat' : 'Oynat';
+  const label = playing ? t('common.duraklat') : t('common.oynat');
   return (
-    <div className="flex items-center justify-center gap-2.5" role="group" aria-label="Oynatma denetimi">
+    <div className="flex items-center justify-center gap-2.5" role="group" aria-label={t('taskbar.oynatma_denetimi')}>
       {onSkip && <SkipButton dir={-1} onClick={() => onSkip(-SKIP_MS)} />}
       <StepButton dir={-1} onClick={() => onStep?.(-1)} />
 
@@ -88,7 +89,7 @@ export function Transport({ playing, buffering = false, onToggle, onStep, onSkip
           type="button"
           onClick={onToggle}
           aria-label={label}
-          title={`${label} (K)`}
+          title={t('taskbar.label_k', { label })}
           data-playing={playing ? 'true' : 'false'}
           className={cn(
             ROUND,

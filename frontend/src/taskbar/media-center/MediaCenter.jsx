@@ -28,6 +28,7 @@ import { SessionSheet } from './SessionSheet.jsx';
 import { EmptyStage } from './EmptyStage.jsx';
 import { playbackStatus, shortcutFor, skipPercent } from './mediaCenterModel.js';
 import { riseEnter, stageVariants } from './choreography.js';
+import { t } from '../../i18n/index.js';
 
 // Kapağın üstündeki rozetler: scrim zemin (blur yok — altında kapak kayıyor), açık metin; iki temada aynı okunur.
 const ART_CHIP = 'h-7 bg-scrim/45 text-scrim-foreground hover:bg-scrim/65';
@@ -39,8 +40,8 @@ function AppChip({ session, onOpenApp }) {
       disabled={!session.package}
       onClick={() => onOpenApp?.(session.package)}
       className={`group/app inline-flex min-w-0 max-w-[60%] cursor-pointer items-center gap-1.5 rounded-full pl-1 pr-2.5 text-[11.5px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default ${ART_CHIP}`}
-      title={`${session.source} uygulamasına git`}
-      aria-label={`${session.source} uygulamasını aç`}
+      title={t('taskbar.source_uygulamasina_git', { source: session.source })}
+      aria-label={t('taskbar.source_uygulamasini_ac', { source: session.source })}
     >
       {session.package ? <AppIcon pkg={session.package} size={20} className="shrink-0 rounded-full" /> : null}
       <span className="truncate">{session.source}</span>
@@ -57,7 +58,7 @@ function NowPlaying({ session, playing, apiRef, onToggle, onStep, onSeek, onOpen
   const directionRef = useRef(1);
   const status = playbackStatus(session, playing);
   const canSkip = clock.durationMs > 0;
-  const title = session.title || 'Medya';
+  const title = session.title || t('taskbar.medya');
 
   const skip = (deltaMs) => {
     const percent = skipPercent(clock.positionMs, clock.durationMs, deltaMs);
@@ -71,7 +72,7 @@ function NowPlaying({ session, playing, apiRef, onToggle, onStep, onSeek, onOpen
   apiRef.current = { toggle, step, skip };
 
   return (
-    <section aria-label="Şimdi çalıyor" className="relative flex min-h-0 flex-col">
+    <section aria-label={t('taskbar.simdi_caliyor')} className="relative flex min-h-0 flex-col">
       {/* Kapak: genişlikten aspect-ratio ile yükselir (4:3 taban; kare/hafif dikey kapakta biraz daha uzun, en çok ekranın %44'ü),
           oran kapak geçişiyle aynı anda yumuşakça değişir (PosterArt). Tek esnek öğe odur: panel sığmazsa 200 px'e kadar kısalır. */}
       <PosterArt session={session} playing={playing} directionRef={directionRef}>
@@ -88,7 +89,7 @@ function NowPlaying({ session, playing, apiRef, onToggle, onStep, onSeek, onOpen
             size="lg"
             showTimes
             timesLayout="inline"
-            label={`${title} parça konumu`}
+            label={t('taskbar.title_parca_konumu', { title })}
             percent={clock.percent}
             positionMs={clock.positionMs}
             durationMs={clock.durationMs}
@@ -166,14 +167,14 @@ export const MediaCenter = forwardRef(function MediaCenter({
       ref={setRefs}
       {...motionProps}
       role="dialog"
-      aria-label="Medya merkezi"
+      aria-label={t('taskbar.medya_merkezi')}
       tabIndex={-1}
       onKeyDown={onKeyDown}
       data-accent={accent ? 'on' : undefined}
       style={accent ? { '--media-accent': accent } : undefined}
       className="media-scope left-4 w-[min(392px,calc(100vw-32px))] origin-bottom-left overflow-hidden border-taskbar-border/80 bg-[color:var(--media-surface)] p-0 shadow-window outline-none backdrop-blur-none select-none sm:bg-[color:var(--media-surface)]"
     >
-      <h2 className="sr-only">Medya merkezi</h2>
+      <h2 className="sr-only">{t('taskbar.medya_merkezi')}</h2>
       {/* Panel kaymaz: içerik esnek kapakla ekrana sığar. Kapak en kısa hâlindeyken bile sığmayan çok kısa ekranda son
           çare olarak kayar, ama çubuk gösterilmez. Uzun liste yalnız "Diğer akışlar" içinde kayar. */}
       <div className="no-scrollbar relative flex max-h-[calc(100vh-82px)] flex-col overflow-y-auto overscroll-contain" data-testid="media-center-body">

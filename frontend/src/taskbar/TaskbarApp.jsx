@@ -16,6 +16,7 @@ import AppIcon from '../ui/AppIcon.jsx';
 import { useLongPress } from '../ui/useLongPress.js';
 import { cn } from '../lib/utils.js';
 import { TASKBAR_ICON_PX, badgeLabel } from './taskbarModel.js';
+import { t } from '../i18n/index.js';
 
 const chain = (...handlers) => (event) => {
   for (const handler of handlers) handler?.(event);
@@ -38,14 +39,14 @@ export function TaskbarApp({
   onPreview,
   onLeave,
 }) {
-  const name = app.name || app.display_name || 'Uygulama';
+  const name = app.name || app.display_name || t('taskbar.uygulama');
   const targetPkg = app.package || app.id;
   const press = useLongPress({ onLongPress: (el) => onMenu?.(el), onClick: onActivate });
   const label = badgeLabel(badge);
 
   const state = [
     onPhone ? 'telefonda' : null,
-    isMinimized ? 'küçültülmüş' : isOpen ? 'açık' : null,
+    isMinimized ? t('taskbar.kucultulmus') : isOpen ? t('common.acik') : null,
     label !== null ? `${badge} bildirim` : null,
   ].filter(Boolean).join(', ');
 

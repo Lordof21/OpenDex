@@ -53,11 +53,14 @@ import {
   toggleActionFor,
 } from './taskbarModel.js';
 import { restartDoneToast, restartFailedToast } from '../window/appRestart.js';
+import { reloadPageWithToast, useWebReloadAvailable } from '../window/webReload.js';
 import { isFrontendOnlyWindow } from '../window/frontendOnly.js';
 import { isMirrorPackage } from '../window/mirrorPackage.js';
 import { iconPackageOf } from '../window/workspacePackage.js';
 import { formatRelativeTime } from '../desktop/notifications/timeUtils.js';
 import { Z_INDEX } from '../ui/zIndex.js';
+import { t as tt } from '../i18n/index.js';
+import { activeLocale } from '../i18n/index.js';
 
 export const BUILTIN_TASKBAR_APPS = [];
 
@@ -133,8 +136,8 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
       const mapped = realNotifications.map((n) => ({
         id: String(n.id || n.key || Math.random()),
         appId: n.package || n.appName || 'system',
-        appName: n.appName || n.title || 'Bildirim',
-        headline: n.title || n.headline || 'Yeni Bildirim',
+        appName: n.appName || n.title || tt('common.bildirim'),
+        headline: n.title || n.headline || tt('taskbar.yeni_bildirim'),
         detail: n.text || n.detail || '',
         time: formatRelativeTime(n),
         icon: Sparkles,
@@ -254,10 +257,10 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
         {
           id: `focus-${Date.now()}`,
           appId: 'focus',
-          appName: 'Odak',
-          headline: 'Odak oturumu tamamlandı',
-          detail: `${focusMinutes} dakikalık odak süren bitti. Bildirimler yeniden açıldı.`,
-          time: 'Şimdi',
+          appName: tt('taskbar.odak'),
+          headline: tt('taskbar.odak_oturumu_tamamlandi'),
+          detail: tt('taskbar.focusminutes_dakikalik_odak_suren', { focusMinutes }),
+          time: tt('taskbar.simdi'),
           icon: Timer,
         },
         ...current,
@@ -532,8 +535,8 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
       id: w.id,
       // İkon anahtarı: Çalışma Alanı kabının paketi yoktur → özel ikon (window/workspacePackage.js); diğerleri kendi paketi.
       package: iconPackageOf(w) || w.id,
-      name: w.title || w.display_name || w.package || 'Uygulama',
-      category: 'Uygulama',
+      name: w.title || w.display_name || w.package || tt('taskbar.uygulama'),
+      category: tt('taskbar.uygulama'),
       pinned: false,
       isOpen: true,
       isActive: isWindowActive(w),
@@ -602,6 +605,12 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
   };
 
   const hasAppSession = (w) => !w.isEcoWorkspace && !isFrontendOnlyWindow(w) && !isMirrorPackage(w.package);
+
+  // "Sayfayı yenile": telefona yalnız menü açıkken ve yalnız gerçek uygulaması olan pencere için sorulur (webReload.js).
+  const menuHasWebPage = useWebReloadAvailable(
+    menuWin?.id,
+    surface === 'appmenu' && Boolean(menuWin) && hasAppSession(menuWin),
+  );
 
   const restartMenuApp = async (id) => {
     try {
@@ -693,7 +702,7 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
     >
       <nav
         ref={navRef}
-        aria-label="DeX görev çubuğu"
+        aria-label={tt('taskbar.dex_gorev_cubugu')}
         className="taskbar-surface relative grid h-[50px] w-full grid-cols-[1fr_auto_1fr] items-center border-t border-taskbar-border bg-taskbar px-2.5 shadow-taskbar backdrop-blur-2xl sm:px-3"
       >
         {/* LEFT: Media Player Widget */}
@@ -714,14 +723,14 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
         <div
           className="flex min-w-0 items-center justify-center"
           role="toolbar"
-          aria-label="Uygulamalar"
+          aria-label={tt('taskbar.uygulamalar')}
           aria-orientation="horizontal"
           onKeyDown={onStripKeyDown}
         >
           <div ref={launcherRef} className="hidden items-center min-[430px]:flex">
             <TaskbarButton
               active={isLauncherOpen}
-              label="Uygulamalar"
+              label={tt('taskbar.uygulamalar')}
               onClick={() => toggleSurface('launcher')}
               data-taskbar-launcher=""
             >
@@ -775,16 +784,16 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
         </div>
 
         {/* RIGHT: sistem tepsisi — 4 grup, aralarında ince ayraç: [masaüstü] · [bağlantı] · [telefon] · [saat].
-            Tüm tek düğmeler 36 px (rounded 10), kapsül içindekiler 32 px (rounded 10) + 2 px iç boşluk = kapsül 36 px (rounded 12, eş merkezli). */}
+            Kompakt ölçüler (geometri yorumu: TRAY_PILL): tek düğme 32 px, kapsül 30 px içinde 24 px düğme, simge 16 px. */}
         <div
           ref={rightRef}
-          className="flex h-full shrink-0 items-center justify-end justify-self-end gap-0.5 pl-1"
-          aria-label="Sistem tepsisi"
+          className="flex h-full shrink-0 items-center justify-end justify-self-end gap-0.5 pl-0.5"
+          aria-label={tt('taskbar.sistem_tepsisi')}
         >
           <div className="flex items-center">
             <SystemTrayButton
               className="hidden sm:inline-flex"
-              label="Gizli simgeleri göster"
+              label={tt('taskbar.gizli_simgeleri_goster')}
               active={surface === 'hidden'}
               onClick={() => toggleSurface('hidden')}
             >
@@ -793,7 +802,7 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
 
             <SystemTrayButton
               className="max-[599px]:hidden"
-              label={isBrowserFullscreen ? 'Pencere moduna dön (F11)' : 'Masaüstünü tam ekran yap (F11)'}
+              label={isBrowserFullscreen ? tt('taskbar.pencere_moduna_don_f11') : tt('taskbar.masaustunu_tam_ekran_yap_f11')}
               active={isBrowserFullscreen}
               onClick={toggleBrowserFullscreen}
             >
@@ -801,7 +810,7 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
             </SystemTrayButton>
 
             <SystemTrayButton
-              label="DeX hızlı ayarları (Ctrl+Alt+D)"
+              label={tt('taskbar.dex_hizli_ayarlari_ctrl_alt_d')}
               active={dexQuickOpen}
               data-dex-quick-toggle=""
               onClick={() => {
@@ -817,10 +826,10 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
           <TrayDivider />
 
           {/* Bağlantı kapsülü: ses · Wi-Fi · sinyal · pil — her düğme ayrı vurgulanır (hangisinin açık olduğu belli) */}
-          <div className={TRAY_PILL} role="group" aria-label="Bağlantı, ses ve pil durumu">
+          <div className={TRAY_PILL} role="group" aria-label={tt('taskbar.baglanti_ses_ve_pil_durumu')}>
             <SystemTrayButton
               className={PILL_BUTTON}
-              label="Ses ayarları ve mikser"
+              label={tt('taskbar.ses_ayarlari_ve_mikser')}
               active={surface === 'quick' && quickView === 'mixer'}
               onClick={() => openQuick('mixer')}
             >
@@ -829,7 +838,7 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
 
             <SystemTrayButton
               className={PILL_BUTTON}
-              label={isWifiOn ? 'Wi-Fi bağlı' : 'Wi-Fi kapalı'}
+              label={isWifiOn ? tt('taskbar.wi_fi_bagli') : tt('taskbar.wi_fi_kapali')}
               active={surface === 'quick' && quickView === 'wifi'}
               onClick={() => openQuick('wifi')}
             >
@@ -838,7 +847,7 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
 
             <SystemTrayButton
               className={cn(PILL_BUTTON, 'hidden sm:inline-flex')}
-              label="Mobil sinyal"
+              label={tt('taskbar.mobil_sinyal')}
               active={surface === 'quick' && quickView === 'main'}
               onClick={() => openQuick('main')}
             >
@@ -847,8 +856,8 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
 
             <SystemTrayButton
               // Sabit genişlik: yüzde 99 → 100 olunca (ve rakam sayısı değişince) soldaki her şey kaymasın.
-              className={cn(PILL_BUTTON, 'w-12 gap-1 px-0')}
-              label={`Pil yüzde ${batteryPercent}, ${batteryInfo?.is_charging ? 'şarj oluyor' : 'pilde'}`}
+              className={cn(PILL_BUTTON, 'w-10 gap-0.5 px-0')}
+              label={tt('taskbar.pil_yuzde_batterypercent_value', { batteryPercent, value: batteryInfo?.is_charging ? tt('taskbar.sarj_oluyor') : 'pilde' })}
               active={surface === 'quick' && quickView === 'battery'}
               onClick={() => openQuick('battery')}
             >
@@ -867,7 +876,7 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
           <TrayDivider />
 
           {/* Telefon kapsülü: sıcaklık (yük paneli) · cihaz merkezi. Dar çubukta yük düğmesi gizlenir, cihaz düğmesi kalır. */}
-          <div className={TRAY_PILL} role="group" aria-label="Telefon">
+          <div className={TRAY_PILL} role="group" aria-label={tt('common.telefon')}>
             <DeviceLoadTrayButton
               className={cn(PILL_HEIGHT, 'max-[899px]:hidden')}
               open={surface === 'load'}
@@ -889,7 +898,7 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
               type="button"
               onClick={() => toggleSurface('clock')}
               className="hidden h-[28px] shrink-0 cursor-pointer items-center gap-1.5 self-center rounded-full border border-status-active/40 bg-status-active/15 px-2.5 text-status-active outline-none transition-colors hover:bg-status-active/25 focus-visible:ring-2 focus-visible:ring-ring sm:inline-flex"
-              aria-label={`Odak oturumu, kalan süre ${focusClock}`}
+              aria-label={tt('taskbar.odak_oturumu_kalan_sure_focusclock', { focusClock })}
             >
               <Timer className="size-3.5" />
               <span className="font-mono text-[11px] font-semibold tabular-nums">
@@ -901,7 +910,7 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
           {/* Digital Clock & Date */}
           <div
             className={cn(
-              'group/clock flex h-9 shrink-0 cursor-pointer items-center rounded-[10px] px-2 transition-colors hover:bg-accent/65',
+              'group/clock flex h-8 shrink-0 cursor-pointer items-center rounded-[9px] px-1.5 transition-colors hover:bg-accent/65',
               surface === 'clock' && 'bg-accent text-accent-foreground'
             )}
           >
@@ -914,11 +923,11 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
                   : 'text-taskbar-foreground/85'
               )}
               onClick={() => toggleSurface('clock')}
-              aria-label={`Saat, takvim ve bildirim merkezi, ${notifications.length} bildirim`}
+              aria-label={tt('taskbar.saat_takvim_ve_bildirim_merkezi_count', { count: notifications.length })}
             >
               <span className="font-mono text-sm font-bold leading-[17px] tabular-nums">
                 {now
-                  ? new Intl.DateTimeFormat('tr-TR', {
+                  ? new Intl.DateTimeFormat(activeLocale(), {
                       hour: '2-digit',
                       minute: '2-digit',
                     }).format(now)
@@ -933,7 +942,7 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
                 )}
               >
                 {now
-                  ? new Intl.DateTimeFormat('tr-TR', {
+                  ? new Intl.DateTimeFormat(activeLocale(), {
                       day: '2-digit',
                       month: '2-digit',
                       year: 'numeric',
@@ -997,11 +1006,7 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
           )}
 
           {surface === 'hidden' && (
-            <HiddenTray
-              key="hidden"
-              {...panelMotion}
-              onDex={openDex}
-            />
+            <HiddenTray key="hidden" {...panelMotion} />
           )}
 
           {surface === 'quick' && (
@@ -1081,6 +1086,7 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
               model={appMenuModel(menuWin, {
                 hasSession: hasAppSession(menuWin),
                 sameAppCount: windows.filter((w) => w.package && w.package === menuWin.package).length,
+                hasWebPage: menuHasWebPage,
               })}
               anchorX={appMenu.anchorX}
               onToggle={() => launchApp(menuWin.id)}
@@ -1088,6 +1094,7 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
               onHandoff={() => useWindowStore.getState().handoffWindowToPhone(menuWin.sourceTaskId || menuWin.id)}
               onReclaim={() => useWindowStore.getState().reclaimWindow(menuWin.id)}
               onRestart={() => restartMenuApp(menuWin.id)}
+              onReloadPage={() => reloadPageWithToast(menuWin.id)}
               onClose={() => closeTaskbarApp(menuWin.id)}
               onCloseAll={() => closeAllOfApp(menuWin)}
               onDismiss={dismissAppMenu}
@@ -1111,20 +1118,24 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
 
 // ---------------------------------------------------------------- yardımcı parçalar (çubuğa özgü)
 
-// Sağ küme geometrisi: kapsül 36 px (rounded 12) = 2 px iç boşluk + 32 px düğme (rounded 10) — dış yarıçap = iç yarıçap + boşluk (eş merkezli).
-const TRAY_PILL = 'flex h-9 shrink-0 items-center gap-0.5 self-center rounded-xl border border-taskbar-border/50 bg-foreground/[0.03] p-0.5';
-const PILL_BUTTON = 'h-8 w-8';
-const PILL_HEIGHT = 'h-8'; // metin taşıyan kapsül düğmeleri (sıcaklık, cihaz): yükseklik sabit, genişlik içeriğe göre
+// Sağ küme geometrisi (kompakt): orta alan (uygulama şeridi) olabildiğince geniş kalsın diye her ölçü tek yerden gelir.
+//   tek düğme  32 px (rounded 9), simge 16 px
+//   kapsül     30 px = 1 px kenarlık + 2 px iç boşluk + 24 px düğme; yarıçap 10 = iç yarıçap 7 + 3 (kenarlık + boşluk) → eş merkezli
+//   küme içi   2 px aralık, ayraç 16 px yüksek · saat 32 px yüksek
+// (Önceki ölçüler: tek düğme 36, kapsül düğmesi 28, simge 17 → sağ küme ~60 px daha genişti.)
+const TRAY_PILL = 'flex h-[30px] shrink-0 items-center gap-px self-center rounded-[10px] border border-taskbar-border/50 bg-foreground/[0.03] p-0.5';
+const PILL_BUTTON = 'h-6 w-[26px] rounded-[7px]';
+const PILL_HEIGHT = 'h-6 rounded-[7px]'; // metin taşıyan kapsül düğmeleri (sıcaklık, cihaz): yükseklik sabit, genişlik içeriğe göre
 
 function TrayDivider({ className }) {
-  return <span aria-hidden="true" className={cn('mx-0 h-5 w-px shrink-0 self-center rounded-full bg-taskbar-border/70', className)} />;
+  return <span aria-hidden="true" className={cn('mx-0 h-4 w-px shrink-0 self-center rounded-full bg-taskbar-border/70', className)} />;
 }
 
 /** Pil simgesi: şarjda şarj simgesi, %20 ve altında alçak pil (kırmızı), diğer durumda normal; yüzdeyle birlikte okunur. */
 function BatteryGlyph({ percent, charging }) {
-  if (charging) return <BatteryCharging className="size-[17px] text-status-active" />;
-  if (percent <= 20) return <BatteryLow className="size-[17px] text-destructive" />;
-  return <BatteryMedium className="size-[17px] text-status-active" />;
+  if (charging) return <BatteryCharging className="size-4 text-status-active" />;
+  if (percent <= 20) return <BatteryLow className="size-4 text-destructive" />;
+  return <BatteryMedium className="size-4 text-status-active" />;
 }
 
 // Başlatıcı (Grip): uygulama düğmeleriyle AYNI 44 px hedef ve 10 px yarıçap.
@@ -1148,13 +1159,13 @@ function TaskbarButton({ label, active, className, onClick, children, ...rest })
   );
 }
 
-// Sistem tepsisi düğmesi: 36 px, 10 px yarıçap, 17 px simge (kapsül içinde `PILL_BUTTON` ile 32 px).
+// Sistem tepsisi düğmesi: 32 px, 9 px yarıçap, 16 px simge (kapsül içinde `PILL_BUTTON` ile 26 × 24 px).
 function SystemTrayButton({ label, active, className, onClick, children, ...rest }) {
   return (
     <button
       type="button"
       className={cn(
-        'relative flex h-9 w-9 shrink-0 cursor-pointer select-none items-center justify-center self-center rounded-[10px] px-0 text-taskbar-foreground/85 outline-none transition-colors duration-150 hover:bg-accent/65 hover:text-taskbar-foreground focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-[17px] [&_svg]:stroke-[1.9]',
+        'relative flex h-8 w-8 shrink-0 cursor-pointer select-none items-center justify-center self-center rounded-[9px] px-0 text-taskbar-foreground/85 outline-none transition-colors duration-150 hover:bg-accent/65 hover:text-taskbar-foreground focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-4 [&_svg]:stroke-[1.9]',
         active && 'bg-accent text-accent-foreground',
         className
       )}

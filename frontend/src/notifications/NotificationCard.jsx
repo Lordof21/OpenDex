@@ -19,13 +19,14 @@ import {
   toastCardVariants,
 } from '../ui/motion.js';
 import { categoryMeta } from './notificationVisuals.js';
+import { t } from '../i18n/index.js';
 
 const DISMISS_OFFSET = 96;
 const DISMISS_VELOCITY = 520;
 
-// Gövde metni: 12/17 px. Kapalıyken en fazla 2 satır (34 px) + "…"; açıkken tam metin (+ satır listesi).
-const BODY_LINE_PX = 17;
-const BODY = 'whitespace-pre-line text-[12px] leading-[17px] text-notification-foreground/75';
+// Gövde metni: 13/18 px (Fluent/Material body–caption arası). Kapalıyken en fazla 2 satır (36 px) + "…"; açıkken tam metin (+ satır listesi).
+const BODY_LINE_PX = 18;
+const BODY = 'whitespace-pre-line text-[13px] leading-[18px] text-notification-foreground/75';
 const TEXT_EASE = 'cubic-bezier(0.3, 0, 0.15, 1)'; // notificationMotion EASE_SLIDE (büyük alan kayması)
 const TEXT_EASE_CLOSE = 'cubic-bezier(0.4, 0, 0.2, 1)';
 
@@ -202,13 +203,14 @@ function NotificationCard({
         // The click that ends a drag must not open the notification.
         setTimeout(() => { draggedRef.current = false; }, 0);
       }}
+      data-notif-card={interactive ? '' : undefined}
       whileTap={interactive ? { scale: 0.985 } : undefined}
       onHoverStart={() => onHoverChange?.(true)}
       onHoverEnd={() => onHoverChange?.(false)}
       style={{ x, opacity: interactive ? dragOpacity : undefined }}
       role={interactive ? 'button' : undefined}
       tabIndex={interactive ? 0 : -1}
-      aria-label={interactive ? `${label}. Açmak için dokunun` : undefined}
+      aria-label={interactive ? t('notifications.label_acmak_icin_dokunun', { label }) : undefined}
       aria-hidden={interactive ? undefined : true}
       onClick={interactive ? open : undefined}
       onKeyDown={(e) => {
@@ -239,7 +241,7 @@ function NotificationCard({
           <AppIcon
             pkg={model.pkg}
             displayName={model.appName}
-            size={isToast ? 38 : 34}
+            size={isToast ? 38 : 36}
             className="rounded-[26%] shadow-sm"
           />
           <span
@@ -254,16 +256,16 @@ function NotificationCard({
         <div className="min-w-0 flex-1">
           {/* App · unread · time  ⇄  hover actions */}
           <motion.div variants={cardLineVariants} className="flex h-4 items-center gap-1.5">
-            <span className="truncate text-[11px] font-semibold tracking-[0.01em] text-notification-foreground/60">
+            <span className="truncate text-[12px] font-semibold leading-4 text-notification-foreground/60">
               {model.appName}
             </span>
             {model.unread && (
-              <span className="size-1.5 shrink-0 rounded-full bg-notification-accent" aria-label="okunmadı" />
+              <span className="size-1.5 shrink-0 rounded-full bg-notification-accent" aria-label={t('notifications.okunmadi')} />
             )}
             <span className="relative ml-auto flex h-4 shrink-0 items-center">
               <span
                 className={cn(
-                  'text-[10.5px] font-medium tabular-nums text-notification-foreground/50 transition-all duration-200',
+                  'text-[12px] font-medium tabular-nums text-notification-foreground/55 transition-all duration-200',
                   interactive && 'group-hover/card:translate-x-1 group-hover/card:opacity-0 group-focus-within/card:opacity-0',
                 )}
               >
@@ -276,8 +278,8 @@ function NotificationCard({
                       type="button"
                       onClick={stop(() => onMarkRead(model))}
                       className="grid size-5 place-items-center rounded-full text-notification-foreground/60 transition-colors hover:bg-notification-hover hover:text-status-active"
-                      aria-label="Okundu olarak işaretle"
-                      title="Okundu"
+                      aria-label={t('notifications.okundu_olarak_isaretle')}
+                      title={t('notifications.okundu')}
                     >
                       <Check className="size-3" strokeWidth={2.4} />
                     </button>
@@ -286,8 +288,8 @@ function NotificationCard({
                     type="button"
                     onClick={stop(() => onDismiss?.(model))}
                     className="grid size-5 place-items-center rounded-full text-notification-foreground/60 transition-colors hover:bg-notification-hover hover:text-notification-foreground"
-                    aria-label="Bildirimi kapat"
-                    title="Kapat"
+                    aria-label={t('notifications.bildirimi_kapat')}
+                    title={t('common.kapat')}
                   >
                     <X className="size-3" strokeWidth={2.4} />
                   </button>
@@ -300,27 +302,27 @@ function NotificationCard({
             <motion.h4
               variants={cardLineVariants}
               className={cn(
-                'mt-0.5 truncate text-[13px] font-semibold leading-[18px] text-notification-foreground',
+                'mt-0.5 truncate text-[14px] font-semibold leading-5 text-notification-foreground',
                 privacy && 'select-none blur-[4px]',
               )}
             >
-              {privacy ? 'Gizli bildirim' : model.title}
+              {privacy ? t('notifications.gizli_bildirim') : model.title}
             </motion.h4>
           )}
 
           {(body || !model.title) && (
             <motion.div variants={cardLineVariants}>
               {privacy ? (
-                <p className={cn('mt-0.5 line-clamp-2 select-none blur-[5px]', BODY)}>İçerik gizli — göstermek için gizliliği kapatın</p>
+                <p className={cn('mt-0.5 line-clamp-2 select-none blur-[5px]', BODY)}>{t('notifications.icerik_gizli_gostermek_icin_gizliligi')}</p>
               ) : expandable ? (
                 <ExpandableText
                   expanded={expanded}
-                  collapsed={<p className={cn('line-clamp-2', BODY)}>{model.text || 'Açmak için dokunun'}</p>}
+                  collapsed={<p className={cn('line-clamp-2', BODY)}>{model.text || t('notifications.acmak_icin_dokunun')}</p>}
                   full={
                     <>
                       <p className={BODY}>{model.bigText || model.text}</p>
                       {!model.bigText && model.lines.length > 1 && (
-                        <ul className="mt-1.5 space-y-1 border-l-2 border-notification-border/60 pl-2 text-[11.5px] leading-[16px] text-notification-foreground/70">
+                        <ul className="mt-1.5 space-y-1 border-l-2 border-notification-border/60 pl-2 text-[12px] leading-[17px] text-notification-foreground/70">
                           {model.lines.map((line, i) => <li key={i}>{line}</li>)}
                         </ul>
                       )}
@@ -328,7 +330,7 @@ function NotificationCard({
                   }
                 />
               ) : (
-                <p className={cn('mt-0.5 line-clamp-2', BODY)}>{body || 'Açmak için dokunun'}</p>
+                <p className={cn('mt-0.5 line-clamp-2', BODY)}>{body || t('notifications.acmak_icin_dokunun')}</p>
               )}
             </motion.div>
           )}
@@ -340,7 +342,7 @@ function NotificationCard({
                   key={act.action_id}
                   type="button"
                   onClick={stop(() => onAction?.(model, act))}
-                  className="notif-pill rounded-full px-2.5 py-1 text-[10.5px] font-semibold text-notification-foreground/85 active:scale-95"
+                  className="notif-pill rounded-full px-3 py-1 text-[12px] font-semibold text-notification-foreground/85 active:scale-95"
                 >
                   {act.title}
                 </button>
@@ -353,7 +355,7 @@ function NotificationCard({
           <button
             type="button"
             onClick={stop(() => onToggleExpand?.(model))}
-            aria-label={expanded ? 'Metni daralt' : 'Metnin tamamını göster'}
+            aria-label={expanded ? t('notifications.metni_daralt') : t('notifications.metnin_tamamini_goster')}
             aria-expanded={expanded}
             className="mt-[15px] grid size-6 shrink-0 place-items-center rounded-full text-notification-foreground/55 outline-none transition-[background-color,color,transform] duration-150 hover:bg-notification-hover hover:text-notification-foreground active:scale-90 focus-visible:ring-2 focus-visible:ring-ring"
           >

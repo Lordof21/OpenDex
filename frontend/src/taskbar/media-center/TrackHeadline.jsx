@@ -9,6 +9,7 @@ import { Equalizer } from '../../ui/media/Equalizer.jsx';
 import { cn } from '../../lib/utils.js';
 import { STATUS_LABEL, bylineOf, titleScale } from './mediaCenterModel.js';
 import { headlineSwap } from './choreography.js';
+import { t } from '../../i18n/index.js';
 
 const TITLE_SIZE = {
   lg: 'text-[32px] leading-[34px]',
@@ -29,8 +30,8 @@ function StatusLine({ status }) {
 
 export function TrackHeadline({ session, status }) {
   const reduce = useReducedMotion();
-  const title = session.title || 'Medya';
-  const { artist, album } = bylineOf(session.artist || 'Android Medya', session.album);
+  const title = session.title || t('taskbar.medya');
+  const { artist, album } = bylineOf(session.artist || t('common.android_medya'), session.album);
 
   return (
     <div className="relative">

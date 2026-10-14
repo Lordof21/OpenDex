@@ -16,6 +16,7 @@ import { iconPackageOf } from '../window/workspacePackage.js';
 import { getWindowThumbnail, subscribeThumbnail } from '../state/windowThumbnailCache.js';
 import { drawDownscaled } from '../lib/downscale.js';
 import { ACTION_LABEL, cardLeft, cardWidthFor, clampAspect, fitBox, toggleActionFor } from './taskbarModel.js';
+import { t } from '../i18n/index.js';
 
 const LIVE_INTERVAL_MS = 66; // ~15 fps: küçük bir önizleme için yeterli, 60 fps tam çözünürlük kopyalamaya göre çok ucuz
 const ASPECT_EPSILON = 0.012; // kaynak oranı bu kadar değişmeden kutu yeniden boyutlanmaz (sürekli yeniden yerleşimi önler)
@@ -119,7 +120,7 @@ export const WindowPreview = forwardRef(function WindowPreview({
   const cardW = cardWidthFor(box.w);
   const positionStyle = { left: `${cardLeft(anchorX, cardW, vw)}px`, width: `${cardW}px` };
 
-  const displayName = app?.name || targetWin?.title || targetWin?.package || 'Uygulama';
+  const displayName = app?.name || targetWin?.title || targetWin?.package || t('taskbar.uygulama');
   const iconPkg = targetWin ? iconPackageOf(targetWin) : app?.package;
 
   return (
@@ -133,14 +134,14 @@ export const WindowPreview = forwardRef(function WindowPreview({
           <AppIcon app={app} pkg={iconPkg} displayName={displayName} size={24} />
           <span className="min-w-0 flex-1">
             <span className="block truncate text-xs font-semibold leading-4">{displayName}</span>
-            {isMinimized && <span className="block text-[10px] leading-3 text-muted-foreground">Küçültüldü</span>}
+            {isMinimized && <span className="block text-[10px] leading-3 text-muted-foreground">{t('taskbar.kucultuldu')}</span>}
           </span>
           {app?.id !== 'lovable' && (
             <button
               type="button"
               className="grid size-7 shrink-0 cursor-pointer place-items-center rounded-md text-muted-foreground transition-colors hover:bg-destructive hover:text-destructive-foreground"
               onClick={onClose}
-              aria-label={`${displayName} uygulamasını kapat`}
+              aria-label={t('taskbar.displayname_uygulamasini_kapat', { displayName })}
             >
               <X className="size-3.5" />
             </button>
@@ -151,7 +152,7 @@ export const WindowPreview = forwardRef(function WindowPreview({
           <button
             type="button"
             onClick={onActivate}
-            aria-label={`${displayName}: ${ACTION_LABEL[action] ?? 'Aç'}`}
+            aria-label={`${displayName}: ${ACTION_LABEL[action] ?? t('common.ac')}`}
             data-testid="window-preview-thumb"
             className="group/thumb relative block cursor-pointer overflow-hidden rounded-lg bg-video-backdrop p-0 outline-none ring-1 ring-border/70 transition-shadow duration-150 hover:ring-2 hover:ring-primary/60 focus-visible:ring-2 focus-visible:ring-ring"
             style={{ width: box.w, height: box.h }}

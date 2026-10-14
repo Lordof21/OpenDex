@@ -11,28 +11,29 @@ import { useAudioMixerStore } from '../state/audioMixerStore.js';
 import { useSystemStore } from '../state/systemStore.js';
 import { cn } from '../lib/utils.js';
 import { PrecisionSlider } from '../ui/PrecisionSlider.jsx';
+import { t } from '../i18n/index.js';
 
 const FINE_TUNE_MIN = -300;
 const FINE_TUNE_MAX = 500;
 const PHASE_TEXT = {
-  mic: 'Mikrofon açılıyor…',
-  clock: 'Telefonun saati ölçülüyor…',
-  listen: 'Dinleniyor: telefon ve DeX ölçü sesi çalıyor (≈ 5 sn)…',
-  analyze: 'Çözümleniyor…',
+  mic: t('taskbar.mikrofon_aciliyor'),
+  clock: t('taskbar.telefonun_saati_olculuyor'),
+  listen: t('taskbar.dinleniyor_telefon_ve_dex_olcu_sesi'),
+  analyze: t('taskbar.cozumleniyor'),
 };
 
 /** What the alignment is doing, in words — `apps` = the store's apps, `sync` = what the backend says about it. */
 export function syncStatus(sync, apps) {
   const both = Object.values(apps || {}).filter((a) => a.live_route === 'both');
   if (sync && sync.supported === false) {
-    return { tone: 'warn', text: 'Telefon yardımcısı güncel değil: «İkisi»de telefon sesi DeX\'ten önce duyulur. py backend/java/build.py ile yenileyip OpenDeX\'i yeniden başlatın.' };
+    return { tone: 'warn', text: t('taskbar.telefon_yardimcisi_guncel_degil_ikisi') };
   }
-  if (both.length === 0) return { tone: 'idle', text: '«İkisi» seçili bir uygulama yok.' };
+  if (both.length === 0) return { tone: 'idle', text: t('taskbar.ikisi_secili_bir_uygulama_yok') };
   const synced = both.find((a) => a.synced);
   if (synced) {
-    return { tone: 'ok', text: `Telefon ve DeX aynı anda çalıyor (ortak gecikme ≈ ${synced.target_ms} ms).` };
+    return { tone: 'ok', text: t('taskbar.telefon_ve_dex_ayni_anda_caliyor', { target_ms: synced.target_ms }) };
   }
-  return { tone: 'warn', text: 'Telefon bu uygulamada hizalanamadı; ses telefonda anlık çalıyor (DeX\'ten önce duyulur).' };
+  return { tone: 'warn', text: t('taskbar.telefon_bu_uygulamada_hizalanamadi') };
 }
 
 /** The laptop's microphone hears the phone and DeX play a test chirp each and the fine tune is set from the gap it hears. */
@@ -57,9 +58,9 @@ function AutoCalibrate({ supported }) {
       abortRef.current = null;
     }
     setRun({ phase: 'idle', result: { ok: false, reason: 'cancelled' } });
-    useSystemStore.getState().pushToast?.('Ölçüm iptal edildi; mikrofon kapatıldı.', {
+    useSystemStore.getState().pushToast?.(t('common.olcum_iptal_edildi_mikrofon_kapatildi'), {
       tone: 'info',
-      title: 'Ses Hizalama',
+      title: t('taskbar.ses_hizalama'),
     });
   };
 
@@ -67,9 +68,9 @@ function AutoCalibrate({ supported }) {
     const controller = new AbortController();
     abortRef.current = controller;
     setRun({ phase: 'mic', result: null });
-    useSystemStore.getState().pushToast?.('Ses ölçümü başladı; telefon ve DeX hoparlörlerini açık tutun.', {
+    useSystemStore.getState().pushToast?.(t('taskbar.ses_olcumu_basladi_telefon_ve_dex'), {
       tone: 'info',
-      title: 'Ses Hizalama',
+      title: t('taskbar.ses_hizalama'),
     });
 
     let result = await runCalibration({
@@ -101,13 +102,13 @@ function AutoCalibrate({ supported }) {
 
     if (result.ok) {
       useSystemStore.getState().pushToast?.(
-        `Ses hizalandı! İnce ayar ${result.offsetMs > 0 ? '+' : ''}${result.offsetMs} ms uygulandı.`,
-        { tone: 'success', title: 'Hizalama Başarılı' },
+        t('taskbar.ses_hizalandi_ince_ayar_valueoffsetms', { value: result.offsetMs > 0 ? '+' : '', offsetMs: result.offsetMs }),
+        { tone: 'success', title: t('taskbar.hizalama_basarili') },
       );
     } else if (result.reason !== 'cancelled') {
       useSystemStore.getState().pushToast?.(
         calibrationMessage(result),
-        { tone: 'warn', title: 'Ses Hizalama' },
+        { tone: 'warn', title: t('taskbar.ses_hizalama') },
       );
     }
   };
@@ -134,7 +135,7 @@ function AutoCalibrate({ supported }) {
           ) : (
             <Mic className="size-3.5" />
           )}
-          {busy ? (PHASE_TEXT[run.phase] || 'Ölçülüyor…') : 'Mikrofonla otomatik ayarla'}
+          {busy ? (PHASE_TEXT[run.phase] || t('common.olculuyor')) : t('taskbar.mikrofonla_otomatik_ayarla')}
         </button>
 
         {busy && (
@@ -142,11 +143,11 @@ function AutoCalibrate({ supported }) {
             type="button"
             onClick={cancel}
             className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[10.5px] text-muted-foreground hover:bg-muted transition-colors cursor-pointer"
-            title="Ölçümü iptal et ve mikrofonu kapat"
+            title={t('taskbar.olcumu_iptal_et_ve_mikrofonu_kapat')}
             data-testid="audio-sync-auto-cancel"
           >
             <X className="size-3" />
-            İptal
+            {t('common.iptal')}
           </button>
         )}
       </div>
@@ -167,7 +168,7 @@ function AutoCalibrate({ supported }) {
           ? PHASE_TEXT[run.phase]
           : run.result
             ? calibrationMessage(run.result)
-            : 'Telefonu dizüstünün yanına koyun, medyayı duraklatın; DeX sesi hoparlörden çıksın. Ölçülen fark ince ayara yazılır.'}
+            : t('taskbar.telefonu_dizustunun_yanina_koyun')}
       </p>
     </div>
   );
@@ -182,16 +183,16 @@ export default function SyncFineTune({ className }) {
 
   return (
     <div className={cn('px-2 py-1.5', className)} data-testid="audio-sync">
-      <p className="pb-1 text-[11px] font-semibold">Telefon–DeX ince ayarı</p>
+      <p className="pb-1 text-[11px] font-semibold">{t('common.telefon_dex_ince_ayari')}</p>
       <PrecisionSlider
         value={offset}
         min={FINE_TUNE_MIN}
         max={FINE_TUNE_MAX}
         step={5}
         unit="ms"
-        label="Telefon–DeX ince ayarı"
+        label={t('common.telefon_dex_ince_ayari')}
         auto={offset === 0}
-        autoLabel="Oto"
+        autoLabel={t('common.oto')}
         onAuto={() => updateSettings({ audio_sync_offset_ms: 0 }).catch(() => {})}
         onCommit={(v) => updateSettings({ audio_sync_offset_ms: v }).catch(() => {})}
       />
@@ -199,8 +200,7 @@ export default function SyncFineTune({ className }) {
         {status.text}
       </p>
       <p className="pt-0.5 text-[9.5px] leading-snug text-muted-foreground">
-        Oto: iki çıkış ortak bir zaman çizgisine göre kendiliğinden hizalanır. Telefonu yine de önde/geride duyuyorsanız
-        aşağıdaki ölçümü çalıştırın ya da kaydırın (+ telefonu geciktirir, − öne alır).
+        {t('taskbar.oto_iki_cikis_ortak_bir_zaman')}
       </p>
       <AutoCalibrate supported={sync?.supported !== false} />
     </div>

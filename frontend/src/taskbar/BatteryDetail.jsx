@@ -14,6 +14,7 @@ import {
   HEALTH_TITLE, MISSING, capacityText, chargeSourceText, diagnosisText, etaText, formatDate, formatMah, healthText,
   powerText, protectionText, sessionText, statusLabel, temperatureText,
 } from '../state/batteryView.js';
+import { t } from '../i18n/index.js';
 
 const POLL_MS = 5000;
 
@@ -103,50 +104,49 @@ export default function BatteryDetail() {
       ))}
 
       <div className="mt-2 overflow-hidden rounded-lg border border-border/70 bg-muted/40 px-3">
-        <Row icon={Plug} label="Şarj Kaynağı" value={chargeSourceText(charging)} tone="text-status-active" />
-        <Row icon={Activity} label={charging?.direction === 'out' ? 'Anlık Tüketim' : 'Şarj Gücü'} value={powerText(charging)} tone="text-window-expand" />
-        <Row icon={Zap} label="Voltaj" value={voltage ? `${voltage.toFixed(2)} V` : MISSING} tone="text-primary" />
+        <Row icon={Plug} label={t('taskbar.sarj_kaynagi')} value={chargeSourceText(charging)} tone="text-status-active" />
+        <Row icon={Activity} label={charging?.direction === 'out' ? t('taskbar.anlik_tuketim') : t('taskbar.sarj_gucu')} value={powerText(charging)} tone="text-window-expand" />
+        <Row icon={Zap} label={t('taskbar.voltaj')} value={voltage ? `${voltage.toFixed(2)} V` : MISSING} tone="text-primary" />
         <Row
           icon={Thermometer}
-          label="Pil Sıcaklığı"
+          label={t('taskbar.pil_sicakligi')}
           value={temperatureText(batteryC, thermal?.battery_state, { battery: true })}
           tone="text-window-close"
         />
         {Number.isFinite(thermal?.soc_c) && (
-          <Row icon={Cpu} label="İşlemci (SoC)" value={temperatureText(thermal.soc_c, thermal.soc_state)} tone="text-muted-foreground" />
+          <Row icon={Cpu} label={t('taskbar.islemci_soc')} value={temperatureText(thermal.soc_c, thermal.soc_state)} tone="text-muted-foreground" />
         )}
-        {protection && <Row icon={ShieldCheck} label="Pil Koruması" value={protection} tone="text-status-active" title="Telefonun ayarı; sınırın şu an işlediğini göstermez." />}
-        {session && <Row icon={RefreshCw} label="Bu Oturumda" value={session} tone="text-primary" title="OpenDeX bağlandığından beri pilin verdiği/aldığı." />}
+        {protection && <Row icon={ShieldCheck} label={t('taskbar.pil_korumasi')} value={protection} tone="text-status-active" title={t('taskbar.telefonun_ayari_sinirin_su_an')} />}
+        {session && <Row icon={RefreshCw} label={t('taskbar.bu_oturumda')} value={session} tone="text-primary" title={t('taskbar.opendex_baglandigindan_beri_pilin')} />}
       </div>
 
       <div className="mt-2 overflow-hidden rounded-lg border border-border/70 bg-muted/40 px-3">
         <Row
           icon={HeartPulse}
-          label="Pil Sağlığı"
+          label={t('taskbar.pil_sagligi')}
           value={healthText(report?.health)}
           tone="text-status-active"
-          title={report?.health ? HEALTH_TITLE[report.health.source] : 'Bu telefon pil sağlığını bildirmiyor.'}
+          title={report?.health ? HEALTH_TITLE[report.health.source] : t('taskbar.bu_telefon_pil_sagligini_bildirmiyor')}
         />
-        <Row icon={Cpu} label="Kapasite" value={capacityText(capacity)} tone="text-muted-foreground" />
-        {report?.cycles != null && <Row icon={RefreshCw} label="Şarj Döngüsü" value={`${report.cycles}`} tone="text-muted-foreground" />}
+        <Row icon={Cpu} label={t('taskbar.kapasite')} value={capacityText(capacity)} tone="text-muted-foreground" />
+        {report?.cycles != null && <Row icon={RefreshCw} label={t('taskbar.sarj_dongusu')} value={`${report.cycles}`} tone="text-muted-foreground" />}
         {report?.first_use && (
           <Row
             icon={Calendar}
-            label="İlk Kullanım"
-            value={`${formatDate(report.first_use.at_ms)} · ${report.first_use.age_days} gün`}
+            label={t('taskbar.ilk_kullanim')}
+            value={t('taskbar.formatdate_age_days_gun', { formatDate: formatDate(report.first_use.at_ms), age_days: report.first_use.age_days })}
             tone="text-muted-foreground"
           />
         )}
-        {report?.technology && <Row icon={Cpu} label="Pil Kimyası" value={report.technology} tone="text-muted-foreground" />}
+        {report?.technology && <Row icon={Cpu} label={t('taskbar.pil_kimyasi')} value={report.technology} tone="text-muted-foreground" />}
       </div>
 
       {report?.limited && (
         <Notice tone="info">
-          Telefon yardımcısı güncel değil: kapasite, sağlık ve şarj ayrıntıları gösterilemiyor. <code>py backend/java/build.py</code> ile
-          yenileyip OpenDeX&apos;i yeniden başlatın.
+          {t('taskbar.telefon_yardimcisi_guncel_degil')}{' '} <code>{t('taskbar.py_backend_java_build_py')}</code> {' '}{t('taskbar.ile_yenileyip_opendex_i_yeniden')}
         </Notice>
       )}
-      {report && report.ok === false && <Notice tone="info">Pil ayrıntıları şu an okunamıyor.</Notice>}
+      {report && report.ok === false && <Notice tone="info">{t('taskbar.pil_ayrintilari_su_an_okunamiyor')}</Notice>}
     </div>
   );
 }

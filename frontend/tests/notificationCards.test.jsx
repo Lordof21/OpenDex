@@ -97,12 +97,71 @@ describe('notification center', () => {
     expect(screen.getByRole('button', { name: /WhatsApp, Ali/ })).toBeInTheDocument();
   });
 
-  it('dismisses through exactly one owner (no double API call)', () => {
+  it('dismisses through exactly one owner (no double API call) once the undo window ends', () => {
+    vi.useFakeTimers();
+    try {
+      const onDismiss = vi.fn();
+      render(<ClockCalendar now={new Date()} onDismiss={onDismiss} />);
+      fireEvent.click(screen.getAllByRole('button', { name: 'Bildirimi kapat' })[0]);
+      expect(onDismiss).not.toHaveBeenCalled(); // geri alınabilir: kalıcı silme beklemede
+      act(() => { vi.advanceTimersByTime(5100); });
+      expect(onDismiss).toHaveBeenCalledTimes(1);
+      expect(api.post).not.toHaveBeenCalledWith('/api/notifications/dismiss', expect.anything());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('undo cancels a dismissal: nothing is deleted and the card stays', () => {
+    vi.useFakeTimers();
+    try {
+      const onDismiss = vi.fn();
+      render(<ClockCalendar now={new Date()} onDismiss={onDismiss} />);
+      fireEvent.click(screen.getAllByRole('button', { name: 'Bildirimi kapat' })[0]);
+      fireEvent.click(screen.getByRole('button', { name: 'Geri al' }));
+      act(() => { vi.advanceTimersByTime(6000); });
+      expect(onDismiss).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('commits a pending dismissal when the panel closes (nothing is lost)', () => {
     const onDismiss = vi.fn();
-    render(<ClockCalendar now={new Date()} onDismiss={onDismiss} />);
+    const { unmount } = render(<ClockCalendar now={new Date()} onDismiss={onDismiss} />);
     fireEvent.click(screen.getAllByRole('button', { name: 'Bildirimi kapat' })[0]);
+    unmount();
     expect(onDismiss).toHaveBeenCalledTimes(1);
-    expect(api.post).not.toHaveBeenCalledWith('/api/notifications/dismiss', expect.anything());
+  });
+
+  it('filters by unread and by app, and offers a way back from an empty filter', async () => {
+    render(<ClockCalendar now={new Date()} />);
+    // WhatsApp (2 okunmamış) + Gmail (okunmuş): çıkan kartlar çıkış animasyonunu bitirince DOM'dan kalkar
+    fireEvent.click(screen.getByRole('button', { name: /^Okunmamış/ }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Gmail, Fatura/ })).toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: /^Tümü\s*\d/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Gmail, Fatura/ })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Gmail 1' }));
+    await waitFor(() => expect(screen.queryByLabelText('WhatsApp, 2 bildirim')).toBeNull());
+    // Gmail + okunmamış = boş → geri dönüş düğmesi
+    fireEvent.click(screen.getByRole('button', { name: /^Okunmamış/ }));
+    expect(await screen.findByText('Bu filtrede bildirim yok')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Filtreyi temizle' }));
+    expect(await screen.findByLabelText('WhatsApp, 2 bildirim')).toBeInTheDocument();
+  });
+
+  it('marks everything read in one tap', () => {
+    render(<ClockCalendar now={new Date()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Tümünü okundu say' }));
+    expect(useNotificationStore.getState().notifications.every((n) => n.read)).toBe(true);
+  });
+
+  it('sections by time only when there is more than one', () => {
+    const OLD = { ...MAIL, id: 'n9', android_key: 'x9', timestamp: Date.now() / 1000 - 3 * 86400 };
+    useNotificationStore.setState({ notifications: [WA, OLD] });
+    render(<ClockCalendar now={new Date()} />);
+    expect(screen.getByText('Son bir saat')).toBeInTheDocument();
+    expect(screen.getByText('Daha eski')).toBeInTheDocument();
   });
 
   it('an action pill never opens the card', async () => {

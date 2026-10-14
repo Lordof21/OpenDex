@@ -13,17 +13,18 @@ import {
   TriangleAlert,
   Users,
 } from 'lucide-react';
-import { formatRelativeTime } from '../desktop/notifications/timeUtils.js';
+import { formatRelativeTime, timestampMs } from '../desktop/notifications/timeUtils.js';
+import { t } from '../i18n/index.js';
 
 /** Backend kategorisi (schemas/notifications.py NotificationCategory) → rozet ikonu, renk token'ı, erişilebilir ad. */
 const CATEGORY_META = {
-  msg: { Icon: MessageCircle, tone: 'var(--status-active)', label: 'Mesaj' },
-  email: { Icon: Mail, tone: 'var(--app-mail)', label: 'E-posta' },
-  media: { Icon: Music2, tone: 'var(--app-gallery)', label: 'Medya' },
-  social: { Icon: Users, tone: 'var(--app-browser)', label: 'Sosyal' },
-  sys: { Icon: ShieldAlert, tone: 'var(--app-settings)', label: 'Sistem' },
-  call: { Icon: Bell, tone: 'var(--status-active)', label: 'Arama' },
-  generic: { Icon: Bell, tone: 'var(--notification-accent)', label: 'Bildirim' },
+  msg: { Icon: MessageCircle, tone: 'var(--status-active)', label: t('notifications.mesaj') },
+  email: { Icon: Mail, tone: 'var(--app-mail)', label: t('notifications.e_posta') },
+  media: { Icon: Music2, tone: 'var(--app-gallery)', label: t('common.medya') },
+  social: { Icon: Users, tone: 'var(--app-browser)', label: t('notifications.sosyal') },
+  sys: { Icon: ShieldAlert, tone: 'var(--app-settings)', label: t('common.sistem') },
+  call: { Icon: Bell, tone: 'var(--status-active)', label: t('notifications.arama') },
+  generic: { Icon: Bell, tone: 'var(--notification-accent)', label: t('notifications.bildirim') },
 };
 
 export function categoryMeta(category) {
@@ -39,7 +40,7 @@ export function toCardModel(n) {
   if (!n) return null;
   const isDemo = !n.android_key && (n.headline !== undefined || n.appId !== undefined) && n.title === undefined;
   const pkg = n.package || n.package_name || n.appId || null;
-  const appName = n.app_name || n.appName || (pkg ? pkg.split('.').pop() : 'Bildirim');
+  const appName = n.app_name || n.appName || (pkg ? pkg.split('.').pop() : t('common.bildirim'));
   const title = n.title || n.headline || '';
   const text = n.text || n.detail || '';
   const bigText = n.big_text || null;
@@ -52,6 +53,7 @@ export function toCardModel(n) {
     bigText: bigText && bigText !== text ? bigText : null,
     lines: Array.isArray(n.lines) ? n.lines : [],
     time: typeof n.time === 'string' && isDemo ? n.time : formatRelativeTime(n.timestamp || n),
+    ts: timestampMs(n),
     category: n.category || 'generic',
     actions: Array.isArray(n.actions) ? n.actions.filter((a) => a && a.action_type !== 'reply') : [],
     unread: n.read === false,
@@ -63,10 +65,10 @@ export function toCardModel(n) {
 // ── Orta üst sistem mesajı ("ada") ────────────────────────────────────────────────────────────────────────────
 
 export const TONES = {
-  success: { Icon: CircleCheck, color: 'var(--status-active)', label: 'Başarılı' },
-  warning: { Icon: TriangleAlert, color: 'var(--warning)', label: 'Uyarı' },
-  error: { Icon: CircleAlert, color: 'var(--destructive)', label: 'Hata' },
-  info: { Icon: Info, color: 'var(--info)', label: 'Bilgi' },
+  success: { Icon: CircleCheck, color: 'var(--status-active)', label: t('notifications.basarili') },
+  warning: { Icon: TriangleAlert, color: 'var(--warning)', label: t('common.uyari') },
+  error: { Icon: CircleAlert, color: 'var(--destructive)', label: t('notifications.hata') },
+  info: { Icon: Info, color: 'var(--info)', label: t('common.bilgi') },
 };
 
 // Mesajın başındaki emoji tonu söyler (🎉/✓ başarı, ⚠️ uyarı, 🔒 kilit…) — ikon onu zaten gösterdiği için metinden atılır.

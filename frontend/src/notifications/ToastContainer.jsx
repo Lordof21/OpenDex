@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { AnimatePresence, LayoutGroup } from 'framer-motion';
 import { useNotificationStore } from '../state/notificationStore.js';
 import HeadsUpToast from './HeadsUpToast.jsx';
+import { t } from '../i18n/index.js';
 
 // Sağ üst anlık bildirimler: en yenisi önde, eskileri arkasında yığın (iOS). Fareyle üzerine gelince yığın açılır ve
 // süreler durur — okurken hiçbir bildirim elinizin altından kaybolmaz.
@@ -12,7 +13,7 @@ export default function ToastContainer() {
 
   return (
     <aside
-      aria-label="Anlık bildirimler"
+      aria-label={t('notifications.anlik_bildirimler')}
       aria-live="polite"
       className="pointer-events-none fixed right-4 top-4 z-headsUpToast w-[min(23rem,calc(100vw-2rem))]"
     >

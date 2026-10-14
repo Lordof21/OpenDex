@@ -5,6 +5,7 @@
 import React from 'react';
 import { ROUTE_OPTIONS } from '../../ui/audioRouting.jsx';
 import { CHOICE_MENU_WIDTH_PX, ChoiceMenu } from '../../ui/ChoiceMenu.jsx';
+import { t } from '../../i18n/index.js';
 
 export const ROUTE_MENU_WIDTH_PX = CHOICE_MENU_WIDTH_PX;
 
@@ -13,7 +14,7 @@ export function RouteMenu({ anchor, current, notice, onPick, onClose }) {
   return (
     <ChoiceMenu
       anchor={anchor}
-      title="Ses nerede çalsın"
+      title={t('taskbar.ses_nerede_calsin')}
       options={ROUTE_OPTIONS}
       current={current}
       notice={notice}

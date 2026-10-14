@@ -23,25 +23,26 @@ import Button from '../ui/Button.jsx';
 import { Card } from '../ui/Card.jsx';
 import { ConfirmStrip, EmptyNote, KeyValueRow } from '../ui/Feedback.jsx';
 import { SectionLabel } from '../ui/Typography.jsx';
+import { t } from '../i18n/index.js';
 
 const POLL_MS = 3000;
 const READONLY_POLL_MS = 10000; // the fallback is a full `dumpsys bluetooth_manager` — keep it rare
 
 const KIND = {
-  headphones: { icon: Headphones, label: 'Kulaklık' },
-  speaker: { icon: Speaker, label: 'Hoparlör' },
-  watch: { icon: Watch, label: 'Saat / giyilebilir' },
-  car: { icon: Car, label: 'Araç' },
-  phone: { icon: Smartphone, label: 'Telefon' },
-  computer: { icon: Laptop, label: 'Bilgisayar' },
-  input: { icon: Keyboard, label: 'Giriş aygıtı' },
-  other: { icon: BluetoothIcon, label: 'Diğer' },
+  headphones: { icon: Headphones, label: t('taskbar.kulaklik') },
+  speaker: { icon: Speaker, label: t('taskbar.hoparlor') },
+  watch: { icon: Watch, label: t('taskbar.saat_giyilebilir') },
+  car: { icon: Car, label: t('taskbar.arac') },
+  phone: { icon: Smartphone, label: t('common.telefon') },
+  computer: { icon: Laptop, label: t('common.bilgisayar') },
+  input: { icon: Keyboard, label: t('taskbar.giris_aygiti') },
+  other: { icon: BluetoothIcon, label: t('common.diger') },
 };
 
 const kindOf = (d) => KIND[d.kind] || KIND.other;
 
 // Services the device advertises (daemon: SDP/GATT UUIDs) — not which one is connected this instant.
-const PROFILE = { media: 'Medya sesi', call: 'Arama', input: 'Giriş' };
+const PROFILE = { media: t('taskbar.medya_sesi_2'), call: t('taskbar.arama'), input: t('taskbar.giris') };
 export const profilesLabel = (profiles) =>
   (profiles || []).map((p) => PROFILE[p]).filter(Boolean).join(' · ') || null;
 
@@ -49,10 +50,10 @@ function DeviceRow({ device, busy, hidden, readonly, onAction }) {
   const [open, setOpen] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const { icon: Icon, label } = kindOf(device);
-  const name = device.name || device.display_address || device.address || 'Adsız cihaz';
+  const name = device.name || device.display_address || device.address || t('taskbar.adsiz_cihaz');
   const canAct = !readonly && Boolean(device.address);
   const toggleVerb = device.connected ? 'disconnect' : 'connect';
-  const status = device.connected === true ? 'Bağlı' : 'Eşleşmiş';
+  const status = device.connected === true ? t('common.bagli') : t('taskbar.eslesmis');
 
   return (
     <div className="border-b border-border/40 py-1 last:border-b-0">
@@ -70,7 +71,7 @@ function DeviceRow({ device, busy, hidden, readonly, onAction }) {
           className="min-w-0 flex-1 text-left cursor-pointer"
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
-          aria-label={`${name} ayrıntıları`}
+          aria-label={t('taskbar.name_ayrintilari', { name })}
         >
           <span className="flex items-center gap-1">
             <span className="truncate text-[11px] font-medium">{name}</span>
@@ -82,25 +83,25 @@ function DeviceRow({ device, busy, hidden, readonly, onAction }) {
               {device.connected && profilesLabel(device.profiles) ? ` · ${profilesLabel(device.profiles)}` : ''}
             </span>
             {device.battery >= 0 && (
-              <span className="inline-flex items-center gap-0.5" aria-label={`Pil yüzde ${device.battery}`}>
+              <span className="inline-flex items-center gap-0.5" aria-label={t('taskbar.pil_yuzde_battery', { battery: device.battery })}>
                 <Battery className="size-3" />%{device.battery}
               </span>
             )}
           </span>
         </button>
         {busy ? (
-          <LoaderCircle className="size-3.5 animate-spin text-muted-foreground" aria-label="İşlem sürüyor" />
+          <LoaderCircle className="size-3.5 animate-spin text-muted-foreground" aria-label={t('taskbar.islem_suruyor')} />
         ) : (
           canAct && (
             <>
               {!hidden[toggleVerb] && (
                 <Button size="2xs" variant="ghost" onClick={() => onAction(device.address, toggleVerb)}>
-                  {device.connected ? 'Bağlantıyı kes' : 'Bağlan'}
+                  {device.connected ? t('taskbar.baglantiyi_kes') : t('common.baglan')}
                 </Button>
               )}
               {!hidden.forget && (
-                <Button size="2xs" variant="destructive-ghost" onClick={() => setConfirm(true)} aria-label={`${name} cihazını unut`}>
-                  Unut
+                <Button size="2xs" variant="destructive-ghost" onClick={() => setConfirm(true)} aria-label={t('taskbar.name_cihazini_unut', { name })}>
+                  {t('taskbar.unut')}
                 </Button>
               )}
             </>
@@ -109,7 +110,7 @@ function DeviceRow({ device, busy, hidden, readonly, onAction }) {
       </div>
       {confirm && (
         <ConfirmStrip
-          message="Bu cihaz unutulsun mu? Yeniden eşleştirmek gerekir."
+          message={t('taskbar.bu_cihaz_unutulsun_mu_yeniden')}
           onCancel={() => setConfirm(false)}
           onConfirm={() => {
             setConfirm(false);
@@ -119,12 +120,12 @@ function DeviceRow({ device, busy, hidden, readonly, onAction }) {
       )}
       {open && (
         <div className="mt-1 ml-9 rounded-md bg-background/60 px-2 py-1">
-          <KeyValueRow label="Ad" value={name} />
-          <KeyValueRow label="Adres" value={device.address || device.display_address} />
-          <KeyValueRow label="Tür" value={label} />
-          <KeyValueRow label="Durum" value={status} />
-          <KeyValueRow label="Profiller" value={profilesLabel(device.profiles)} />
-          <KeyValueRow label="Pil" value={device.battery >= 0 ? `%${device.battery}` : 'Bildirilmiyor'} />
+          <KeyValueRow label={t('common.ad')} value={name} />
+          <KeyValueRow label={t('taskbar.adres')} value={device.address || device.display_address} />
+          <KeyValueRow label={t('common.tur')} value={label} />
+          <KeyValueRow label={t('taskbar.durum')} value={status} />
+          <KeyValueRow label={t('taskbar.profiller')} value={profilesLabel(device.profiles)} />
+          <KeyValueRow label={t('common.pil')} value={device.battery >= 0 ? `%${device.battery}` : 'Bildirilmiyor'} />
         </div>
       )}
     </div>
@@ -147,13 +148,13 @@ export default function BluetoothDetail({ enabled }) {
   const onAction = (address, verb) => useConnectivityStore.getState().btAction(address, verb);
 
   if (enabled === false) {
-    return <EmptyNote>Bluetooth kapalı. Cihazları görmek için sağ üstten açın.</EmptyNote>;
+    return <EmptyNote>{t('taskbar.bluetooth_kapali_cihazlari_gormek')}</EmptyNote>;
   }
   if (!bt) {
-    return <EmptyNote>{btError ? `Bluetooth bilgisi okunamadı: ${btError}` : 'Yükleniyor…'}</EmptyNote>;
+    return <EmptyNote>{btError ? t('taskbar.bluetooth_bilgisi_okunamadi_bterror', { btError }) : t('common.yukleniyor_2')}</EmptyNote>;
   }
   if (!bt.ok) {
-    return <EmptyNote>Bluetooth bilgisi okunamadı. {btErrorText(bt.error)}</EmptyNote>;
+    return <EmptyNote>{t('taskbar.bluetooth_bilgisi_okunamadi', { btErrorText: btErrorText(bt.error) })}</EmptyNote>;
   }
 
   const devices = bt.devices || [];
@@ -175,23 +176,23 @@ export default function BluetoothDetail({ enabled }) {
     <div className="pb-1">
       {readonly && (
         <p className="mt-2 rounded-md bg-muted/45 px-2 py-1.5 text-[10px] leading-snug text-muted-foreground" role="note">
-          Salt okunur liste: {btErrorText(bt.error)} Bağlantı durumu ve pil bilgisi bu kaynakta yok.
+          {t('taskbar.salt_okunur_liste_bterrortext', { btErrorText: btErrorText(bt.error) })}
         </p>
       )}
-      {bt.name && <p className="mt-2 px-1 text-[9px] text-muted-foreground">Telefonun görünen adı: {bt.name}</p>}
+      {bt.name && <p className="mt-2 px-1 text-[9px] text-muted-foreground">{t('taskbar.telefonun_gorunen_adi_name', { name: bt.name })}</p>}
 
       {!readonly && (
         <>
-          <SectionLabel>Bağlı cihazlar</SectionLabel>
-          <Card className="py-0.5">{connected.length ? rows(connected) : <EmptyNote>Bağlı cihaz yok.</EmptyNote>}</Card>
+          <SectionLabel>{t('taskbar.bagli_cihazlar')}</SectionLabel>
+          <Card className="py-0.5">{connected.length ? rows(connected) : <EmptyNote>{t('taskbar.bagli_cihaz_yok')}</EmptyNote>}</Card>
         </>
       )}
 
-      <SectionLabel>Eşleşmiş cihazlar</SectionLabel>
-      <Card className="py-0.5">{paired.length ? rows(paired) : <EmptyNote>Eşleşmiş başka cihaz yok.</EmptyNote>}</Card>
+      <SectionLabel>{t('taskbar.eslesmis_cihazlar')}</SectionLabel>
+      <Card className="py-0.5">{paired.length ? rows(paired) : <EmptyNote>{t('taskbar.eslesmis_baska_cihaz_yok')}</EmptyNote>}</Card>
 
       <p className="mt-2 px-1 text-[9px] leading-snug text-muted-foreground">
-        Yeni cihaz eşleştirmek için telefonun Bluetooth ayarlarını kullanın.
+        {t('taskbar.yeni_cihaz_eslestirmek_icin_telefonun')}
       </p>
     </div>
   );

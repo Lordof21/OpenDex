@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.js';
 // Görev çubuğunun SAF mantığı (React/DOM yok): hangi pencere "aktif", bir düğmeye/önizlemeye tıklayınca ne olur, önizleme kutusunun boyutu.
 //
 // Neden ayrı: "aktif pencere" bilgisi eskiden store'da OLMAYAN `activeWindowId` alanından okunuyordu → hiçbir pencere aktif sayılmıyor, ön plandaki
@@ -18,7 +19,7 @@ export function toggleActionFor(win) {
 }
 
 /** Önizleme düğmesinin erişilebilir eylem adı (aynı eylemin Türkçesi). */
-export const ACTION_LABEL = Object.freeze({ restore: 'Geri yükle', minimize: 'Küçült', focus: 'Öne getir' });
+export const ACTION_LABEL = Object.freeze({ restore: t('common.geri_yukle'), minimize: t('common.kucult'), focus: t('common.one_getir') });
 
 // ---------------------------------------------------------------- geometri (milimetrik ızgara)
 //
@@ -129,7 +130,7 @@ export function badgeLabel(count) {
  * `hasSession`: pencerenin arkasında gerçek bir Android uygulaması var (Workspace kabı, Dosyalar/kırpma ve ayna değil).
  * `sameAppCount`: aynı uygulamanın açık pencere sayısı ("hepsini kapat" yalnız birden fazlaysa).
  */
-export function appMenuModel(win, { hasSession = false, sameAppCount = 1 } = {}) {
+export function appMenuModel(win, { hasSession = false, sameAppCount = 1, hasWebPage = false } = {}) {
   const toggle = toggleActionFor(win);
   const onPhone = Boolean(win?.handoffToPhone);
   return {
@@ -138,6 +139,8 @@ export function appMenuModel(win, { hasSession = false, sameAppCount = 1 } = {})
     canHandoff: hasSession && !onPhone,
     canReclaim: hasSession && onPhone,
     canRestart: hasSession,
+    // `hasWebPage`: telefon bu uygulamada yenilenecek bir web sayfası olduğunu söyledi (webReload.js) — liste değil, yoklama.
+    canReloadPage: hasSession && hasWebPage,
     closeAllCount: sameAppCount > 1 ? sameAppCount : 0,
   };
 }

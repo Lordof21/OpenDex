@@ -28,14 +28,15 @@ import AppIcon from '../ui/AppIcon.jsx';
 import { THERMAL_LABEL, formatTemperature, thermalTone } from '../state/deviceThermal.js';
 import { useSystemStore } from '../state/systemStore.js';
 import QrPairing from '../wireless/QrPairing.jsx';
+import { t } from '../i18n/index.js';
 
 const STATUS_LABEL = {
-  connected: 'Bağlı',
-  connecting: 'Bağlanıyor',
-  available: 'Kullanılabilir',
-  offline: 'Bağlantı kesildi',
-  unauthorized: 'Yetki bekliyor',
-  disconnected: 'Cihaz bağlı değil',
+  connected: t('common.bagli'),
+  connecting: t('taskbar.baglaniyor'),
+  available: t('taskbar.kullanilabilir'),
+  offline: t('taskbar.baglanti_kesildi'),
+  unauthorized: t('taskbar.yetki_bekliyor'),
+  disconnected: t('common.cihaz_bagli_degil'),
 };
 
 export function DeviceTrayButton({ hub, open, onOpen, className }) {
@@ -50,19 +51,19 @@ export function DeviceTrayButton({ hub, open, onOpen, className }) {
       onClick={onOpen}
       aria-label={
         noDevice
-          ? 'Cihaz merkezi, cihaz bağlı değil'
-          : `Cihaz merkezi, ${active.model}, ${wireless ? 'kablosuz' : 'USB'} hat, ${STATUS_LABEL[active.status] || active.status}`
+          ? t('taskbar.cihaz_merkezi_cihaz_bagli_degil')
+          : t('taskbar.cihaz_merkezi_model_value_hat_value2', { model: active.model, value: wireless ? 'kablosuz' : 'USB', value2: STATUS_LABEL[active.status] || active.status })
       }
-      data-tooltip={noDevice ? 'Cihaz bağlı değil' : `${active.model} · ${wireless ? `Wi-Fi ${active.ip || ''}` : 'USB'}`}
+      data-tooltip={noDevice ? t('common.cihaz_bagli_degil') : `${active.model} · ${wireless ? t('taskbar.wi_fi_value', { value: active.ip || '' }) : 'USB'}`}
       className={cn(
         // Sağ küme kuralları (Taskbar.jsx): 10 px yarıçap, dış boşluk yok (aralığı kapsül ya da küme verir), klavye odak halkası.
-        'relative inline-flex h-9 shrink-0 cursor-pointer select-none items-center gap-1.5 self-center rounded-[10px] px-2 text-taskbar-foreground outline-none transition-colors duration-150 hover:bg-accent/65 focus-visible:ring-2 focus-visible:ring-ring',
+        'relative inline-flex h-8 shrink-0 cursor-pointer select-none items-center gap-1 self-center rounded-[9px] px-1.5 text-taskbar-foreground outline-none transition-colors duration-150 hover:bg-accent/65 focus-visible:ring-2 focus-visible:ring-ring',
         open && 'bg-accent text-accent-foreground',
         className
       )}
     >
       <span className="relative grid place-items-center">
-        <Smartphone className="size-[17px]" strokeWidth={1.8} />
+        <Smartphone className="size-4" strokeWidth={1.8} />
         <span
           className={cn(
             'absolute -bottom-1 -right-1.5 grid size-[11px] place-items-center rounded-full bg-taskbar ring-1',
@@ -77,7 +78,7 @@ export function DeviceTrayButton({ hub, open, onOpen, className }) {
         </span>
       </span>
       <span className="hidden min-w-0 flex-col items-start leading-none lg:flex">
-        <span className="max-w-[74px] truncate font-mono text-[9px] font-semibold">
+        <span className="max-w-[58px] truncate font-mono text-[9px] font-semibold">
           {noDevice ? '—' : active.serial}
         </span>
         <span
@@ -86,7 +87,7 @@ export function DeviceTrayButton({ hub, open, onOpen, className }) {
             noDevice ? 'text-muted-foreground' : wireless ? 'text-status-active' : 'text-muted-foreground'
           )}
         >
-          {noDevice ? 'Yok' : wireless ? 'Wi-Fi' : 'USB'}
+          {noDevice ? t('taskbar.yok') : wireless ? 'Wi-Fi' : 'USB'}
         </span>
       </span>
     </button>
@@ -133,21 +134,21 @@ export const DeviceCenter = forwardRef(function DeviceCenter({ hub, ...motionPro
       <motion.section
         ref={ref} {...motionProps}
         transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
-        aria-label="Cihaz merkezi"
+        aria-label={t('taskbar.cihaz_merkezi')}
         data-taskbar-portal="true"
         style={{ zIndex: Z_INDEX.flyout }}
         className="absolute bottom-[calc(100%+16px)] right-4 z-flyout flex h-[min(520px,calc(100vh-82px))] w-[min(340px,calc(100vw-32px))] flex-col overflow-hidden rounded-2xl border border-taskbar-border bg-popover text-popover-foreground shadow-2xl sm:right-24 sm:bg-popover/95 sm:backdrop-blur-xl"
       >
         <header className="flex shrink-0 items-center justify-between gap-2 border-b border-border/70 px-3 py-2.5">
           <span className="min-w-0">
-            <h2 className="truncate text-[12px] font-semibold">Cihaz Merkezi</h2>
-            <p className="truncate text-[9px] text-muted-foreground">scrcpy 4.1 · adb köprüsü</p>
+            <h2 className="truncate text-[12px] font-semibold">{t('taskbar.cihaz_merkezi_2')}</h2>
+            <p className="truncate text-[9px] text-muted-foreground">{t('taskbar.scrcpy_4_1_adb_koprusu')}</p>
           </span>
           <button
             type="button"
             onClick={rescan}
-            aria-label="Cihazları yeniden tara"
-            data-tooltip="Yeniden tara"
+            aria-label={t('taskbar.cihazlari_yeniden_tara')}
+            data-tooltip={t('taskbar.yeniden_tara')}
             data-tooltip-align="end"
             className="size-7 shrink-0 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
           >
@@ -161,16 +162,16 @@ export const DeviceCenter = forwardRef(function DeviceCenter({ hub, ...motionPro
               <span className="grid size-11 place-items-center rounded-full bg-background text-muted-foreground ring-1 ring-border/70">
                 <WifiOff className="size-5" strokeWidth={1.8} />
               </span>
-              <span className="text-[11.5px] font-semibold text-foreground">Cihaz bağlı değil</span>
+              <span className="text-[11.5px] font-semibold text-foreground">{t('common.cihaz_bagli_degil')}</span>
               <p className="max-w-[220px] text-[10px] leading-relaxed text-muted-foreground">
-                Telefonu USB ile takın veya kablosuz eşleştirin.
+                {t('taskbar.telefonu_usb_ile_takin_veya_kablosuz')}
               </p>
               <button
                 type="button"
                 onClick={openPairing}
                 className="mt-1 flex h-9 items-center gap-1.5 rounded-md bg-primary px-3.5 text-[11px] font-semibold text-primary-foreground transition-colors hover:bg-primary/90 cursor-pointer"
               >
-                <Plus className="size-3.5" /> Cihaz Eşleştir
+                <Plus className="size-3.5" /> {' '}{t('taskbar.cihaz_eslestir')}
               </button>
             </section>
           ) : (
@@ -217,7 +218,7 @@ export const DeviceCenter = forwardRef(function DeviceCenter({ hub, ...motionPro
                       )}
                     />
                     <span className={active.status === 'connected' ? 'text-status-active' : 'text-muted-foreground'}>
-                      Aktif Hat · {STATUS_LABEL[active.status] || active.status}
+                      {t('taskbar.aktif_hat_value', { value: STATUS_LABEL[active.status] || active.status })}
                     </span>
                   </span>
                 </span>
@@ -226,45 +227,45 @@ export const DeviceCenter = forwardRef(function DeviceCenter({ hub, ...motionPro
               <div className="mt-2.5 grid grid-cols-3 gap-1.5">
                 <Metric
                   icon={Zap}
-                  label="ADB gecikmesi"
+                  label={t('taskbar.adb_gecikmesi')}
                   value={live?.device?.adb_rtt_ms != null ? `${live.device.adb_rtt_ms} ms` : '—'}
-                  title="Bilgisayar ⟷ telefon adb hattının gidiş-dönüş süresi"
+                  title={t('taskbar.bilgisayar_telefon_adb_hattinin_gidis')}
                 />
                 <Metric
                   icon={Cpu}
-                  label="Telefon CPU"
+                  label={t('taskbar.telefon_cpu')}
                   value={formatPercent(live?.device?.cpu_pct)}
-                  title={`Telefonun tüm çekirdeklerinin toplam meşguliyeti${live?.device?.cores ? ` (${live.device.cores} çekirdek)` : ''}`}
+                  title={t('taskbar.telefonun_tum_cekirdeklerinin_toplam', { value: live?.device?.cores ? t('taskbar.cores_cekirdek', { cores: live.device.cores }) : '' })}
                 />
-                <Metric icon={BatteryMedium} label="Pil" value={active.battery != null ? `${active.battery}%` : '—'} />
+                <Metric icon={BatteryMedium} label={t('common.pil')} value={active.battery != null ? `${active.battery}%` : '—'} />
                 <Metric
                   icon={Gauge}
-                  label="Kare hızı"
+                  label={t('taskbar.kare_hizi')}
                   value={streams ? `${streams.fps} fps` : '—'}
-                  title="Pencere akışlarının en yüksek kare hızı (telefonun kodlayıcı çıkışı). Ekran değişmiyorsa 0 olması normaldir."
+                  title={t('taskbar.pencere_akislarinin_en_yuksek_kare')}
                 />
                 <Metric
                   icon={Activity}
-                  label="Bant genişliği"
+                  label={t('taskbar.bant_genisligi')}
                   value={streams ? `${streams.mbps} Mbps` : '—'}
-                  title="Tüm pencere akışlarının toplam video verisi (adb hattından geçen)"
+                  title={t('taskbar.tum_pencere_akislarinin_toplam_video')}
                 />
                 <Metric
                   icon={Thermometer}
-                  label="Sıcaklık"
+                  label={t('common.sicaklik')}
                   value={formatTemperature(connected ? active.temperatureC : null)}
                   tone={thermalTone(thermalLevel)}
-                  title={`Pil sıcaklığı · Android ısıl durumu: ${THERMAL_LABEL[thermalLevel] || thermalLevel}`}
+                  title={t('taskbar.pil_sicakligi_android_isil_durumu', { value: THERMAL_LABEL[thermalLevel] || thermalLevel })}
                 />
               </div>
 
               {(cpuGroups.length > 0 || (systemCpu != null && systemCpu > 0)) && (
-                <div className="mt-2.5" aria-label="Uygulama CPU kullanımı">
+                <div className="mt-2.5" aria-label={t('taskbar.uygulama_cpu_kullanimi')}>
                   <div className="mb-1 flex items-center justify-between px-0.5">
-                    <p className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">İşlemci Dağılımı</p>
+                    <p className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">{t('taskbar.islemci_dagilimi')}</p>
                     {live?.device?.cpu_pct != null && (
                       <span className="font-mono text-[9px] font-semibold text-muted-foreground/90">
-                        Toplam {formatPercent(live.device.cpu_pct)}
+                        {t('taskbar.toplam_formatpercent', { formatPercent: formatPercent(live.device.cpu_pct) })}
                       </span>
                     )}
                   </div>
@@ -282,10 +283,10 @@ export const DeviceCenter = forwardRef(function DeviceCenter({ hub, ...motionPro
                     <div className="mt-1.5 border-t border-border/40 pt-1.5">
                       <div
                         className="flex items-center justify-between gap-2 px-1 py-0.5 text-[10px]"
-                        title="SurfaceFlinger (ekran birleştirici), ses motoru, scrcpy kodlama/yansıtma, donanım sürücüleri ve çekirdek"
+                        title={t('taskbar.surfaceflinger_ekran_birlestirici_ses')}
                       >
                         <span className="truncate text-muted-foreground font-medium">
-                          Sistem & Ekran Yansıtma
+                          {t('taskbar.sistem_ekran_yansitma')}
                         </span>
                         <span className="flex shrink-0 items-center gap-1.5 font-mono text-[9.5px]">
                           {live?.device?.cores && (
@@ -301,7 +302,7 @@ export const DeviceCenter = forwardRef(function DeviceCenter({ hub, ...motionPro
                     </div>
                   )}
                   <p className="mt-1 px-0.5 text-[8px] leading-snug text-muted-foreground">
-                    Pay, telefonun tüm çekirdeklerinin toplam kapasitesine göredir (tek çekirdek tam doluyken 1 / çekirdek sayısı).
+                    {t('taskbar.pay_telefonun_tum_cekirdeklerinin')}
                   </p>
                 </div>
               )}
@@ -314,13 +315,13 @@ export const DeviceCenter = forwardRef(function DeviceCenter({ hub, ...motionPro
                   className="h-9 flex-1 flex items-center justify-center gap-1.5 rounded-[6px] border border-primary/45 bg-primary/10 px-2 text-[10px] font-semibold text-primary hover:bg-primary/20 disabled:opacity-45 transition-colors cursor-pointer"
                 >
                   {wireless ? <Usb className="size-3.5" /> : <Wifi className="size-3.5" />}
-                  <span className="truncate">{wireless ? 'USB Hattına Dön' : `Kablosuz Hatta Geç (${port})`}</span>
+                  <span className="truncate">{wireless ? t('taskbar.usb_hattina_don') : t('taskbar.kablosuz_hatta_gec_port', { port })}</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => (active.status === 'available' ? connect(active.id) : disconnect(active.id))}
-                  aria-label={active.status === 'available' ? 'Etkinleştir' : 'Bağlantıyı kes'}
-                  data-tooltip={active.status === 'available' ? 'Etkinleştir' : 'Bağlantıyı kes'}
+                  aria-label={active.status === 'available' ? t('taskbar.etkinlestir') : t('taskbar.baglantiyi_kes')}
+                  data-tooltip={active.status === 'available' ? t('taskbar.etkinlestir') : t('taskbar.baglantiyi_kes')}
                   className="size-9 shrink-0 flex items-center justify-center rounded-[6px] border border-border/70 bg-background p-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors cursor-pointer"
                 >
                   {active.status === 'available' ? <Unplug className="size-3.5" /> : <Link2Off className="size-3.5" />}
@@ -331,7 +332,7 @@ export const DeviceCenter = forwardRef(function DeviceCenter({ hub, ...motionPro
 
           {others.length > 0 && (
             <>
-              <p className="mb-1.5 mt-3 px-0.5 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">Diğer cihazlar</p>
+              <p className="mb-1.5 mt-3 px-0.5 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">{t('taskbar.diger_cihazlar')}</p>
               <div className="flex flex-col gap-1.5">
                 {others.map((device) => (
                   <button
@@ -372,7 +373,7 @@ export const DeviceCenter = forwardRef(function DeviceCenter({ hub, ...motionPro
 
           {offlineKnown.length > 0 && (
             <>
-              <p className="mb-1.5 mt-3 px-0.5 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">Kayıtlı Cihazlar</p>
+              <p className="mb-1.5 mt-3 px-0.5 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">{t('taskbar.kayitli_cihazlar')}</p>
               <div className="flex flex-col gap-1.5">
                 {offlineKnown.map((device) => (
                   <div
@@ -388,17 +389,17 @@ export const DeviceCenter = forwardRef(function DeviceCenter({ hub, ...motionPro
                       <Smartphone className="size-3.5" />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[11px] font-medium">{device.model || 'Android Cihazı'}</span>
+                      <span className="block truncate text-[11px] font-medium">{device.model || t('common.android_cihazi')}</span>
                       <span className="flex items-center gap-1 font-mono text-[9px] text-muted-foreground">
                         <LinkIconFor link={device.last_transport === 'wireless' ? 'wifi' : 'usb'} className="size-2.5 shrink-0" />
                         <span className="min-w-0 flex-1 truncate">
                           {device.discovered
-                            ? 'Ağda bulundu'
+                            ? t('taskbar.agda_bulundu')
                             : device.last_transport === 'usb'
-                            ? 'USB ile bağlanır'
+                            ? t('taskbar.usb_ile_baglanir')
                             : device.last_known_ip
                             ? `Son IP: ${device.last_known_ip}`
-                            : 'IP bilinmiyor'}
+                            : t('taskbar.ip_bilinmiyor')}
                         </span>
                       </span>
                     </span>
@@ -413,14 +414,14 @@ export const DeviceCenter = forwardRef(function DeviceCenter({ hub, ...motionPro
                             : 'bg-muted text-muted-foreground hover:bg-accent hover:text-foreground'
                         )}
                       >
-                        {device.discovered ? 'Bağlan' : 'Yeniden Dene'}
+                        {device.discovered ? t('common.baglan') : t('taskbar.yeniden_dene')}
                       </button>
                     )}
                     <button
                       type="button"
                       onClick={() => forgetKnown(device.android_id)}
-                      aria-label="Kayıtlı listeden kaldır"
-                      data-tooltip="Unut"
+                      aria-label={t('taskbar.kayitli_listeden_kaldir')}
+                      data-tooltip={t('taskbar.unut')}
                       className="size-6 shrink-0 flex items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors cursor-pointer"
                     >
                       <X className="size-3" />
@@ -433,7 +434,7 @@ export const DeviceCenter = forwardRef(function DeviceCenter({ hub, ...motionPro
 
           <div className="mt-3 flex items-center gap-1.5 rounded-[6px] border border-border/70 bg-muted/40 px-2.5 py-2">
             <label htmlFor="adb-port" className="shrink-0 text-[10px] font-medium text-muted-foreground">
-              TCP/IP portu
+              {t('taskbar.tcp_ip_portu')}
             </label>
             <input
               id="adb-port"
@@ -447,7 +448,7 @@ export const DeviceCenter = forwardRef(function DeviceCenter({ hub, ...motionPro
               onClick={openPairing}
               className="ml-auto flex items-center gap-1 h-7 px-2 rounded-md text-[10px] font-semibold hover:bg-accent text-foreground transition-colors cursor-pointer"
             >
-              <Plus className="size-3" /> Cihaz Eşleştir
+              <Plus className="size-3" /> {' '}{t('taskbar.cihaz_eslestir')}
             </button>
           </div>
         </div>
@@ -477,7 +478,7 @@ export const DeviceCenter = forwardRef(function DeviceCenter({ hub, ...motionPro
 
 function AppCpuRow({ app, cores }) {
   const pct = app.cpu_pct;
-  const detail = [app.package, app.processes ? `${app.processes} süreç` : '', formatCores(pct, cores)].filter(Boolean);
+  const detail = [app.package, app.processes ? t('taskbar.processes_surec', { processes: app.processes }) : '', formatCores(pct, cores)].filter(Boolean);
   return (
     <div className="flex items-center gap-2 py-0.5" title={detail.join(' · ')}>
       <AppIcon pkg={app.package} size={16} />

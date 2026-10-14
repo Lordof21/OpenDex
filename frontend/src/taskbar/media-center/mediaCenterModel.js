@@ -1,3 +1,4 @@
+import { t, activeLocale } from '../../i18n/index.js';
 // Medya merkezinin saf kuralları (React bilmez, birim testlidir). Tasarım gerekçesi: MEDYA_MERKEZI_TASARIM_PLANI.md.
 
 /**
@@ -13,9 +14,9 @@ export function titleScale(title) {
 }
 
 export const STATUS_LABEL = {
-  playing: 'Çalıyor',
-  paused: 'Duraklatıldı',
-  buffering: 'Yükleniyor',
+  playing: t('taskbar.caliyor'),
+  paused: t('common.duraklatildi'),
+  buffering: t('common.yukleniyor'),
 };
 
 /** Sahnedeki oturumun durumu: arabellek (telefon BUFFERING bildirdi) > çalıyor > duraklatıldı. */
@@ -35,7 +36,7 @@ export function skipPercent(positionMs, durationMs, deltaMs) {
 export function bylineOf(artist, album) {
   const a = String(artist || '').trim();
   const b = String(album || '').trim();
-  if (!b || b.toLocaleLowerCase('tr') === a.toLocaleLowerCase('tr')) return { artist: a, album: '' };
+  if (!b || b.toLocaleLowerCase(activeLocale()) === a.toLocaleLowerCase(activeLocale())) return { artist: a, album: '' };
   return { artist: a, album: b };
 }
 
@@ -62,21 +63,24 @@ export function shortcutFor(event) {
 export const GLYPH_PLAY = 'M8.5 5L14 8.5L14 15.5L8.5 19Z M14 8.5L19.5 12L19.5 12L14 15.5Z';
 export const GLYPH_PAUSE = 'M6.5 5L10.5 5L10.5 19L6.5 19Z M13.5 5L17.5 5L17.5 19L13.5 19Z';
 
-// ── Kapak oranı ──────────────────────────────────────────────────────────────────────────────────────────────────────
-// Afiş kapağı varsayılan 4:3 (genişlik/yükseklik ≈ 1,33) bir kutudur ve görsel `object-cover` ile doldurulur. Kare ya da
-// hafif dikey bir kapak bu kutuda alttan/üstten kırpılır (yüz, başlık kesilir). Fark belirginse kutunun KENDİSİ biraz
-// yükselir; güvenlik kilitleri: çok küçük/bozuk görsel, uç oranlar (yanlış resim, banner, tek piksel) ve üst sınır.
-export const POSTER_BASE_RATIO = 4 / 3;
-/** Kutu bundan daha "dikey" olamaz: kare. Daha dikey kapak yine de biraz kırpılır, panel kontrolleri ezilmez. */
-export const POSTER_MIN_RATIO = 1;
-/** Görsel, taban orandan en az bu kadar (%) dikeyse kutu yükselir; altındaki fark kırpmayı fark ettirmez. */
-export const POSTER_GROW_THRESHOLD = 0.08;
+// ── Kapak sığdırma ───────────────────────────────────────────────────────────────────────────────────────────────────
+// Kapak kutusunu HER boyutta kenardan kenara doldurur (sağ/sol hiçbir zaman boş kalmaz; object-cover). Kutu kapağın kendi oranını
+// alır, böylece normal boyutlarda hiçbir şey kırpılmaz. Pencere küçülüp kutu yükseklik sınırına (ekranın %44'ü) takılırsa kapak
+// genişliğe göre ölçeklenir ve ÜST/ALT hafifçe kırpılır — yanlarda boşluk bırakmaktan iyidir (görüntü ağırlığı üst %40'ta).
+export const POSTER_BASE_RATIO = 4 / 3;       // kapak yok / yükleniyor / simge: taban kutu
+export const POSTER_MAX_HEIGHT_VH = 0.44;     // kapaklı kutunun en büyük yüksekliği (ekranın %44'ü)
+export const POSTER_BASE_MAX_HEIGHT_VH = 0.34; // tabanda en çok min(294 px, ekranın %34'ü)
+export const POSTER_BASE_MAX_HEIGHT_PX = 294;
+/** Kutu bundan daha "dikey" / "yatay" olamaz; daha uç kapak yine kutuyu doldurur, fazlası kırpılır. */
+export const POSTER_MIN_RATIO = 0.6;
+export const POSTER_MAX_RATIO = 2;
 const MIN_SIDE_PX = 48;
 const SANE_RATIO = { min: 0.5, max: 3 };
 
 /**
- * Yüklenen kapağın doğal boyutundan kutunun genişlik/yükseklik oranı; null = taban kutu kalır (büyütme yok).
- * Güvenli: boyut okunamıyorsa, kenar < 48 px ya da oran 0,5–3 dışındaysa null (yanlış/yer tutucu görsel kutuyu oynatmaz).
+ * Yüklenen kapağın doğal boyutundan kutunun genişlik/yükseklik oranı (kapağın KENDİ oranı, uç değerlerde sınırlı);
+ * null = taban kutu kalır. Güvenli: boyut okunamıyorsa, kenar < 48 px ya da oran 0,5–3 dışındaysa null (yanlış/yer tutucu görsel
+ * kutuyu oynatmaz; yine de kutuyu doldurur).
  */
 export function posterRatioFor(naturalWidth, naturalHeight) {
   const w = Number(naturalWidth);
@@ -84,6 +88,8 @@ export function posterRatioFor(naturalWidth, naturalHeight) {
   if (!Number.isFinite(w) || !Number.isFinite(h) || w < MIN_SIDE_PX || h < MIN_SIDE_PX) return null;
   const ratio = w / h;
   if (ratio < SANE_RATIO.min || ratio > SANE_RATIO.max) return null;
-  if (ratio >= POSTER_BASE_RATIO * (1 - POSTER_GROW_THRESHOLD)) return null;
-  return Math.max(ratio, POSTER_MIN_RATIO);
+  return Math.min(Math.max(ratio, POSTER_MIN_RATIO), POSTER_MAX_RATIO);
 }
+
+/** Kutunun en büyük yüksekliği (CSS): kapağı olan kutu ekranın %44'üne, taban kutu min(294 px, %34)'e kadar. */
+export const posterMaxHeight = (grown) => (grown ? `${POSTER_MAX_HEIGHT_VH * 100}vh` : `min(${POSTER_BASE_MAX_HEIGHT_PX}px, ${POSTER_BASE_MAX_HEIGHT_VH * 100}vh)`);

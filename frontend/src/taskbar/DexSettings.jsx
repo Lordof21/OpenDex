@@ -53,21 +53,22 @@ import { openOpenDexSettings } from '../settings/SettingsPanel.jsx';
 import { PrecisionSlider } from '../ui/PrecisionSlider.jsx';
 import AppIcon from '../ui/AppIcon.jsx';
 import { isMirrorPackage } from '../window/mirrorPackage.js';
+import { t as tt } from '../i18n/index.js';
 
 const WINDOW_MODES = [
-  { value: 'eco', label: 'Eko Çalışma Alanı', hint: 'Paylaşımlı, 1 encoder', icon: Zap },
-  { value: 'independent', label: 'Bağımsız Ekranlar', hint: 'Her pencere kendi VD\'si', icon: Monitor },
-  { value: 'hybrid', label: 'Hibrit (Otomatik)', hint: 'Kapasiteye göre', icon: Sparkles },
+  { value: 'eco', label: tt('common.eko_calisma_alani'), hint: tt('taskbar.paylasimli_1_encoder'), icon: Zap },
+  { value: 'independent', label: tt('common.bagimsiz_ekranlar'), hint: tt('taskbar.her_pencere_kendi_vd_si'), icon: Monitor },
+  { value: 'hybrid', label: tt('common.hibrit_otomatik'), hint: tt('taskbar.kapasiteye_gore'), icon: Sparkles },
 ];
 
 const RESOLUTION_OPTIONS = [
-  { value: 'dynamic', label: 'Dinamik', tag: 'dynamic_fit' },
-  { value: 'dynamic_fix', label: 'Dinamik‑Fix', tag: 'dynamic_fix' },
-  { value: 'phone_scale', label: 'Telefon ölçeği', tag: 'zoom' },
+  { value: 'dynamic', label: tt('common.dinamik'), tag: 'dynamic_fit' },
+  { value: 'dynamic_fix', label: tt('taskbar.dinamik_fix'), tag: 'dynamic_fix' },
+  { value: 'phone_scale', label: tt('taskbar.telefon_olcegi'), tag: 'zoom' },
   { value: '1080p', label: '1080p (16:9)', tag: '1920×1080' },
-  { value: 'tablet', label: 'Tablet (16:10)', tag: '1920×1200' },
-  { value: '2k', label: '2K Masaüstü', tag: '2560×1440' },
-  { value: '2.5k', label: '2.5K Tablet (16:10)', tag: '2560×1600' },
+  { value: 'tablet', label: tt('taskbar.tablet_16_10'), tag: '1920×1200' },
+  { value: '2k', label: tt('taskbar.2k_masaustu'), tag: '2560×1440' },
+  { value: '2.5k', label: tt('taskbar.2_5k_tablet_16_10'), tag: '2560×1600' },
 ];
 
 // Görüntü ölçeği: TEK sözlük (window/fitModes.js) — Hub ve Ayarlar ile aynı adlar.
@@ -76,17 +77,17 @@ const CANVAS_FIT = GLOBAL_FIT_CHOICES.map((value) => ({ value, label: FIT_MODES[
 const WINDOW_FIT = FIT_CYCLE.filter((value) => value !== 'auto').map((value) => ({ value, label: FIT_MODES[value].label }));
 const FOLLOW = 'follow';
 const THEME_SEGMENTS = [
-  { value: 'dark', label: 'Koyu' },
-  { value: 'light', label: 'Açık' },
+  { value: 'dark', label: tt('common.koyu') },
+  { value: 'light', label: tt('common.acik_2') },
 ];
 
 // Tek sıra, artan: beş hazır yoğunluk 372 px'lik satıra sığar (eskiden 3+2 iki satırdı).
 const DPI_PRESETS = [
   { value: '180', label: '180 DPI', hint: 'DeX' },
-  { value: '200', label: '200 DPI', hint: 'Optimum' },
-  { value: '220', label: '220 DPI', hint: 'Tablet' },
-  { value: '240', label: '240 DPI', hint: 'Rahat' },
-  { value: '340', label: '340 DPI', hint: 'Erişim' },
+  { value: '200', label: '200 DPI', hint: tt('taskbar.optimum') },
+  { value: '220', label: '220 DPI', hint: tt('taskbar.tablet') },
+  { value: '240', label: '240 DPI', hint: tt('taskbar.rahat') },
+  { value: '340', label: '340 DPI', hint: tt('taskbar.erisim') },
 ];
 
 const DPI_MIN = 130;
@@ -95,43 +96,43 @@ const DPI_STEP = 2;
 const DPI_AUTO = 206;
 
 const CODECS = [
-  { value: 'auto', label: 'Oto (265)' },
+  { value: 'auto', label: tt('taskbar.oto_265') },
   { value: 'h265', label: 'H.265' },
   { value: 'av1', label: 'AV1' },
   { value: 'h264', label: 'H.264' },
 ];
 
 const BITRATE_OPTIONS = [
-  { value: '4', label: '4 Mbps', hint: 'Dengeli' },
-  { value: '8', label: '8 Mbps', hint: 'Varsayılan' },
-  { value: '12', label: '12 Mbps', hint: 'Ultra HD' },
-  { value: '16', label: '16 Mbps', hint: '2K Netlik' },
-  { value: '20', label: '20 Mbps', hint: 'Maksimum' },
+  { value: '4', label: tt('common.4_mbps'), hint: tt('common.dengeli') },
+  { value: '8', label: tt('common.8_mbps'), hint: tt('common.varsayilan') },
+  { value: '12', label: tt('common.12_mbps'), hint: tt('taskbar.ultra_hd') },
+  { value: '16', label: tt('common.16_mbps'), hint: tt('taskbar.2k_netlik') },
+  { value: '20', label: tt('common.20_mbps'), hint: tt('taskbar.maksimum') },
 ];
 
 const FPS_OPTIONS = [
-  { value: '15', label: '15 FPS', hint: 'Tasarruf' },
-  { value: '30', label: '30 FPS', hint: 'Dengeli' },
-  { value: '60', label: '60 FPS', hint: 'Akıcı' },
+  { value: '15', label: '15 FPS', hint: tt('taskbar.tasarruf') },
+  { value: '30', label: '30 FPS', hint: tt('common.dengeli') },
+  { value: '60', label: '60 FPS', hint: tt('taskbar.akici') },
 ];
 
 const TARGET_DP = [
-  { value: '600', label: '600 dp', hint: 'Tablet' },
-  { value: '720', label: '720 dp', hint: 'Masaüstü' },
-  { value: '840', label: '840 dp', hint: 'Geniş DeX' },
-  { value: '960', label: '960 dp', hint: 'Yoğun' },
+  { value: '600', label: '600 dp', hint: tt('taskbar.tablet') },
+  { value: '720', label: '720 dp', hint: tt('common.masaustu') },
+  { value: '840', label: '840 dp', hint: tt('taskbar.genis_dex') },
+  { value: '960', label: '960 dp', hint: tt('common.yogun') },
 ];
 
 // Telefona aktarılan uygulamanın pencereleme kipi: tek GLOBAL ayar (pencere başına değil).
 const HANDOFF_WINDOWING = [
-  { value: 'fullscreen', label: 'Tam ekran', hint: 'Önerilen' },
-  { value: 'freeform', label: 'Serbest pencere', hint: 'Küçük pencere' },
+  { value: 'fullscreen', label: tt('common.tam_ekran'), hint: tt('common.onerilen') },
+  { value: 'freeform', label: tt('common.serbest_pencere'), hint: tt('common.kucuk_pencere') },
 ];
 
 // Pencerenin uygulaması TELEFONDA kapatılınca: pencere kapanır ya da yeniden açma kartı gösterir.
 const APP_CLOSED_BEHAVIOR = [
-  { value: 'close', label: 'Pencereyi kapat', hint: 'Varsayılan' },
-  { value: 'badge', label: 'Pencerede göster', hint: 'Yeniden aç' },
+  { value: 'close', label: tt('common.pencereyi_kapat'), hint: tt('common.varsayilan') },
+  { value: 'badge', label: tt('common.pencerede_goster'), hint: tt('common.yeniden_ac') },
 ];
 
 const DP_MIN = 350;
@@ -208,7 +209,7 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
     : null;
 
   // Kapsam: "Bu pencere" bölümü odaktaki pencereye, "Tüm pencereler" genel varsayılanlara aittir.
-  const windowName = activeWindow ? activeWindow.title || activeWindow.package || 'Pencere' : null;
+  const windowName = activeWindow ? activeWindow.title || activeWindow.package || tt('common.pencere_2') : null;
   const canTuneWindow = Boolean(activeWindow) && !activeWindow.isEcoWorkspace;
   const tab = pickedTab ?? (canTuneWindow ? 'density' : 'general');
   const selectTab = useCallback((id) => {
@@ -228,21 +229,21 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
   const userDisplayLock = resolutionLocked && !headerLocked;
   const resolutionLabelOf = (value) => RESOLUTION_OPTIONS.find((item) => item.value === value)?.label ?? value;
   const windowScopeHint = !activeWindow
-    ? 'Açık pencere yok. Bir pencere seçince DPI ve başlık ayarları burada o pencere için görünür.'
-    : 'Çalışma Alanı görevlerinin yoğunluğu, her görevin kendi ⚙ menüsünden ayarlanır.';
+    ? tt('taskbar.acik_pencere_yok_bir_pencere_secince')
+    : tt('taskbar.calisma_alani_gorevlerinin_yogunlugu');
 
   const resolutionTag = RESOLUTION_OPTIONS.find((item) => item.value === resolution)?.tag ?? 'dynamic_fit';
   const codecLabel =
     codec === 'h265'
-      ? 'H.265 HEVC (Ultra‑Net)'
+      ? tt('taskbar.h_265_hevc_ultra_net')
       : codec === 'av1'
-      ? 'AV1 (Yeni Nesil)'
+      ? tt('taskbar.av1_yeni_nesil')
       : codec === 'h264'
-      ? 'H.264 (Uyumlu)'
-      : 'Oto (265)';
+      ? tt('taskbar.h_264_uyumlu')
+      : tt('taskbar.oto_265');
   const dpiLabel = dpiAuto
     ? (activeWindow
-        ? `Oto (${liveCalculatedDpi} DPI · ${activeWindow.title || activeWindow.package || 'Aktif'})`
+        ? `Oto (${liveCalculatedDpi} DPI · ${activeWindow.title || activeWindow.package || tt('taskbar.aktif')})`
         : `Oto (${liveCalculatedDpi} DPI)`)
     : `${dpiValue} DPI`;
   const targetLabel = dpAuto ? `Otomatik (${dpValue} dp)` : `${dpValue} dp`;
@@ -325,11 +326,11 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
           icon={MonitorCog}
           iconTone="soft"
           size="md"
-          title="DeX ayarları"
-          subtitle="Bu pencere ve tüm pencereler"
+          title={tt('taskbar.dex_ayarlari')}
+          subtitle={tt('taskbar.bu_pencere_ve_tum_pencereler')}
         />
-        <span className="rounded-full bg-muted px-2 py-1 font-mono text-[9px] font-semibold tabular-nums text-muted-foreground" title="Bu cihazın destekleyebildiği bağımsız pencere sayısı">
-          ~16 VD
+        <span className="rounded-full bg-muted px-2 py-1 font-mono text-[9px] font-semibold tabular-nums text-muted-foreground" title={tt('taskbar.bu_cihazin_destekleyebildigi_bagimsiz')}>
+         {tt('taskbar.16_vd')}
         </span>
       </div>
 
@@ -354,18 +355,18 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
             <>
               {!smartResize && (
                 <p className="rounded-md border border-dashed border-border/70 px-2.5 py-1.5 text-[9px] leading-[12px] text-muted-foreground">
-                  «Gerçek Çözünürlük» kapalı: DPI ve Target DP bu pencereye uygulanmaz. «Genel» sekmesinden açın.
+                 {tt('taskbar.gercek_cozunurluk_kapali_dpi_ve')}
                 </p>
               )}
               <Readout
                 items={[
-                  { label: 'Etkin DPI', value: String(Math.round(effectiveDpi)), unit: 'DPI' },
-                  { label: 'En küçük genişlik', value: liveSwDp ? String(liveSwDp) : '—', unit: 'dp' },
-                  { label: 'Yoğunluk kipi', value: DENSITY_MODE_LABEL[policy.mode] || 'Oto' },
+                  { label: tt('taskbar.etkin_dpi'), value: String(Math.round(effectiveDpi)), unit: 'DPI' },
+                  { label: tt('taskbar.en_kucuk_genislik'), value: liveSwDp ? String(liveSwDp) : '—', unit: 'dp' },
+                  { label: tt('taskbar.yogunluk_kipi'), value: DENSITY_MODE_LABEL[policy.mode] || 'Oto' },
                 ]}
               />
 
-              <SettingsGroup dense icon={Gauge} title="Özel DPI Yoğunluğu" value={dpiLabel} mono>
+              <SettingsGroup dense icon={Gauge} title={tt('taskbar.ozel_dpi_yogunlugu')} value={dpiLabel} mono>
                 <ChoiceGrid
                   dense
                   columns={5}
@@ -381,14 +382,14 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
                   auto={dpiAuto}
                   onCommit={setDpi}
                   onAuto={handleDpiAuto}
-                  label="Özel DPI yoğunluğu"
+                  label={tt('common.ozel_dpi_yogunlugu')}
                   unit="DPI"
                   ticks={[130, 160, 180, 200, 220, 240, 280, 320, 340]}
                   className="mt-1.5"
                 />
               </SettingsGroup>
 
-              <SettingsGroup dense icon={Ruler} title="Mantıksal Alan (Target DP)" value={targetLabel} mono>
+              <SettingsGroup dense icon={Ruler} title={tt('taskbar.mantiksal_alan_target_dp')} value={targetLabel} mono>
                 <ChoiceGrid
                   dense
                   columns={4}
@@ -404,7 +405,7 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
                   auto={dpAuto}
                   onCommit={setDp}
                   onAuto={handleDpAuto}
-                  label="Mantıksal alan (target dp)"
+                  label={tt('common.mantiksal_alan_target_dp')}
                   unit="dp"
                   ticks={[350, 480, 600, 720, 840, 960, 1080]}
                   className="mt-1.5"
@@ -415,13 +416,13 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
                 <SwitchRow
                   variant="row"
                   icon={Smartphone}
-                  title="Telefon Ölçeği (Zoom)"
+                  title={tt('taskbar.telefon_olcegi_zoom')}
                   description={
                     phoneScaleActive
-                      ? `Açık · ${liveCalculatedDpi} DPI — telefondaki düzenle`
+                      ? tt('taskbar.acik_livecalculateddpi_dpi', { liveCalculatedDpi })
                       : phoneMetricsReady
-                        ? 'Telefondaki düzenle açılır · DPI/Target DP\'yi kapatır'
-                        : 'Cihaz bağlanınca kullanılabilir'
+                        ? tt('taskbar.telefondaki_duzenle_acilir_dpi_target')
+                        : tt('taskbar.cihaz_baglaninca_kullanilabilir')
                   }
                   checked={phoneScaleActive}
                   disabled={!phoneMetricsReady && !phoneScaleActive}
@@ -432,12 +433,12 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
 
               {!resolutionLocked && (
                 <InlineChoice
-                  title="Flex DP Kilidi"
+                  title={tt('taskbar.flex_dp_kilidi')}
                   dataSetting="dp_lock_enabled"
                   options={[
-                    { value: FOLLOW, label: 'Genele uy', hint: `Genel: ${flexLock ? 'Kilitli' : 'Serbest'}` },
-                    { value: true, label: 'Kilitli' },
-                    { value: false, label: 'Serbest' },
+                    { value: FOLLOW, label: tt('taskbar.genele_uy'), hint: tt('taskbar.genel_value', { value: flexLock ? tt('taskbar.kilitli') : tt('taskbar.serbest') }) },
+                    { value: true, label: tt('taskbar.kilitli') },
+                    { value: false, label: tt('taskbar.serbest') },
                   ]}
                   value={windowDpLock}
                   onChange={(value) => setWindowOverride('dp_lock_enabled', value)}
@@ -458,10 +459,10 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
               <SettingsGroup
                 dense
                 icon={Monitor}
-                title="Çözünürlük Stratejisi"
+                title={tt('taskbar.cozunurluk_stratejisi')}
                 value={
                   resolutionLocked
-                    ? (userDisplayLock ? 'Ekran kilitli' : 'Telefon ekranı')
+                    ? (userDisplayLock ? 'Ekran kilitli' : tt('taskbar.telefon_ekrani'))
                     : windowResolution === FOLLOW
                       ? `Genele uy · ${resolutionLabelOf(resolution)}`
                       : resolutionLabelOf(windowResolution)
@@ -470,15 +471,15 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
                 {resolutionLocked ? (
                   <p className="text-[9px] leading-[12px] text-muted-foreground">
                     {userDisplayLock
-                      ? 'Bu pencerenin görüntü boyutu (px) ve DPI\'ı kilitli: pencereyi boyutlandırmak, kaplamak ya da ayar değiştirmek akışı değiştirmez. Kilidi pencere Hub\'ından (Ekran kilidi) kaldırabilirsin.'
-                      : 'Bu pencere telefonun kendi ekranını gösterir; çözünürlüğü telefon belirler.'}
+                      ? tt('taskbar.bu_pencerenin_goruntu_boyutu_px_ve')
+                      : tt('taskbar.bu_pencere_telefonun_kendi_ekranini')}
                   </p>
                 ) : (
                   <div className="grid grid-cols-3 gap-1" data-window-setting="resolution_mode">
                     <ChoiceChip
                       dense
-                      label="Genele uy"
-                      hint={`Genel: ${resolutionLabelOf(resolution)}`}
+                      label={tt('taskbar.genele_uy')}
+                      hint={tt('taskbar.genel_resolutionlabelof', { resolutionLabelOf: resolutionLabelOf(resolution) })}
                       active={windowResolution === FOLLOW}
                       onClick={() => setWindowOverride('resolution_mode', FOLLOW)}
                     />
@@ -498,14 +499,14 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
               <SettingsGroup
                 dense
                 icon={Maximize2}
-                title="Görüntü Sığdırma"
+                title={tt('common.goruntu_sigdirma')}
                 value={windowFit === 'auto' ? `Genele uy · ${FIT_MODES[canvasFit]?.label ?? ''}` : FIT_MODES[windowFit].label}
               >
                 <div className="grid grid-cols-3 gap-1" data-window-setting="video_fit_mode">
                   <ChoiceChip
                     dense
-                    label="Genele uy"
-                    hint={`Genel: ${FIT_MODES[canvasFit]?.label ?? ''}`}
+                    label={tt('taskbar.genele_uy')}
+                    hint={tt('taskbar.genel_value', { value: FIT_MODES[canvasFit]?.label ?? '' })}
                     active={windowFit === 'auto'}
                     onClick={() => setWindowFit('auto')}
                   />
@@ -521,10 +522,10 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
                 </div>
               </SettingsGroup>
 
-              <SettingsGroup dense icon={GripHorizontal} title="Başlık Çubuğu" value={headerLocked ? 'Gizli' : HEADER_MODE_LABELS[headerMode]}>
+              <SettingsGroup dense icon={GripHorizontal} title={tt('taskbar.baslik_cubugu')} value={headerLocked ? 'Gizli' : HEADER_MODE_LABELS[headerMode]}>
                 {headerLocked ? (
                   <p className="text-[9px] leading-[12px] text-muted-foreground">
-                    Telefon ekranı yansıtılırken başlık her zaman gizlidir.
+                   {tt('taskbar.telefon_ekrani_yansitilirken_baslik')}
                   </p>
                 ) : (
                   <div className="grid grid-cols-3 gap-1">
@@ -533,7 +534,7 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
                         dense
                         key={mode}
                         label={HEADER_MODE_LABELS[mode]}
-                        hint={mode === 'follow' ? `Genel: ${dragTitle ? 'Hover' : 'Sabit'}` : undefined}
+                        hint={mode === 'follow' ? tt('taskbar.genel_value', { value: dragTitle ? tt('taskbar.hover') : tt('taskbar.sabit') }) : undefined}
                         active={headerMode === mode}
                         onClick={() => setHeaderMode(mode)}
                       />
@@ -555,11 +556,11 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
             <div className="flex items-center justify-between gap-2 px-2.5 py-1.5">
               <span className="flex min-w-0 items-center gap-2">
                 <Palette className="size-3.5 shrink-0 text-muted-foreground" />
-                <span className="truncate text-[11px] font-semibold">Görünüm Teması</span>
+                <span className="truncate text-[11px] font-semibold">{tt('taskbar.gorunum_temasi_2')}</span>
               </span>
               <SegmentedControl
                 size="md"
-                label="Görünüm teması"
+                label={tt('taskbar.gorunum_temasi')}
                 options={THEME_SEGMENTS}
                 value={theme}
                 onChange={setTheme}
@@ -568,8 +569,8 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
             <SwitchRow
               variant="row"
               icon={ScanSearch}
-              title="Gerçek Çözünürlük"
-              description="Akıllı ekran yeniden boyutlama"
+              title={tt('taskbar.gercek_cozunurluk')}
+              description={tt('taskbar.akilli_ekran_yeniden_boyutlama')}
               checked={smartResize}
               onToggle={handleSmartResizeToggle}
               className="py-1.5"
@@ -577,8 +578,8 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
             <SwitchRow
               variant="row"
               icon={GripHorizontal}
-              title="Sürükleyici Başlık (varsayılan)"
-              description="«Genele uy» pencerelerde başlık hover ile açılır"
+              title={tt('common.surukleyici_baslik_varsayilan')}
+              description={tt('taskbar.genele_uy_pencerelerde_baslik_hover')}
               checked={dragTitle}
               onToggle={handleDragTitleToggle}
               className="py-1.5"
@@ -586,8 +587,8 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
             <SwitchRow
               variant="row"
               icon={MonitorOff}
-              title="Telefon Ekranını Kapat"
-              description="DeX çalışırken telefon uyur"
+              title={tt('taskbar.telefon_ekranini_kapat')}
+              description={tt('taskbar.dex_calisirken_telefon_uyur')}
               checked={phoneScreenOff}
               onToggle={handlePhoneScreenOffToggle}
               className="py-1.5"
@@ -595,29 +596,29 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
             <SwitchRow
               variant="row"
               icon={Lock}
-              title="Varsayılan Flex DP Kilidi"
-              description={flexLock ? 'Boyutlandırmada DPI sabit (Sıfır Donma)' : 'Boyutlandırmada DPI serbest'}
+              title={tt('common.varsayilan_flex_dp_kilidi')}
+              description={flexLock ? tt('taskbar.boyutlandirmada_dpi_sabit_sifir_donma') : tt('taskbar.boyutlandirmada_dpi_serbest')}
               checked={flexLock}
               onToggle={handleFlexLockToggle}
               className="py-1.5"
             />
           </section>
 
-          <SettingsGroup dense icon={Monitor} title="Varsayılan Çözünürlük Stratejisi" value={resolutionTag} mono>
+          <SettingsGroup dense icon={Monitor} title={tt('taskbar.varsayilan_cozunurluk_stratejisi')} value={resolutionTag} mono>
             <ChoiceGrid dense columns={3} options={RESOLUTION_OPTIONS} value={resolution} onChange={handleResolutionChange} />
           </SettingsGroup>
 
           <SettingsGroup
             dense
             icon={Maximize2}
-            title="Varsayılan Görüntü Sığdırma"
+            title={tt('taskbar.varsayilan_goruntu_sigdirma')}
             value={CANVAS_FIT.find((item) => item.value === canvasFit)?.label ?? ''}
           >
             <ChoiceGrid dense columns={3} options={CANVAS_FIT} value={canvasFit} onChange={handleCanvasFitChange} />
           </SettingsGroup>
 
           <p className="px-0.5 text-[9px] leading-[12px] text-muted-foreground">
-            Bu sekme yeni açılan pencerelere, oturumun geneline ve «Genele uy» diyen pencerelere uygulanır.
+           {tt('taskbar.bu_sekme_yeni_acilan_pencerelere')}
           </p>
         </TabPane>
 
@@ -625,44 +626,42 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
         <TabPane id="stream" active={tab === 'stream'}>
           <Readout
             items={[
-              { label: 'Kodek', value: CODEC_SHORT[codec] || 'Oto' },
-              { label: 'Bit hızı', value: bitrate, unit: 'Mbps' },
-              { label: 'Kare hızı', value: fps, unit: 'FPS' },
+              { label: tt('taskbar.kodek'), value: CODEC_SHORT[codec] || 'Oto' },
+              { label: tt('taskbar.bit_hizi'), value: bitrate, unit: tt('common.mbps') },
+              { label: tt('taskbar.kare_hizi'), value: fps, unit: 'FPS' },
             ]}
           />
-          <SettingsGroup dense icon={AudioLines} title="Video Bit Hızı" value={`${bitrate} Mbps`} mono>
+          <SettingsGroup dense icon={AudioLines} title={tt('common.video_bit_hizi')} value={`${bitrate} Mbps`} mono>
             <ChoiceGrid dense columns={5} options={BITRATE_OPTIONS} value={bitrate} onChange={handleBitrateChange} />
           </SettingsGroup>
-          <SettingsGroup dense icon={Activity} title="Maksimum FPS" value={`${fps} FPS`} mono>
+          <SettingsGroup dense icon={Activity} title={tt('common.maksimum_fps')} value={`${fps} FPS`} mono>
             <ChoiceGrid dense columns={3} options={FPS_OPTIONS} value={fps} onChange={handleFpsChange} />
           </SettingsGroup>
-          <SettingsGroup dense icon={Film} title="Video Kodek (DeX Kalitesi)" value={codecLabel}>
+          <SettingsGroup dense icon={Film} title={tt('taskbar.video_kodek_dex_kalitesi')} value={codecLabel}>
             <ChoiceGrid dense columns={4} options={CODECS} value={codec} onChange={handleCodecChange} />
           </SettingsGroup>
         </TabPane>
 
         {/* ─── Tüm pencereler · Sistem ─── */}
         <TabPane id="system" active={tab === 'system'}>
-          <SettingsGroup dense icon={Smartphone} title="Telefona Aktarma Kipi">
+          <SettingsGroup dense icon={Smartphone} title={tt('common.telefona_aktarma_kipi')}>
             <ChoiceGrid dense columns={2} options={HANDOFF_WINDOWING} value={handoffWindowing} onChange={handleHandoffWindowingChange} />
             <p className="mt-1.5 text-[9px] leading-[12px] text-muted-foreground">
-              Yalnız «Telefona aktar» düğmesinin varsayılanı. Tek seferlik seçim için pencere başlığına sağ tıkla; telefonda
-              kendin açtığın uygulamalar her zaman tam ekran açılır. Serbest pencere HyperOS&apos;un kendi küçük penceresidir.
+             {tt('taskbar.yalniz_telefona_aktar_dugmesinin')}
             </p>
           </SettingsGroup>
 
-          <SettingsGroup dense icon={Smartphone} title="Uygulama Telefonda Kapatılınca">
+          <SettingsGroup dense icon={Smartphone} title={tt('common.uygulama_telefonda_kapatilinca')}>
             <ChoiceGrid dense columns={2} options={APP_CLOSED_BEHAVIOR} value={appClosedBehavior} onChange={handleAppClosedBehaviorChange} />
             <p className="mt-1.5 text-[9px] leading-[12px] text-muted-foreground">
-              Son Kullanılanlar&apos;dan kapatılan uygulamanın penceresi kapanır ya da «Yeniden aç» kartı gösterir. Çalışma
-              Alanı görevleri her zaman kapanır.
+             {tt('taskbar.son_kullanilanlar_dan_kapatilan')}
             </p>
           </SettingsGroup>
 
           <SettingsGroup
             dense
             icon={Layers}
-            title="Varsayılan Pencereleme Davranışı"
+            title={tt('common.varsayilan_pencereleme_davranisi')}
             value={WINDOW_MODES.find((item) => item.value === windowMode)?.label ?? ''}
           >
             <div className="grid grid-cols-3 gap-1">
@@ -680,12 +679,12 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
               ))}
             </div>
             <p className="mt-1.5 text-[9px] leading-[12px] text-muted-foreground">
-              Bu cihaz <strong className="font-semibold text-foreground">~16</strong> bağımsız pencere destekliyor.
+             {tt('taskbar.bu_cihaz')}{' '} <strong className="font-semibold text-foreground">~16</strong> {' '}{tt('taskbar.bagimsiz_pencere_destekliyor')}
             </p>
           </SettingsGroup>
 
           <Button variant="outline" size="lg" className="w-full text-[11px]" startIcon={<ExternalLink className="size-3.5" />} onClick={handleOpenAllSettings}>
-            Tüm OpenDeX Ayarlarını Aç
+           {tt('taskbar.tum_opendex_ayarlarini_ac')}
           </Button>
         </TabPane>
       </div>
@@ -699,15 +698,15 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
 // Bütün sekme gövdeleri bağlı kalır (yalnız `hidden`): kaydırıcı/odak durumu sekme değişince kaybolmaz.
 
 const DEX_TABS = [
-  { id: 'density', scope: 'window', label: 'Yoğunluk', icon: Gauge },
-  { id: 'window', scope: 'window', label: 'Pencere', icon: AppWindow },
-  { id: 'general', scope: 'global', label: 'Genel', icon: SlidersHorizontal },
-  { id: 'stream', scope: 'global', label: 'Akış', icon: Activity },
-  { id: 'system', scope: 'global', label: 'Sistem', icon: Smartphone },
+  { id: 'density', scope: 'window', label: tt('taskbar.yogunluk'), icon: Gauge },
+  { id: 'window', scope: 'window', label: tt('common.pencere'), icon: AppWindow },
+  { id: 'general', scope: 'global', label: tt('taskbar.genel'), icon: SlidersHorizontal },
+  { id: 'stream', scope: 'global', label: tt('common.akis'), icon: Activity },
+  { id: 'system', scope: 'global', label: tt('common.sistem'), icon: Smartphone },
 ];
 
-const DENSITY_MODE_LABEL = { auto: 'Oto', custom: 'Özel', target: 'Target', phone: 'Telefon' };
-const CODEC_SHORT = { auto: 'Oto', h265: 'H.265', av1: 'AV1', h264: 'H.264' };
+const DENSITY_MODE_LABEL = { auto: tt('common.oto'), custom: tt('common.ozel'), target: 'Target', phone: tt('common.telefon_2') };
+const CODEC_SHORT = { auto: tt('common.oto'), h265: 'H.265', av1: 'AV1', h264: 'H.264' };
 
 function DexTabs({ tabs, active, onChange, windowIcon, windowName }) {
   const activeScope = tabs.find((t) => t.id === active)?.scope;
@@ -725,15 +724,15 @@ function DexTabs({ tabs, active, onChange, windowIcon, windowName }) {
   return (
     <div className="shrink-0 border-b border-border/70 px-3">
       <div className="grid grid-cols-[2fr_3fr]">
-        <ScopeLabel scope="window" active={activeScope === 'window'} icon={windowIcon} title="Bu pencere" name={windowName} />
+        <ScopeLabel scope="window" active={activeScope === 'window'} icon={windowIcon} title={tt('taskbar.bu_pencere')} name={windowName} />
         <ScopeLabel
           scope="global"
           active={activeScope === 'global'}
-          title="Tüm pencereler"
-          hint="Yeni açılan pencerelere, oturumun geneline ve «Genele uy» diyen pencerelere uygulanır."
+          title={tt('taskbar.tum_pencereler')}
+          hint={tt('taskbar.yeni_acilan_pencerelere_oturumun')}
         />
       </div>
-      <div role="tablist" aria-label="DeX ayar bölümleri" onKeyDown={onKeyDown} className="grid grid-cols-5">
+      <div role="tablist" aria-label={tt('taskbar.dex_ayar_bolumleri')} onKeyDown={onKeyDown} className="grid grid-cols-5">
         {tabs.map((tab, index) => {
           const selected = tab.id === active;
           const Icon = tab.icon;

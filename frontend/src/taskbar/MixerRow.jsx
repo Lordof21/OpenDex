@@ -2,6 +2,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { cn } from '../lib/utils.js';
 import { ECHO_HOLDOFF_MS, useRelativeDrag } from '../ui/useRelativeDrag.js';
+import { t } from '../i18n/index.js';
 
 // Ses kaydırıcısı: yalnız TUTAMAÇ sürüklenir, boş track tıklaması değeri atlatmaz (useRelativeDrag).
 // Değer her adımda canlı uygulanır (ses anında duyulur; store 200 ms'de bir telefona gönderir). Bırakınca
@@ -14,7 +15,7 @@ export function MixerRow({
   value,
   max,
   onChange,
-  label = 'Ses düzeyi',
+  label = t('taskbar.ses_duzeyi'),
   muted: mutedFlag,
   onToggleMute,
   className,
@@ -39,7 +40,7 @@ export function MixerRow({
           muted && 'bg-muted text-muted-foreground shadow-none'
         )}
         onClick={() => (onToggleMute ? onToggleMute() : applyValue(muted ? Math.ceil(max / 3) : 0))}
-        aria-label={muted ? 'Sesi aç' : 'Sesi kapat'}
+        aria-label={muted ? t('common.sesi_ac') : t('taskbar.sesi_kapat')}
         aria-pressed={muted}
       >
         <Icon className="size-4" />

@@ -14,10 +14,11 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { api } from '../lib/api.js';
 import { useSystemStore } from '../state/systemStore.js';
 import { batteryTemperatureC } from '../state/deviceThermal.js';
+import { t } from '../i18n/index.js';
 
 const DISCONNECTED_PLACEHOLDER = {
   id: 'none',
-  model: 'Cihaz bağlı değil',
+  model: t('common.cihaz_bagli_degil'),
   serial: null,
   link: 'usb',
   ip: null,
@@ -52,7 +53,7 @@ export function useDeviceHub() {
     const wireless = d.transport === 'wireless' || (d.serial || '').includes(':');
     return {
       id: d.serial,
-      model: d.model || 'Android Cihazı',
+      model: d.model || t('common.android_cihazi'),
       serial: d.serial,
       link: wireless ? 'wifi' : 'usb',
       ip: wireless ? d.serial.split(':')[0] : null,
@@ -105,12 +106,12 @@ export function useDeviceHub() {
     if (!dev) return;
 
     if (targetLink === 'wifi') {
-      notify(`${dev.model} · Wi-Fi hattına geçiliyor (${port})...`);
+      notify(t('taskbar.model_wi_fi_hattina_geciliyor_port', { model: dev.model, port }));
       try {
         const res = await api.post(`/api/device/tcpip?port=${encodeURIComponent(port)}`);
-        notify(res?.message || '🎉 Kablosuz bağlantı etkin! USB kablosunu çıkarabilirsiniz.');
+        notify(res?.message || t('taskbar.kablosuz_baglanti_etkin_usb_kablosunu'));
       } catch (err) {
-        notify(err?.detail || 'Kablosuz geçiş başarısız oldu.');
+        notify(err?.detail || t('taskbar.kablosuz_gecis_basarisiz_oldu'));
       }
       await useSystemStore.getState().fetchDevices();
       return;
@@ -121,15 +122,15 @@ export function useDeviceHub() {
     // about it instead of pretending the click did something.
     const usbCandidate = devices.find((d) => d.link === 'usb');
     if (!usbCandidate) {
-      notify('USB kablosu takılı değil. Lütfen telefonu USB ile bağlayın.');
+      notify(t('taskbar.usb_kablosu_takili_degil_lutfen'));
       return;
     }
-    notify(`${usbCandidate.model} · USB hattına bağlanıyor...`);
+    notify(t('taskbar.model_usb_hattina_baglaniyor', { model: usbCandidate.model }));
     try {
       await api.post('/api/device/bind', { serial: usbCandidate.serial });
-      notify('USB hattına geçildi.');
+      notify(t('taskbar.usb_hattina_gecildi'));
     } catch (err) {
-      notify(err?.detail || 'USB hattına geçilemedi.');
+      notify(err?.detail || t('taskbar.usb_hattina_gecilemedi'));
     }
     await useSystemStore.getState().fetchDevices();
   }, [devices, port, notify]);
@@ -139,9 +140,9 @@ export function useDeviceHub() {
     if (!dev) return;
     try {
       await api.post('/api/device/disconnect');
-      notify(`${dev.model} bağlantısı kesildi.`);
+      notify(t('taskbar.model_baglantisi_kesildi', { model: dev.model }));
     } catch (err) {
-      notify(err?.detail || 'Bağlantı kesilemedi.');
+      notify(err?.detail || t('taskbar.baglanti_kesilemedi'));
     }
     await useSystemStore.getState().fetchDevices();
   }, [devices, notify]);
@@ -152,12 +153,12 @@ export function useDeviceHub() {
       await useSystemStore.getState().fetchDevices();
       return;
     }
-    notify(`${dev.model} bağlantısı deneniyor...`);
+    notify(t('taskbar.model_baglantisi_deneniyor', { model: dev.model }));
     try {
       await api.post('/api/device/bind', { serial: dev.serial });
-      notify('Bağlandı.');
+      notify(t('taskbar.baglandi_2'));
     } catch (err) {
-      notify(err?.detail || 'Bağlanılamadı.');
+      notify(err?.detail || t('taskbar.baglanilamadi'));
     }
     await useSystemStore.getState().fetchDevices();
   }, [devices, notify]);
@@ -165,12 +166,12 @@ export function useDeviceHub() {
   const activate = useCallback(async (id) => {
     const dev = devices.find((d) => d.id === id);
     if (!dev || dev.status === 'connected') return;
-    notify(`${dev.model} etkinleştiriliyor...`);
+    notify(t('taskbar.model_etkinlestiriliyor', { model: dev.model }));
     try {
       await api.post('/api/device/bind', { serial: dev.serial });
       notify(`Aktif hat: ${dev.model}`);
     } catch (err) {
-      notify(err?.detail || 'Cihaz etkinleştirilemedi.');
+      notify(err?.detail || t('taskbar.cihaz_etkinlestirilemedi'));
     }
     await useSystemStore.getState().fetchDevices();
   }, [devices, notify]);
@@ -182,12 +183,12 @@ export function useDeviceHub() {
   // reboot — that's an honest, expected outcome, not a bug).
   const connectKnown = useCallback(async (androidId) => {
     const known = knownDevices.find((d) => d.android_id === androidId);
-    notify(`${known?.model || 'Cihaz'} bağlantısı deneniyor...`);
+    notify(t('taskbar.value_baglantisi_deneniyor', { value: known?.model || 'Cihaz' }));
     try {
       await api.post(`/api/devices/known/${androidId}/connect`);
-      notify('🎉 Bağlandı!');
+      notify(t('taskbar.baglandi'));
     } catch (err) {
-      notify(err?.detail || 'Bağlanılamadı — cihaz USB ile tekrar etkinleştirilmesi gerekebilir.');
+      notify(err?.detail || t('taskbar.baglanilamadi_cihaz_usb_ile_tekrar'));
     }
     await Promise.all([useSystemStore.getState().fetchDevices(), fetchKnownDevices()]);
   }, [knownDevices, notify, fetchKnownDevices]);
@@ -195,9 +196,9 @@ export function useDeviceHub() {
   const forgetKnown = useCallback(async (androidId) => {
     try {
       await api.delete(`/api/devices/known/${androidId}`);
-      notify('Cihaz kayıtlı listeden kaldırıldı.');
+      notify(t('taskbar.cihaz_kayitli_listeden_kaldirildi'));
     } catch (err) {
-      notify(err?.detail || 'Kaldırılamadı.');
+      notify(err?.detail || t('taskbar.kaldirilamadi'));
     }
     await fetchKnownDevices();
   }, [notify, fetchKnownDevices]);
@@ -211,7 +212,7 @@ export function useDeviceHub() {
         fetchKnownDevices(),
         useSystemStore.getState().fetchBatteryInfo(),
       ]);
-      notify('Cihaz taraması tamamlandı.');
+      notify(t('taskbar.cihaz_taramasi_tamamlandi'));
     } finally {
       setScanning(false);
     }

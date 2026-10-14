@@ -15,6 +15,7 @@ import { audioErrorText, routeOption } from '../ui/audioRouting.jsx';
 import { RouteMenu } from './media-center/RouteMenu.jsx';
 import { useLongPress } from '../ui/useLongPress.js';
 import { cn } from '../lib/utils.js';
+import { t } from '../i18n/index.js';
 
 const CHIP = 'inline-flex h-6 items-center gap-1.5 rounded-full bg-foreground/[0.08] px-2.5 text-[11px] font-semibold transition-colors';
 
@@ -40,7 +41,7 @@ export default function RouteChip({ pkg, className }) {
     setBusy(true);
     try {
       const res = await transferToPc(pkg, route);
-      if (!res.ok) useSystemStore.getState().pushToast?.(audioErrorText(res.error) || 'Ses DeX\'e alınamadı.');
+      if (!res.ok) useSystemStore.getState().pushToast?.(audioErrorText(res.error) || t('taskbar.ses_dex_e_alinamadi'));
     } finally {
       setBusy(false);
     }
@@ -62,9 +63,9 @@ export default function RouteChip({ pkg, className }) {
   const { icon: Icon, label } = routeOption(live);
   const title = handedOff
     ? 'Uygulama telefona devredildi; sesi onunla birlikte telefonda'
-    : `Bu uygulamanın sesi: ${label} — tıkla: ${flipTo === 'pc' ? "DeX'e al" : 'telefona gönder'} · basılı tut: Telefon / DeX / İkisi`;
+    : t('taskbar.bu_uygulamanin_sesi_label_tikla_value', { label, value: flipTo === 'pc' ? "DeX'e al" : t('taskbar.telefona_gonder') });
   const notice = live === 'both' && hasWindow && app.synced === false
-    ? 'Telefon sesi DeX ile hizalanamadı (telefon yardımcısı güncel değil olabilir).'
+    ? t('taskbar.telefon_sesi_dex_ile_hizalanamadi')
     : null;
 
   return (
@@ -75,7 +76,7 @@ export default function RouteChip({ pkg, className }) {
         {...press}
         className={cn(CHIP, disabled ? 'cursor-default opacity-70' : 'cursor-pointer hover:bg-foreground/[0.14]', menuAnchor && 'bg-foreground/[0.14]', className)}
         title={title}
-        aria-label={`Ses: ${label}`}
+        aria-label={t('taskbar.ses_label', { label })}
         aria-haspopup="menu"
         aria-expanded={Boolean(menuAnchor)}
         onKeyDown={(event) => {

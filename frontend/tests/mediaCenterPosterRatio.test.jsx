@@ -11,7 +11,7 @@ vi.mock('../src/lib/api.js', () => ({
 
 import { MediaCenter } from '../src/taskbar/media-center/MediaCenter.jsx';
 import { HINT_DELAY_MS, HOLD_MAX_MS, NONE_SETTLE_MS } from '../src/taskbar/media-center/PosterArt.jsx';
-import { POSTER_MIN_RATIO, posterRatioFor } from '../src/taskbar/media-center/mediaCenterModel.js';
+import { POSTER_MAX_RATIO, POSTER_MIN_RATIO, posterMaxHeight, posterRatioFor } from '../src/taskbar/media-center/mediaCenterModel.js';
 
 // ── Sahte Image: kapak yüklemesini testin elinden bitiriyoruz.
 let queue = [];
@@ -52,25 +52,34 @@ afterEach(() => {
 });
 
 describe('posterRatioFor', () => {
-  it('geniş ve 4:3\'e yakın kapakta büyütme yok (fark %8\'in altında)', () => {
-    expect(posterRatioFor(1600, 900)).toBeNull();
-    expect(posterRatioFor(1200, 900)).toBeNull();
-    expect(posterRatioFor(1120, 900)).toBeNull();
-  });
-
-  it('kare ve hafif dikey kapakta kutunun oranı görselinki olur; en çok kare', () => {
+  it('kutunun oranı kapağın KENDİ oranıdır: geniş kapak alçalır, kare ve dikey kapak yükselir', () => {
+    expect(posterRatioFor(1600, 900)).toBeCloseTo(16 / 9, 5);
+    expect(posterRatioFor(1200, 900)).toBeCloseTo(4 / 3, 5);
     expect(posterRatioFor(1000, 1000)).toBe(1);
-    expect(posterRatioFor(1000, 1100)).toBe(POSTER_MIN_RATIO);
     expect(posterRatioFor(1050, 900)).toBeCloseTo(1.1667, 3);
+    expect(posterRatioFor(800, 1000)).toBeCloseTo(0.8, 5);
   });
 
-  it('güvenlik: küçük/bozuk görsel ve uç oranlar kutuyu oynatmaz', () => {
+  it('uç oranlar sınırlanır (kutu çökmez / uzamaz); kapak yine de bütün gösterilir', () => {
+    expect(posterRatioFor(2400, 1000)).toBe(POSTER_MAX_RATIO);
+    expect(posterRatioFor(600, 1000)).toBe(POSTER_MIN_RATIO);
+    expect(posterRatioFor(520, 1000)).toBe(POSTER_MIN_RATIO);
+  });
+
+  it('güvenlik: küçük/bozuk görsel ve anlamsız oranlar kutuyu oynatmaz', () => {
     expect(posterRatioFor(1, 1)).toBeNull();
     expect(posterRatioFor(40, 400)).toBeNull();
     expect(posterRatioFor(0, 0)).toBeNull();
     expect(posterRatioFor(undefined, 500)).toBeNull();
     expect(posterRatioFor(300, 900)).toBeNull();
     expect(posterRatioFor(3000, 500)).toBeNull();
+  });
+});
+
+describe('posterMaxHeight', () => {
+  it('kapaklı kutu ekranın %44\'üne, taban kutu min(294 px, %34)\'e kadar', () => {
+    expect(posterMaxHeight(true)).toBe('44vh');
+    expect(posterMaxHeight(false)).toBe('min(294px, 34vh)');
   });
 });
 
@@ -92,14 +101,40 @@ describe('MediaCenter kapağı', () => {
   const current = () => states().at(-1);
   const tick = (ms) => act(async () => { vi.advanceTimersByTime(ms); });
 
-  it('ilk kapak hazır olana dek iskelet; hazır olunca görüntü, tabanda (4:3) sabit yükseklik sınırı', async () => {
+  it('ilk kapak hazır olana dek iskelet (taban 4:3 kutu); hazır olunca kutu kapağın oranını alır', async () => {
     mount(session(A));
     expect(current()).toBe('pending');
-    await finish(A, [1600, 900]);
-    expect(lastImage().getAttribute('src')).toBe(A);
-    expect(frame().getAttribute('data-poster-grown')).toBeNull();
     expect(frame().style.aspectRatio).toBe(String(4 / 3));
     expect(frame().style.maxHeight).toBe('min(294px, 34vh)');
+    await finish(A, [1600, 900]);
+    expect(lastImage().getAttribute('src')).toBe(A);
+    expect(frame().getAttribute('data-poster-grown')).toBe('true');
+    expect(frame().style.aspectRatio).toBe(String(16 / 9));
+    expect(frame().style.maxHeight).toBe('44vh');
+  });
+
+  it('kapak kutuyu HER boyutta doldurur: object-cover (yanlarda boşluk yok), yan dolgu katmanı yok', async () => {
+    mount(session(A));
+    await finish(A, [1600, 900]);
+    expect(lastImage().className).toContain('object-cover');
+    expect(lastImage().className).not.toContain('object-contain');
+    expect(screen.queryByTestId('media-poster-backdrop')).toBeNull();
+  });
+
+  it('başlık kapağı örtmez: kapak alanı kutunun üstünde, altta ayrı 48 px şerit (box-content + pb-12)', async () => {
+    mount(session(A));
+    await finish(A, [1600, 900]);
+    expect(frame().className).toContain('box-content');
+    expect(frame().className).toContain('pb-12');
+    expect(screen.getByTestId('media-poster').className).toContain('bottom-12');
+  });
+
+  it('uzun kapak: kutu 0,6 oranıyla sınırlı, yine de kutuyu doldurur (üst/alt kırpılır, yanlar boş kalmaz)', async () => {
+    mount(session(A));
+    await finish(A, [600, 1200]);
+    expect(frame().style.aspectRatio).toBe(String(POSTER_MIN_RATIO));
+    expect(frame().style.maxHeight).toBe('44vh');
+    expect(lastImage().className).toContain('object-cover');
   });
 
   it('açılışta kapağı kesin olmayan oturum iskelet çakmadan doğrudan simgeyle başlar', async () => {
@@ -160,7 +195,7 @@ describe('MediaCenter kapağı', () => {
     expect(lastImage().getAttribute('src')).toBe(A);            // yeni kapak henüz çözülmedi: hâlâ eski
     await finish(B, [1600, 900]);
     expect(lastImage().getAttribute('src')).toBe(B);
-    expect(frame().getAttribute('data-poster-grown')).toBeNull(); // oran yeni kapakla BİRLİKTE güncellendi
+    expect(frame().style.aspectRatio).toBe(String(16 / 9));      // oran yeni kapakla BİRLİKTE güncellendi
   });
 
   it('bekleme sürerken ince "yükleniyor" çubuğu çıkar; hızlı gelende hiç çıkmaz', async () => {
@@ -253,7 +288,7 @@ describe('MediaCenter kapağı', () => {
     await finish(C, [1600, 900]);
     await finish(B, [1000, 1000]);                               // geç gelen eski sonuç yok sayılır
     expect(lastImage().getAttribute('src')).toBe(C);
-    expect(frame().getAttribute('data-poster-grown')).toBeNull();
+    expect(frame().style.aspectRatio).toBe(String(16 / 9));
   });
 
   it('1×1 yer tutucu kapak kutuyu büyütmez ama gösterilir', async () => {

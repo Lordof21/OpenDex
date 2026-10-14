@@ -6,6 +6,7 @@ import AppIcon from '../ui/AppIcon.jsx';
 import { PanelShell } from './PanelShell.jsx';
 import { cn } from '../lib/utils.js';
 import { cardLeft, TASKBAR_ICON_PX } from './taskbarModel.js';
+import { t } from '../i18n/index.js';
 
 const PANEL_WIDTH = 248;
 
@@ -20,10 +21,10 @@ export function OverflowButton({ count, open, hasActive, onClick }) {
         (open || hasActive) && 'bg-accent/80 shadow-xs',
       )}
       onClick={onClick}
-      aria-label={`${count} pencere daha`}
+      aria-label={t('taskbar.count_pencere_daha', { count })}
       aria-haspopup="menu"
       aria-expanded={open}
-      data-tooltip={open ? undefined : `${count} pencere daha`}
+      data-tooltip={open ? undefined : t('taskbar.count_pencere_daha', { count })}
     >
       <span className="font-mono text-[13px] font-semibold leading-none tabular-nums text-taskbar-foreground/90">+{count}</span>
       <span
@@ -47,8 +48,8 @@ export const OverflowPanel = forwardRef(function OverflowPanel({ items, anchorX 
       style={{ left: `${cardLeft(anchorX, PANEL_WIDTH, vw)}px`, width: `${PANEL_WIDTH}px` }}
       className="rounded-xl border border-border/80 bg-popover/95 p-1 shadow-2xl backdrop-blur-3xl"
     >
-      <p className="truncate px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Diğer pencereler</p>
-      <div role="menu" aria-label="Diğer pencereler" className="max-h-[min(60vh,360px)] overflow-y-auto">
+      <p className="truncate px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('taskbar.diger_pencereler')}</p>
+      <div role="menu" aria-label={t('taskbar.diger_pencereler')} className="max-h-[min(60vh,360px)] overflow-y-auto">
         {items.map((app) => (
           <button
             key={app.id}
@@ -60,9 +61,9 @@ export const OverflowPanel = forwardRef(function OverflowPanel({ items, anchorX 
             <AppIcon app={app} pkg={app.package || app.id} displayName={app.name} size={TASKBAR_ICON_PX - 6} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-xs font-medium leading-4">{app.name}</span>
-              {app.isMinimized && <span className="block text-[10px] leading-3 text-muted-foreground">Küçültüldü</span>}
+              {app.isMinimized && <span className="block text-[10px] leading-3 text-muted-foreground">{t('taskbar.kucultuldu')}</span>}
             </span>
-            {app.isActive && <span className="size-1.5 shrink-0 rounded-full bg-status-active" aria-label="Etkin" />}
+            {app.isActive && <span className="size-1.5 shrink-0 rounded-full bg-status-active" aria-label={t('taskbar.etkin')} />}
           </button>
         ))}
       </div>

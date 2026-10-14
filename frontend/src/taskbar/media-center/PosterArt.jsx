@@ -1,11 +1,13 @@
-// Afişin kapağı: panelin tepesinde kenardan kenara, alt kenarı panel yüzeyine erir (başlık o bölgeye oturur).
+// Afişin kapağı: panelin tepesinde kenardan kenara. Kapak kutuyu HER boyutta doldurur (sağ/sol asla boş kalmaz, object-cover): kutu
+// kapağın kendi oranını alır, normal boyutta hiçbir şey kırpılmaz; pencere küçülüp yükseklik sınırına (ekranın %44'ü) takılırsa
+// kapak genişliğe göre ölçeklenir, yalnız üst/alt hafifçe kırpılır. Başlık kapağı örtmez: kutunun altındaki 48 px'lik şeride oturur.
 //
 //   hazır olunca geçiş  Parça değişince yeni kapak HAZIR (indirildi, çözüldü, boyutu bilindi) olana dek eski kapak yerinde kalır;
 //                       hazır olunca eski yana kayarak söner, yenisi yönüne (sonraki → sağdan, önceki → soldan) yumuşakça
 //                       oturur ve üstünden bir ışık süpürmesi geçer. Kullanıcı hiç "boş kare / uygulama simgesi" görmez, gecikme de
 //                       hissetmez: geçiş zaten hazır olan bir görüntüyle başlar.
-//   yükseklik           Kutu bir `aspect-ratio` kutusudur ve oranı kapağın doğal oranından gelir (kare / hafif dikey kapak biraz
-//                       yükselir, bkz. mediaCenterModel.posterRatioFor). Oran kapak GEÇİŞİYLE AYNI ANDA değişir ve CSS ile
+//   yükseklik           Kutu bir `aspect-ratio` kutusudur ve oranı kapağın doğal oranından gelir (geniş kapak alçalır, dikey kapak
+//                       yükselir; bkz. mediaCenterModel.posterRatioFor). Oran kapak GEÇİŞİYLE AYNI ANDA değişir ve CSS ile
 //                       yumuşakça geçilir; bu yüzden ardışık parçalarda kutu zıplamaz, kayar.
 //   güvenlik            Yeni kapak ~3 sn içinde gelmezse (ya da kapaksız/bozuksa) eski kapak YANLIŞ kapak olarak kalmaz: uygulama
 //                       simgesine geçilir. Kapağı kesin olmayan parça 0,3 sn bekletilir (kapak hemen gelebilir; simge çakması olmaz).
@@ -18,7 +20,8 @@ import { Music2 } from 'lucide-react';
 import AppIcon from '../../ui/AppIcon.jsx';
 import { cn } from '../../lib/utils.js';
 import { artEnter, artSlide } from './choreography.js';
-import { POSTER_BASE_RATIO, posterRatioFor } from './mediaCenterModel.js';
+import { POSTER_BASE_RATIO, posterMaxHeight, posterRatioFor } from './mediaCenterModel.js';
+import { t } from '../../i18n/index.js';
 
 export const HOLD_MAX_MS = 3200;      // yeni kapak bu sürede hazır olmazsa eski kapak bırakılır
 export const NONE_SETTLE_MS = 320;    // kapağı kesin olmayan parça için simgeye geçmeden önce bekleme
@@ -107,12 +110,13 @@ function CoverLayer({ shown }) {
   if (shown.kind === 'image') {
     return (
       <span className="absolute inset-0" data-art-state="image">
+        {/* object-cover: kutuyu kenardan kenara doldurur (yanlarda boşluk yok); kırpma gerekirse üst/alttan, ağırlık üst %40'ta. */}
         <img
           src={shown.src}
           alt=""
           draggable={false}
           decoding="async"
-          className="absolute inset-0 size-full object-cover object-[50%_35%]"
+          className="absolute inset-0 size-full object-cover object-[50%_40%]"
         />
       </span>
     );
@@ -155,16 +159,17 @@ export function PosterArt({ session, playing, directionRef, preload, children })
   const grown = Boolean(ratio);
 
   return (
-    // Yükseklik: genişlikten `aspect-ratio` ile; üst sınır taban kutuda min(294 px, %34 ekran), büyümüşte %44 ekran. Hem oran hem
-    // sınır CSS ile yumuşakça geçilir (kapak geçişiyle aynı anda). Panel ekrana sığmazsa 200 px'e kadar kısalır.
+    // Yükseklik: genişlikten `aspect-ratio` ile (box-content: oran YALNIZ kapak alanına uygulanır, altındaki 48 px başlık şeridi
+    // ayrıdır); üst sınır taban kutuda min(294 px, %34 ekran), kapaklıda %44 ekran. Hem oran hem sınır CSS ile yumuşakça geçilir.
+    // Panel ekrana sığmazsa kapak alanı 152 px'e kadar kısalır (kapak object-cover: yanlar dolu kalır, üst/alt hafifçe kırpılır).
     <motion.div
       variants={artEnter}
       data-testid="media-poster-frame"
       data-poster-grown={grown ? 'true' : undefined}
-      className="relative min-h-[200px] shrink transition-[aspect-ratio,max-height] duration-[480ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
-      style={{ aspectRatio: String(ratio ?? POSTER_BASE_RATIO), maxHeight: grown ? '44vh' : 'min(294px, 34vh)' }}
+      className="relative box-content min-h-[152px] shrink pb-12 transition-[aspect-ratio,max-height] duration-[480ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+      style={{ aspectRatio: String(ratio ?? POSTER_BASE_RATIO), maxHeight: posterMaxHeight(grown) }}
     >
-      <div className="absolute inset-0 overflow-hidden" data-testid="media-poster">
+      <div className="absolute inset-x-0 top-0 bottom-12 overflow-hidden" data-testid="media-poster">
         <AnimatePresence initial={false} custom={shown.dir}>
           <motion.div
             key={shown.key}
@@ -203,7 +208,7 @@ export function PosterArt({ session, playing, directionRef, preload, children })
 
         {/* Yeni kapak yolda: üst kenarda ince, kayan çubuk (yalnız hâlâ bekleniyorsa; hızlı gelende hiç görünmez). */}
         {hint && (
-          <span className="pointer-events-none absolute inset-x-0 top-0 z-[3] h-0.5 overflow-hidden" data-testid="media-poster-loading" role="status" aria-label="Yeni kapak yükleniyor">
+          <span className="pointer-events-none absolute inset-x-0 top-0 z-[3] h-0.5 overflow-hidden" data-testid="media-poster-loading" role="status" aria-label={t('taskbar.yeni_kapak_yukleniyor')}>
             <motion.span
               className="block h-full w-1/3 rounded-full bg-[var(--media-ink)] opacity-70"
               initial={{ x: '-100%' }}

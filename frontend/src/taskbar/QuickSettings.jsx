@@ -43,6 +43,7 @@ import { IconTile } from '../ui/Choice.jsx';
 import { PanelHeader } from '../ui/Typography.jsx';
 import { subviewMotion } from '../ui/motion.js';
 import { useConnectivityStore } from '../state/connectivityStore.js';
+import { t as tt } from '../i18n/index.js';
 
 export const QuickSettings = forwardRef(function QuickSettings({
   view = 'main',
@@ -70,7 +71,7 @@ export const QuickSettings = forwardRef(function QuickSettings({
   const screenKnown = screenState === true || screenState === false;
   const screenPower = screenState === true;
   const screenPending = Boolean(systemStore?.displayPowerPending);
-  const screenStatus = screenPending ? 'Değişiyor…' : !screenKnown ? 'Bilinmiyor' : screenPower ? 'Açık' : 'Kapalı';
+  const screenStatus = screenPending ? tt('taskbar.degisiyor') : !screenKnown ? tt('taskbar.bilinmiyor') : screenPower ? tt('common.acik_2') : tt('common.kapali_2');
   const toggleScreenPower = () => {
     if (screenPending) return;
     systemStore?.setDisplayPowerState?.(screenState === false);
@@ -88,7 +89,7 @@ export const QuickSettings = forwardRef(function QuickSettings({
   const connectionState = systemStore?.connectionState;
   const wifiSummary = wifiStatus?.connected ? wifiStatus.ssid : null;
   const btConnectedCount = btStatus?.ok && !btStatus.readonly ? (btStatus.devices || []).filter((d) => d.connected).length : 0;
-  const btSummary = btConnectedCount ? `${btConnectedCount} cihaz bağlı` : null;
+  const btSummary = btConnectedCount ? tt('taskbar.btconnectedcount_cihaz_bagli', { btConnectedCount }) : null;
 
   useEffect(() => {
     if (view !== 'main' || connectionState !== 'connected') return;
@@ -157,11 +158,11 @@ export const QuickSettings = forwardRef(function QuickSettings({
   const batteryDetail =
     [
       batteryLevel != null && `%${batteryLevel}`,
-      batteryInfo && (batteryInfo.is_charging ? 'Şarj oluyor' : 'Pilde'),
+      batteryInfo && (batteryInfo.is_charging ? tt('common.sarj_oluyor') : tt('taskbar.pilde')),
       batteryTemp !== '—' && batteryTemp,
     ]
       .filter(Boolean)
-      .join(' · ') || 'Telefon pili okunamıyor';
+      .join(' · ') || tt('taskbar.telefon_pili_okunamiyor');
 
   const direction = view === 'main' ? -1 : 1;
 
@@ -181,7 +182,7 @@ export const QuickSettings = forwardRef(function QuickSettings({
           >
             <div className="mb-2 flex h-7 shrink-0 items-center justify-between px-1">
               <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                Hızlı Kontrol Merkezi
+               {tt('taskbar.hizli_kontrol_merkezi')}
               </span>
               <BatteryPill
                 level={batteryLevel}
@@ -193,64 +194,64 @@ export const QuickSettings = forwardRef(function QuickSettings({
             <div className="grid grid-cols-2 gap-1.5">
               <QuickWideTile
                 icon={wifiOn ? Wifi : WifiOff}
-                title="Wi‑Fi"
-                status={wifiOn ? wifiSummary || 'Açık' : 'Kapalı'}
+                title={tt('taskbar.wi_fi')}
+                status={wifiOn ? wifiSummary || tt('common.acik_2') : tt('common.kapali_2')}
                 active={wifiOn}
                 onClick={toggleWifi}
                 onDetail={() => setView('wifi')}
-                detailLabel="Wi‑Fi ayrıntıları"
+                detailLabel={tt('taskbar.wi_fi_ayrintilari')}
               />
               <QuickWideTile
                 icon={Bluetooth}
-                title="Bluetooth"
-                status={btOn ? btSummary || 'Açık' : 'Kapalı'}
+                title={tt('taskbar.bluetooth')}
+                status={btOn ? btSummary || tt('common.acik_2') : tt('common.kapali_2')}
                 active={btOn}
                 onClick={toggleBluetooth}
                 onDetail={() => setView('bluetooth')}
-                detailLabel="Bluetooth ayrıntıları"
+                detailLabel={tt('taskbar.bluetooth_ayrintilari')}
               />
             </div>
 
             <div className="mt-2 grid shrink-0 auto-rows-[68px] grid-cols-3 gap-1">
               <IconTile
                 icon={Flashlight}
-                title="Fener"
-                status={flashlight ? 'Açık' : 'Kapalı'}
+                title={tt('taskbar.fener')}
+                status={flashlight ? tt('common.acik_2') : tt('common.kapali_2')}
                 active={flashlight}
                 onClick={() => systemStore?.toggleHardwareState?.('torch')}
               />
               <IconTile
                 icon={silent ? VolumeX : Volume2}
-                title="Sessiz Mod"
-                status={silent ? 'Açık' : 'Kapalı'}
+                title={tt('taskbar.sessiz_mod')}
+                status={silent ? tt('common.acik_2') : tt('common.kapali_2')}
                 active={silent}
                 onClick={() => systemStore?.toggleHardwareState?.('mute')}
               />
               <IconTile
                 icon={BellRing}
-                title="Zil Sesi"
-                status={ring ? 'Açık' : 'Kapalı'}
+                title={tt('taskbar.zil_sesi_2')}
+                status={ring ? tt('common.acik_2') : tt('common.kapali_2')}
                 active={ring}
                 onClick={() => systemStore?.toggleHardwareState?.('mute')}
               />
               <IconTile
                 icon={Monitor}
-                title="Ekran Gücü"
+                title={tt('taskbar.ekran_gucu')}
                 status={screenStatus}
                 active={screenPower}
                 onClick={toggleScreenPower}
               />
               <IconTile
                 icon={MonitorCog}
-                title="Ekran Uyanık"
+                title={tt('taskbar.ekran_uyanik')}
                 status={screenStatus}
                 active={screenPower}
                 onClick={toggleScreenPower}
               />
               <IconTile
                 icon={Signal}
-                title="Mobil Veri"
-                status={mobileData ? 'Açık' : 'Kapalı'}
+                title={tt('taskbar.mobil_veri')}
+                status={mobileData ? tt('common.acik_2') : tt('common.kapali_2')}
                 active={mobileData}
                 onClick={() => systemStore?.toggleHardwareState?.('mobile_data')}
               />
@@ -260,21 +261,21 @@ export const QuickSettings = forwardRef(function QuickSettings({
               {onDex && (
                 <QuickNavRow
                   icon={MonitorCog}
-                  title="DeX Hızlı Ayarları"
-                  detail="Masaüstü modu, çözünürlük, DPI & görüntü motoru"
+                  title={tt('taskbar.dex_hizli_ayarlari')}
+                  detail={tt('taskbar.masaustu_modu_cozunurluk_dpi_goruntu')}
                   onClick={onDex}
                 />
               )}
               <QuickNavRow
                 icon={SlidersHorizontal}
-                title="Çok Kanallı Mikser"
-                detail="Medya · Zil · Bildirim · Alarm Canlı Kanalları"
+                title={tt('taskbar.cok_kanalli_mikser')}
+                detail={tt('taskbar.medya_zil_bildirim_alarm_canli')}
                 onClick={() => setView('mixer')}
               />
               <OutputSelector value={output} onChange={handleOutputChange} isDefault={perAppSupported} />
               <QuickNavRow
                 icon={BatteryCharging}
-                title="Pil Durumu & Teşhis"
+                title={tt('taskbar.pil_durumu_teshis')}
                 detail={batteryDetail}
                 onClick={() => setView('battery')}
               />
@@ -289,41 +290,41 @@ export const QuickSettings = forwardRef(function QuickSettings({
             {...subviewMotion(1)}
           >
             <QuickSubHeader
-              title="Çok Kanallı Mikser"
+              title={tt('taskbar.cok_kanalli_mikser')}
               subtitle={
                 perAppSupported
-                  ? "DeX'teki uygulamalar ve telefonun ses akışları"
-                  : 'Android sistem ses akışları ve donanım kontrolü'
+                  ? tt('taskbar.dex_teki_uygulamalar_ve_telefonun_ses')
+                  : tt('taskbar.android_sistem_ses_akislari_ve')
               }
               onBack={() => setView('main')}
             />
             <div className="dex-scroll min-h-0 flex-1 overflow-y-auto pb-1">
               <AppAudioSection mode={audioMode} />
-              <MixerSection title="Telefon · Android akışları">
+              <MixerSection title={tt('taskbar.telefon_android_akislari')}>
                 <MixerRow
                   icon={Music4}
-                  label="Medya sesi"
+                  label={tt('taskbar.medya_sesi')}
                   value={channelVolumes.media}
                   max={channelVolumes.mediaMax}
                   onChange={(val) => handleStreamChange(3, val)}
                 />
                 <MixerRow
                   icon={Phone}
-                  label="Zil sesi"
+                  label={tt('taskbar.zil_sesi')}
                   value={channelVolumes.ring}
                   max={channelVolumes.ringMax}
                   onChange={(val) => handleStreamChange(2, val)}
                 />
                 <MixerRow
                   icon={Bell}
-                  label="Bildirim sesi"
+                  label={tt('taskbar.bildirim_sesi')}
                   value={channelVolumes.notification}
                   max={channelVolumes.notificationMax}
                   onChange={(val) => handleStreamChange(5, val)}
                 />
                 <MixerRow
                   icon={AlarmClock}
-                  label="Alarm sesi"
+                  label={tt('taskbar.alarm_sesi')}
                   value={channelVolumes.alarm}
                   max={channelVolumes.alarmMax}
                   onChange={(val) => handleStreamChange(4, val)}
@@ -343,11 +344,11 @@ export const QuickSettings = forwardRef(function QuickSettings({
             {...subviewMotion(1)}
           >
             <QuickSubHeader
-              title="Wi‑Fi"
-              subtitle="Bağlı ağ, çevredeki ve kayıtlı ağlar"
+              title={tt('taskbar.wi_fi')}
+              subtitle={tt('taskbar.bagli_ag_cevredeki_ve_kayitli_aglar')}
               onBack={() => setView('main')}
               action={
-                <Switch checked={wifiOn} label="Wi‑Fi aç/kapat" onChange={() => toggleFromDetail('wifi')} />
+                <Switch checked={wifiOn} label={tt('taskbar.wi_fi_ac_kapat')} onChange={() => toggleFromDetail('wifi')} />
               }
             />
             <div className="dex-scroll min-h-0 flex-1 overflow-y-auto">
@@ -363,13 +364,13 @@ export const QuickSettings = forwardRef(function QuickSettings({
             {...subviewMotion(1)}
           >
             <QuickSubHeader
-              title="Bluetooth"
-              subtitle="Bağlı ve eşleşmiş cihazlar"
+              title={tt('taskbar.bluetooth')}
+              subtitle={tt('taskbar.bagli_ve_eslesmis_cihazlar')}
               onBack={() => setView('main')}
               action={
                 <Switch
                   checked={btOn}
-                  label="Bluetooth aç/kapat"
+                  label={tt('taskbar.bluetooth_ac_kapat')}
                   onChange={() => toggleFromDetail('bluetooth')}
                 />
               }
@@ -387,8 +388,8 @@ export const QuickSettings = forwardRef(function QuickSettings({
             {...subviewMotion(1)}
           >
             <QuickSubHeader
-              title="Pil"
-              subtitle="Sağlık, şarj ve sıcaklık"
+              title={tt('common.pil')}
+              subtitle={tt('taskbar.saglik_sarj_ve_sicaklik')}
               onBack={() => setView('main')}
             />
             <BatteryDetail />
@@ -447,8 +448,8 @@ function QuickWideTile({ icon: Icon, title, status, active, onClick, onDetail, d
             active && 'border-primary-foreground/20 hover:bg-primary-foreground/10'
           )}
           onClick={onDetail}
-          aria-label={detailLabel || `${title} ayrıntıları`}
-          title={detailLabel || `${title} ayrıntıları`}
+          aria-label={detailLabel || tt('taskbar.title_ayrintilari', { title })}
+          title={detailLabel || tt('taskbar.title_ayrintilari', { title })}
         >
           <ChevronRight className="size-4" />
         </button>
@@ -484,7 +485,7 @@ function QuickSubHeader({ title, subtitle, onBack, action }) {
       title={title}
       subtitle={subtitle}
       onBack={onBack}
-      backLabel="Hızlı ayarlara dön"
+      backLabel={tt('taskbar.hizli_ayarlara_don')}
       action={action}
       className="h-11 shrink-0 gap-2 border-b border-border/70 px-1 pb-2"
     />
@@ -497,7 +498,7 @@ function BatteryPill({ level, temp, onClick }) {
     <button
       type="button"
       onClick={onClick}
-      aria-label="Pil ayrıntıları"
+      aria-label={tt('taskbar.pil_ayrintilari')}
       className="flex shrink-0 items-center gap-1.5 rounded-full border border-border/60 bg-muted/60 px-2 py-1 transition-colors hover:bg-accent/70 cursor-pointer"
     >
       <BatteryMedium className="size-3.5 text-status-active" />
@@ -522,7 +523,7 @@ function AppAudioSection({ mode }) {
   if (mode === 'legacy') {
     return (
       <p className="mt-2 rounded-lg border border-border/60 bg-muted/35 px-3 py-2 text-[10px] text-muted-foreground">
-        Uygulama başına ses Android 13+ gerektirir — telefonun tüm sesi tek akış olarak geliyor.
+       {tt('taskbar.uygulama_basina_ses_android_13')}
       </p>
     );
   }
@@ -539,12 +540,12 @@ function AppAudioSection({ mode }) {
   const rows = Object.values(apps).filter((a) => a.windows?.length);
 
   return (
-    <MixerSection as="section" title="DeX'teki uygulamalar" aria-label="DeX'teki uygulamalar">
+    <MixerSection as="section" title={tt('taskbar.dex_teki_uygulamalar')} aria-label={tt('taskbar.dex_teki_uygulamalar')}>
       {rows.length ? (
         rows.map((app) => <AppMixerRow key={app.package} app={app} label={titleFor(app.package) || appNameOf(app.package)} />)
       ) : (
         <p className="py-2.5 text-[10px] text-muted-foreground">
-          Açık uygulama penceresi yok. Pencerede açılan ya da Medya Merkezi'nden DeX'e alınan her uygulamanın sesi burada ayrı bir kanal olur.
+         {tt('taskbar.acik_uygulama_penceresi_yok_pencerede')}
         </p>
       )}
       {rows.some((a) => a.live_route === 'both') && <SyncFineTune className="border-t border-border/55" />}
@@ -556,7 +557,7 @@ function AppAudioSection({ mode }) {
             checked={duckOthers}
             onChange={(e) => setDuckOthers(e.target.checked)}
           />
-          Odaktaki pencere dışındakilerin sesini kıs (%35)
+         {tt('taskbar.odaktaki_pencere_disindakilerin')}
         </label>
       )}
     </MixerSection>
@@ -570,12 +571,12 @@ function OutputSelector({ value, onChange, isDefault = false }) {
         <Volume2 className="size-3.5 shrink-0 text-muted-foreground" />
         <span
           className="truncate text-[10px] font-semibold"
-          title={isDefault ? 'Kendi çıkışı seçilmemiş uygulamalar bu çıkışı kullanır' : undefined}
+          title={isDefault ? tt('taskbar.kendi_cikisi_secilmemis_uygulamalar') : undefined}
         >
-          {isDefault ? 'Varsayılan Çıkış' : 'Ses Çıkışı'}
+          {isDefault ? tt('taskbar.varsayilan_cikis') : tt('common.ses_cikisi')}
         </span>
       </span>
-      <RouteSelector label="Ses çıkışı hedefi" semantics="toggle" value={routeOption(value).value} onChange={onChange} />
+      <RouteSelector label={tt('taskbar.ses_cikisi_hedefi')} semantics="toggle" value={routeOption(value).value} onChange={onChange} />
     </div>
   );
 }

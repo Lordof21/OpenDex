@@ -13,6 +13,7 @@ import Button from '../ui/Button.jsx';
 import { Card } from '../ui/Card.jsx';
 import { ConfirmStrip, EmptyNote, KeyValueRow } from '../ui/Feedback.jsx';
 import { SectionLabel } from '../ui/Typography.jsx';
+import { t } from '../i18n/index.js';
 
 const STATUS_POLL_MS = 5000;
 const SAVED_PREVIEW = 5;
@@ -27,23 +28,23 @@ const STANDARD = {
 };
 
 const SECURITY = {
-  open: 'Açık (şifresiz)',
-  owe: 'Gelişmiş açık (OWE)',
-  wep: 'WEP (güvensiz)',
-  wpa2: 'WPA2-Kişisel',
-  wpa3: 'WPA3-Kişisel',
-  eap: 'WPA2/3-Kurumsal',
-  'eap-wpa3': 'WPA3-Kurumsal',
-  'eap-192': 'WPA3-Kurumsal 192-bit',
+  open: t('taskbar.acik_sifresiz'),
+  owe: t('taskbar.gelismis_acik_owe'),
+  wep: t('taskbar.wep_guvensiz'),
+  wpa2: t('taskbar.wpa2_kisisel'),
+  wpa3: t('taskbar.wpa3_kisisel'),
+  eap: t('taskbar.wpa2_3_kurumsal'),
+  'eap-wpa3': t('taskbar.wpa3_kurumsal'),
+  'eap-192': t('taskbar.wpa3_kurumsal_192_bit'),
   'wapi-psk': 'WAPI-PSK',
-  'wapi-cert': 'WAPI-Sertifika',
+  'wapi-cert': t('taskbar.wapi_sertifika'),
   passpoint: 'Passpoint',
   'passpoint-r3': 'Passpoint R3',
   osen: 'OSEN',
   dpp: 'Easy Connect (DPP)',
 };
 
-const QUALITY = ['Çok zayıf', 'Zayıf', 'Orta', 'İyi', 'Mükemmel'];
+const QUALITY = [t('taskbar.cok_zayif'), t('taskbar.zayif'), t('common.orta'), t('common.iyi'), t('taskbar.mukemmel')];
 
 export function channelOf(freq) {
   if (!freq) return null;
@@ -89,23 +90,23 @@ function ConnectedCard({ wifi, onForget, onDisconnect }) {
         </span>
         <div className="min-w-0 flex-1">
           <div className="truncate text-[12px] font-semibold" title={wifi.ssid}>{wifi.ssid}</div>
-          <div className="text-[9px] text-status-active">Bağlı</div>
+          <div className="text-[9px] text-status-active">{t('common.bagli')}</div>
         </div>
         <SignalBars n={wifi.bars} className="text-foreground" />
       </div>
       <KeyValueRow
-        label="Sinyal"
+        label={t('taskbar.sinyal')}
         value={wifi.rssi != null ? `${wifi.rssi} dBm · ${QUALITY[wifi.bars ?? 0]}` : null}
       />
-      <KeyValueRow label="Bağlantı hızı" value={speedLabel(wifi.tx_mbps, wifi.rx_mbps)} />
+      <KeyValueRow label={t('taskbar.baglanti_hizi')} value={speedLabel(wifi.tx_mbps, wifi.rx_mbps)} />
       <KeyValueRow
-        label="Bant"
+        label={t('taskbar.bant')}
         value={wifi.band && `${wifi.band} · ${wifi.frequency} MHz${channel ? ` · kanal ${channel}` : ''}`}
       />
-      <KeyValueRow label="Standart" value={standardLabel(wifi.standard, wifi.band)} />
-      <KeyValueRow label="Güvenlik" value={securityLabel(wifi.security)} />
-      <KeyValueRow label="IP adresi" value={wifi.ip && (wifi.prefix != null ? `${wifi.ip}/${wifi.prefix}` : wifi.ip)} />
-      <KeyValueRow label="Ağ geçidi" value={wifi.gateway} />
+      <KeyValueRow label={t('taskbar.standart')} value={standardLabel(wifi.standard, wifi.band)} />
+      <KeyValueRow label={t('taskbar.guvenlik')} value={securityLabel(wifi.security)} />
+      <KeyValueRow label={t('taskbar.ip_adresi')} value={wifi.ip && (wifi.prefix != null ? `${wifi.ip}/${wifi.prefix}` : wifi.ip)} />
+      <KeyValueRow label={t('taskbar.ag_gecidi')} value={wifi.gateway} />
       <KeyValueRow
         label="MAC"
         value={wifi.mac && `${wifi.mac}${wifi.mac_randomized ? ' (rastgele)' : wifi.mac_randomized === false ? ' (cihaz)' : ''}`}
@@ -113,7 +114,7 @@ function ConnectedCard({ wifi, onForget, onDisconnect }) {
       <KeyValueRow label="BSSID" value={wifi.bssid} />
       {confirm ? (
         <ConfirmStrip
-          message="Bu ağ unutulsun mu? Yeniden bağlanmak için şifre gerekir."
+          message={t('taskbar.bu_ag_unutulsun_mu_yeniden_baglanmak')}
           onCancel={() => setConfirm(false)}
           onConfirm={() => {
             setConfirm(false);
@@ -124,17 +125,17 @@ function ConnectedCard({ wifi, onForget, onDisconnect }) {
         <>
           <div className="flex justify-end gap-1.5 pt-1">
             <Button size="2xs" variant="ghost" disabled={disconnecting || carriesSession} onClick={disconnect}>
-              {disconnecting ? 'Kesiliyor…' : 'Bağlantıyı kes'}
+              {disconnecting ? t('taskbar.kesiliyor') : t('taskbar.baglantiyi_kes')}
             </Button>
             {wifi.network_id != null && (
               <Button size="2xs" variant="destructive-ghost" disabled={carriesSession} onClick={() => setConfirm(true)}>
-                Bu ağı unut
+                {t('taskbar.bu_agi_unut')}
               </Button>
             )}
           </div>
           {carriesSession && (
             <p className="pt-1 text-[10px] leading-snug text-muted-foreground" data-testid="wifi-carries-session">
-              OpenDeX bu Wi-Fi üzerinden bağlı; ağdan ayrılmak oturumu da koparır. Önce USB&apos;ye geçin.
+              {t('taskbar.opendex_bu_wi_fi_uzerinden_bagli')}
             </p>
           )}
         </>
@@ -157,13 +158,13 @@ function PasswordForm({ network, onCancel, onSubmit }) {
     setError(null);
     const r = await onSubmit(password);
     setBusy(false);
-    if (!r.ok) setError(r.error || 'Bağlanılamadı.');
+    if (!r.ok) setError(r.error || t('taskbar.baglanilamadi'));
   };
 
   return (
-    <form onSubmit={submit} className="my-1 rounded-md border border-primary/30 bg-background/70 p-2" aria-label={`${network.ssid} şifresi`}>
+    <form onSubmit={submit} className="my-1 rounded-md border border-primary/30 bg-background/70 p-2" aria-label={t('taskbar.ssid_sifresi', { ssid: network.ssid })}>
       <label className="block text-[10px] text-muted-foreground" htmlFor="wifi-password">
-        “{network.ssid}” için şifre ({securityLabel(network.security)})
+        {t('taskbar.ssid_icin_sifre_securitylabel', { ssid: network.ssid, securityLabel: securityLabel(network.security) })}
       </label>
       <div className="mt-1 flex items-center gap-1 rounded-md border border-border bg-background px-2">
         <input
@@ -180,7 +181,7 @@ function PasswordForm({ network, onCancel, onSubmit }) {
         <button
           type="button"
           className="grid size-6 place-items-center text-muted-foreground hover:text-foreground cursor-pointer"
-          aria-label={show ? 'Şifreyi gizle' : 'Şifreyi göster'}
+          aria-label={show ? t('taskbar.sifreyi_gizle') : t('taskbar.sifreyi_goster')}
           onClick={() => setShow((v) => !v)}
         >
           {show ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
@@ -188,12 +189,12 @@ function PasswordForm({ network, onCancel, onSubmit }) {
       </div>
       {error && <p role="alert" className="mt-1 text-[10px] text-destructive">{error}</p>}
       {!error && password.length > 0 && !valid && (
-        <p className="mt-1 text-[10px] text-muted-foreground">Şifre 8–63 karakter olmalı.</p>
+        <p className="mt-1 text-[10px] text-muted-foreground">{t('taskbar.sifre_8_63_karakter_olmali')}</p>
       )}
       <div className="mt-1.5 flex justify-end gap-1">
-        <Button size="2xs" variant="ghost" onClick={onCancel}>İptal</Button>
+        <Button size="2xs" variant="ghost" onClick={onCancel}>{t('common.iptal')}</Button>
         <Button size="2xs" type="submit" disabled={!valid || busy}>
-          {busy ? 'Bağlanıyor…' : 'Bağlan'}
+          {busy ? t('common.baglaniyor') : t('common.baglan')}
         </Button>
       </div>
     </form>
@@ -201,13 +202,13 @@ function PasswordForm({ network, onCancel, onSubmit }) {
 }
 
 function NetworkRow({ network, saved, joining, onJoin }) {
-  const title = network.connectable || saved ? undefined : 'Kurumsal/WEP ağlara telefonun kendi ayarlarından bağlanın.';
+  const title = network.connectable || saved ? undefined : t('taskbar.kurumsal_wep_aglara_telefonun_kendi');
   return (
     <button
       type="button"
       onClick={() => onJoin(network)}
       title={title}
-      aria-label={`${network.ssid} ağına bağlan`}
+      aria-label={t('taskbar.ssid_agina_baglan', { ssid: network.ssid })}
       className={cn(
         'flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left transition-colors hover:bg-accent/60 cursor-pointer',
         !network.connectable && !saved && 'opacity-60',
@@ -217,11 +218,11 @@ function NetworkRow({ network, saved, joining, onJoin }) {
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[11px] font-medium">{network.ssid}</span>
         <span className="block text-[9px] text-muted-foreground">
-          {[saved ? 'Kayıtlı' : null, network.band, securityLabel(network.security)].filter(Boolean).join(' · ')}
+          {[saved ? t('taskbar.kayitli') : null, network.band, securityLabel(network.security)].filter(Boolean).join(' · ')}
         </span>
       </span>
       {joining ? (
-        <LoaderCircle className="size-3.5 animate-spin text-muted-foreground" aria-label="Bağlanıyor" />
+        <LoaderCircle className="size-3.5 animate-spin text-muted-foreground" aria-label={t('taskbar.baglaniyor')} />
       ) : (
         network.secured && <Lock className="size-3 text-muted-foreground" aria-hidden="true" />
       )}
@@ -237,21 +238,21 @@ function SavedRow({ network, inRange, onConnect, onForget }) {
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[11px] font-medium">{network.ssid}</span>
           <span className="block text-[9px] text-muted-foreground">
-            {[inRange ? 'Menzilde' : 'Menzil dışında', securityLabel(network.kind || network.security)].join(' · ')}
+            {[inRange ? t('taskbar.menzilde') : t('taskbar.menzil_disinda'), securityLabel(network.kind || network.security)].join(' · ')}
           </span>
         </span>
         {inRange && network.kind && (
-          <Button size="2xs" variant="ghost" onClick={() => onConnect(network)} aria-label={`${network.ssid} ağına bağlan`}>
-            Bağlan
+          <Button size="2xs" variant="ghost" onClick={() => onConnect(network)} aria-label={t('taskbar.ssid_agina_baglan', { ssid: network.ssid })}>
+            {t('common.baglan')}
           </Button>
         )}
-        <Button size="2xs" variant="destructive-ghost" onClick={() => setConfirm(true)} aria-label={`${network.ssid} ağını unut`}>
-          Unut
+        <Button size="2xs" variant="destructive-ghost" onClick={() => setConfirm(true)} aria-label={t('taskbar.ssid_agini_unut', { ssid: network.ssid })}>
+          {t('taskbar.unut')}
         </Button>
       </div>
       {confirm && (
         <ConfirmStrip
-          message="Bu ağ unutulsun mu? Yeniden bağlanmak için şifre gerekir."
+          message={t('taskbar.bu_ag_unutulsun_mu_yeniden_baglanmak')}
           onCancel={() => setConfirm(false)}
           onConfirm={() => {
             setConfirm(false);
@@ -312,7 +313,7 @@ export default function WifiDetail({ enabled }) {
       return;
     }
     if (!network.connectable) {
-      toast('Kurumsal/WEP ağlara telefonun kendi Wi-Fi ayarlarından bağlanın.');
+      toast(t('taskbar.kurumsal_wep_aglara_telefonun_kendi_2'));
       return;
     }
     if (network.secured) {
@@ -332,18 +333,18 @@ export default function WifiDetail({ enabled }) {
   const forget = (networkId) => useConnectivityStore.getState().forgetWifi(networkId);
 
   if (enabled === false) {
-    return <EmptyNote>Wi-Fi kapalı. Çevredeki ağları görmek için sağ üstten açın.</EmptyNote>;
+    return <EmptyNote>{t('taskbar.wi_fi_kapali_cevredeki_aglari_gormek')}</EmptyNote>;
   }
 
   return (
     <div className="pb-1">
-      {wifiError && !wifi && <EmptyNote>Wi-Fi durumu okunamadı: {wifiError}</EmptyNote>}
+      {wifiError && !wifi && <EmptyNote>{t('taskbar.wi_fi_durumu_okunamadi_wifierror', { wifiError })}</EmptyNote>}
 
       {wifi?.connected && <div className="mt-2"><ConnectedCard wifi={wifi} onForget={forget} onDisconnect={() => useConnectivityStore.getState().disconnectWifi()} /></div>}
-      {wifi && !wifi.connected && !joining && <EmptyNote>Bir ağa bağlı değil.</EmptyNote>}
+      {wifi && !wifi.connected && !joining && <EmptyNote>{t('taskbar.bir_aga_bagli_degil')}</EmptyNote>}
       {joining && joining !== connectedSsid && (
         <div className="mt-2 flex items-center gap-2 rounded-md bg-muted/45 px-2 py-1.5 text-[10px]" role="status">
-          <LoaderCircle className="size-3.5 animate-spin" />“{joining}” ağına bağlanılıyor…
+          <LoaderCircle className="size-3.5 animate-spin" />{t('taskbar.joining_agina_baglaniliyor', { joining })}
         </div>
       )}
 
@@ -357,15 +358,15 @@ export default function WifiDetail({ enabled }) {
             type="button"
             onClick={() => useConnectivityStore.getState().scanWifi()}
             disabled={scanning}
-            aria-label="Ağları yeniden tara"
-            title={wirelessLink ? 'Telefon Wi-Fi ile bağlıyken tarama görüntüyü bir an dondurabilir' : undefined}
+            aria-label={t('taskbar.aglari_yeniden_tara')}
+            title={wirelessLink ? t('taskbar.telefon_wi_fi_ile_bagliyken_tarama') : undefined}
             className="grid size-5 place-items-center rounded text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer disabled:cursor-default"
           >
             <RefreshCw className={cn('size-3', scanning && 'animate-spin')} />
           </button>
         }
       >
-        Çevredeki ağlar
+        {t('taskbar.cevredeki_aglar')}
       </SectionLabel>
       <Card className="px-1 py-0.5">
         {nearby.length ? (
@@ -379,13 +380,13 @@ export default function WifiDetail({ enabled }) {
             />
           ))
         ) : (
-          <EmptyNote>{scanning ? 'Taranıyor…' : 'Çevrede ağ bulunamadı.'}</EmptyNote>
+          <EmptyNote>{scanning ? t('taskbar.taraniyor') : t('taskbar.cevrede_ag_bulunamadi')}</EmptyNote>
         )}
       </Card>
 
       {savedOthers.length > 0 && (
         <>
-          <SectionLabel>Kayıtlı ağlar</SectionLabel>
+          <SectionLabel>{t('taskbar.kayitli_aglar')}</SectionLabel>
           <Card className="py-0.5">
             {savedShown.map((n) => (
               <SavedRow
@@ -402,7 +403,7 @@ export default function WifiDetail({ enabled }) {
                 onClick={() => setShowAllSaved((v) => !v)}
                 className="w-full py-1 text-center text-[10px] text-muted-foreground hover:text-foreground cursor-pointer"
               >
-                {showAllSaved ? 'Daha az göster' : `Tümünü göster (${savedOthers.length})`}
+                {showAllSaved ? t('taskbar.daha_az_goster') : t('taskbar.tumunu_goster_count', { count: savedOthers.length })}
               </button>
             )}
           </Card>
