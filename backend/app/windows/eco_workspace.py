@@ -40,6 +40,7 @@ from .scrcpy_launcher import ScrcpyServer
 from .spawn_profile import bring_up_server
 from .task_movement import move_task_to_display
 from .task_windowing import FREEFORM, TaskWindowingState, read_task_windowing, settle_task_windowing
+from .workspace_slots import WorkspaceSlots, fit_to_canvas
 from . import surfaceflinger_probe
 
 if TYPE_CHECKING:
@@ -90,6 +91,22 @@ def android_to_visible_bounds(bounds: TaskBounds, scale: float) -> TaskBounds:
     vis_w = round(android_w * scale)
     vis_h = round(android_h * scale)
     return (left_f, top_f, left_f + vis_w, top_f + vis_h)
+
+
+_MAX_ANDROID_DENSITY = 800
+
+
+def android_density(density: int, scale: float = 1.0) -> int:
+    """The densityDpi Android must be given so the task LOOKS like `density`.
+
+    HyperOS draws a freeform task at `scale` (0.7): the app lays out and rasterises at its logical box and density, then the
+    system shrinks the result. Text therefore shows up at `scale` × the intended size (a 260 DPI task read like 182 DPI).
+    Giving Android `density / scale` cancels it: the logical box is `1/scale` larger (visible_to_android_bounds), the density is
+    `1/scale` higher, so the dp layout is exactly the one `density` promises on the visible box, and the shrunk text is the
+    size `density` promises. `density` everywhere else (UI, ledger, remembered slot) stays the VISIBLE one. No-op at scale 1."""
+    if density <= 0 or not (0.3 < scale < 0.98):
+        return density
+    return min(_MAX_ANDROID_DENSITY, round(density / scale))
 
 
 def freeform_start_command(display_id: str, component: str, launch_bounds: TaskBounds | None = None) -> str:
@@ -176,6 +193,9 @@ class WorkspaceTask:
     # Workspace çerçevesi, Sub-PiP ve DeX-içi kırpma penceresi AYNI kararı versin (eskiden yalnızca ana
     # pencerenin ön yüz belleğindeydi; ayrı JS dünyasındaki PiP göremiyordu).
     density_mode: str = "auto"
+    # Android'e yazılan yoğunluğun hesaplandığı freeform ölçeği (bkz. android_density). Ölçek okumadan sonra değişirse
+    # yoğunluk yeniden yazılır; yoksa görev önceki ölçeğin telafisiyle çizilmeye devam ederdi.
+    density_scale: float = 1.0
     # True ⇒ Android task'ı şu an Display 0'da (telefonda) yaşıyor; Workspace'teki
     # YERİ (bounds/yoğunluk tercihi) korunuyor ama paylaşımlı VD'ye hiçbir maliyeti
     # yok.
@@ -238,8 +258,32 @@ class EcoWorkspaceManager:
         self._tasks: dict[str, WorkspaceTask] = {}  # window_id -> WorkspaceTask
         self._vd_w: int | None = None
         self._vd_h: int | None = None
+        # Where each app's Workspace window was the last time (see workspace_slots.py): an app that comes into the
+        # Workspace — from its own VD window, from the phone, or in a later session — returns to ITS place here.
+        self._slots = WorkspaceSlots(settings_db.get_workspace_slot, settings_db.save_workspace_slot)
 
     # ------------------------------------------------------------------ durum
+
+    @property
+    def slots(self) -> WorkspaceSlots:
+        return self._slots
+
+    async def _placement(
+        self, package: str, bounds: TaskBounds | None, density: int | None, density_mode: str | None,
+    ) -> tuple[TaskBounds, int | None, str | None]:
+        """Where and how dense an app enters the Workspace: what the caller asked for, else what the app had the last time
+        it was here, else the Workspace's own default box. NEVER the size it had where it came from."""
+        slot = await self._slots.recall(package)
+        canvas_w = self._vd_w or self._settings.ECO_WORKSPACE_DISPLAY_W
+        canvas_h = self._vd_h or self._settings.ECO_WORKSPACE_DISPLAY_H
+        if bounds is None:
+            bounds = fit_to_canvas(slot.bounds, canvas_w, canvas_h) if slot else self.DEFAULT_BOUNDS
+        if density is None and slot is not None:
+            density, density_mode = slot.density, density_mode or slot.density_mode
+        return bounds, density, density_mode
+
+    async def _remember_placement(self, task: "WorkspaceTask") -> None:
+        await self._slots.remember(task.package, task.bounds, task.density, task.density_mode)
 
     def _live_tasks(self) -> list[WorkspaceTask]:
         """Paylaşımlı VD'de GERÇEKTEN yaşayanlar — telefona park edilmişler hariç."""
@@ -622,15 +666,22 @@ class EcoWorkspaceManager:
         *,
         settle_log_tag: str,
         density: int | None = None,
+        density_mode: str | None = None,
     ) -> tuple[str, int, int, TaskBounds]:
         """Common tail of open_in_workspace/attach_existing_task once the
         task is placed on the shared VD: set its density (BEFORE the readback: a density change moves the minimum task
         size in pixels, and Android grows the task to comply — after the readback nobody would hear of it), wait for
         the WM layout to settle, read back the real (Android-adjusted) bounds, register the task, and
         emit workspace_task_added."""
+        density_scale = 1.0
         if density:
-            await self._daemon_set_task_density(task_id, density)
+            density_scale = await self._get_freeform_scale(serial)
+            await self._daemon_set_task_density(task_id, density, density_scale)
         effective_bounds, scale = await self._settled_effective_bounds(serial, task_id, target_bounds, wlog)
+        if density and abs(scale[0] - density_scale) > 0.02 and scale[0] > 0.1:
+            # The cached scale was not what the system actually applies to THIS task: write the density again with the measured one.
+            density_scale = scale[0]
+            await self._daemon_set_task_density(task_id, density, density_scale)
         wlog.info(
             "🔬 [ECO WORKSPACE:%s] %s (task=%s) -> effective=%s (hedef: %s, scale=%s)",
             settle_log_tag, package, task_id, effective_bounds, target_bounds, scale,
@@ -638,13 +689,15 @@ class EcoWorkspaceManager:
 
         self._tasks[window_id] = WorkspaceTask(
             window_id=window_id, package=package, task_id=task_id, bounds=effective_bounds,
-            render_scale=scale,
+            render_scale=scale, density=density or None, density_scale=density_scale,
+            density_mode=density_mode if density_mode in DENSITY_MODES else "auto",
         )
         await self._events.emit(
             "workspace_task_added",
             window_id=window_id, package=package, bounds=list(effective_bounds),
             render_scale=list(scale),
-            density=None,
+            density=density or None,
+            density_mode=self._tasks[window_id].density_mode,
         )
 
         stream_w, stream_h = self._stream_dims(server)
@@ -657,13 +710,14 @@ class EcoWorkspaceManager:
         *,
         bounds: TaskBounds | None = None,
         density: int | None = None,
+        density_mode: str | None = None,
     ) -> tuple[str, int, int, TaskBounds]:
         """Paylaşımlı VD'de YENİ bir freeform task başlatır (`am start`).
         Döner: (ws_url, stream_w, stream_h, effective_bounds)."""
         serial = self._serial_getter()
         if not serial:
             raise DeviceNotBoundError()
-        target_bounds = bounds or self.DEFAULT_BOUNDS
+        target_bounds, density, density_mode = await self._placement(package, bounds, density, density_mode)
         wlog = window_logger(__name__, window_id)
 
         server = await self._ensure_shared_display()
@@ -737,19 +791,25 @@ class EcoWorkspaceManager:
         # yoksa çerçeve ile freeform penceresi birbirini tutmaz.
         return await self._finalize_task_registration(
             window_id, package, task_id, target_bounds, serial, wlog, server,
-            settle_log_tag="OPEN_EFFECTIVE", density=density,
+            settle_log_tag="OPEN_EFFECTIVE", density=density, density_mode=density_mode,
         )
 
     async def attach_existing_task(
         self, package: str, window_id: str, task_id: str, *, bounds: TaskBounds | None = None, density: int | None = None,
+        density_mode: str | None = None,
     ) -> tuple[str, int, int, TaskBounds]:
         """Zaten çalışan bir task'ı (başka bir VD'den taşınmış — Dock akışı)
         Eco Workspace'e KAYDEDER. `am start` ÇAĞIRMAZ, sadece move-stack +
-        defter kaydı yapar. task_teleporter.dock_to_workspace() kullanır."""
+        defter kaydı yapar. task_teleporter.dock_to_workspace() kullanır.
+
+        Yer ve yoğunluk geldiği yerden DEĞİL, Workspace'in kendi uzayından gelir: çağıranın verdiği, yoksa uygulamanın
+        Workspace'teki SON yeri/yoğunluğu, o da yoksa Workspace'in varsayılanı (bkz. `_placement`)."""
         serial = self._serial_getter()
         if not serial:
             raise DeviceNotBoundError()
-        target_bounds = bounds or self.DEFAULT_BOUNDS
+        target_bounds, density, density_mode = await self._placement(package, bounds, density, density_mode)
+        if not density:
+            density = self._settings.ECO_WORKSPACE_DPI  # the VD window's / the phone's density is not this space's
         wlog = window_logger(__name__, window_id)
         server = await self._ensure_shared_display()
         assert self._display_id
@@ -787,7 +847,7 @@ class EcoWorkspaceManager:
 
         ws_url, stream_w, stream_h, effective_bounds = await self._finalize_task_registration(
             window_id, package, task_id, target_bounds, serial, wlog, server,
-            settle_log_tag="ACTUAL_BOUNDS", density=density,
+            settle_log_tag="ACTUAL_BOUNDS", density=density, density_mode=density_mode,
         )
         wlog.info("🌱 [ECO WORKSPACE] %s dock ile katıldı (task=%s, bounds=%s, freeform_coerced=%s)", package, task_id, effective_bounds, component)
         return ws_url, stream_w, stream_h, effective_bounds
@@ -919,6 +979,8 @@ class EcoWorkspaceManager:
         effective, new_scale = await self._settled_effective_bounds(serial, task.task_id, bounds, wlog)
         task.bounds = effective
         task.render_scale = new_scale
+        await self._resync_density_scale(task)
+        await self._remember_placement(task)
         await self._events.emit(
             "workspace_task_bounds_changed",
             window_id=window_id, bounds=list(effective),
@@ -943,6 +1005,7 @@ class EcoWorkspaceManager:
         task = self._tasks.pop(window_id, None)
         if not task:
             return
+        await self._remember_placement(task)
         wlog = window_logger(__name__, window_id)
         serial = self._serial_getter()
         if serial:
@@ -952,17 +1015,36 @@ class EcoWorkspaceManager:
         wlog.info("🚪 [ECO WORKSPACE] %s kapatıldı (force-stop), kalan üye sayısı=%d", task.package, len(self._tasks))
         await self._teardown_if_empty()
 
-    async def _daemon_set_task_density(self, task_id: str, density: int) -> bool:
-        """Task-level densityDpi override via the daemon's WindowContainerTransaction; False when it can't."""
+    async def _daemon_set_task_density(self, task_id: str, density: int, scale: float = 1.0) -> bool:
+        """Task-level densityDpi override via the daemon's WindowContainerTransaction; False when it can't.
+        `density` is the VISIBLE density; what Android receives is `android_density(density, scale)`."""
         daemon = self._daemon_client_getter()
         if not (daemon and daemon.is_connected):
             log.warning("⚠️ [ECO WORKSPACE:DENSITY] Daemon aktif değil veya bağlı değil (task=%s).", task_id)
             return False
         try:
-            return bool(await daemon.set_task_density(task_id, density))
+            return bool(await daemon.set_task_density(task_id, android_density(density, scale)))
         except Exception as exc:
             log.warning("⚠️ [ECO WORKSPACE:DENSITY] Daemon RPC hatası (task=%s): %s", task_id, exc)
             return False
+
+    async def _density_scale_of(self, task: WorkspaceTask) -> float:
+        """The freeform scale the system applies to `task` now: measured (render_scale) when known, else the device's."""
+        if task.render_scale[0] > 0.1:
+            return task.render_scale[0]
+        serial = self._serial_getter()
+        return await self._get_freeform_scale(serial) if serial else 1.0
+
+    async def _resync_density_scale(self, task: WorkspaceTask) -> None:
+        """After a read-back, when the scale the system really applies differs from the one the density was written for
+        (HyperOS scales a freeform window but not a maximised one), write the density again for the new scale."""
+        if not task.density or task.parked:
+            return
+        scale = task.render_scale[0]
+        if scale <= 0.1 or abs(scale - task.density_scale) <= 0.02:
+            return
+        if await self._daemon_set_task_density(task.task_id, task.density, scale):
+            task.density_scale = scale
 
     async def park_task(self, window_id: str, task_id: str | None = None) -> WorkspaceTask | None:
         """Üyeyi "telefona park edilmiş" olarak işaretler. Workspace'teki yeri
@@ -978,6 +1060,7 @@ class EcoWorkspaceManager:
         if task.parked:
             return task
         task.parked = True
+        await self._remember_placement(task)
         window_logger(__name__, window_id).info(
             "📱 [ECO WORKSPACE] %s telefona park edildi (yeri korunuyor), canlı üye sayısı=%d",
             task.package, len(self._live_tasks()),
@@ -1020,6 +1103,7 @@ class EcoWorkspaceManager:
         başka bir display'e taşıdığı için burada force-stop edilMEMELİdir."""
         task = self._tasks.pop(window_id, None)
         if task:
+            await self._remember_placement(task)
             window_logger(__name__, window_id).info(
                 "🌸 [ECO WORKSPACE] %s tomurcuklanmak üzere defterden düşürüldü, kalan üye sayısı=%d",
                 task.package, len(self._tasks),
@@ -1040,11 +1124,14 @@ class EcoWorkspaceManager:
             window_logger(__name__, window_id).info("ℹ️ [ECO WORKSPACE:DENSITY] telefonda park halinde — yoğunluk unpark'ta uygulanacak")
             return False
 
-        if not await self._daemon_set_task_density(task.task_id, density):
+        scale = await self._density_scale_of(task)
+        if not await self._daemon_set_task_density(task.task_id, density, scale):
             return False
         task.density = density
+        task.density_scale = scale
         if mode in DENSITY_MODES:
             task.density_mode = mode
+        await self._remember_placement(task)
         await self._events.emit(
             "workspace_task_density_changed",
             window_id=window_id,

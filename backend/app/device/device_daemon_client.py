@@ -669,6 +669,31 @@ class DeviceDaemonClient:
         resp = await self._send_rpc_full(body, "media_get", timeout=2.5)
         return resp if resp and resp.get("type") == "media_update" else None
 
+    async def is_package_playing(self, package: str) -> bool | None:
+        """Does ``package`` have a media session that is playing (or buffering to play) RIGHT NOW? The phone is asked live
+        (`media_get`); the pushed cache is the fallback when that read fails. None: unknown (no daemon, unreadable session
+        list) — callers that would destroy something on "no" must treat unknown as unknown, not as "not playing" (the
+        daemon's own contract: `active:false` + `error` is "could not read", never "nothing plays")."""
+        if not package or not self.is_connected:
+            return None
+        snapshot: dict[str, Any] | None = None
+        with contextlib.suppress(Exception):
+            snapshot = await self.refresh_media()
+        if snapshot is None:
+            snapshot = self.last_media_state
+        if snapshot.get("error"):
+            return None
+        sessions = snapshot.get("sessions")
+        if not isinstance(sessions, list):
+            # `active:false` without an error is the daemon's promise that the phone has no media session at all.
+            sessions = [snapshot] if snapshot.get("active") else []
+        wanted = package.lower()
+        return any(
+            isinstance(s, dict) and str(s.get("package", "")).lower() == wanted
+            and (s.get("is_playing") is True or s.get("state") == "BUFFERING")
+            for s in sessions
+        )
+
     # =========================================================================
     # Fast RPC Command Dispatcher (< 1ms execution)
     # =========================================================================

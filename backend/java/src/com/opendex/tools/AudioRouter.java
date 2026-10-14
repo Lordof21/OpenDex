@@ -33,8 +33,11 @@ import java.util.concurrent.Executors;
  *   phone → no policy at all            : the app plays on the phone as if OpenDeX did not exist
  *
  * Everything not matched by a policy (notifications, calls, alarms, apps without a window) keeps playing on the phone
- * untouched. The hidden android.media.audiopolicy API is reached by reflection (same approach as scrcpy's
- * AudioPlaybackCapture, Apache-2.0 — written from scratch here); requires API 33+.
+ * untouched. The hidden android.media.audiopolicy API is reached by reflection. The order of those reflective calls in
+ * {@code AppCapture.startLocked} (rule → mix → policy → registerAudioPolicyStatic → createAudioRecordSink) follows
+ * scrcpy's AudioPlaybackCapture (Genymobile, Apache-2.0; see THIRD_PARTY_NOTICES.md) — the framework leaves no other way
+ * in. The rule (per-UID, not per-usage), routing, capture loop, timeline and everything else here is OpenDeX's own.
+ * Requires API 33+.
  *
  * Invariant: a registered policy is ALWAYS paired with a live capture in {@link #captures}. A policy left behind
  * keeps its app silent on the phone ("pc" route), so every exit path (route change, stop, capture failure, idle,

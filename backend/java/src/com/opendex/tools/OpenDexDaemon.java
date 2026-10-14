@@ -1204,6 +1204,9 @@ public class OpenDexDaemon {
 
     /** Which way the toggles were last read (logged once per way: a phone that rejects one identity is then visible in the log). */
     private static volatile String statesReadPath;
+    /** After a failed read the periodic tick leaves the toggles alone for this long (an explicit states_get still tries). */
+    private static final long STATES_RETRY_AFTER_FAILURE_MS = 60_000;
+    private static volatile long statesRetryAtMs = 0;
 
     private static final class Toggles {
         boolean wifi, bt, airplane, mobileData, rotLock, mute;
@@ -1260,7 +1263,11 @@ public class OpenDexDaemon {
                     }
                 }
                 if (t == null) {
-                    String why = (shellFailure != null ? "shell identity: " + Json.reason(shellFailure) + "; " : "") + "system context: " + Json.reason(systemFailure);
+                    // Object hashes (IApplicationThread$Stub$Proxy@1a2b3c) change on every attempt: a message that differs
+                    // each time was logged and BROADCAST again on every tick although nothing had changed.
+                    String why = ((shellFailure != null ? "shell identity: " + Json.reason(shellFailure) + "; " : "") + "system context: " + Json.reason(systemFailure))
+                            .replaceAll("@[0-9a-f]{4,}", "@…").replaceAll("pid=\\d+", "pid=…");
+                    statesRetryAtMs = System.currentTimeMillis() + STATES_RETRY_AFTER_FAILURE_MS;
                     if (!why.equals(statesReadPath)) {
                         statesReadPath = why;
                         Log.warn("States", "toggles unreadable — " + why);
@@ -1280,6 +1287,7 @@ public class OpenDexDaemon {
                 t.mute = "0".equals(execCommand("settings get system mode_ringer"));
             }
 
+            statesRetryAtMs = 0;
             JSONObject states = new JSONObject()
                     .put("wifi", t.wifi).put("bluetooth", t.bt).put("mobile_data", t.mobileData)
                     .put("airplane_mode", t.airplane).put("rotation_lock", t.rotLock).put("mute", t.mute).put("torch", lastTorchState);
@@ -2478,8 +2486,10 @@ public class OpenDexDaemon {
                         String bat = Battery.updateJson().toString();
                         if (!bat.equals(lastBat)) { lastBat = bat; broadcast(bat); }
 
-                        String states = getHardwareStatesJson().toString();
-                        if (!states.equals(lastStates)) { lastStates = states; broadcast(states); }
+                        if (System.currentTimeMillis() >= statesRetryAtMs) {
+                            String states = getHardwareStatesJson().toString();
+                            if (!states.equals(lastStates)) { lastStates = states; broadcast(states); }
+                        }
                     }
                 } catch (Throwable ignored) {}
             }

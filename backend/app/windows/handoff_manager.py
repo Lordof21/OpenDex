@@ -607,10 +607,26 @@ class HandoffManager:
                         target_windowing = (await settings_db.get_project_settings()).phone_handoff_windowing
                 launch_mode = 5 if target_windowing == "freeform" else None
 
-                out_start = await android_shell.bring_to_front(
-                    self._adb, serial, pkg, "0", reorder_only=bool(task_id), component=top_component,
-                    windowing_mode=launch_mode,
-                )
+                out_start = ""
+                # HyperOS/MIUI: görev WCT ile taşındıysa Home'a gerçek bir ön-plan geçişi verilmeli, yoksa kenar geri jesti
+                # (GestureStub) dokunuşa kapalı kalır — Home → uygulama (kök neden: HANDOFF_GERI_JESTI_KOK_NEDEN.md).
+                # Başlatma komutu hata verirse (çözülemeyen intent) kullanıcı Home'da kalmasın: düz öne getirmeye düşülür.
+                if task_id and await android_shell.is_miui_or_hyperos(self._adb, serial):
+                    try:
+                        out_start = await android_shell.unlock_display0_gesture_navigation(
+                            self._adb, serial, pkg, windowing_mode=launch_mode,
+                        )
+                    except Exception as exc:  # noqa: BLE001 — düz öne getirmeye düşülür
+                        log.warning("⚠️ [HANDOFF: HYPEROS JEST KİLİDİ] Home → %s geçişi başarısız: %s", pkg, exc)
+                    if "error" in (out_start or "").lower():
+                        out_start = ""
+                    elif out_start:
+                        log.info("🧭 [HANDOFF: HYPEROS JEST KİLİDİ] Home → %s geçişi yapıldı (onForegroundChanged → GestureStub)", pkg)
+                if not out_start:
+                    out_start = await android_shell.bring_to_front(
+                        self._adb, serial, pkg, "0", reorder_only=bool(task_id), component=top_component,
+                        windowing_mode=launch_mode,
+                    )
                 log.info("🎯 [HANDOFF] am start --display 0 tamamlandı (comp=%s mode=%s): '%s'", top_component or "auto", launch_mode, out_start.strip() if out_start else "OK")
             except Exception as exc:
                 log.warning("⚠️ [HANDOFF] am start --display 0 uyarısı: %s", exc)
@@ -654,9 +670,7 @@ class HandoffManager:
                 if not cdp_ok:
                     # CDP dürtmesi yanıt vermezse ve ön-iniş yapılmadıysa güvenli geri çekilme (restart fallback)
                     if not prelanded and task_id and self._daemon_client_getter:
-                        daemon = self._daemon_client_getter()
-                        if daemon and hasattr(daemon, "restart_task_activity"):
-                            restarted = await daemon.restart_task_activity(task_id)
+                        restarted = await self._reinflate(pkg, task_id)
 
             elif prelanded and not is_web_rendered_app(pkg):
                 # ── KADEME 2: Ön-İnişli Yerel ve Hibrit Uygulamalar (Sıfır Durum Kaybı) ──
@@ -674,14 +688,12 @@ class HandoffManager:
                 should_reinflate = not prelanded or is_web_rendered_app(pkg)
                 if should_reinflate and task_id and self._daemon_client_getter:
                     try:
-                        daemon = self._daemon_client_getter()
-                        if daemon and hasattr(daemon, "restart_task_activity"):
-                            restarted = await daemon.restart_task_activity(task_id)
-                            if restarted:
-                                log.info(
-                                    "🎯 [HANDOFF: REINFLATE] %s View ağacı Display 0 üzerinde telefon düzenine göre yeniden oluşturuldu",
-                                    pkg,
-                                )
+                        restarted = await self._reinflate(pkg, task_id)
+                        if restarted:
+                            log.info(
+                                "🎯 [HANDOFF: REINFLATE] %s View ağacı Display 0 üzerinde telefon düzenine göre yeniden oluşturuldu",
+                                pkg,
+                            )
                     except Exception as exc:
                         log.debug("restart_task_activity atlandı/uyarı: %s", exc)
 
@@ -917,6 +929,18 @@ class HandoffManager:
             return True
         finally:
             self._active_transitions.discard(window_id)
+
+    async def _reinflate(self, pkg: str, task_id: str | int) -> bool:
+        """Rebuilds the app's view tree on the phone display: a state-preserving PROCESS restart (daemon) — except for an app
+        that is playing media, whose process must not die (the music would go with it): that one is recreated in place
+        (density_reconciler, "Playback is never cut"). True: the app was rebuilt."""
+        if self._density is not None and await self._density.is_playing(pkg):
+            log.info("🎵 [HANDOFF: REINFLATE] %s müzik çalıyor — süreç öldürülmeden yerinde yeniden kuruluyor", pkg)
+            return await self._density.relaunch_in_place(pkg)
+        daemon = self._daemon_client_getter() if callable(self._daemon_client_getter) else None
+        if daemon and hasattr(daemon, "restart_task_activity"):
+            return bool(await daemon.restart_task_activity(task_id))
+        return False
 
     def _watched_sessions(self) -> list["WindowSession"]:
         """Windows whose app can wander to the phone: real apps (not our pseudo-windows, not a launcher), streaming.

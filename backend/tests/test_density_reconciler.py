@@ -23,6 +23,7 @@ from app.windows.density_reconciler import (
     DISABLED,
     FRESH_PROCESS,
     INVALID,
+    KEPT_PLAYING,
     NO_DAEMON,
     NO_PROCESS,
     NO_TASK,
@@ -124,10 +125,14 @@ class FakePhone:
 class FakeDaemon:
     is_connected = True
 
-    def __init__(self, phone: FakePhone, *, handles_density=True, restart_ok=True, reborn=True):
+    def __init__(self, phone: FakePhone, *, handles_density=True, restart_ok=True, reborn=True, playing=None):
         self.phone, self.handles_density, self.restart_ok, self.reborn = phone, handles_density, restart_ok, reborn
+        self.playing = playing  # what the phone says about the app's media session: True / False / None (unknown)
         self.restarts: list[str] = []
         self.info_calls: list[str] = []
+
+    async def is_package_playing(self, package):
+        return self.playing
 
     async def task_density_info(self, tid):
         self.info_calls.append(str(tid))
@@ -220,6 +225,70 @@ async def test_same_process_that_lived_through_the_change_gets_a_verified_proces
     assert daemon.restarts == ["42"]
     # The task is resolved on the TARGET display at decision time, not remembered from before a move.
     assert (PKG, "9") in tasks["calls"]
+
+
+async def test_a_playing_app_is_never_process_restarted_when_the_relaunch_is_unproven(tasks):
+    """The YouTube Music report: the process that lived through the density change carried the playback service, and the
+    escalation to a process restart ended the music. A playing app is left alive instead (kept_playing)."""
+    phone = FakePhone(relaunch_works=False)
+    daemon = FakeDaemon(phone, playing=True)
+    rec = make(phone, daemon)
+    before = await rec.snapshot(PKG)
+
+    outcome = await rec.settle(PKG, before=before, display="9", reason="open")
+
+    assert outcome.action == KEPT_PLAYING and outcome.ok and not outcome.refreshed
+    assert daemon.restarts == []
+    assert (phone.pid, phone.ticks) == (4000, 90_000)  # the very same process is still running
+
+
+async def test_a_playing_video_player_keeps_the_old_process_restart(tasks):
+    """YouTube plays a video and must still be reborn under the new density (its layout stays phone-sized otherwise)."""
+    phone = FakePhone("com.google.android.youtube", relaunch_works=False)
+    daemon = FakeDaemon(phone, playing=True)
+    rec = make(phone, daemon)
+    before = await rec.snapshot("com.google.android.youtube")
+
+    outcome = await rec.settle("com.google.android.youtube", before=before, display="9", reason="open")
+
+    assert outcome.action == RESTARTED and daemon.restarts == ["42"]
+
+
+async def test_a_playing_app_with_a_hard_refresh_policy_is_still_not_killed(tasks, monkeypatch):
+    phone = FakePhone()
+    daemon = FakeDaemon(phone, playing=True)
+    rec = make(phone, daemon)
+    monkeypatch.setattr(rec, "_policy", AsyncMock(return_value=(True, True)))  # density_refresh_hard on: no gentle tier first
+    before = await rec.snapshot(PKG)
+
+    outcome = await rec.settle(PKG, before=before, display="9", reason="open")
+
+    assert daemon.restarts == []
+    # The in-place relaunch (the only thing allowed) was tried inside the guard and proven → the layout is rebuilt.
+    assert outcome.action == RELAUNCHED and outcome.detail.startswith("playing;")
+    assert (phone.pid, phone.ticks) == (4000, 90_000)
+
+
+async def test_the_users_explicit_restart_is_not_second_guessed_by_the_playback_guard(tasks):
+    phone = FakePhone()
+    daemon = FakeDaemon(phone, playing=True)
+    rec = make(phone, daemon)
+
+    outcome = await rec.settle(PKG, before=None, display="9", reason="manual", force=True)
+
+    assert outcome.action == RESTARTED and daemon.restarts == ["42"]
+
+
+@pytest.mark.parametrize("playing", [False, None])
+async def test_a_silent_or_unknown_app_keeps_the_process_restart_escalation(tasks, playing):
+    """The guard needs a POSITIVE answer: an app the phone says is not playing (or a daemon that cannot tell) is
+    reconciled exactly as before."""
+    phone = FakePhone(relaunch_works=False)
+    daemon = FakeDaemon(phone, playing=playing)
+    rec = make(phone, daemon)
+    before = await rec.snapshot(PKG)
+
+    assert (await rec.settle(PKG, before=before, display="9", reason="open")).action == RESTARTED
 
 
 @pytest.mark.parametrize("package", ["com.android.chrome", "com.google.android.youtube", "org.example.anything"])

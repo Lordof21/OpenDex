@@ -256,6 +256,17 @@ async def _probe_tab_visible(port: int, page: dict[str, Any]) -> dict[str, Any] 
     return None
 
 
+async def _web_pages(port: int) -> list[dict[str, Any]]:
+    """The open http(s) page tabs of the browser behind the forwarded DevTools ``port`` (raises on a dead socket)."""
+    loop = asyncio.get_running_loop()
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/json/list")
+    raw_list = await loop.run_in_executor(None, lambda: urllib.request.urlopen(req, timeout=0.5).read().decode())
+    return [
+        t for t in json.loads(raw_list)
+        if t.get("type") == "page" and t.get("url", "").startswith(("http://", "https://")) and t.get("webSocketDebuggerUrl")
+    ]
+
+
 async def _find_active_page_target(port: int, valid_pages: list[dict[str, Any]], timeout_s: float = 0.5) -> dict[str, Any]:
     """Finds the foreground active/visible page tab among all open browser targets.
 
@@ -297,16 +308,7 @@ async def capture_browser_scroll_state(
     async with _get_cdp_lock(serial):
         try:
             async with open_cdp_session(adb, serial, socket_name, timeout_s=timeout_s) as port:
-                loop = asyncio.get_running_loop()
-                req = urllib.request.Request(f"http://127.0.0.1:{port}/json/list")
-                raw_list = await loop.run_in_executor(
-                    None, lambda: urllib.request.urlopen(req, timeout=0.4).read().decode()
-                )
-                tabs = json.loads(raw_list)
-                pages = [
-                    t for t in tabs
-                    if t.get("type") == "page" and t.get("url", "").startswith(("http://", "https://")) and t.get("webSocketDebuggerUrl")
-                ]
+                pages = await _web_pages(port)
                 if not pages:
                     return None
 
@@ -399,16 +401,7 @@ async def refresh_browser_layout_inplace(
                 loop = asyncio.get_running_loop()
                 deadline = loop.time() + timeout_s
 
-                # Fetch all open page tabs
-                req = urllib.request.Request(f"http://127.0.0.1:{port}/json/list")
-                raw_list = await loop.run_in_executor(
-                    None, lambda: urllib.request.urlopen(req, timeout=0.5).read().decode()
-                )
-                tabs = json.loads(raw_list)
-                pages = [
-                    t for t in tabs
-                    if t.get("type") == "page" and t.get("url", "").startswith(("http://", "https://")) and t.get("webSocketDebuggerUrl")
-                ]
+                pages = await _web_pages(port)
                 if not pages:
                     log.debug("[CDP_REFRESH] Açık aktif web sayfası bulunamadı")
                     return False
@@ -465,6 +458,45 @@ async def refresh_browser_layout_inplace(
         except Exception as exc:
             log.debug("[CDP_REFRESH] In-place layout dürtmesi atlandı/hata: %s", exc)
             return False
+
+
+async def soft_reload_active_tab(
+    adb: "Adb",
+    serial: str,
+    socket_name: str,
+    *,
+    timeout_s: float = 2.5,
+) -> dict[str, Any] | None:
+    """The USER's "reload this page": a normal reload (``Page.reload``, HTTP cache honoured — not a hard reload) of the
+    foreground tab, so the page lays itself out again under the window's CURRENT size and density.
+
+    This is deliberately NOT part of any automatic path: the in-place nudge above runs once per handoff, but a reload
+    after every resize would reload a page the user is reading (lost form input, restarted media, one more render on the
+    phone's CPU per resize). It is a button the user presses when a page came out wrong after a resize.
+
+    Returns ``{"title", "url"}`` of the tab that was reloaded, None when there was nothing to reload or the tab never
+    answered. Never raises; the port forward is removed unconditionally."""
+    async with _get_cdp_lock(serial):
+        try:
+            async with open_cdp_session(adb, serial, socket_name, timeout_s=timeout_s) as port:
+                pages = await _web_pages(port)
+                if not pages:
+                    return None
+                target = await _find_active_page_target(port, pages, timeout_s=0.4)
+                ws_raw = target.get("webSocketDebuggerUrl")
+                if not ws_raw:
+                    return None
+                ws_url = re.sub(r"ws://[^/]+/", f"ws://127.0.0.1:{port}/", ws_raw)
+                async with websockets.connect(ws_url, open_timeout=_TAB_OPEN_TIMEOUT_S, close_timeout=0.3) as ws:
+                    res = await _send_cdp(ws, "Page.reload", {"ignoreCache": False}, req_id=31, timeout_s=1.0)
+                if not res or "error" in res:
+                    log.debug("[CDP_RELOAD] Page.reload reddedildi/yanıtsız: %s", res)
+                    return None
+                log.info("🔄 [CDP_RELOAD] Aktif sekme yumuşak yenilendi ('%s')", target.get("title", "")[:40])
+                return {"title": target.get("title", ""), "url": target.get("url", "")}
+        except Exception as exc:
+            log.debug("[CDP_RELOAD] Yumuşak yenileme atlandı/hata: %s", exc)
+            return None
 
 
 async def _reset_scale_on_tab(port: int, page: dict[str, Any], gate: asyncio.Semaphore) -> None:

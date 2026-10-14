@@ -2187,6 +2187,105 @@
         }
       }
     },
+    "/api/v1/windows/{window_id}/web-reload": {
+      "get": {
+        "tags": [
+          "windows"
+        ],
+        "summary": "Web Reload Capability",
+        "description": "Does this window's app have a web page the user can reload (Chromium DevTools socket)? Asked when a menu opens, so\n\"Sayfayı yenile\" is only offered where it can work (windows/web_reload.py).",
+        "operationId": "web_reload_capability_api_v1_windows__window_id__web_reload_get",
+        "parameters": [
+          {
+            "name": "window_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Window Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForeignOrigin"
+          }
+        }
+      }
+    },
+    "/api/v1/windows/reload-page": {
+      "post": {
+        "tags": [
+          "windows"
+        ],
+        "summary": "Reload Window Page",
+        "description": "Hub → \"Sayfayı yenile\": a NORMAL reload of the foreground tab of a Chromium-based browser window. Never automatic\n(a reload after every resize would reload a page the user is reading); the app and its other tabs are untouched.",
+        "operationId": "reload_window_page_api_v1_windows_reload_page_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestartAppRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForeignOrigin"
+          },
+          "411": {
+            "$ref": "#/components/responses/LengthRequired"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          }
+        }
+      }
+    },
     "/api/v1/window/{window_id}/xml-elements": {
       "get": {
         "tags": [
@@ -6477,6 +6576,21 @@
           "window_id": {
             "type": "string",
             "title": "Window Id"
+          },
+          "windowing": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "fullscreen",
+                  "freeform"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Windowing"
           }
         },
         "type": "object",
@@ -7766,13 +7880,6 @@
           "type": {
             "type": "string",
             "title": "Error Type"
-          },
-          "input": {
-            "title": "Input"
-          },
-          "ctx": {
-            "type": "object",
-            "title": "Context"
           }
         },
         "type": "object",

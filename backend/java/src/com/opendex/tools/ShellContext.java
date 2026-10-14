@@ -128,11 +128,54 @@ final class ShellContext extends ContextWrapper {
         }
 
         protected IContentProvider acquireProvider(Context c, String name) {
-            return (IContentProvider) call(acquire, c, name);
+            IContentProvider external = externalProvider(name);
+            return external != null ? external : (IContentProvider) call(acquire, c, name);
         }
 
         protected IContentProvider acquireUnstableProvider(Context c, String name) {
-            return (IContentProvider) call(acquireUnstable, c, name);
+            IContentProvider external = externalProvider(name);
+            return external != null ? external : (IContentProvider) call(acquireUnstable, c, name);
+        }
+
+        /** Identifies this process to ActivityManager for getContentProviderExternal (the shell's `content`/`settings` do the same). */
+        private static final android.os.IBinder EXTERNAL_TOKEN = new android.os.Binder();
+        private static final java.util.Map<String, IContentProvider> EXTERNAL = new java.util.concurrent.ConcurrentHashMap<>();
+
+        /**
+         * A provider obtained the way a shell command obtains one: ActivityManager.getContentProviderExternal. The ordinary
+         * path (ActivityThread.acquireProvider) hands ActivityManager OUR IApplicationThread, which this app_process never
+         * attached — a provider this process has not cached yet is then refused ("Unable to find app for caller
+         * IApplicationThread$Stub$Proxy@… when getting content provider settings"), on every read, for ever. Null when the
+         * call is not available on this Android; the caller then falls back to the ordinary path, as before.
+         */
+        private static IContentProvider externalProvider(String name) {
+            IContentProvider cached = EXTERNAL.get(name);
+            if (cached != null) {
+                if (cached.asBinder().isBinderAlive()) return cached;
+                EXTERNAL.remove(name);   // the provider's process died: ask again
+            }
+            try {
+                Object am = Binders.service("activity", "android.app.IActivityManager$Stub");
+                if (am == null) return null;
+                Method get = null;
+                for (Method m : Class.forName("android.app.IActivityManager").getMethods()) {
+                    Class<?>[] p = m.getParameterTypes();
+                    if (m.getName().equals("getContentProviderExternal") && p.length == 4 && p[0] == String.class
+                            && p[1] == int.class && p[2] == android.os.IBinder.class && p[3] == String.class) {
+                        get = m;
+                        break;
+                    }
+                }
+                if (get == null) return null;
+                Object holder = get.invoke(am, name, 0, EXTERNAL_TOKEN, "opendex");
+                if (holder == null) return null;
+                IContentProvider provider = (IContentProvider) holder.getClass().getField("provider").get(holder);
+                if (provider != null) EXTERNAL.put(name, provider);
+                return provider;
+            } catch (Throwable t) {
+                Log.warn("ShellContext", "getContentProviderExternal(" + name + ") unavailable: " + Json.reason(t));
+                return null;
+            }
         }
 
         public boolean releaseProvider(IContentProvider icp) {

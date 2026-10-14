@@ -1145,6 +1145,58 @@ async def test_a_packet_with_the_predicted_size_confirms_even_without_the_client
     assert flex_manager.profile.flex_display_supported is True
 
 
+async def test_an_orientation_locked_app_that_rotates_the_display_still_confirms_the_resize(flex_manager):
+    """Settings and most portrait-only apps rotate the display when a landscape size is asked for: asked 1088x800, the
+    session packet says 800x1088 and the flag is cleared (rotation = display properties changed). That is OUR resize —
+    refusing it cost the 3 s timeout and a full display rebuild every time."""
+    handle = await _open_flex_window(flex_manager)
+    session = flex_manager.get_session(handle.window_id)
+    session.server.size_alignment = 16
+    control = _script_control(
+        flex_manager, handle.window_id,
+        lambda w, h: _ack(flex_manager, handle.window_id, 800, 1088, client_resized=False),
+    )
+
+    result = await flex_manager.resize_window(handle.window_id, 1088, 800)
+
+    assert control.sent == [(1088, 800)]
+    assert (result.display_w, result.display_h) == (800, 1088)           # what the stream really is
+    assert session.rotates_on_resize is True
+    assert flex_manager.profile.flex_display_supported is True
+
+
+async def test_once_known_to_rotate_the_same_landscape_request_is_a_no_op(flex_manager):
+    handle = await _open_flex_window(flex_manager)
+    session = flex_manager.get_session(handle.window_id)
+    session.server.size_alignment = 16
+    control = _script_control(
+        flex_manager, handle.window_id,
+        lambda w, h: _ack(flex_manager, handle.window_id, 800, 1088, client_resized=False),
+    )
+    await flex_manager.resize_window(handle.window_id, 1088, 800)
+    control.sent.clear()
+
+    result = await flex_manager.resize_window(handle.window_id, 1088, 800)   # the display is already that: no packet would come
+
+    assert control.sent == []
+    assert (result.display_w, result.display_h) == (800, 1088)
+
+
+async def test_an_app_that_keeps_the_orientation_is_not_marked_as_rotating(flex_manager):
+    handle = await _open_flex_window(flex_manager)
+    session = flex_manager.get_session(handle.window_id)
+    session.server.size_alignment = 16
+    session.rotates_on_resize = True                                       # an earlier app on this window rotated
+    _script_control(
+        flex_manager, handle.window_id,
+        lambda w, h: _ack(flex_manager, handle.window_id, 1088, 800, client_resized=True),
+    )
+
+    await flex_manager.resize_window(handle.window_id, 1088, 800)
+
+    assert session.rotates_on_resize is False
+
+
 class _LivePumpFlexServer(_FlexCapableFakeScrcpyServer):
     """Its video socket stays open until the test ends it (``video_reader.feed_eof()``): the window's pump keeps
     running, as on a real device, instead of ending right after the handshake."""

@@ -4,7 +4,7 @@
 
 Every tunable of the backend is an environment variable with the prefix `OPENDEX_` (a `.env` file next to where the backend starts is read too). Nothing is hard-coded at call sites. Values are validated at start-up; an invalid value stops the backend with a message instead of running half-configured.
 
-78 settings, generated from [`backend/app/config.py`](../backend/app/config.py) — the comment above each setting there is the description below.
+80 settings, generated from [`backend/app/config.py`](../backend/app/config.py) — the comment above each setting there is the description below.
 
 
 ## ADB / scrcpy
@@ -33,8 +33,8 @@ Every tunable of the backend is an environment variable with the prefix `OPENDEX
 | Variable | Type | Default | Description |
 |---|---|---|---|
 | `OPENDEX_API_TOKEN` | `str \| None` | *(unset)* | The bearer token every /api and /ws call must present. Empty: the per-user file below is used (created 0600 on first start). Set it explicitly when the API must be reachable from another machine. |
-| `OPENDEX_API_TOKEN_FILE` | `Path` | `~/.opendex/api-token` | The per-user token file, used when API_TOKEN is empty. |
-| `OPENDEX_DAEMON_TOKEN_FILE` | `Path` | `~/.opendex/daemon-token` | The secret the on-device daemon is started with and the backend answers its challenge with (device/daemon_auth.py). A different file from the API token on purpose: that one reaches the browser UI, this one never leaves the backend. |
+| `OPENDEX_API_TOKEN_FILE` | `Path` | `~\.opendex\api-token` | The per-user token file, used when API_TOKEN is empty. |
+| `OPENDEX_DAEMON_TOKEN_FILE` | `Path` | `~\.opendex\daemon-token` | The secret the on-device daemon is started with and the backend answers its challenge with (device/daemon_auth.py). A different file from the API token on purpose: that one reaches the browser UI, this one never leaves the backend. |
 | `OPENDEX_DAEMON_SHELL` | `bool` | `true` | Device shell commands go to the daemon first (device/adb.py). False is the way back: every command runs on adb, as before — for comparing the two paths on a device, or if a phone's daemon misbehaves. The daemon itself (media, volume, tasks, …) is unaffected. |
 | `OPENDEX_ALLOW_REMOTE` | `bool` | `false` | Listening beyond loopback is refused unless this is true AND API_TOKEN is set explicitly. |
 | `OPENDEX_TOKEN_BOOTSTRAP` | `bool` | `false` | GET /api/auth/bootstrap hands the token to a browser page from one of the app's own origins. Only for the nginx/Docker deployment, where nothing else can give the page the token; the desktop build leaves it off. |
@@ -54,12 +54,12 @@ Every tunable of the backend is an environment variable with the prefix `OPENDEX
 | `OPENDEX_FS_ADB_PORT` | `int` | `5037` | the adb server's port |
 | `OPENDEX_FS_TRANSFER_WORKERS` | `int` | `3` | files in flight per job |
 | `OPENDEX_FS_MAX_JOBS` | `int` | `2` | jobs running at once; the rest wait, queued |
-| `OPENDEX_FS_CACHE_DIR` | `Path` | `~/.opendex/cache/fs` | the OLD on-disk preview cache: only ever cleaned up |
+| `OPENDEX_FS_CACHE_DIR` | `Path` | `~\.opendex\cache\fs` | the OLD on-disk preview cache: only ever cleaned up |
 | `OPENDEX_FS_CACHE_MB` | `int` | `256` | RAM kept for previewed phone files (never written to the disk) |
 | `OPENDEX_FS_THUMB_CACHE_MB` | `int` | `48` | RAM kept for thumbnails |
 | `OPENDEX_FS_PREVIEW_MAX_MB` | `int` | `96` | a bigger phone file is copied, not previewed (also capped by FS_CACHE_MB) |
 | `OPENDEX_FS_TRASH_DAYS` | `int` | `30` | the phone's Recycle Bin keeps items this long (0: for ever) |
-| `OPENDEX_FS_SHELL_TOKEN_FILE` | `Path` | `~/.opendex/shell-token` | Only the Tauri shell can read this file: it proves a drag-and-drop / file-picker grant came from native UI. |
+| `OPENDEX_FS_SHELL_TOKEN_FILE` | `Path` | `~\.opendex\shell-token` | Only the Tauri shell can read this file: it proves a drag-and-drop / file-picker grant came from native UI. |
 
 ## Video defaults
 
@@ -115,7 +115,7 @@ Every tunable of the backend is an environment variable with the prefix `OPENDEX
 
 | Variable | Type | Default | Description |
 |---|---|---|---|
-| `OPENDEX_DB_PATH` | `Path` | `~/.opendex/settings.db` | The SQLite file that holds the project settings and window layouts. |
+| `OPENDEX_DB_PATH` | `Path` | `~\.opendex\settings.db` | The SQLite file that holds the project settings and window layouts. |
 
 ## Helper APK
 
@@ -150,6 +150,8 @@ Every tunable of the backend is an environment variable with the prefix `OPENDEX
 | `OPENDEX_DENSITY_REFRESH_QUIET_S` | `float` | `1.2` | a burst of density changes becomes ONE restart after this much silence |
 | `OPENDEX_DENSITY_REFRESH_MIN_GAP_S` | `float` | `5.0` | never restart the same app twice within this many seconds |
 | `OPENDEX_DENSITY_ADAPT_WAIT_S` | `float` | `1.5` | How long after the last density change the event log is watched for the app rebuilding ITSELF (Chrome recreates its activity on every density change; a move that changes the screen size makes Android relaunch many apps). Such an app is left alone — refreshing it again was the needless second refresh. |
+| `OPENDEX_DENSITY_SELF_RECREATE_ESCALATE` | `bool` | `false` | OPT-IN. An app that "adapted" only by recreating its OWN activity (proof "app:") is still restarted (state preserving, i.e. an onDestroy + cold start) when it crossed between the phone's and the window's density (handoff / reclaim / open). Measured: Chrome switches its page scale to x1.2 in the PC window's config and never switches back in-process (devicePixelRatio 3.8475 instead of 3.206 on the phone); only a process restart resets it. |
+| `OPENDEX_HANDOFF_PRELANDING_STABILIZE_S` | `float` | `0.8` | After the handoff pre-landing the task is moved only after this much quiet, so the rebuilt app (Chrome: a NEW renderer process) draws its first frame at the new density first — moved mid-rebuild, the phone showed a black surface. |
 
 ## Encoder capacity stress test
 

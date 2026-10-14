@@ -444,6 +444,46 @@ async def test_xiaomi_hyperos_freeform_scale_resizes_task_and_emits_visible_boun
     assert mgr.get_task("win-1").bounds == (100, 100, 900, 700)
 
 
+def test_android_density_cancels_the_freeform_shrink():
+    """HyperOS draws a freeform task at 0.7: 260 DPI would look like 182 DPI. Android is given density/scale."""
+    from app.windows.eco_workspace import android_density
+
+    assert android_density(260, 0.7) == 371       # 371 × 0.7 ≈ 260 on screen
+    assert android_density(260, 1.0) == 260       # AOSP / maximised: untouched
+    assert android_density(260, 0.0) == 260       # unknown scale: untouched, never a division by zero
+    assert android_density(0, 0.7) == 0
+    assert android_density(700, 0.5) == 800       # capped, never an absurd density
+
+
+@pytest.mark.asyncio
+async def test_density_written_to_android_is_compensated_for_the_system_scale():
+    """Ledger / UI keep the VISIBLE density (260); the daemon gets 260/0.7. Same box in dp, text at the size 260 promises."""
+    class _FakeProfile:
+        android_id = "XIAOMI_1"
+        supports_launch_bounds = True
+        freeform_scale = 0.7
+
+    daemon = _DensityDaemon()
+    mgr = _mgr(_FakeAdb(dumpsys_bounds="100, 100 - 1243, 957"), _FakeEvents(), profile=_FakeProfile(), daemon=daemon)
+
+    await mgr.open_in_workspace("com.app.a", "win-1", bounds=(100, 100, 900, 700), density=260)
+    assert daemon.calls[-1][1] == 371                       # before the read-back, from the device's cached scale
+    assert mgr.get_task("win-1").density == 260             # the ledger keeps what the user sees
+
+    daemon.calls.clear()
+    assert await mgr.set_task_density("win-1", 300)
+    assert daemon.calls == [("task-1", 429)]
+    assert mgr.get_task("win-1").density == 300
+
+
+@pytest.mark.asyncio
+async def test_density_is_not_compensated_when_the_system_applies_no_scale():
+    daemon = _DensityDaemon()
+    mgr = _mgr(_FakeAdb(), _FakeEvents(), daemon=daemon)       # no profile: scale 1.0
+    await mgr.open_in_workspace("com.app.a", "win-1", density=260)
+    assert daemon.calls[-1][1] == 260
+
+
 def test_subpixel_rounding_rule():
     """Bölüm 1.2: Başlangıç ofsetlerinde floor, boyutlarda round kuralı doğrulanmalıdır."""
     # Float ofsetler ve boyutlar:

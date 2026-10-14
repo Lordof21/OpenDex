@@ -176,3 +176,46 @@ async def probe_omni_geometry(adb, serial: str, task_id: str) -> TaskGeometry | 
         decor_layers=tuple(decor_layers),
         oem_marks=tuple(oem_marks),
     )
+
+
+Transform = tuple[float, float, float, float]  # (scale_x, scale_y, tx, ty)
+
+
+def activity_layer_transform(sf_dump: str, package: str) -> Transform | None:
+    """The transform the compositor applies to the app's WINDOW layer (``<package>/<activity>#id``), or None when it is the
+    identity (SurfaceFlinger prints ``toDisplayTransform`` only for a layer that is scaled or moved).
+
+    The task's own layer is not the one that matters here: HyperOS' freeform window decorator scales the app's window layer
+    (0.7, offset to the freeform box). Moved out of a freeform window into a fullscreen one, the task's windowing mode and
+    bounds are right in WindowManager — the app is drawn at 70 % in a corner all the same, and its touch region is that
+    corner. The first detail block of the layer decides (the dump lists a layer again further down, in its input list)."""
+    prefix = f"{package}/"
+    lines = sf_dump.splitlines()
+    for i, line in enumerate(lines):
+        if not line.startswith("  Layer [") or prefix not in line or "InputSink" in line:
+            continue
+        block: list[str] = []
+        for follow in lines[i + 1:]:
+            if follow.startswith("  Layer [") or follow.startswith("  - Output Layer"):
+                break
+            block.append(follow)
+        text = "\n".join(block)
+        if "bounds=" not in text:
+            continue  # not a detail block (a bare list entry)
+        if tr := _TRANSFORM_SCALE_RE.search(text):
+            return (float(tr.group(1)), float(tr.group(2)), float(tr.group(3)), float(tr.group(4)))
+        return None
+    return None
+
+
+async def read_sf_dump(adb, serial: str) -> str | None:
+    """SurfaceFlinger's dump through the daemon (no `dumpsys` process), the shell as the fallback; None when unreadable."""
+    daemon = daemon_registry.live("dump")
+    dump = await daemon.dump("SurfaceFlinger") if daemon is not None else None
+    if dump is None:
+        try:
+            dump = await adb.shell("dumpsys SurfaceFlinger", serial=serial, timeout_s=2.5)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("[Omni-Adapter] SurfaceFlinger dökümü okunamadı: %s", exc)
+            return None
+    return dump or None

@@ -48,6 +48,11 @@ CREATE TABLE IF NOT EXISTS app_audio_prefs (
     package TEXT PRIMARY KEY,
     data    TEXT NOT NULL
 );
+-- Where (and how dense) an app's Workspace window was the last time: its next Workspace visit starts there.
+CREATE TABLE IF NOT EXISTS workspace_slots (
+    package TEXT PRIMARY KEY,
+    data    TEXT NOT NULL
+);
 -- File system. `device` is '' for the PC so it can sit in a primary key.
 CREATE TABLE IF NOT EXISTS fs_roots (
     path  TEXT PRIMARY KEY,
@@ -96,6 +101,7 @@ _EXPECTED_COLUMNS: dict[str, set[str]] = {
     "project_settings": {"id", "data"},
     "known_devices": {"android_id", "data"},
     "app_audio_prefs": {"package", "data"},
+    "workspace_slots": {"package", "data"},
     "fs_roots": {"path", "added"},
     "fs_favorites": {"id", "provider", "device", "path", "name", "position"},
     "fs_transfers": {"id", "finished", "data"},
@@ -295,5 +301,23 @@ async def upsert_app_audio_pref(pref: AppAudioPref) -> None:
             "INSERT INTO app_audio_prefs (package, data) VALUES (?, ?) "
             "ON CONFLICT(package) DO UPDATE SET data = excluded.data",
             (pref.package, pref.model_dump_json()),
+        )
+        await db.commit()
+
+
+async def get_workspace_slot(package: str) -> dict | None:
+    """The app's last Workspace placement ({bounds, density, density_mode}), None when it has none yet."""
+    async with aiosqlite.connect(_require_path()) as db:
+        cur = await db.execute("SELECT data FROM workspace_slots WHERE package = ?", (package,))
+        row = await cur.fetchone()
+    return json.loads(row[0]) if row else None
+
+
+async def save_workspace_slot(package: str, slot: dict) -> None:
+    async with aiosqlite.connect(_require_path()) as db:
+        await db.execute(
+            "INSERT INTO workspace_slots (package, data) VALUES (?, ?) "
+            "ON CONFLICT(package) DO UPDATE SET data = excluded.data",
+            (package, json.dumps(slot)),
         )
         await db.commit()

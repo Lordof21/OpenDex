@@ -312,6 +312,37 @@ async def restart_window_app(body: RestartAppRequest, ctx: AppContextDep):
     return {"ok": True, "window_id": body.window_id, "action": outcome.action}
 
 
+_RELOAD_REFUSALS = {
+    "not_web": (409, "Bu uygulamada yenilenecek bir web sayfası yok."),
+    "no_page": (409, "Yenilenecek açık bir web sayfası bulunamadı (yalnız yeni sekme ya da yanıt vermeyen bir sekme olabilir)."),
+    "not_reloadable": (409, "Bu pencerenin yenilenecek bir web sayfası yok."),
+    "no_device": (409, "Cihaz bağlı değil."),
+}
+
+
+@router.get("/windows/{window_id}/web-reload")
+async def web_reload_capability(window_id: str, ctx: AppContextDep):
+    """Does this window's app have a web page the user can reload (Chromium DevTools socket)? Asked when a menu opens, so
+    "Sayfayı yenile" is only offered where it can work (windows/web_reload.py)."""
+    available = await ctx.window_manager.web_reload_available(window_id)
+    if available is None:
+        raise HTTPException(status_code=404, detail="Pencere bulunamadı.")
+    return {"window_id": window_id, "available": available}
+
+
+@router.post("/windows/reload-page")
+async def reload_window_page(body: RestartAppRequest, ctx: AppContextDep):
+    """Hub → "Sayfayı yenile": a NORMAL reload of the foreground tab of a Chromium-based browser window. Never automatic
+    (a reload after every resize would reload a page the user is reading); the app and its other tabs are untouched."""
+    outcome = await ctx.window_manager.reload_window_page(body.window_id)
+    if outcome is None:
+        raise HTTPException(status_code=404, detail="Pencere bulunamadı.")
+    if not outcome.ok:
+        status, detail = _RELOAD_REFUSALS.get(outcome.action, (502, "Sayfa yenilenemedi."))
+        raise HTTPException(status_code=status, detail=detail)
+    return {"ok": True, "window_id": body.window_id, "action": outcome.action}
+
+
 @router.get("/window/{window_id}/xml-elements")
 async def get_window_xml_elements(window_id: str, ctx: AppContextDep):
     """Zero-Apps ADB XML Element Inspector (Faz 3+ Deneysel Mod)."""

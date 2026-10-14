@@ -45,6 +45,14 @@ async def tmp_db(tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _no_settings_db_outlives_its_test():
+    """`settings_db.init` sets a module-global path. A test that initialised a database must not leave it behind for the
+    NEXT test (which would then read — and write — another test's rows, e.g. the Workspace's remembered placements)."""
+    yield
+    settings_db._db_path = None
+
+
+@pytest.fixture(autouse=True)
 def _test_client_presents_the_api_token(monkeypatch):
     """Every /api and /ws call needs the bearer token (app/api/auth.py). Tests exercise routes, not the lock — the
     client sends it by default; tests of the lock itself drop it with `client.headers.pop("Authorization")`."""

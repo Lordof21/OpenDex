@@ -27,8 +27,10 @@ against the published behaviour of the server; it contains no scrcpy source. "sc
 
 ## The phone helper (`opendex-tools.jar`)
 
-OpenDeX's own code (`backend/java/src`, GPL-3.0-or-later). It bundles **no** third-party code: it uses the Android framework and Java standard library already on the phone
-(including the platform's `org.json`). `backend/java/stubs/` holds small *compile-only* stand-ins for hidden framework classes, written for this project and never packaged into the jar.
+OpenDeX's own code (`backend/java/src`, GPL-3.0-or-later). It bundles **no** third-party library: it uses the Android framework and Java standard library already on the phone
+(including the platform's `org.json`). One method follows scrcpy (Apache-2.0, © Genymobile and Romain Vimont): the sequence of hidden-API calls that registers an audio policy and
+opens its capture sink in `AudioRouter.AppCapture.startLocked` is modelled on scrcpy's `AudioPlaybackCapture`; the matching rule (per app UID), routing, capture loop, clocks and PCM
+transport around it are OpenDeX's own. `backend/java/stubs/` holds small *compile-only* stand-ins for hidden framework classes, written for this project and never packaged into the jar.
 
 ## Fonts (shipped inside the desktop app)
 

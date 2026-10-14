@@ -60,7 +60,7 @@ from ..streams.app_audio import AudioWindow
 from ..streams.broadcaster import BroadcasterRegistry
 from ..streams.audio_stream import SessionAudio
 from ..telemetry import markers as load_markers
-from . import resource_budget
+from . import resource_budget, web_reload
 from .budget_reallocator import BudgetReallocator
 from .density_reconciler import DensityReconciler, RefreshOutcome, Snapshot
 from .display_ids import is_virtual_display_id, known_display_id
@@ -138,6 +138,8 @@ class WindowSession:
     applock_task: asyncio.Task | None = None
     # When this window's server was last asked for a keyframe (monotonic; SessionReconfigurer.request_keyframe).
     keyframe_requested_at: float = float("-inf")
+    # The app locks the display orientation: a landscape resize comes back rotated (see SessionReconfigurer._resolve_resize_ack).
+    rotates_on_resize: bool = False
     # Set while the window's app stands on the PHONE after a pre-landing resized this window's display to the phone's own
     # size and density (handoff_manager.Landing): what the display has to return to before the app comes back.
     landing: Any = None
@@ -1367,6 +1369,22 @@ class WindowManager:
             session, density=self._density, display=display,
             start_app=self._start_app, task_on_display=self._task_on_display,
         )
+
+    async def _package_of(self, window_id: str) -> str | None:
+        async with self._lock:
+            session = self._sessions.get(window_id)
+            return session.state.package if session is not None else None
+
+    async def web_reload_available(self, window_id: str) -> bool | None:
+        """Does the window's app have a web page to reload (a Chromium DevTools socket of its own)? None: no such window."""
+        package = await self._package_of(window_id)
+        return None if package is None else await web_reload.can_reload(self._adb, self._serial, package)
+
+    async def reload_window_page(self, window_id: str) -> web_reload.WebReloadOutcome | None:
+        """Hub → "Sayfayı yenile" (web_reload.py): a normal reload of the foreground browser tab. None: no such window. The
+        DevTools round trips take a moment, so the global window lock is held only to read the session."""
+        package = await self._package_of(window_id)
+        return None if package is None else await web_reload.reload_page(self._adb, self._serial, package)
 
     async def _start_app(self, session: WindowSession) -> None:
         """The app's launcher intent into the window (what a click on a window with no app task sends)."""

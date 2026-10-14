@@ -192,14 +192,10 @@ class TaskTeleporter:
         if not task_id:
             raise RuntimeError(f"{pkg} için Task ID bulunamadı; dock edilemiyor.")
 
-        dock_bounds = bounds
-        if not dock_bounds and session.stream_w and session.stream_h:
-            dock_w = min(session.stream_w, self._settings.ECO_WORKSPACE_DISPLAY_W - 160)
-            dock_h = min(session.stream_h, self._settings.ECO_WORKSPACE_DISPLAY_H - 160)
-            dock_bounds = (80, 80, 80 + dock_w, 80 + dock_h)
-
+        # The box is the Workspace's own (the app's last place there, else the default) — NOT the size the window had on its
+        # own virtual display: that is another space, and a phone-shaped stream would become a phone-shaped window here.
         ws_url, stream_w, stream_h, effective_bounds = await self._workspace.attach_existing_task(
-            pkg, window_id, task_id, bounds=dock_bounds,
+            pkg, window_id, task_id, bounds=bounds,
         )
         wlog.info(
             "🏠 [DOCK:ATTACHED] %s -> effective_bounds=%s, stream=%sx%s, ws_url=%s",

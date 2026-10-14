@@ -75,10 +75,12 @@ class FlexResizeAborted(RuntimeError):
 @dataclass
 class _PendingAck:
     """A flex resize waiting for scrcpy's session packet. ``expected``: the size scrcpy will produce, when the encoder
-    alignment is known (flex_constrained_size); None otherwise."""
+    alignment is known (flex_constrained_size); None otherwise. ``rotated``: set when the confirmation came with the
+    expected size TRANSPOSED — the app locks the display's orientation and rotated it (see _resolve_resize_ack)."""
 
     future: "asyncio.Future[SessionMeta]"
     expected: tuple[int, int] | None
+    rotated: bool = False
 
 
 def resolution_aware_bitrate(width: int, height: int, fps: int, configured_bitrate: int, settings: Settings) -> int:
@@ -328,11 +330,21 @@ class SessionReconfigurer:
         ours: scrcpy flags a reset caused by OUR resize request (``client_resized``; scrcpy 4.1
         ``SurfaceEncoder.java:144-146``). If the same reset also carried a display-properties change (rotation, …)
         scrcpy clears that flag, yet the packet still reports our size — so a packet with exactly the expected size is
-        accepted too. Anything else is a server-initiated change and must not be mistaken for the confirmation."""
+        accepted too. The same goes for the expected size TRANSPOSED: an app that locks its orientation (Settings,
+        most portrait-only apps) rotates the display when a landscape size is asked for, and the packet then reports
+        the rotated size (asked 1100x800, got 800x1100). That is our resize too — refusing it cost a 3 s timeout and a
+        full display rebuild for every landscape request. Anything else is a server-initiated change and must not be
+        mistaken for the confirmation."""
         pending = self._pending_resize_acks.get(window_id)
         if pending is None or pending.future.done():
             return
-        if meta.client_resized or (pending.expected is not None and (meta.width, meta.height) == pending.expected):
+        size = (meta.width, meta.height)
+        expected = pending.expected
+        if meta.client_resized or (expected is not None and size == expected):
+            pending.future.set_result(meta)
+            return
+        if expected is not None and expected[0] != expected[1] and size == (expected[1], expected[0]):
+            pending.rotated = True
             pending.future.set_result(meta)
             return
         window_logger(__name__, window_id).info(
@@ -495,7 +507,10 @@ class SessionReconfigurer:
         alignment = session.server.size_alignment
         if alignment:
             expected = flex_constrained_size(width, height, alignment=alignment, max_size=session.server.max_size)
-            if expected == (session.stream_w, session.stream_h):
+            current = (session.stream_w, session.stream_h)
+            # An app that locks the orientation shows a landscape request rotated: the stream is already the transposed
+            # size and the display will not change either (learned from an earlier rotated confirmation).
+            if expected == current or (session.rotates_on_resize and expected[::-1] == current):
                 session.target_display_w, session.target_display_h = width, height
                 window_logger(__name__, window_id).info(
                     "[Resize:FLEX_NOOP] %dx%d -> %dx%d (hizalama=%d): sunucu ekranı değiştirmeyecek, onay beklenmiyor",
@@ -512,7 +527,8 @@ class SessionReconfigurer:
 
         loop = asyncio.get_running_loop()
         future: asyncio.Future[SessionMeta] = loop.create_future()
-        self._pending_resize_acks[window_id] = _PendingAck(future, expected)
+        pending = _PendingAck(future, expected)
+        self._pending_resize_acks[window_id] = pending
         try:
             try:
                 await self._send_resize(session, payload, dpi)
@@ -534,6 +550,8 @@ class SessionReconfigurer:
         session.stream_w, session.stream_h = meta.width, meta.height
         session.target_display_w, session.target_display_h = width, height
         session.state.width, session.state.height = meta.width, meta.height
+        if expected is not None and expected[0] != expected[1]:
+            session.rotates_on_resize = pending.rotated  # a non-square size told us whether the app rotates the display
         wlog = window_logger(__name__, window_id)
         wlog.debug(
             "FLEX_RESIZE_SUCCESS: allocated_display=%dx%d, stream_output=%dx%d for %s",

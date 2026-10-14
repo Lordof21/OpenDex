@@ -103,13 +103,23 @@ async def test_is_miui_or_hyperos():
     assert await android_shell.is_miui_or_hyperos(adb_aosp, "SER_AOSP") is False
 
 
-async def test_unlock_display0_gesture_navigation():
-    adb = _Adb("")
-    await android_shell.unlock_display0_gesture_navigation(adb, "SER", "com.android.chrome", component="com.android.chrome/.Main")
+async def test_unlock_display0_gesture_navigation_is_a_real_home_to_app_transition():
+    """Home'a gerçek bir ön-plan geçişi gerekir: reorder-to-front (zaten öndeki göreve) onForegroundChanged üretmez (cihaz günlüğü)."""
+    adb = _Adb("Starting: Intent")
+    out = await android_shell.unlock_display0_gesture_navigation(adb, "SER", "com.android.chrome")
+    assert out == "Starting: Intent"
     assert adb.calls == [
-        "am start --display 0 -n com.android.chrome/.Main -f 0x10020000 --activity-reorder-to-front"
+        "am start --display 0 -a android.intent.action.MAIN -c android.intent.category.HOME; sleep 0.15; "
+        "am start --display 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER "
+        "-p com.android.chrome -f 0x10000000"
     ]
 
+
+async def test_unlock_display0_gesture_navigation_keeps_the_freeform_mode():
+    adb = _Adb("")
+    await android_shell.unlock_display0_gesture_navigation(adb, "SER", "com.android.chrome", windowing_mode=5)
+    assert "--windowingMode 5 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER" in adb.calls[0]
+    assert adb.calls[0].startswith("am start --display 0 -a android.intent.action.MAIN -c android.intent.category.HOME; sleep 0.15; ")
 
 
 async def test_set_display_density_prefers_the_daemon():

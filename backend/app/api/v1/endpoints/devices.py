@@ -1,6 +1,7 @@
 """Device lifecycle, status, and connection control endpoints."""
 from __future__ import annotations
 
+import re
 import contextlib
 import logging
 import time
@@ -312,10 +313,11 @@ def _remember_daemon_states_failure(res: object) -> None:
     """The daemon's own words for why `states_get` failed, once per distinct message (it used to be thrown away, which made
     a daemon that never answers look like a daemon that is fine)."""
     error = str(res.get("error") or "unknown") if isinstance(res, dict) else "no_reply"
+    error = re.sub(r"@[0-9a-f]{4,}", "@…", error)   # object hashes differ on every attempt: one reason is one line, not eight
     if error in _states_errors_logged or len(_states_errors_logged) >= 8:
         return
     _states_errors_logged.add(error)
-    log.warning("[Devices] daemon durum okuyamadı (states_get: %s) — adb yedek yolu kullanılıyor (tek komut, %.0f sn önbellekli)",
+    log.warning("[Devices] daemon durum okuyamadı (states_get: %s) — yedek yol: telefonda tek kabuk komutu (daemon üzerinden gider, %.0f sn önbellekli)",
                 error[:200], _STATES_FALLBACK_TTL_S)
 
 

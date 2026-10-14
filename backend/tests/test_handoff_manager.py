@@ -279,6 +279,8 @@ def _prelanding_rig(mock_adb, events, settings, *, outcome_ok=True, density_writ
     density = MagicMock()
     density.snapshot = AsyncMock(return_value="BEFORE")
     density.mark = AsyncMock(return_value=123.0)
+    density.is_playing = AsyncMock(return_value=False)
+    density.relaunch_in_place = AsyncMock(return_value=True)
     density.settle = AsyncMock(return_value=RefreshOutcome(ADAPTED if outcome_ok else UNCONFIRMED, session.state.package))
     mock_daemon = AsyncMock()
     mock_daemon.is_connected = True
@@ -392,6 +394,21 @@ async def test_reinflate_on_display_0_triggers_view_reinflation_without_redundan
 
     daemon_client.restart_task_activity.assert_awaited_once_with("888")
     density.schedule_settle.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_playing_app_is_recreated_in_place_never_process_restarted(mock_adb, events, settings):
+    """Çalan uygulamanın reinflate'i süreci öldürmez (öldürmek müziği keserdi): etkinlikler yerinde yeniden kurulur."""
+    handoff, _session, density, _log, _phases, patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=False)
+    density.is_playing = AsyncMock(return_value=True)
+    daemon_client = handoff._daemon_client_getter()
+    daemon_client.restart_task_activity = AsyncMock(return_value=True)
+
+    with patches[0], patches[1], patches[2]:
+        assert await handoff.handoff_to_phone("win-3") is True
+
+    daemon_client.restart_task_activity.assert_not_called()
+    density.relaunch_in_place.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -553,3 +570,60 @@ async def test_app_opened_on_the_phone_is_always_fullscreen_whatever_the_freefor
 
     assert mock_bring_to_front.await_args.kwargs["windowing_mode"] is None
     assert mock_settle.await_args.kwargs["windowing"] == "fullscreen"
+
+
+@pytest.mark.asyncio
+async def test_hyperos_handoff_gives_home_a_real_foreground_transition(mock_adb, events, settings):
+    """Kenar geri jesti: HyperOS'ta taşınan göreve Home → uygulama geçişi verilir (düz reorder-to-front jesti açmaz)."""
+    handoff, session, density, _log, _phases, patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=False)
+    daemon_client = handoff._daemon_client_getter()
+    daemon_client.move_task_wct = AsyncMock(return_value=True)
+    with (
+        patches[0], patches[1], patches[2],
+        patch("app.device.android_shell.phone_size", AsyncMock(return_value=(1220, 2712))),
+        patch("app.device.android_shell.is_miui_or_hyperos", AsyncMock(return_value=True)),
+        patch("app.device.android_shell.unlock_display0_gesture_navigation", AsyncMock(return_value="Starting: Intent")) as unlock,
+        patch("app.device.android_shell.bring_to_front", AsyncMock(return_value="OK")) as plain,
+    ):
+        assert await handoff.handoff_to_phone("win-3") is True
+
+    unlock.assert_awaited_once()
+    assert unlock.await_args.args[2] == "com.google.android.youtube"
+    plain.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["Error: Activity not started, unable to resolve Intent", ""])
+async def test_hyperos_unlock_that_fails_falls_back_to_plain_bring_to_front(mock_adb, events, settings, failure):
+    """Home'a gidip uygulamayı başlatamazsa kullanıcı Home'da kalmaz: düz öne getirme çalışır."""
+    handoff, session, density, _log, _phases, patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=False)
+    daemon_client = handoff._daemon_client_getter()
+    daemon_client.move_task_wct = AsyncMock(return_value=True)
+    with (
+        patches[0], patches[1], patches[2],
+        patch("app.device.android_shell.phone_size", AsyncMock(return_value=(1220, 2712))),
+        patch("app.device.android_shell.is_miui_or_hyperos", AsyncMock(return_value=True)),
+        patch("app.device.android_shell.unlock_display0_gesture_navigation", AsyncMock(return_value=failure)),
+        patch("app.device.android_shell.bring_to_front", AsyncMock(return_value="OK")) as plain,
+    ):
+        assert await handoff.handoff_to_phone("win-3") is True
+
+    plain.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_non_xiaomi_handoff_keeps_the_plain_reorder(mock_adb, events, settings):
+    handoff, session, density, _log, _phases, patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=False)
+    daemon_client = handoff._daemon_client_getter()
+    daemon_client.move_task_wct = AsyncMock(return_value=True)
+    with (
+        patches[0], patches[1], patches[2],
+        patch("app.device.android_shell.phone_size", AsyncMock(return_value=(1220, 2712))),
+        patch("app.device.android_shell.is_miui_or_hyperos", AsyncMock(return_value=False)),
+        patch("app.device.android_shell.unlock_display0_gesture_navigation", AsyncMock()) as unlock,
+        patch("app.device.android_shell.bring_to_front", AsyncMock(return_value="OK")) as plain,
+    ):
+        assert await handoff.handoff_to_phone("win-3") is True
+
+    unlock.assert_not_awaited()
+    plain.assert_awaited_once()

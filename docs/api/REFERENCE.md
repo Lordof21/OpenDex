@@ -2,7 +2,7 @@
 
 # API reference
 
-All 123 operations of the public OpenAPI document ([`openapi.json`](openapi.json), OpenAPI 3.1.0), grouped by tag. Conventions that apply to every operation — authentication, the Origin/Host guard, limits, error shapes — are in [API.md](../API.md); the WebSocket channels and the event types are there too.
+All 125 operations of the public OpenAPI document ([`openapi.json`](openapi.json), OpenAPI 3.1.0), grouped by tag. Conventions that apply to every operation — authentication, the Origin/Host guard, limits, error shapes — are in [API.md](../API.md); the WebSocket channels and the event types are there too.
 
 Paths are relative to `http://127.0.0.1:8710/api/v1` (every operation is also served under `/api`, unversioned). **Auth** `token` = needs the API token; **Device** = answers `409` while no phone is bound.
 
@@ -12,7 +12,7 @@ Paths are relative to `http://127.0.0.1:8710/api/v1` (every operation is also se
 | [devices](#devices) | 29 |
 | [pairing](#pairing) | 4 |
 | [apps](#apps) | 4 |
-| [windows](#windows) | 21 |
+| [windows](#windows) | 23 |
 | [settings](#settings) | 4 |
 | [audio](#audio) | 5 |
 | [input](#input) | 5 |
@@ -536,6 +536,8 @@ Mirror windows: one phone app per virtual display — open, close, resize, densi
 | `POST` | `/windows/resize` | Dynamically reconfigures resolution and DPI of a running window's virtual display. | token |  |
 | `POST` | `/windows/refresh-density` | The user's explicit "refresh this window": a state-preserving restart of the app's PROCESS under the window… | token |  |
 | `POST` | `/windows/restart-app` | Hub → "Uygulamayı yeniden başlat": the window's APP is rebuilt inside the same window — a state-preserving… | token |  |
+| `GET` | `/windows/{window_id}/web-reload` | Does this window's app have a web page the user can reload (Chromium DevTools socket)? Asked when a menu op… | token |  |
+| `POST` | `/windows/reload-page` | Hub → "Sayfayı yenile": a NORMAL reload of the foreground tab of a Chromium-based browser window. Never aut… | token |  |
 | `GET` | `/window/{window_id}/xml-elements` | Zero-Apps ADB XML Element Inspector (Faz 3+ Deneysel Mod). | token |  |
 | `POST` | `/windows/workspace/open` | Eco Workspace'te (paylaşımlı VD, tek encoder) yeni bir freeform pencere açar. | token |  |
 | `POST` | `/windows/workspace/adopt-from-phone` | "Buraya Yolla": telefonda şu an çalışan bir uygulamayı Eco Workspace'e alır. | token |  |
@@ -614,6 +616,7 @@ density equalization; see HandoffManager.handoff_to_phone).
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `window_id` | string | yes |  |
+| `windowing` | `"fullscreen"` \| `"freeform"` (nullable) | no |  |
 
 **Responses:** `200` Successful Response · `422` Validation Error · `401` token missing/wrong · `403` foreign Origin/Host · `411` chunked body · `413` body too large
 
@@ -717,6 +720,34 @@ in-place activity relaunch. Verified — the reply says whether the app really r
 Hub → "Uygulamayı yeniden başlat": the window's APP is rebuilt inside the same window — a state-preserving process
 restart, else onDestroy→onCreate in place (plan B), else a cold start when nothing was running (app_restart.py).
 The reply is VERIFIED: ``action`` is what really happened (``restarted`` | ``relaunched`` | ``launched``).
+
+*token required*
+
+**Request body** (JSON, `RestartAppRequest`)
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `window_id` | string | yes |  |
+
+**Responses:** `200` Successful Response · `422` Validation Error · `401` token missing/wrong · `403` foreign Origin/Host · `411` chunked body · `413` body too large
+
+### `GET /windows/{window_id}/web-reload`
+
+Does this window's app have a web page the user can reload (Chromium DevTools socket)? Asked when a menu opens, so
+"Sayfayı yenile" is only offered where it can work (windows/web_reload.py).
+
+*token required*
+
+| Parameter | In | Type | Required | Notes |
+|---|---|---|---|---|
+| `window_id` | path | string | yes |  |
+
+**Responses:** `200` Successful Response · `422` Validation Error · `401` token missing/wrong · `403` foreign Origin/Host
+
+### `POST /windows/reload-page`
+
+Hub → "Sayfayı yenile": a NORMAL reload of the foreground tab of a Chromium-based browser window. Never automatic
+(a reload after every resize would reload a page the user is reading); the app and its other tabs are untouched.
 
 *token required*
 

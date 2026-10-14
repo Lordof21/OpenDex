@@ -265,6 +265,82 @@ async def _sf_summary(adb: Any, serial: str, task_id: str) -> str:
     return "render=? scale=?"
 
 
+_IDENTITY_SCALE_TOLERANCE = 0.02
+_IDENTITY_OFFSET_TOLERANCE_PX = 2.0
+_TRANSFORM_READS = 3
+_TRANSFORM_READ_GAP_S = 0.45
+
+
+def _is_identity(transform: tuple[float, float, float, float] | None) -> bool:
+    if transform is None:
+        return True
+    sx, sy, tx, ty = transform
+    return (
+        abs(sx - 1.0) <= _IDENTITY_SCALE_TOLERANCE and abs(sy - 1.0) <= _IDENTITY_SCALE_TOLERANCE
+        and abs(tx) <= _IDENTITY_OFFSET_TOLERANCE_PX and abs(ty) <= _IDENTITY_OFFSET_TOLERANCE_PX
+    )
+
+
+async def _render_transform_state(
+    adb: Any, serial: str, package: str, sleep: Callable[[float], Awaitable[Any]],
+) -> tuple[str, tuple[float, float, float, float] | None]:
+    """("clean" | "stale" | "unknown", the transform). A window that is still ENTERING is scaled for a moment, so "stale" needs
+    the same non-identity transform on every one of a few reads half a second apart; one identity read ends it as clean."""
+    last: tuple[float, float, float, float] | None = None
+    for read in range(_TRANSFORM_READS):
+        dump = await surfaceflinger_probe.read_sf_dump(adb, serial)
+        if dump is None:
+            return "unknown", None
+        transform = surfaceflinger_probe.activity_layer_transform(dump, package)
+        if _is_identity(transform):
+            return "clean", None
+        last = transform
+        if read + 1 < _TRANSFORM_READS:
+            await sleep(_TRANSFORM_READ_GAP_S)
+    return "stale", last
+
+
+async def repair_stale_render_transform(
+    adb: Any,
+    serial: str,
+    package: str,
+    display_id: str | int,
+    *,
+    wlog: logging.Logger | None = None,
+    sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep,
+    cycles: int = 2,
+) -> str:
+    """A task moved out of a HyperOS freeform window into a fullscreen one keeps the freeform decorator's transform on the
+    app's window layer: the right windowing mode and bounds in WindowManager, the app drawn at 70 % in a corner on the
+    screen (and touchable only there). Measured on the phone: re-launching the task with `--windowingMode 5` and then `1`
+    clears it (cmd activity task resize, a plain `am start` and a second WCT did not).
+    Returns "clean" (nothing to do), "repaired", "stale" (still scaled after `cycles` tries) or "unknown" (dump unreadable).
+    Never raises."""
+    wlog = wlog or log
+    try:
+        state, transform = await _render_transform_state(adb, serial, package, sleep)
+        if state != "stale":
+            return state
+        for cycle in range(1, max(1, cycles) + 1):
+            wlog.info(
+                "🩹 [TRANSFER] %s tam ekranda ama pencere katmanı eski serbest pencere dönüşümünü taşıyor (ölçek=%.2f kayma=(%.0f,%.0f)) "
+                "— serbest → tam ekran döngüsüyle temizleniyor (deneme %d)", package, transform[0], transform[2], transform[3], cycle,
+            )
+            await _relayout(adb, serial, package, display_id, FREEFORM)
+            await sleep(1.0)
+            await _relayout(adb, serial, package, display_id, FULLSCREEN)
+            await sleep(0.8)
+            state, transform = await _render_transform_state(adb, serial, package, sleep)
+            if state == "clean":
+                return "repaired"
+            if state == "unknown":
+                return "unknown"
+        return "stale"
+    except Exception as exc:  # noqa: BLE001
+        (wlog or log).warning("⚠️ [TRANSFER] %s pencere dönüşümü denetlenemedi: %s", package, exc)
+        return "unknown"
+
+
 def _fmt_state(state: TaskWindowingState | None) -> str:
     if state is None or not state.found:
         return "mode=? bounds=? display=?"
@@ -359,8 +435,13 @@ async def settle_task_windowing(
         if verdict != "bad":
             break  # ok ya da okunamıyor — tekrarın anlamı yok
 
+    # Mode and bounds are right in WindowManager; the compositor may still draw the app small (see the function): fullscreen on
+    # the phone's own screen only, and only when the task was not already fullscreen there (nothing stale to inherit).
+    render = ""
+    if target == "fullscreen" and verdict != "bad" and str(display_id) == "0":
+        render = " render_fix=" + await repair_stale_render_transform(adb, serial, package, display_id, wlog=wlog, sleep=sleep)
     sf = await _sf_summary(adb, serial, task_id)
-    report_line(wlog, package, task_id, "after", after, f"target={target} verdict={verdict} attempts={used} method={method} relayout={relayout} {sf}")
+    report_line(wlog, package, task_id, "after", after, f"target={target} verdict={verdict} attempts={used} method={method} relayout={relayout} {sf}{render}")
     return WindowingReport(
         task_id=str(task_id), target=target, verdict=verdict, attempts=used, method=method, relayout=relayout,
         before=before, after=after,

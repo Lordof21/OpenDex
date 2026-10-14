@@ -104,3 +104,17 @@ def test_an_unreadable_phone_is_a_failure_not_a_made_up_answer():
     ctx.adb.shell.side_effect = RuntimeError("device offline")
     body = client.get("/api/device/states").json()
     assert body["ok"] is False and "offline" in body["error"]
+
+
+def test_the_same_reason_with_a_different_object_hash_is_logged_once(caplog):
+    """The daemon's message embeds an object hash (`IApplicationThread$Stub$Proxy@1a2b3c`) that changes on every attempt:
+    one reason used to be logged once per hash, up to the cap, as if each were new."""
+    client, _ = _client(daemon_reply={"type": "states_update", "ok": False,
+                                      "error": "Unable to find app for caller Proxy@1a2b3c4 (pid=1)"})
+    with caplog.at_level(logging.WARNING, logger=devices.log.name):
+        client.get("/api/device/states")
+        devices._states_fallback.clear()
+        client.app.state.ctx.daemon_client.get_hardware_states.return_value = {
+            "type": "states_update", "ok": False, "error": "Unable to find app for caller Proxy@9f8e7d6 (pid=1)"}
+        client.get("/api/device/states")
+    assert len([r for r in caplog.records if "daemon durum okuyamadı" in r.getMessage()]) == 1

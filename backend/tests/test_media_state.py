@@ -184,6 +184,70 @@ async def test_refresh_media_medya_olmayan_yanit_none_doner():
     assert await client.refresh_media() is None
 
 
+# ---------------------------------------------------------------- is_package_playing (the playback guard's question)
+
+def _connected_client(monkeypatch, live):
+    """A client whose socket looks open; `live` is what the phone answers to media_get (None: the read failed)."""
+    client = DeviceDaemonClient(adb=None, events=_Bus())
+    monkeypatch.setattr(DeviceDaemonClient, "is_connected", property(lambda self: True))
+
+    async def fake_refresh(package=None):
+        return live
+
+    client.refresh_media = fake_refresh
+    return client
+
+
+def _sessions(*pairs):
+    return {"active": True, "sessions": [{"package": p, "is_playing": playing, "state": "PLAYING" if playing else "PAUSED"}
+                                         for p, playing in pairs]}
+
+
+@pytest.mark.asyncio
+async def test_is_package_playing_is_per_package_not_the_primary_session(monkeypatch):
+    client = _connected_client(monkeypatch, _sessions(("com.spotify.music", False), ("com.google.android.apps.youtube.music", True)))
+
+    assert await client.is_package_playing("com.google.android.apps.youtube.music") is True
+    assert await client.is_package_playing("com.spotify.music") is False
+    assert await client.is_package_playing("com.never.heard") is False
+
+
+@pytest.mark.asyncio
+async def test_is_package_playing_buffering_counts_as_playing(monkeypatch):
+    client = _connected_client(monkeypatch, {"active": True, "sessions": [{"package": "a.b", "is_playing": False, "state": "BUFFERING"}]})
+
+    assert await client.is_package_playing("a.b") is True
+
+
+@pytest.mark.asyncio
+async def test_is_package_playing_unreadable_sessions_is_unknown_not_silence(monkeypatch):
+    client = _connected_client(monkeypatch, {"active": False, "error": "sessions_unavailable"})
+
+    assert await client.is_package_playing("a.b") is None
+
+
+@pytest.mark.asyncio
+async def test_is_package_playing_no_sessions_at_all_is_a_definite_no(monkeypatch):
+    client = _connected_client(monkeypatch, {"active": False})
+
+    assert await client.is_package_playing("a.b") is False
+
+
+@pytest.mark.asyncio
+async def test_is_package_playing_falls_back_to_the_pushed_cache_when_the_live_read_fails(monkeypatch):
+    client = _connected_client(monkeypatch, None)
+    client.last_media_state = _sessions(("a.b", True))
+
+    assert await client.is_package_playing("a.b") is True
+
+
+@pytest.mark.asyncio
+async def test_is_package_playing_without_a_daemon_is_unknown():
+    client = DeviceDaemonClient(adb=None, events=_Bus())
+
+    assert await client.is_package_playing("a.b") is None
+
+
 # ---------------------------------------------------------------- get_media_status(fresh=...)
 
 class _Ctx:

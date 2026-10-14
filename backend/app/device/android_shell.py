@@ -422,23 +422,26 @@ async def unlock_display0_gesture_navigation(
     serial: str,
     package: str,
     *,
-    timeout_s: float = 2.0,
+    timeout_s: float = 4.0,
     component: str | None = None,
-) -> None:
-    """HyperOS / MIUI üzerinde kenar geri jestlerini (GestureStubLeft/Right) dokunuşa açar.
+    windowing_mode: int | None = None,
+) -> str:
+    """HyperOS / MIUI üzerinde kenar geri jestlerini (GestureStubLeft/Right) dokunuşa açar; `am start` çıktısını döndürür.
 
     Kök Neden (bkz. HANDOFF_GERI_JESTI_KOK_NEDEN.md):
     HyperOS RecentsImpl (com.miui.home / com.mi.android.globallauncher), kenar geri jestlerini
     (GestureStubView) yalnızca Display 0 üzerinde gerçek bir ön plan değişimi (onForegroundChanged)
-    aldığında 'setBackTouchable(true)' ve 'showGestureStub' yaparak açar.
-    Görevin doğru bileşeniyle (explicit component) Display 0 üzerinde reorder-to-front yapılması
-    RecentsImpl'in onForegroundChanged olayını doğal yolla almasını ve GestureStub'ın anında
-    açılmasını sağlar. Ana ekrana (HOME) gidip kullanıcıyı ana ekranda bırakmak kesinlikle yasaktır.
+    aldığında 'setBackTouchable(true)' ve 'showGestureStub' yaparak açar. Görev sanal ekrandan WCT ile taşınınca
+    ATMS yeni bir ön-plan geçişi üretmez; zaten öndeki göreve `reorder-to-front` vermek de üretmez (cihaz günlüğü,
+    2026-10-14: `am start … --activity-reorder-to-front` yalnız uygulamaya pause/resume yaptırdı, Home'a olay gitmedi).
+
+    Gerçek geçiş: Display 0'da önce Home, 150 ms sonra hedef uygulama öne alınır — tek kabuk komutu, uygulama sonunda
+    önde kalır (kullanıcı Home'da bırakılmaz). Süreç, DOM ve kaydırma konumu korunur; dokunma enjeksiyonu yoktur.
+    `windowing_mode`: serbest kip aktarımında görevin kipi (5) değişmesin diye ikinci `am start`a verilir.
     """
-    with contextlib.suppress(Exception):
-        await bring_to_front(
-            adb, serial, package, "0", reorder_only=True, component=component, timeout_s=timeout_s,
-        )
+    target = bring_to_front_command(package, "0", windowing_mode, reorder_only=False, component=component)
+    home = "am start --display 0 -a android.intent.action.MAIN -c android.intent.category.HOME"
+    return await adb.shell(f"{home}; sleep 0.15; {target}", serial=serial, timeout_s=timeout_s)
 
 
 async def sync_display0_focus(
