@@ -11,6 +11,7 @@ import { typeLabel } from './fileTypes.js';
 import { useFilesStore } from './filesStore.js';
 import { formatFullDate, formatSize } from './formatters.js';
 import { isPhone, parentOf } from './paths.js';
+import { t, activeLocale } from '../i18n/index.js';
 
 /** "rwxr-xr-x" (telefon, sekizlik mod). Mod yoksa null. */
 export function modeString(mode) {
@@ -45,15 +46,15 @@ export default function PropertiesDialog({ winId, dialog }) {
   const copyPath = async () => {
     try {
       await navigator.clipboard.writeText(loc.path);
-      useSystemStore.getState().pushToast?.('Yol panoya kopyalandı.', { tone: 'success', durationMs: 1600 });
+      useSystemStore.getState().pushToast?.(t('files.yol_panoya_kopyalandi'), { tone: 'success', durationMs: 1600 });
     } catch {
-      useSystemStore.getState().pushToast?.('Yol kopyalanamadı.', { tone: 'error' });
+      useSystemStore.getState().pushToast?.(t('files.yol_kopyalanamadi'), { tone: 'error' });
     }
   };
 
   const mode = modeString(entry.mode);
   return (
-    <Dialog open onClose={close} label="Özellikler" position="absolute" className="max-w-md p-5">
+    <Dialog open onClose={close} label={t('files.ozellikler')} position="absolute" className="max-w-md p-5">
       <div className="flex items-center gap-3 border-b border-border/70 pb-3">
         <FileIcon entry={entry} loc={loc} size={40} thumb px={96} />
         <div className="min-w-0">
@@ -62,20 +63,20 @@ export default function PropertiesDialog({ winId, dialog }) {
         </div>
       </div>
       <dl className="divide-y divide-border/50">
-        <Row label="Konum">
+        <Row label={t('files.konum')}>
           <span className="flex items-start gap-1">
             <span className="min-w-0 flex-1 break-all font-mono text-[11px]">{parentOf(loc)?.path ?? loc.path}</span>
-            <button type="button" aria-label="Tam yolu kopyala" onClick={copyPath} className="grid size-6 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground cursor-pointer"><Copy className="size-3" /></button>
+            <button type="button" aria-label={t('files.tam_yolu_kopyala')} onClick={copyPath} className="grid size-6 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground cursor-pointer"><Copy className="size-3" /></button>
           </span>
         </Row>
-        <Row label="Yer">{isPhone(loc) ? 'Telefon' : 'Bilgisayar'}</Row>
-        {entry.kind !== 'dir' && <Row label="Boyut"><span className="tabular-nums">{formatSize(entry.size)} <span className="text-muted-foreground">({new Intl.NumberFormat('tr-TR').format(entry.size)} bayt)</span></span></Row>}
-        <Row label="Değiştirme">{formatFullDate(entry.mtime)}</Row>
-        {entry.symlink && <Row label="Bağlantı">{entry.link_target || 'Sembolik bağlantı'}</Row>}
-        {entry.hidden && <Row label="Öznitelik">Gizli</Row>}
-        {mode && <Row label="İzinler"><span className="font-mono">{mode}</span></Row>}
+        <Row label={t('files.yer')}>{isPhone(loc) ? t('common.telefon_2') : t('files.bilgisayar')}</Row>
+        {entry.kind !== 'dir' && <Row label={t('files.boyut')}><span className="tabular-nums">{formatSize(entry.size)} <span className="text-muted-foreground">{t('files.value_bayt', { value: new Intl.NumberFormat(activeLocale()).format(entry.size) })}</span></span></Row>}
+        <Row label={t('files.degistirme')}>{formatFullDate(entry.mtime)}</Row>
+        {entry.symlink && <Row label={t('files.baglanti')}>{entry.link_target || t('files.sembolik_baglanti')}</Row>}
+        {entry.hidden && <Row label={t('files.oznitelik')}>{t('files.gizli')}</Row>}
+        {mode && <Row label={t('files.izinler')}><span className="font-mono">{mode}</span></Row>}
       </dl>
-      <div className="mt-3 flex justify-end"><Button size="sm" variant="outline" onClick={close} autoFocus>Kapat</Button></div>
+      <div className="mt-3 flex justify-end"><Button size="sm" variant="outline" onClick={close} autoFocus>{t('common.kapat')}</Button></div>
     </Dialog>
   );
 }

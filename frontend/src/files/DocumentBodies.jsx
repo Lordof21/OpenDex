@@ -12,14 +12,15 @@ import { docxToDocument } from './documents/docxDocument.js';
 import { SHEET_MAX_COLS, SHEET_MAX_ROWS, formatCell, readWorkbook } from './documents/workbook.js';
 import { readSlides } from './documents/slides.js';
 import PreviewFailed from './PreviewFailed.jsx';
+import { t } from '../i18n/index.js';
 
-const READ_ONLY_NOTE = 'Salt okunur önizleme — düzenlemek için telefondaki uygulamayı kullanın ya da bilgisayara kaydedip açın.';
+const READ_ONLY_NOTE = t('files.salt_okunur_onizleme_duzenlemek_icin');
 
 function messageOf(err) {
-  if (err?.code === 'too_large') return 'Dosya önizleme için çok büyük.';
+  if (err?.code === 'too_large') return t('files.dosya_onizleme_icin_cok_buyuk');
   if (err?.code === 'password' || err?.code === 'invalid') return err.message;
   if (err instanceof ApiError) return err.message;
-  return 'Belge okunamadı (bozuk, parola korumalı ya da desteklenmeyen dosya).';
+  return t('files.belge_okunamadi_bozuk_parola_korumali');
 }
 
 /** Baytları getirir ve `convert` ile çözer. `dispose(değer)`: bileşen kalkınca (ya da dosya değişince) bırakılacak kaynak. */
@@ -41,7 +42,7 @@ function useDocument(loc, entry, convert, dispose) {
 }
 
 function Frame({ state, onOpen, children }) {
-  if (state.status === 'loading') return <LoaderCircle className="size-6 animate-spin text-muted-foreground motion-reduce:animate-none" aria-label="Yükleniyor" />;
+  if (state.status === 'loading') return <LoaderCircle className="size-6 animate-spin text-muted-foreground motion-reduce:animate-none" aria-label={t('common.yukleniyor')} />;
   if (state.status === 'error') return <PreviewFailed message={state.message} onOpen={onOpen} />;
   return (
     <div className="flex h-full w-full max-w-4xl flex-col">
@@ -75,7 +76,7 @@ function PdfPage({ pdf, number, width, ratio, root }) {
 
   return (
     <div ref={holder} style={{ width, minHeight: width * ratio }} className="mx-auto mb-3 bg-white shadow-window" data-page={number}>
-      <canvas ref={canvas} className="block" aria-label={`Sayfa ${number}`} />
+      <canvas ref={canvas} className="block" aria-label={t('files.sayfa_number', { number })} />
     </div>
   );
 }
@@ -96,7 +97,7 @@ function PdfPages({ pdf }) {
   useEffect(() => { let live = true; pdf.pageRatio(1).then((r) => { if (live && r > 0) setRatio(r); }).catch(() => {}); return () => { live = false; }; }, [pdf]);
   const numbers = useMemo(() => Array.from({ length: pdf.pageCount }, (_, i) => i + 1), [pdf]);
   return (
-    <div ref={setHost} tabIndex={0} aria-label={`PDF, ${pdf.pageCount} sayfa`} className="dex-scroll h-full overflow-auto rounded-lg bg-muted/40 p-3">
+    <div ref={setHost} tabIndex={0} aria-label={t('files.pdf_pagecount_sayfa', { pageCount: pdf.pageCount })} className="dex-scroll h-full overflow-auto rounded-lg bg-muted/40 p-3">
       {numbers.map((n) => <PdfPage key={n} pdf={pdf} number={n} width={width} ratio={ratio} root={host} />)}
     </div>
   );
@@ -114,9 +115,9 @@ export function DocxBody({ loc, entry, onOpen }) {
   return (
     <Frame state={state} onOpen={onOpen}>
       {doc && (doc.empty
-        ? <p className="grid h-full place-items-center text-sm opacity-80">Bu belgede gösterilecek içerik yok.</p>
+        ? <p className="grid h-full place-items-center text-sm opacity-80">{t('files.bu_belgede_gosterilecek_icerik_yok')}</p>
         // sandbox="" (hiçbir izin yok): betik çalışmaz, form/pencere/gezinme yok, kaynak ayrı bir köken. srcDoc kendi CSP'sini taşır.
-        : <iframe title={`Belge: ${entry.name}`} sandbox="" srcDoc={doc.srcdoc} className="h-full w-full rounded-lg bg-white" />)}
+        : <iframe title={t('files.belge_name', { name: entry.name })} sandbox="" srcDoc={doc.srcdoc} className="h-full w-full rounded-lg bg-white" />)}
     </Frame>
   );
 }
@@ -149,7 +150,7 @@ function SheetTable({ sheet }) {
           </tbody>
         </table>
       </div>
-      {cut && <p className="mt-1 text-center text-[11px] text-scrim-foreground/75">İlk {sheet.rows.length} satır / {cols} sütun gösteriliyor (toplam {sheet.totalRows} × {sheet.totalCols}).</p>}
+      {cut && <p className="mt-1 text-center text-[11px] text-scrim-foreground/75">{t('files.ilk_count_satir_cols_sutun', { count: sheet.rows.length, cols, totalRows: sheet.totalRows, totalCols: sheet.totalCols })}</p>}
     </div>
   );
 }
@@ -165,7 +166,7 @@ export function SheetBody({ loc, entry, onOpen }) {
       {sheet && (
         <div className="flex h-full flex-col gap-1.5">
           {sheets.length > 1 && (
-            <div role="tablist" aria-label="Sayfalar" className="flex gap-1 overflow-x-auto">
+            <div role="tablist" aria-label={t('files.sayfalar')} className="flex gap-1 overflow-x-auto">
               {sheets.map((s, i) => (
                 <button key={s.name + i} type="button" role="tab" aria-selected={i === active} onClick={() => setActive(i)}
                   className={`shrink-0 rounded-md px-2.5 py-1 text-xs cursor-pointer ${i === active ? 'bg-scrim-foreground/20 font-semibold' : 'hover:bg-scrim-foreground/10'}`}>{s.name}</button>
@@ -186,13 +187,13 @@ export function SlidesBody({ loc, entry, onOpen }) {
   return (
     <Frame state={state} onOpen={onOpen}>
       <div className="flex h-full flex-col gap-1.5">
-        <p className="text-[11px] text-scrim-foreground/75">Sunumun metin özeti — slaytların görünümü için dosyayı uygulamasında açın.</p>
+        <p className="text-[11px] text-scrim-foreground/75">{t('files.sunumun_metin_ozeti_slaytlarin')}</p>
         <div className="dex-scroll min-h-0 flex-1 space-y-2 overflow-auto">
-          {slides.length === 0 && <p className="text-sm text-scrim-foreground/80">Bu sunumda metin bulunamadı.</p>}
+          {slides.length === 0 && <p className="text-sm text-scrim-foreground/80">{t('files.bu_sunumda_metin_bulunamadi')}</p>}
           {slides.map((slide) => (
             <section key={slide.number} className="rounded-lg border border-border/70 bg-background p-3 text-foreground">
-              <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Slayt {slide.number}</h3>
-              {slide.paragraphs.length === 0 ? <p className="text-xs text-muted-foreground">(metin yok)</p> : slide.paragraphs.map((text, i) => <p key={i} className={`text-sm ${i === 0 ? 'font-semibold' : ''}`}>{text}</p>)}
+              <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{t('files.slayt_number', { number: slide.number })}</h3>
+              {slide.paragraphs.length === 0 ? <p className="text-xs text-muted-foreground">{t('files.metin_yok')}</p> : slide.paragraphs.map((text, i) => <p key={i} className={`text-sm ${i === 0 ? 'font-semibold' : ''}`}>{text}</p>)}
             </section>
           ))}
         </div>

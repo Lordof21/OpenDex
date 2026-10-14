@@ -11,6 +11,7 @@ import { FOCUS_PATH_EVENT } from './menuActions.js';
 import { breadcrumbs, collapseCrumbs, locKey, parsePathInput } from './paths.js';
 import { acceptsDrop } from './dragRules.js';
 import { MenuItem } from '../ui/Menu.jsx';
+import { t as tt } from '../i18n/index.js';
 
 const MAX = { compact: 2, medium: 4, wide: 6 };
 
@@ -92,7 +93,7 @@ export default function Breadcrumbs({ winId, pi, layoutMode }) {
     await store.getState().navigate(winId, pi, loc);
     const after = store.getState().wins[winId]?.panes[pi];
     if (after?.status === 'error') {
-      setError(after.error?.code === 'outside_roots' ? 'Bu konuma erişim izni yok.' : after.error?.code === 'not_found' ? 'Böyle bir klasör yok.' : after.error?.message || 'Açılamadı.');
+      setError(after.error?.code === 'outside_roots' ? tt('files.bu_konuma_erisim_izni_yok_2') : after.error?.code === 'not_found' ? tt('files.boyle_bir_klasor_yok') : after.error?.message || tt('files.acilamadi'));
       await store.getState().goBack(winId, pi);
       return;
     }
@@ -105,7 +106,7 @@ export default function Breadcrumbs({ winId, pi, layoutMode }) {
         <input
           ref={input}
           value={draft}
-          aria-label="Konum"
+          aria-label={tt('files.konum')}
           aria-invalid={Boolean(error)}
           spellCheck={false}
           autoComplete="off"
@@ -125,7 +126,7 @@ export default function Breadcrumbs({ winId, pi, layoutMode }) {
 
   return (
     <nav
-      aria-label="Klasör yolu"
+      aria-label={tt('files.klasor_yolu')}
       className="flex h-8 min-w-0 flex-1 cursor-text items-center overflow-hidden rounded-md border border-transparent px-0.5 transition-colors hover:border-border/70 hover:bg-background/60"
       onClick={(e) => { if (e.target === e.currentTarget) beginEdit(); }}
       onDoubleClick={beginEdit}
@@ -137,9 +138,9 @@ export default function Breadcrumbs({ winId, pi, layoutMode }) {
           {hidden.length > 0 && (
             <>
               <DropdownMenu
-                label="Gizlenen üst klasörler"
+                label={tt('files.gizlenen_ust_klasorler')}
                 trigger={(t) => (
-                  <button type="button" {...t} aria-label="Gizlenen üst klasörler" className="grid h-6 w-6 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground cursor-pointer">
+                  <button type="button" {...t} aria-label={tt('files.gizlenen_ust_klasorler')} className="grid h-6 w-6 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground cursor-pointer">
                     <Ellipsis className="size-3.5" />
                   </button>
                 )}

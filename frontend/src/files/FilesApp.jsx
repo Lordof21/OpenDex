@@ -21,6 +21,7 @@ import { defaultLocation, useFilesStore } from './filesStore.js';
 import { useContainerSize, useLayoutMode } from './useContainerSize.js';
 import { useTransferStore } from './transferStore.js';
 import { useExternalDrop } from './useExternalDrop.js';
+import { t } from '../i18n/index.js';
 
 export default function FilesApp({ win }) {
   const winId = win.id;
@@ -109,7 +110,7 @@ export default function FilesApp({ win }) {
       <TransferTray compact={compact} />
       <PreviewOverlay winId={winId} compact={compact} />
       <FilesDialogs winId={winId} focused={Boolean(win.focused)} />
-      <Dialog open={placesOpen} onClose={() => setPlacesOpen(false)} label="Yerler" position="absolute" align="top" className="max-w-sm p-1">
+      <Dialog open={placesOpen} onClose={() => setPlacesOpen(false)} label={t('files.yerler')} position="absolute" align="top" className="max-w-sm p-1">
         <FilesSidebar winId={winId} variant="sheet" onNavigated={() => setPlacesOpen(false)} />
       </Dialog>
       <DragGhost />

@@ -5,6 +5,7 @@ import {
   Smartphone, Star, Trash2, EyeOff,
 } from 'lucide-react';
 import { previewKind } from './fileTypes.js';
+import { t as tt } from '../i18n/index.js';
 
 const item = (id, label, icon, extra = {}) => ({ type: 'item', id, label, icon, ...extra });
 const SEP = Object.freeze({ type: 'separator' });
@@ -23,35 +24,35 @@ export function buildMenu({ targets, provider, hasClipboard = false, dual = fals
 
   if (targets.length === 0) {
     out.push(
-      item('new-folder', 'Yeni klasör', FolderPlus, { hint: 'Ctrl+Shift+N' }),
-      item('paste', 'Yapıştır', ClipboardPaste, { hint: 'Ctrl+V', disabled: !hasClipboard }),
+      item('new-folder', tt('files.yeni_klasor'), FolderPlus, { hint: 'Ctrl+Shift+N' }),
+      item('paste', tt('files.yapistir'), ClipboardPaste, { hint: 'Ctrl+V', disabled: !hasClipboard }),
       SEP,
-      item('toggle-hidden', showHidden ? 'Gizli dosyaları gizle' : 'Gizli dosyaları göster', showHidden ? EyeOff : Eye, { hint: 'Ctrl+H' }),
-      item('refresh', 'Yenile', RefreshCw, { hint: 'F5' }),
+      item('toggle-hidden', showHidden ? tt('files.gizli_dosyalari_gizle') : tt('files.gizli_dosyalari_goster'), showHidden ? EyeOff : Eye, { hint: 'Ctrl+H' }),
+      item('refresh', tt('files.yenile'), RefreshCw, { hint: 'F5' }),
     );
     return out;
   }
 
   // Aç / önizle
-  if (one?.kind === 'dir') out.push(item('open', 'Aç', FolderOpen, { hint: 'Enter' }));
-  else if (one && previewKind(one)) out.push(item('preview', 'Önizle', Eye, { hint: 'Boşluk' }));
-  if (one && one.kind !== 'dir') out.push(item('open-on-pc', provider === 'phone' ? 'Bilgisayarda aç' : 'Varsayılan uygulamayla aç', ExternalLink));
-  if (one && provider === 'pc') out.push(item('reveal', 'Klasörde göster', FolderOpen));
+  if (one?.kind === 'dir') out.push(item('open', tt('common.ac'), FolderOpen, { hint: tt('files.enter') }));
+  else if (one && previewKind(one)) out.push(item('preview', tt('files.onizle'), Eye, { hint: tt('files.bosluk') }));
+  if (one && one.kind !== 'dir') out.push(item('open-on-pc', provider === 'phone' ? tt('files.bilgisayarda_ac') : tt('files.varsayilan_uygulamayla_ac'), ExternalLink));
+  if (one && provider === 'pc') out.push(item('reveal', tt('files.klasorde_goster'), FolderOpen));
   if (out.length) out.push(SEP);
 
   // Bu yerler arası aktarım: bu uygulamanın asıl işi
-  if (provider === 'pc') out.push(item('send-to-phone', many ? 'Telefona gönder' : 'Telefona gönder', Smartphone, { disabled: !phoneConnected }));
-  else out.push(item('save-to-pc', many ? 'Bilgisayara kaydet' : 'Bilgisayara kaydet', Laptop));
+  if (provider === 'pc') out.push(item('send-to-phone', many ? tt('files.telefona_gonder') : tt('files.telefona_gonder'), Smartphone, { disabled: !phoneConnected }));
+  else out.push(item('save-to-pc', many ? tt('files.bilgisayara_kaydet_2') : tt('files.bilgisayara_kaydet_2'), Laptop));
   if (dual) {
-    out.push(item('copy-other', 'Diğer bölmeye kopyala', Copy, { hint: 'F5' }), item('move-other', 'Diğer bölmeye taşı', ArrowLeftRight, { hint: 'F6' }));
+    out.push(item('copy-other', tt('files.diger_bolmeye_kopyala'), Copy, { hint: 'F5' }), item('move-other', tt('files.diger_bolmeye_tasi'), ArrowLeftRight, { hint: 'F6' }));
   }
-  out.push(SEP, item('copy', 'Kopyala', Copy, { hint: 'Ctrl+C' }), item('cut', 'Kes', Scissors, { hint: 'Ctrl+X' }));
-  if (one?.kind === 'dir') out.push(item('paste-into', 'İçine yapıştır', ClipboardPaste, { hint: 'Ctrl+V', disabled: !hasClipboard }));
+  out.push(SEP, item('copy', tt('files.kopyala_2'), Copy, { hint: 'Ctrl+C' }), item('cut', tt('files.kes_2'), Scissors, { hint: 'Ctrl+X' }));
+  if (one?.kind === 'dir') out.push(item('paste-into', tt('files.icine_yapistir'), ClipboardPaste, { hint: 'Ctrl+V', disabled: !hasClipboard }));
   out.push(SEP);
-  if (one) out.push(item('rename', 'Yeniden adlandır', Pencil, { hint: 'F2' }));
-  if (one?.kind === 'dir') out.push(item('favorite', 'Favorilere ekle', Star));
-  out.push(item('delete', onlyFiles || one ? 'Sil' : 'Sil', Trash2, { hint: 'Del', destructive: true }));
-  if (one) out.push(SEP, item('properties', 'Özellikler', Info, { hint: 'Alt+Enter' }));
+  if (one) out.push(item('rename', tt('files.yeniden_adlandir'), Pencil, { hint: 'F2' }));
+  if (one?.kind === 'dir') out.push(item('favorite', tt('files.favorilere_ekle'), Star));
+  out.push(item('delete', onlyFiles || one ? tt('files.sil') : tt('files.sil'), Trash2, { hint: tt('files.del'), destructive: true }));
+  if (one) out.push(SEP, item('properties', tt('files.ozellikler'), Info, { hint: 'Alt+Enter' }));
   return out;
 }
 

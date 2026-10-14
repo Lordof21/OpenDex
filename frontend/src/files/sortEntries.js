@@ -4,11 +4,12 @@
 //   * akıştan gelen sayfalar sıralanıp mevcut sıralı diziyle BİRLEŞTİRİLİR (`mergeSorted`, O(n)) — her sayfada tüm liste
 //     yeniden sıralanmaz.
 import { typeSortKey } from './fileTypes.js';
+import { t, activeLocale } from '../i18n/index.js';
 
 export const SORT_KEYS = Object.freeze(['name', 'modified', 'size', 'type']);
-export const SORT_LABELS = Object.freeze({ name: 'Ad', modified: 'Değiştirme tarihi', size: 'Boyut', type: 'Tür' });
+export const SORT_LABELS = Object.freeze({ name: 'Ad', modified: t('files.degistirme_tarihi'), size: 'Boyut', type: t('common.tur') });
 
-const collator = new Intl.Collator('tr', { sensitivity: 'accent', usage: 'sort' });
+const collator = new Intl.Collator(activeLocale(), { sensitivity: 'accent', usage: 'sort' });
 const PAD = 12;
 
 /** 'IMG_9.jpg' < 'IMG_10.jpg': her sayı dizisi 12 haneye sıfırla tamamlanır. */
@@ -76,9 +77,9 @@ export function mergeSorted(a, b, compare) {
 
 /** Gizli dosyaları ve (varsa) ad süzgecini uygular. */
 export function filterEntries(entries, { showHidden = false, query = '' } = {}) {
-  const needle = query.trim().toLocaleLowerCase('tr');
+  const needle = query.trim().toLocaleLowerCase(activeLocale());
   if (showHidden && !needle) return entries;
-  return entries.filter((e) => (showHidden || !e.hidden) && (!needle || e.name.toLocaleLowerCase('tr').includes(needle)));
+  return entries.filter((e) => (showHidden || !e.hidden) && (!needle || e.name.toLocaleLowerCase(activeLocale()).includes(needle)));
 }
 
 /**
@@ -87,13 +88,13 @@ export function filterEntries(entries, { showHidden = false, query = '' } = {}) 
  */
 export function typeAheadIndex(entries, buffer, from = -1) {
   if (!buffer) return -1;
-  const needle = buffer.toLocaleLowerCase('tr');
+  const needle = buffer.toLocaleLowerCase(activeLocale());
   const repeated = needle.length > 1 && [...needle].every((c) => c === needle[0]);
   const probe = repeated ? needle[0] : needle;
   const n = entries.length;
   for (let step = 1; step <= n; step += 1) {
     const idx = (from + step + n) % n;
-    if (entries[idx].name.toLocaleLowerCase('tr').startsWith(probe)) return idx;
+    if (entries[idx].name.toLocaleLowerCase(activeLocale()).startsWith(probe)) return idx;
   }
   return -1;
 }

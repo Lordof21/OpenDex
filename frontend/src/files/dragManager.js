@@ -7,6 +7,7 @@
 // taşıyan öğelerdir (`registerDropTarget`) → bırakınca hedefin `onDrop`'u çalışır. Esc ya da pointercancel iptal eder.
 // Sürüklemeden sonraki "click" yutulur (satır yanlışlıkla açılmasın).
 import { dropOperation } from './filesCommands.js';
+import { t } from '../i18n/index.js';
 
 const THRESHOLD_PX = 5;
 const EDGE_PX = 40;
@@ -53,9 +54,9 @@ const targetUnder = (x, y) => {
 };
 
 export function labelFor(op, dest) {
-  const where = dest?.provider === 'phone' ? 'Telefona' : dest?.provider === 'pc' ? 'Bilgisayara' : '';
-  if (op === 'move') return where ? `${where} taşı` : 'Taşı';
-  return where ? `${where} kopyala` : 'Kopyala';
+  const where = dest?.provider === 'phone' ? t('files.telefona') : dest?.provider === 'pc' ? t('files.bilgisayara') : '';
+  if (op === 'move') return where ? t('files.where_tasi', { where }) : t('files.tasi');
+  return where ? `${where} kopyala` : t('files.kopyala_2');
 }
 
 function markHover(el) {

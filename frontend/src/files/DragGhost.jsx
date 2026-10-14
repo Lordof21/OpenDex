@@ -7,6 +7,7 @@ import { Ban, Copy, File, Files, Folder, MoveRight } from 'lucide-react';
 import { cn } from '../lib/utils.js';
 import { Z_INDEX } from '../ui/zIndex.js';
 import { getDrag, labelFor, subscribeDrag } from './dragManager.js';
+import { t } from '../i18n/index.js';
 
 export function DragGhostView({ drag }) {
   const Icon = drag.count > 1 ? Files : drag.kind === 'dir' ? Folder : File;
@@ -27,7 +28,7 @@ export function DragGhostView({ drag }) {
           <span className="block truncate font-medium">{drag.label}</span>
           <span className={cn('flex items-center gap-1 truncate text-[10px]', ok ? 'text-primary' : 'text-muted-foreground')}>
             <OpIcon className="size-3 shrink-0" />
-            {ok ? `${labelFor(drag.op, drag.destLoc)}${drag.target.name ? ` · ${drag.target.name}` : ''}` : 'Buraya bırakılamaz'}
+            {ok ? `${labelFor(drag.op, drag.destLoc)}${drag.target.name ? ` · ${drag.target.name}` : ''}` : t('files.buraya_birakilamaz')}
           </span>
         </span>
       </div>

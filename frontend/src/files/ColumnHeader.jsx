@@ -3,6 +3,7 @@
 import React from 'react';
 import { ArrowDown, ArrowUp } from 'lucide-react';
 import { cn } from '../lib/utils.js';
+import { t } from '../i18n/index.js';
 
 export const HEADER_HEIGHT = 28;
 
@@ -26,10 +27,10 @@ export default function ColumnHeader({ sort, columns, showCheck, onSort }) {
     <div role="row" aria-rowindex={1} className="sticky top-0 z-10 border-b border-border/70 bg-background/92 backdrop-blur-sm" style={{ height: HEADER_HEIGHT }}>
       {/* Satırlarla aynı iç boşluk (inset 4 + padding 8); seçim kutusu açıkken satırlar 24 px kayar */}
       <div className="flex h-full items-center gap-2 pr-3" style={{ paddingLeft: showCheck ? 36 : 12 }}>
-        <Cell id="name" label="Ad" sort={sort} onSort={onSort} className="min-w-0 flex-1" />
-        {columns.date && <Cell id="modified" label="Değiştirme tarihi" sort={sort} onSort={onSort} className="w-36 shrink-0" />}
-        {columns.type && <Cell id="type" label="Tür" sort={sort} onSort={onSort} className="w-36 shrink-0" />}
-        {columns.size && <Cell id="size" label="Boyut" sort={sort} onSort={onSort} className="w-20 shrink-0" align="right" />}
+        <Cell id="name" label={t('common.ad')} sort={sort} onSort={onSort} className="min-w-0 flex-1" />
+        {columns.date && <Cell id="modified" label={t('files.degistirme_tarihi')} sort={sort} onSort={onSort} className="w-36 shrink-0" />}
+        {columns.type && <Cell id="type" label={t('common.tur')} sort={sort} onSort={onSort} className="w-36 shrink-0" />}
+        {columns.size && <Cell id="size" label={t('files.boyut')} sort={sort} onSort={onSort} className="w-20 shrink-0" align="right" />}
       </div>
     </div>
   );

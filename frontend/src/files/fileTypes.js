@@ -33,30 +33,31 @@ import {
   Trash2,
   Type,
 } from 'lucide-react';
+import { t } from '../i18n/index.js';
 
 /** Tür → { icon, tone, label }. `label` yalnızca uzantı bilinmiyorsa kullanılan genel ad; uzantılı ad typeLabel'dadır. */
 export const KIND_META = Object.freeze({
-  folder: { icon: Folder, tone: 'folder', label: 'Klasör' },
-  image: { icon: FileImage, tone: 'image', label: 'Resim' },
-  video: { icon: FileVideo, tone: 'video', label: 'Video' },
-  audio: { icon: FileMusic, tone: 'audio', label: 'Ses' },
-  pdf: { icon: FileText, tone: 'pdf', label: 'PDF belgesi' },
-  doc: { icon: FileText, tone: 'doc', label: 'Belge' },
-  sheet: { icon: FileSpreadsheet, tone: 'sheet', label: 'Elektronik tablo' },
-  slides: { icon: Presentation, tone: 'slides', label: 'Sunum' },
-  text: { icon: FileText, tone: 'generic', label: 'Metin belgesi' },
-  archive: { icon: Archive, tone: 'archive', label: 'Arşiv' },
-  code: { icon: FileCode2, tone: 'code', label: 'Kaynak kod' },
-  data: { icon: Database, tone: 'data', label: 'Veri dosyası' },
-  app: { icon: AppWindow, tone: 'app', label: 'Uygulama' },
-  apk: { icon: Package, tone: 'app', label: 'Android uygulaması' },
-  font: { icon: Type, tone: 'generic', label: 'Yazı tipi' },
-  disk: { icon: Disc3, tone: 'archive', label: 'Disk görüntüsü' },
-  ebook: { icon: BookOpen, tone: 'doc', label: 'E-kitap' },
-  subtitle: { icon: Subtitles, tone: 'generic', label: 'Altyazı' },
-  config: { icon: Cog, tone: 'generic', label: 'Yapılandırma' },
-  link: { icon: Link2, tone: 'generic', label: 'Bağlantı' },
-  unknown: { icon: File, tone: 'generic', label: 'Dosya' },
+  folder: { icon: Folder, tone: 'folder', label: t('common.klasor') },
+  image: { icon: FileImage, tone: 'image', label: t('files.resim') },
+  video: { icon: FileVideo, tone: 'video', label: t('files.video') },
+  audio: { icon: FileMusic, tone: 'audio', label: t('common.ses') },
+  pdf: { icon: FileText, tone: 'pdf', label: t('files.pdf_belgesi') },
+  doc: { icon: FileText, tone: 'doc', label: t('files.belge') },
+  sheet: { icon: FileSpreadsheet, tone: 'sheet', label: t('files.elektronik_tablo') },
+  slides: { icon: Presentation, tone: 'slides', label: t('files.sunum') },
+  text: { icon: FileText, tone: 'generic', label: t('files.metin_belgesi') },
+  archive: { icon: Archive, tone: 'archive', label: t('files.arsiv') },
+  code: { icon: FileCode2, tone: 'code', label: t('files.kaynak_kod') },
+  data: { icon: Database, tone: 'data', label: t('files.veri_dosyasi') },
+  app: { icon: AppWindow, tone: 'app', label: t('common.uygulama') },
+  apk: { icon: Package, tone: 'app', label: t('files.android_uygulamasi') },
+  font: { icon: Type, tone: 'generic', label: t('files.yazi_tipi') },
+  disk: { icon: Disc3, tone: 'archive', label: t('files.disk_goruntusu') },
+  ebook: { icon: BookOpen, tone: 'doc', label: t('files.e_kitap') },
+  subtitle: { icon: Subtitles, tone: 'generic', label: t('files.altyazi') },
+  config: { icon: Cog, tone: 'generic', label: t('files.yapilandirma') },
+  link: { icon: Link2, tone: 'generic', label: t('files.baglanti') },
+  unknown: { icon: File, tone: 'generic', label: t('files.dosya') },
 });
 
 const GROUPS = {
@@ -67,7 +68,7 @@ const GROUPS = {
   doc: 'doc docx odt rtf pages wps',
   sheet: 'xls xlsx ods csv tsv numbers',
   slides: 'ppt pptx odp key',
-  text: 'txt md markdown log nfo',
+  text: t('files.txt_md_markdown_log_nfo'),
   archive: 'zip rar 7z tar gz tgz bz2 xz zst lz cab',
   code: 'js mjs cjs jsx ts tsx py java kt kts c h cpp hpp cc cs go rs rb php swift sh bat cmd ps1 sql html htm css scss less vue lua dart gradle',
   data: 'json xml yaml yml toml db sqlite sqlite3 sql3 dat bin parquet',
@@ -76,7 +77,7 @@ const GROUPS = {
   font: 'ttf otf woff woff2 fon',
   disk: 'iso img vhd vhdx vmdk',
   ebook: 'epub mobi azw azw3 fb2 djvu',
-  subtitle: 'srt vtt ass ssa sub',
+  subtitle: t('files.srt_vtt_ass_ssa_sub'),
   config: 'ini cfg conf properties env gitignore editorconfig',
   link: 'lnk url desktop webloc',
 };
@@ -102,13 +103,13 @@ export function kindOf(entry) {
 /** "JPG Resmi", "ZIP Arşivi", ".xyz dosyası", "Klasör" — Windows Gezgini'ndeki "Tür" sütunu gibi. */
 export function typeLabel(entry) {
   if (!entry) return '';
-  if (entry.kind === 'dir') return entry.symlink ? 'Klasör bağlantısı' : 'Klasör';
+  if (entry.kind === 'dir') return entry.symlink ? t('files.klasor_baglantisi') : t('common.klasor');
   const ext = extensionOf(entry.name);
   const kind = kindOf(entry);
   if (!ext) return KIND_META[kind].label;
   const upper = ext.toUpperCase(); // teknik simge: Türkçe kuralı (i → İ) 'ZİP' yazdırırdı
-  if (kind === 'unknown') return `${upper} dosyası`;
-  const noun = { image: 'Resmi', video: 'Videosu', audio: 'Ses dosyası', archive: 'Arşivi', pdf: 'Belgesi', doc: 'Belgesi', sheet: 'Tablosu', slides: 'Sunumu', text: 'Metin belgesi', code: 'Kaynak dosyası', data: 'Veri dosyası', app: 'Uygulaması', apk: 'Paketi', font: 'Yazı tipi', disk: 'Görüntüsü', ebook: 'E-kitabı', subtitle: 'Altyazısı', config: 'Yapılandırma dosyası', link: 'Bağlantısı' }[kind];
+  if (kind === 'unknown') return t('files.upper_dosyasi', { upper });
+  const noun = { image: t('files.resmi'), video: t('files.videosu'), audio: t('files.ses_dosyasi'), archive: t('files.arsivi'), pdf: t('files.belgesi'), doc: t('files.belgesi'), sheet: t('files.tablosu'), slides: t('files.sunumu'), text: t('files.metin_belgesi'), code: t('files.kaynak_dosyasi'), data: t('files.veri_dosyasi'), app: t('files.uygulamasi'), apk: t('files.paketi'), font: t('files.yazi_tipi'), disk: t('files.goruntusu'), ebook: t('files.e_kitabi'), subtitle: t('files.altyazisi'), config: t('files.yapilandirma_dosyasi'), link: t('files.baglantisi') }[kind];
   return noun ? `${upper} ${noun}` : upper;
 }
 
@@ -119,26 +120,26 @@ export function typeSortKey(entry) {
 
 // ── Özel klasörler: ad (küçük harf, Türkçe yerelleştirilmiş adlar dahil) → simge ──────────────────────────────
 const SPECIAL = new Map([
-  ['dcim', { glyph: Camera, label: 'Kamera' }],
-  ['camera', { glyph: Camera, label: 'Kamera' }],
-  ['download', { glyph: Download, label: 'İndirilenler' }],
-  ['downloads', { glyph: Download, label: 'İndirilenler' }],
-  ['indirilenler', { glyph: Download, label: 'İndirilenler' }],
-  ['pictures', { glyph: Image, label: 'Resimler' }],
-  ['resimler', { glyph: Image, label: 'Resimler' }],
-  ['screenshots', { glyph: Monitor, label: 'Ekran görüntüleri' }],
-  ['ekran görüntüleri', { glyph: Monitor, label: 'Ekran görüntüleri' }],
-  ['music', { glyph: Music, label: 'Müzik' }],
-  ['müzik', { glyph: Music, label: 'Müzik' }],
-  ['movies', { glyph: Film, label: 'Filmler' }],
-  ['videos', { glyph: Film, label: 'Videolar' }],
-  ['videolar', { glyph: Film, label: 'Videolar' }],
-  ['documents', { glyph: FileText, label: 'Belgeler' }],
-  ['belgeler', { glyph: FileText, label: 'Belgeler' }],
-  ['android', { glyph: Smartphone, label: 'Android' }],
-  ['whatsapp', { glyph: MessageCircle, label: 'WhatsApp' }],
-  ['telegram', { glyph: MessageCircle, label: 'Telegram' }],
-  ['.opendex-trash', { glyph: Trash2, label: 'Geri dönüşüm' }],
+  ['dcim', { glyph: Camera, label: t('files.kamera') }],
+  ['camera', { glyph: Camera, label: t('files.kamera') }],
+  ['download', { glyph: Download, label: t('files.indirilenler') }],
+  ['downloads', { glyph: Download, label: t('files.indirilenler') }],
+  ['indirilenler', { glyph: Download, label: t('files.indirilenler') }],
+  ['pictures', { glyph: Image, label: t('files.resimler') }],
+  ['resimler', { glyph: Image, label: t('files.resimler') }],
+  ['screenshots', { glyph: Monitor, label: t('files.ekran_goruntuleri_2') }],
+  [t('files.ekran_goruntuleri'), { glyph: Monitor, label: t('files.ekran_goruntuleri_2') }],
+  ['music', { glyph: Music, label: t('common.muzik') }],
+  [t('files.muzik'), { glyph: Music, label: t('common.muzik') }],
+  ['movies', { glyph: Film, label: t('files.filmler') }],
+  ['videos', { glyph: Film, label: t('files.videolar') }],
+  ['videolar', { glyph: Film, label: t('files.videolar') }],
+  ['documents', { glyph: FileText, label: t('files.belgeler') }],
+  ['belgeler', { glyph: FileText, label: t('files.belgeler') }],
+  ['android', { glyph: Smartphone, label: t('files.android') }],
+  ['whatsapp', { glyph: MessageCircle, label: t('files.whatsapp') }],
+  ['telegram', { glyph: MessageCircle, label: t('files.telegram') }],
+  ['.opendex-trash', { glyph: Trash2, label: t('files.geri_donusum') }],
 ]);
 
 // Anahtar: varsayılan (yerel-bağımsız) küçük harf + birleşik noktayı at. Türkçe kuralı ('I' → 'ı') 'DCIM'i 'dcım' yapıp

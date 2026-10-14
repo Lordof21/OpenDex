@@ -1,3 +1,4 @@
+import { t as tt } from '../i18n/index.js';
 // Konum (Location) yardımcıları: { provider: 'pc' | 'phone', path, device? }. Yol sözdizimi sağlayıcıya aittir:
 // telefon POSIX ('/'), PC yerel (Windows '\' + sürücü, diğerleri '/').
 
@@ -78,7 +79,7 @@ export function breadcrumbs(loc, places = []) {
     cursor = out[0].loc;
     rest = loc.path.slice(drive ? drive.length : 0);
   } else {
-    out.push({ label: isPhone(loc) ? 'Telefon' : '/', loc: { ...loc, path: '/' } });
+    out.push({ label: isPhone(loc) ? tt('common.telefon') : '/', loc: { ...loc, path: '/' } });
     cursor = out[0].loc;
     rest = trimEnd(loc.path, sep);
   }

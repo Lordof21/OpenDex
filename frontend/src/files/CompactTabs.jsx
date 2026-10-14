@@ -5,6 +5,7 @@ import { ArrowRightLeft, Laptop, Smartphone } from 'lucide-react';
 import { cn } from '../lib/utils.js';
 import { overallProgress, useTransferStore } from './transferStore.js';
 import { useMemo } from 'react';
+import { t } from '../i18n/index.js';
 
 function Tab({ icon: Icon, label, active, badge, onClick }) {
   return (
@@ -28,10 +29,10 @@ export default function CompactTabs({ provider, onPick }) {
   const trayOpen = useTransferStore((s) => s.trayOpen);
   const active = useMemo(() => overallProgress(order.map((id) => jobs[id]).filter(Boolean)).count, [jobs, order]);
   return (
-    <div role="tablist" aria-label="Bölümler" className="flex shrink-0 border-t border-border/70 bg-background">
-      <Tab icon={Smartphone} label="Telefon" active={!trayOpen && provider === 'phone'} onClick={() => onPick('phone')} />
-      <Tab icon={Laptop} label="Bilgisayar" active={!trayOpen && provider === 'pc'} onClick={() => onPick('pc')} />
-      <Tab icon={ArrowRightLeft} label="Aktarımlar" active={trayOpen} badge={active || null} onClick={() => useTransferStore.getState().setTrayOpen(!trayOpen)} />
+    <div role="tablist" aria-label={t('files.bolumler')} className="flex shrink-0 border-t border-border/70 bg-background">
+      <Tab icon={Smartphone} label={t('common.telefon')} active={!trayOpen && provider === 'phone'} onClick={() => onPick('phone')} />
+      <Tab icon={Laptop} label={t('common.bilgisayar')} active={!trayOpen && provider === 'pc'} onClick={() => onPick('pc')} />
+      <Tab icon={ArrowRightLeft} label={t('files.aktarimlar')} active={trayOpen} badge={active || null} onClick={() => useTransferStore.getState().setTrayOpen(!trayOpen)} />
     </div>
   );
 }

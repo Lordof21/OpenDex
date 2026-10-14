@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.js';
 // Klavye → eylem eşlemesi. SAF: bir KeyboardEvent'ten (ya da {key, ctrlKey, …} nesnesinden) eylem tanımı üretir; FolderView
 // yalnızca bunu yürütür. Kısayol tablosu böylece testle sabitlenir ve belgelenir (kısayol yardımı aynı tabloyu kullanır).
 //
@@ -5,24 +6,24 @@
 
 /** Kısayol yardımı için gösterilen liste: [tuş, açıklama]. */
 export const SHORTCUTS = Object.freeze([
-  ['↑ ↓ ← →', 'Odağı taşı'],
-  ['Shift + ok', 'Seçimi genişlet'],
-  ['Ctrl + A', 'Tümünü seç'],
-  ['Enter', 'Aç'],
-  ['Boşluk', 'Hızlı önizleme'],
-  ['Backspace · Alt+↑', 'Üst klasör'],
-  ['Alt + ← / →', 'Geri / ileri'],
-  ['F2', 'Yeniden adlandır'],
-  ['Delete', 'Geri dönüşüm kutusuna taşı'],
-  ['Shift + Delete', 'Kalıcı sil'],
-  ['Ctrl + C / X / V', 'Kopyala / kes / yapıştır'],
-  ['Ctrl + Shift + N', 'Yeni klasör'],
-  ['F5 · F6', 'İki bölmede: diğerine kopyala · taşı'],
-  ['Ctrl + L', 'Adres çubuğuna git'],
-  ['Ctrl + F', 'Bu klasörde ara'],
-  ['Ctrl + H', 'Gizli dosyaları göster/gizle'],
-  ['Alt + Enter', 'Özellikler'],
-  ['Harf yazın', 'Ada göre atla'],
+  ['↑ ↓ ← →', t('files.odagi_tasi')],
+  ['Shift + ok', t('files.secimi_genislet')],
+  ['Ctrl + A', t('files.tumunu_sec')],
+  ['Enter', t('common.ac')],
+  [t('files.bosluk'), t('files.hizli_onizleme')],
+  [t('files.backspace_alt'), t('files.ust_klasor')],
+  ['Alt + ← / →', t('files.geri_ileri')],
+  ['F2', t('files.yeniden_adlandir')],
+  ['Delete', t('files.geri_donusum_kutusuna_tasi')],
+  ['Shift + Delete', t('files.kalici_sil')],
+  ['Ctrl + C / X / V', t('files.kopyala_kes_yapistir')],
+  ['Ctrl + Shift + N', t('files.yeni_klasor')],
+  [t('files.f5_f6'), t('files.iki_bolmede_digerine_kopyala_tasi')],
+  ['Ctrl + L', t('files.adres_cubuguna_git')],
+  ['Ctrl + F', t('files.bu_klasorde_ara')],
+  ['Ctrl + H', t('files.gizli_dosyalari_goster_gizle')],
+  ['Alt + Enter', t('files.ozellikler')],
+  [t('files.harf_yazin'), t('files.ada_gore_atla')],
 ]);
 
 const NAV_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown']);

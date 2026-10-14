@@ -7,6 +7,7 @@ import { IconButton } from '../ui/IconButton.jsx';
 import { useFilesStore } from './filesStore.js';
 import { FOCUS_SEARCH_EVENT } from './menuActions.js';
 import { locKey } from './paths.js';
+import { t } from '../i18n/index.js';
 
 export default function SearchField({ winId, compact }) {
   const pi = useFilesStore((s) => s.wins[winId]?.activePane ?? 0);
@@ -41,7 +42,7 @@ export default function SearchField({ winId, compact }) {
   };
 
   if (!expanded) {
-    return <IconButton label="Ara" size="md" onClick={() => setOpen(true)}><Search /></IconButton>;
+    return <IconButton label={t('files.ara')} size="md" onClick={() => setOpen(true)}><Search /></IconButton>;
   }
 
   const deep = pane?.search;
@@ -52,8 +53,8 @@ export default function SearchField({ winId, compact }) {
         ref={input}
         type="search"
         value={text}
-        placeholder={compact ? 'Ara' : 'Bu klasörde ara'}
-        aria-label="Dosyalarda ara"
+        placeholder={compact ? t('files.ara') : t('files.bu_klasorde_ara')}
+        aria-label={t('files.dosyalarda_ara')}
         spellCheck={false}
         autoComplete="off"
         onChange={(e) => { setText(e.target.value); store.getState().setQuery(winId, pi, e.target.value); }}
@@ -67,8 +68,8 @@ export default function SearchField({ winId, compact }) {
       />
       {text && (
         <span className="absolute right-1 flex items-center gap-0.5">
-          {!deep && <kbd className="rounded-sm border border-border/70 px-1 text-[9px] text-muted-foreground" title="Alt klasörlerde de ara">↵</kbd>}
-          <IconButton label="Aramayı temizle" size="xs" onClick={clear}><X /></IconButton>
+          {!deep && <kbd className="rounded-sm border border-border/70 px-1 text-[9px] text-muted-foreground" title={t('files.alt_klasorlerde_de_ara')}>↵</kbd>}
+          <IconButton label={t('common.aramayi_temizle')} size="xs" onClick={clear}><X /></IconButton>
         </span>
       )}
     </div>

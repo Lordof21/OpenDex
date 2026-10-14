@@ -15,6 +15,7 @@ import { formatSize } from './formatters.js';
 import { isPhone } from './paths.js';
 import PreviewFailed from './PreviewFailed.jsx';
 import { useThumbnail } from './useThumbnail.js';
+import { t } from '../i18n/index.js';
 
 const TEXT_LIMIT = 1_000_000;
 const PRELOAD_MAX_BYTES = 20 * 1024 * 1024;
@@ -28,21 +29,21 @@ function TextBody({ loc, entry }) {
     setState({ status: 'loading', text: '' });
     fetchText(loc, TEXT_LIMIT, ctrl.signal)
       .then((text) => setState({ status: 'ready', text }))
-      .catch((err) => { if (err?.name !== 'AbortError') setState({ status: 'error', text: '', message: err.code === 'too_large' ? 'Dosya önizleme için çok büyük.' : err.message }); });
+      .catch((err) => { if (err?.name !== 'AbortError') setState({ status: 'error', text: '', message: err.code === 'too_large' ? t('files.dosya_onizleme_icin_cok_buyuk') : err.message }); });
     return () => ctrl.abort();
   }, [loc.path, loc.provider, loc.device, entry.mtime]);                     // eslint-disable-line react-hooks/exhaustive-deps
-  if (state.status === 'loading') return <LoaderCircle className="size-6 animate-spin text-muted-foreground motion-reduce:animate-none" aria-label="Yükleniyor" />;
+  if (state.status === 'loading') return <LoaderCircle className="size-6 animate-spin text-muted-foreground motion-reduce:animate-none" aria-label={t('common.yukleniyor')} />;
   if (state.status === 'error') return <PreviewFailed message={state.message} />;
   return (
     <div className="flex h-full w-full max-w-3xl flex-col">
       <pre tabIndex={0} className="dex-scroll min-h-0 flex-1 overflow-auto rounded-lg border border-border/70 bg-background p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words text-foreground">{state.text}</pre>
-      {entry.size > TEXT_LIMIT && <p className="mt-1.5 text-center text-[11px] text-muted-foreground">İlk {formatSize(TEXT_LIMIT)} gösteriliyor ({formatSize(entry.size)} dosyanın).</p>}
+      {entry.size > TEXT_LIMIT && <p className="mt-1.5 text-center text-[11px] text-muted-foreground">{t('files.ilk_formatsize_gosteriliyor', { formatSize: formatSize(TEXT_LIMIT), formatSize2: formatSize(entry.size) })}</p>}
     </div>
   );
 }
 
 // Video/ses telefondan oynarken aralıklı okunur (boyut sınırı yok); oynatılamıyorsa (codec) nedeni ve çıkışı söylenir.
-const MEDIA_FAILED = 'Bu dosya burada oynatılamadı (biçim ya da codec desteklenmiyor olabilir). Bilgisayarın oynatıcısında açabilirsiniz.';
+const MEDIA_FAILED = t('files.bu_dosya_burada_oynatilamadi_bicim_ya');
 
 /** Müzik: albüm kapağı (varsa, telefonun kendi çözücüsünden) + oynatıcı. Ses doğrudan akar, otomatik başlar. */
 function AudioBody({ loc, entry, url, onError }) {
@@ -116,7 +117,7 @@ export default function PreviewOverlay({ winId, compact = false }) {
       ref={root}
       role="dialog"
       aria-modal="true"
-      aria-label={`Önizleme: ${entry.name}`}
+      aria-label={t('common.onizleme_name', { name: entry.name })}
       tabIndex={-1}
       className="absolute inset-0 z-40 flex flex-col bg-scrim/85 text-scrim-foreground outline-none backdrop-blur-sm"
       onClick={(e) => { if (e.target === e.currentTarget) close(); }}
@@ -127,19 +128,19 @@ export default function PreviewOverlay({ winId, compact = false }) {
           <p className="text-[11px] opacity-75 tabular-nums">{position} / {previewables.length} · {formatSize(entry.size)}</p>
         </div>
         {/* Başlık pencerenin en üstünde: varsayılan (yukarı açılan) ipucu kırpılır → aşağı; en sağdaki sağa hizalı (kenardan taşmasın). */}
-        <IconButton label="Bilgisayarda aç" tone="scrim" size="md" tooltipPosition="bottom" onClick={() => openOnPc(loc)}><ExternalLink /></IconButton>
-        {phone && <IconButton label="Bilgisayara kaydet" tone="scrim" size="md" tooltipPosition="bottom" onClick={() => sendSelection(winId, preview.pane, 'pc')}><Save /></IconButton>}
-        <IconButton label="Kapat (Esc)" tone="scrim" size="md" tooltipPosition="bottom" tooltipAlign="end" onClick={close}><X /></IconButton>
+        <IconButton label={t('files.bilgisayarda_ac')} tone="scrim" size="md" tooltipPosition="bottom" onClick={() => openOnPc(loc)}><ExternalLink /></IconButton>
+        {phone && <IconButton label={t('files.bilgisayara_kaydet')} tone="scrim" size="md" tooltipPosition="bottom" onClick={() => sendSelection(winId, preview.pane, 'pc')}><Save /></IconButton>}
+        <IconButton label={t('files.kapat_esc')} tone="scrim" size="md" tooltipPosition="bottom" tooltipAlign="end" onClick={close}><X /></IconButton>
       </header>
       <div className="relative flex min-h-0 flex-1 items-center justify-center px-14 pb-4" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
         {/* IconButton kendi `relative` sınıfını taşır (CSS'te `absolute`'un ÜSTÜNDE): konumlama sarmalayıcıda. */}
-        <span className="absolute left-2 top-1/2 -translate-y-1/2"><IconButton label="Önceki (←)" tone="scrim" shape="full" size="lg" disabled={position <= 1} onClick={() => step(-1)}><ChevronLeft /></IconButton></span>
-        <span className="absolute right-2 top-1/2 -translate-y-1/2"><IconButton label="Sonraki (→)" tone="scrim" shape="full" size="lg" disabled={position >= previewables.length} onClick={() => step(1)}><ChevronRight /></IconButton></span>
+        <span className="absolute left-2 top-1/2 -translate-y-1/2"><IconButton label={t('files.onceki')} tone="scrim" shape="full" size="lg" disabled={position <= 1} onClick={() => step(-1)}><ChevronLeft /></IconButton></span>
+        <span className="absolute right-2 top-1/2 -translate-y-1/2"><IconButton label={t('files.sonraki')} tone="scrim" shape="full" size="lg" disabled={position >= previewables.length} onClick={() => step(1)}><ChevronRight /></IconButton></span>
         {failed ? (
           <PreviewFailed message={kind === 'video' || kind === 'audio' ? MEDIA_FAILED : undefined} onOpen={() => openOnPc(loc)} />
         ) : kind === 'image' ? (
           <>
-            {!loaded && <LoaderCircle className="absolute size-6 animate-spin motion-reduce:animate-none" aria-label="Yükleniyor" />}
+            {!loaded && <LoaderCircle className="absolute size-6 animate-spin motion-reduce:animate-none" aria-label={t('common.yukleniyor')} />}
             <img key={url} src={url} alt={entry.name} draggable={false} onLoad={() => setLoaded(true)} onError={() => setFailed(true)} className={`max-h-full max-w-full rounded-md object-contain shadow-window transition-opacity duration-150 ${loaded ? 'opacity-100' : 'opacity-0'}`} />
           </>
         ) : kind === 'video' ? (

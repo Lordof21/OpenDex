@@ -9,12 +9,13 @@ import { IconButton } from '../ui/IconButton.jsx';
 import ConflictPanel from './ConflictPanel.jsx';
 import { formatEta, formatSize, formatSpeed } from './formatters.js';
 import { TERMINAL, jobProgress, jobTitle, useTransferStore } from './transferStore.js';
+import { t } from '../i18n/index.js';
 
 export function stateLabel(job) {
-  if (job.state === 'paused') return job.pause_reason === 'device_offline' ? 'Telefon bağlantısı bekleniyor…' : 'Duraklatıldı';
+  if (job.state === 'paused') return job.pause_reason === 'device_offline' ? t('files.telefon_baglantisi_bekleniyor') : t('common.duraklatildi');
   return {
-    queued: 'Sırada', scanning: 'Dosyalar sayılıyor…', running: job.op === 'move' ? 'Taşınıyor' : 'Kopyalanıyor', waiting: 'Karar bekleniyor',
-    completed: 'Tamamlandı', failed: 'Başarısız', cancelled: 'İptal edildi',
+    queued: t('files.sirada'), scanning: t('files.dosyalar_sayiliyor'), running: job.op === 'move' ? t('files.tasiniyor') : t('files.kopyalaniyor'), waiting: t('files.karar_bekleniyor'),
+    completed: t('files.tamamlandi'), failed: t('files.basarisiz'), cancelled: t('files.iptal_edildi'),
   }[job.state] ?? job.state;
 }
 
@@ -46,7 +47,7 @@ function JobCard({ job }) {
   const detail = [
     job.total_bytes ? `${formatSize(job.done_bytes)} / ${formatSize(job.total_bytes)}` : null,
     !paused && job.speed ? formatSpeed(job.speed) : null,
-    !paused && !done && eta ? `${eta} kaldı` : null,
+    !paused && !done && eta ? t('files.eta_kaldi', { eta }) : null,
   ].filter(Boolean).join(' · ');
 
   return (
@@ -56,20 +57,20 @@ function JobCard({ job }) {
           <p className="truncate text-xs font-semibold" title={jobTitle(job)}>{jobTitle(job)}</p>
           <p className={cn('text-[11px]', job.state === 'failed' ? 'text-destructive' : 'text-muted-foreground')}>
             {done && job.state === 'completed' && <Check className="mr-1 inline size-3 text-ft-sheet" aria-hidden="true" />}
-            {stateLabel(job)}{job.skipped ? ` · ${job.skipped} atlandı` : ''}{job.failed ? ` · ${job.failed} hata` : ''}
+            {stateLabel(job)}{job.skipped ? t('files.skipped_atlandi', { skipped: job.skipped }) : ''}{job.failed ? ` · ${job.failed} hata` : ''}
           </p>
         </div>
         {!done && (
           <>
             {job.state !== 'waiting' && (
-              <IconButton label={paused ? 'Sürdür' : 'Duraklat'} size="sm" onClick={() => (paused ? store.resume(job.id) : store.pause(job.id))}>
+              <IconButton label={paused ? t('files.surdur') : t('files.duraklat')} size="sm" onClick={() => (paused ? store.resume(job.id) : store.pause(job.id))}>
                 {paused ? <Play /> : <Pause />}
               </IconButton>
             )}
-            <IconButton label="İptal et" size="sm" danger="destructive" onClick={() => store.cancel(job.id)}><X /></IconButton>
+            <IconButton label={t('files.iptal_et')} size="sm" danger="destructive" onClick={() => store.cancel(job.id)}><X /></IconButton>
           </>
         )}
-        {done && <IconButton label="Listeden kaldır" size="sm" onClick={() => store.dismiss(job.id)}><X /></IconButton>}
+        {done && <IconButton label={t('files.listeden_kaldir')} size="sm" onClick={() => store.dismiss(job.id)}><X /></IconButton>}
       </div>
       {!done && job.state !== 'waiting' && <Bar value={progress} tone={tone} />}
       {job.state === 'waiting' && <ConflictPanel job={job} />}
@@ -79,7 +80,7 @@ function JobCard({ job }) {
       {done && job.errors.length > 0 && (
         <div>
           <button type="button" onClick={() => setShowErrors((v) => !v)} aria-expanded={showErrors} className="flex items-center gap-1 text-[11px] font-medium text-destructive hover:underline cursor-pointer">
-            <AlertTriangle className="size-3" aria-hidden="true" /> {job.errors.length} hata
+            <AlertTriangle className="size-3" aria-hidden="true" /> {' '}{t('files.count_hata', { count: job.errors.length })}
             <ChevronDown className={cn('size-3 transition-transform', showErrors && 'rotate-180')} aria-hidden="true" />
           </button>
           {showErrors && (
@@ -106,7 +107,7 @@ export default function TransferTray({ compact = false }) {
         <motion.section
           key="tray"
           role="region"
-          aria-label="Aktarımlar"
+          aria-label={t('files.aktarimlar')}
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 8 }}
@@ -114,12 +115,12 @@ export default function TransferTray({ compact = false }) {
           className={cn('absolute z-30 flex max-h-[65%] flex-col rounded-xl border border-border/80 bg-popover/95 text-popover-foreground shadow-window backdrop-blur-2xl', compact ? 'inset-x-2 bottom-[4.75rem]' : 'bottom-9 right-3 w-[22rem] max-w-[calc(100%-1.5rem)]')}
         >
           <header className="flex items-center gap-1 border-b border-border/70 px-3 py-2">
-            <h2 className="flex-1 text-xs font-semibold">Aktarımlar</h2>
-            {finished > 0 && <button type="button" onClick={() => useTransferStore.getState().clearFinished()} className="rounded-sm px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-accent-foreground cursor-pointer">Bitenleri temizle</button>}
-            <IconButton label="Tepsiyi kapat" size="sm" onClick={() => useTransferStore.getState().setTrayOpen(false)}><X /></IconButton>
+            <h2 className="flex-1 text-xs font-semibold">{t('files.aktarimlar')}</h2>
+            {finished > 0 && <button type="button" onClick={() => useTransferStore.getState().clearFinished()} className="rounded-sm px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-accent-foreground cursor-pointer">{t('files.bitenleri_temizle')}</button>}
+            <IconButton label={t('files.tepsiyi_kapat')} size="sm" onClick={() => useTransferStore.getState().setTrayOpen(false)}><X /></IconButton>
           </header>
           {list.length === 0 ? (
-            <p className="px-4 py-6 text-center text-[11px] text-muted-foreground">Henüz aktarım yok. Dosyaları sürükleyip bırakın ya da kopyalayıp yapıştırın.</p>
+            <p className="px-4 py-6 text-center text-[11px] text-muted-foreground">{t('files.henuz_aktarim_yok_dosyalari')}</p>
           ) : (
             <ul className="dex-scroll flex flex-col gap-2 overflow-y-auto overflow-x-hidden p-2">{[...list].reverse().map((job) => <JobCard key={job.id} job={job} />)}</ul>
           )}

@@ -3,6 +3,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { cn } from '../lib/utils.js';
 import { renameSelection } from './fileNames.js';
+import { t } from '../i18n/index.js';
 
 export default function InlineRename({ entry, onCommit, onCancel, centered = false }) {
   const ref = useRef(null);
@@ -25,7 +26,7 @@ export default function InlineRename({ entry, onCommit, onCancel, centered = fal
     try {
       await onCommit(value);
     } catch (err) {
-      setError(err.message || 'Yeniden adlandırılamadı.');
+      setError(err.message || t('files.yeniden_adlandirilamadi'));
       busy.current = false;
       ref.current?.focus();
     }
@@ -38,7 +39,7 @@ export default function InlineRename({ entry, onCommit, onCancel, centered = fal
       <input
         ref={ref}
         value={value}
-        aria-label="Yeni ad"
+        aria-label={t('files.yeni_ad')}
         aria-invalid={Boolean(error)}
         spellCheck={false}
         autoComplete="off"

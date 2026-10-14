@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.js';
 // İstemci tarafı ad kuralları — backend/app/fs/names.py'nin AYNASI. Backend her zaman son sözü söyler; bu dosya yalnızca
 // "yanlış adı yazarken anında uyar, sunucuya gitme" içindir ve aynı test tablosuyla (tests/files/fileNames.test.js)
 // doğrulanır.
@@ -10,17 +11,17 @@ const utf8Length = (s) => new TextEncoder().encode(s).length;
 
 /** Geçerliyse null, değilse kullanıcıya gösterilecek Türkçe neden. */
 export function validateName(name, { windows }) {
-  if (typeof name !== 'string' || name === '' || name === '.' || name === '..') return 'Ad boş olamaz.';
-  if (name.includes('\u0000') || name.includes('/')) return "Ad '/' ya da boş karakter içeremez.";
-  if (BIDI.test(name)) return 'Ad görünmez yön denetim karakterleri içeremez.';
+  if (typeof name !== 'string' || name === '' || name === '.' || name === '..') return t('files.ad_bos_olamaz');
+  if (name.includes('\u0000') || name.includes('/')) return t('files.ad_ya_da_bos_karakter_iceremez');
+  if (BIDI.test(name)) return t('files.ad_gorunmez_yon_denetim_karakterleri');
   if (windows) {
     const bad = [...new Set([...name].filter((c) => WINDOWS_INVALID.test(c)))];
-    if (bad.length) return `Ad şu karakterleri içeremez: ${bad.map((c) => (c.charCodeAt(0) < 32 ? '↯' : c)).join(' ')}`;
-    if (/[ .]$/.test(name)) return 'Ad nokta ya da boşlukla bitemez.';
-    if (WINDOWS_RESERVED.has(name.split('.')[0].replace(/ +$/, '').toUpperCase())) return "Bu ad Windows'ta ayrılmış bir aygıt adıdır.";
-    if (name.length > 255) return 'Ad çok uzun (en fazla 255 karakter).';
+    if (bad.length) return t('files.ad_su_karakterleri_iceremez_value', { value: bad.map((c) => (c.charCodeAt(0) < 32 ? '↯' : c)).join(' ') });
+    if (/[ .]$/.test(name)) return t('files.ad_nokta_ya_da_boslukla_bitemez');
+    if (WINDOWS_RESERVED.has(name.split('.')[0].replace(/ +$/, '').toUpperCase())) return t('files.bu_ad_windows_ta_ayrilmis_bir_aygit');
+    if (name.length > 255) return t('files.ad_cok_uzun_en_fazla_255_karakter');
   } else if (utf8Length(name) > 255) {
-    return 'Ad çok uzun (en fazla 255 bayt).';
+    return t('files.ad_cok_uzun_en_fazla_255_bayt');
   }
   return null;
 }

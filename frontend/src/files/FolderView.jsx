@@ -32,6 +32,7 @@ import { typeAheadIndex } from './sortEntries.js';
 import {
   contentHeight, gridGeometry, indexAtPoint, keyboardTarget, listGeometry, rectOf, scrollTopToReveal, visibleRange,
 } from './virtual.js';
+import { t as tt } from '../i18n/index.js';
 
 const OVERSCAN = 4;
 const TYPE_AHEAD_MS = 900;
@@ -143,7 +144,7 @@ export default function FolderView({ winId, pi, layoutMode, active, dual = false
   // ── Seçim özeti (ekran okuyucu) ────────────────────────────────────────────────────────────────────────
   const selectedCount = pane.selection.ids.size;
   useEffect(() => {
-    const t = setTimeout(() => setAnnounce(selectedCount ? `${countLabel(selectedCount)} seçili` : ''), 300);
+    const t = setTimeout(() => setAnnounce(selectedCount ? tt('files.countlabel_secili', { countLabel: countLabel(selectedCount) }) : ''), 300);
     return () => clearTimeout(t);
   }, [selectedCount]);
 
@@ -180,7 +181,7 @@ export default function FolderView({ winId, pi, layoutMode, active, dual = false
     });
     const offPane = registerDropTarget(`pane:${paneKey}`, {
       get loc() { return paneFolder(cur()); },
-      get name() { return baseName(paneFolder(cur()) || {}) || 'Klasör'; },
+      get name() { return baseName(paneFolder(cur()) || {}) || tt('common.klasor'); },
       accepts: (sources, mods) => acceptsDrop(sources, mods, paneFolder(cur())),
       onDrop: (sources, mods) => dropOnFolder({ sources, dest: paneFolder(cur()), ...mods }),
     });
@@ -442,7 +443,7 @@ export default function FolderView({ winId, pi, layoutMode, active, dual = false
   return (
     <section
       ref={sectionRef}
-      aria-label={folder ? baseName(folder) || 'Klasör' : 'Klasör'}
+      aria-label={folder ? baseName(folder) || tt('common.klasor') : tt('common.klasor')}
       data-pane={paneKey}
       className={cn('relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden', dual && (active ? 'ring-1 ring-inset ring-ring/60' : 'opacity-[0.97]'))}
     >
@@ -452,7 +453,7 @@ export default function FolderView({ winId, pi, layoutMode, active, dual = false
         data-files-scroll
         data-drop-id={`pane:${paneKey}`}
         role={grid ? 'listbox' : 'grid'}
-        aria-label="Dosyalar"
+        aria-label={tt('files.dosyalar')}
         aria-multiselectable="true"
         aria-rowcount={grid ? undefined : count + 1}
         aria-busy={pane.status === 'loading'}

@@ -2,6 +2,7 @@
 // Klasör boyutu listeden bilinmez (hesaplamak ağır): seçimde klasör varsa "+ klasörler" notu düşülür.
 import { countLabel, formatSize } from './formatters.js';
 import { keyOf } from './filesStore.js';
+import { t } from '../i18n/index.js';
 
 export function summarize(pane) {
   if (!pane) return { total: 0, hidden: 0, selected: 0, bytes: 0, folders: 0, files: 0 };
@@ -29,13 +30,13 @@ export function statusText(pane) {
   const s = summarize(pane);
   if (pane?.search) {
     const more = pane.search.truncated ? '+' : '';
-    return pane.search.status === 'loading' ? 'Aranıyor…' : `${countLabel(s.total)}${more} bulundu`;
+    return pane.search.status === 'loading' ? t('files.araniyor') : `${countLabel(s.total)}${more} bulundu`;
   }
-  if (pane?.status === 'loading' && s.total === 0) return 'Yükleniyor…';
-  if (pane?.query && s.selected === 0) return countLabel(s.total, 'eşleşme');
+  if (pane?.status === 'loading' && s.total === 0) return t('common.yukleniyor_2');
+  if (pane?.query && s.selected === 0) return countLabel(s.total, t('files.eslesme'));
   if (s.selected > 0) {
-    const size = s.files > 0 ? ` · ${formatSize(s.bytes)}${s.folders ? ' (+ klasörler)' : ''}` : '';
-    return `${countLabel(s.selected)} seçili${size}`;
+    const size = s.files > 0 ? ` · ${formatSize(s.bytes)}${s.folders ? t('files.klasorler') : ''}` : '';
+    return t('files.countlabel_secilisize', { countLabel: countLabel(s.selected), size });
   }
   return `${countLabel(s.total)}${s.hidden > 0 ? ` · ${s.hidden} gizli` : ''}`;
 }

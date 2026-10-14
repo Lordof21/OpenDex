@@ -8,6 +8,7 @@ import { useFilesStore } from './filesStore.js';
 import { isInside } from './paths.js';
 import { statusText } from './statusModel.js';
 import { TERMINAL, overallProgress, useTransferStore } from './transferStore.js';
+import { t } from '../i18n/index.js';
 
 export default function StatusBar({ winId, layoutMode }) {
   const pi = useFilesStore((s) => s.wins[winId]?.activePane ?? 0);
@@ -29,11 +30,11 @@ export default function StatusBar({ winId, layoutMode }) {
   const compact = layoutMode === 'compact';
 
   return (
-    <footer className="flex h-7 shrink-0 items-center gap-3 border-t border-border/70 px-3 text-[11px] text-muted-foreground" aria-label="Durum çubuğu">
+    <footer className="flex h-7 shrink-0 items-center gap-3 border-t border-border/70 px-3 text-[11px] text-muted-foreground" aria-label={t('files.durum_cubugu')}>
       <span className="min-w-0 flex-1 truncate" aria-live="off">{pane ? statusText(pane) : ''}</span>
       {!compact && free && (
-        <span className={cn('shrink-0 tabular-nums', free.low && 'text-destructive')} title={`${formatSize(free.total)} toplam`}>
-          {formatSize(free.free)} boş
+        <span className={cn('shrink-0 tabular-nums', free.low && 'text-destructive')} title={t('files.formatsize_toplam', { formatSize: formatSize(free.total) })}>
+          {t('files.formatsize_bos', { formatSize: formatSize(free.free) })}
         </span>
       )}
       {list.length > 0 && (
@@ -41,7 +42,7 @@ export default function StatusBar({ winId, layoutMode }) {
           type="button"
           onClick={() => useTransferStore.getState().setTrayOpen(!trayOpen)}
           aria-expanded={trayOpen}
-          aria-label={active.length ? `${active.length} aktarım sürüyor` : 'Aktarım geçmişi'}
+          aria-label={active.length ? t('files.count_aktarim_suruyor', { count: active.length }) : t('files.aktarim_gecmisi')}
           className={cn(
             'flex shrink-0 items-center gap-1.5 rounded-sm px-1.5 py-0.5 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer',
             active.length > 0 && 'text-foreground',
@@ -50,10 +51,10 @@ export default function StatusBar({ winId, layoutMode }) {
           {active.length > 0 ? <LoaderCircle className="size-3 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <ArrowRightLeft className="size-3" aria-hidden="true" />}
           {active.length > 0 ? (
             <span className="tabular-nums">
-              {active.length} aktarım{progress.pct != null ? ` · %${Math.round(progress.pct)}` : ''}{progress.speed > 0 && !compact ? ` · ${formatSpeed(progress.speed)}` : ''}
+              {t('files.count_aktarimvaluevalue2', { count: active.length, value: progress.pct != null ? ` · %${Math.round(progress.pct)}` : '', value2: progress.speed > 0 && !compact ? ` · ${formatSpeed(progress.speed)}` : '' })}
             </span>
           ) : (
-            <span>Aktarımlar</span>
+            <span>{t('files.aktarimlar')}</span>
           )}
         </button>
       )}

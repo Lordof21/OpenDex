@@ -4,6 +4,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { MenuItem, MenuSeparator, MenuSurface } from '../ui/Menu.jsx';
 import { pushEscapeHandler } from '../lib/escapeStack.js';
+import { t } from '../i18n/index.js';
 
 const WIDTH = 224;
 const ITEM_H = 28;
@@ -49,7 +50,7 @@ export default function FileContextMenu({ menu, x, y, bounds, onPick, onClose })
       <MenuSurface
         key="files-menu"
         ref={ref}
-        aria-label="Dosya menüsü"
+        aria-label={t('files.dosya_menusu')}
         onKeyDown={onKeyDown}
         onContextMenu={(e) => e.preventDefault()}
         className="absolute z-modal"

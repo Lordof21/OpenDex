@@ -4,12 +4,13 @@ import { Dialog } from '../ui/Dialog.jsx';
 import { Button } from '../ui/Button.jsx';
 import { useFilesStore } from './filesStore.js';
 import { SHORTCUTS } from './keymap.js';
+import { t } from '../i18n/index.js';
 
 export default function ShortcutsDialog({ winId }) {
   const close = () => useFilesStore.getState().closeDialog(winId);
   return (
-    <Dialog open onClose={close} label="Klavye kısayolları" position="absolute" className="dex-scroll max-h-[85%] max-w-md overflow-y-auto overflow-x-hidden p-5">
-      <h2 className="mb-2 text-sm font-semibold">Klavye kısayolları</h2>
+    <Dialog open onClose={close} label={t('files.klavye_kisayollari')} position="absolute" className="dex-scroll max-h-[85%] max-w-md overflow-y-auto overflow-x-hidden p-5">
+      <h2 className="mb-2 text-sm font-semibold">{t('files.klavye_kisayollari')}</h2>
       <dl className="divide-y divide-border/50">
         {SHORTCUTS.map(([keys, label]) => (
           <div key={keys} className="flex items-center justify-between gap-3 py-1.5 text-xs">
@@ -18,7 +19,7 @@ export default function ShortcutsDialog({ winId }) {
           </div>
         ))}
       </dl>
-      <div className="mt-3 flex justify-end"><Button size="sm" variant="outline" onClick={close} autoFocus>Kapat</Button></div>
+      <div className="mt-3 flex justify-end"><Button size="sm" variant="outline" onClick={close} autoFocus>{t('common.kapat')}</Button></div>
     </Dialog>
   );
 }

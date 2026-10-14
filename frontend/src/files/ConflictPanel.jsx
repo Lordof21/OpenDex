@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { Button } from '../ui/Button.jsx';
 import { formatDate, formatSize } from './formatters.js';
 import { useTransferStore } from './transferStore.js';
+import { t } from '../i18n/index.js';
 
 function Side({ title, size, mtime, hint }) {
   return (
@@ -22,8 +23,8 @@ export function compareHints(incoming, existing) {
   const same = incoming.size === existing.size && incoming.mtime === existing.mtime;
   return {
     same,
-    incoming: same ? 'Aynı dosya gibi görünüyor' : newer === 'in' ? 'Daha yeni' : newer === 'ex' ? 'Daha eski' : null,
-    existing: same ? null : newer === 'ex' ? 'Daha yeni' : newer === 'in' ? 'Daha eski' : null,
+    incoming: same ? t('files.ayni_dosya_gibi_gorunuyor') : newer === 'in' ? t('files.daha_yeni') : newer === 'ex' ? t('files.daha_eski') : null,
+    existing: same ? null : newer === 'ex' ? t('files.daha_yeni') : newer === 'in' ? t('files.daha_eski') : null,
   };
 }
 
@@ -45,24 +46,24 @@ export default function ConflictPanel({ job, autoFocus = false }) {
   };
 
   return (
-    <div role="group" aria-label="Çakışma" className="flex flex-col gap-3">
+    <div role="group" aria-label={t('files.cakisma')} className="flex flex-col gap-3">
       <div>
-        <p className="text-sm font-semibold">Bu klasörde aynı ada sahip bir {c.existing.kind === 'dir' ? 'klasör' : 'dosya'} var</p>
+        <p className="text-sm font-semibold">{t('files.bu_klasorde_ayni_ada_sahip_bir_value', { value: c.existing.kind === 'dir' ? t('files.klasor') : 'dosya' })}</p>
         <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground" title={c.name}>{c.name}</p>
       </div>
       <div className="flex gap-2">
-        <Side title="Gelen" size={c.incoming.size} mtime={c.incoming.mtime} hint={hints.incoming} />
-        <Side title="Mevcut" size={c.existing.size} mtime={c.existing.mtime} hint={hints.existing} />
+        <Side title={t('files.gelen')} size={c.incoming.size} mtime={c.incoming.mtime} hint={hints.incoming} />
+        <Side title={t('files.mevcut')} size={c.existing.size} mtime={c.existing.mtime} hint={hints.existing} />
       </div>
       <label className="flex cursor-pointer items-center gap-2 text-[11px] text-muted-foreground">
         <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} className="size-3.5 accent-primary" />
-        Sonraki çakışmalar için de aynısını uygula
+        {t('files.sonraki_cakismalar_icin_de_aynisini')}
       </label>
       <div className="flex flex-wrap justify-end gap-1.5">
-        <Button size="sm" variant="ghost" disabled={busy} onClick={() => useTransferStore.getState().cancel(job.id)}>İptal</Button>
-        <Button size="sm" variant="outline" disabled={busy} onClick={() => answer('skip')}>Atla</Button>
-        <Button size="sm" variant="outline" disabled={busy} onClick={() => answer('keep_both')} autoFocus={autoFocus}>İkisini de tut</Button>
-        <Button size="sm" variant="destructive" disabled={busy} onClick={() => answer('replace')}>Değiştir</Button>
+        <Button size="sm" variant="ghost" disabled={busy} onClick={() => useTransferStore.getState().cancel(job.id)}>{t('common.iptal')}</Button>
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => answer('skip')}>{t('files.atla')}</Button>
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => answer('keep_both')} autoFocus={autoFocus}>{t('files.ikisini_de_tut')}</Button>
+        <Button size="sm" variant="destructive" disabled={busy} onClick={() => answer('replace')}>{t('files.degistir')}</Button>
       </div>
     </div>
   );

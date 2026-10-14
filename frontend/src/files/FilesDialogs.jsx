@@ -9,6 +9,7 @@ import ShortcutsDialog from './ShortcutsDialog.jsx';
 import TrashDialog from './TrashDialog.jsx';
 import { useFilesStore } from './filesStore.js';
 import { selectConflictJob, useTransferStore } from './transferStore.js';
+import { t } from '../i18n/index.js';
 
 export default function FilesDialogs({ winId, focused }) {
   const dialog = useFilesStore((s) => s.wins[winId]?.dialog);
@@ -20,7 +21,7 @@ export default function FilesDialogs({ winId, focused }) {
       {dialog?.type === 'trash' && <TrashDialog winId={winId} />}
       {dialog?.type === 'shortcuts' && <ShortcutsDialog winId={winId} />}
       {focused && conflictJob && (
-        <Dialog open label="Aynı adlı öğe var" position="absolute" closeOnBackdrop={false} closeOnEscape={false} className="max-w-md p-5">
+        <Dialog open label={t('files.ayni_adli_oge_var')} position="absolute" closeOnBackdrop={false} closeOnEscape={false} className="max-w-md p-5">
           <ConflictPanel job={conflictJob} autoFocus />
         </Dialog>
       )}

@@ -17,6 +17,7 @@ import {
   EMPTY_SELECTION, clearSelection, clickSelect, invertSelection, marqueeSelect, moveFocus, reconcile, selectAll, toggleFocused,
 } from './selection.js';
 import { filterEntries, makeComparator, mergeSorted, prepareAll, sortEntries } from './sortEntries.js';
+import { t } from '../i18n/index.js';
 
 export const FLUSH_MS = 70;
 const PREFS_KEY = 'opendex.files.prefs.v1';
@@ -266,7 +267,7 @@ export const useFilesStore = create((set, get) => {
       } catch (err) {
         clearTimeout(timer);
         if (err?.name === 'AbortError' || !current()) return;
-        patchPane(winId, pi, { status: 'error', error: { code: err?.code || null, message: err?.message || 'Klasör okunamadı.' } });
+        patchPane(winId, pi, { status: 'error', error: { code: err?.code || null, message: err?.message || t('files.klasor_okunamadi_2') } });
       }
     },
 
@@ -380,7 +381,7 @@ export const useFilesStore = create((set, get) => {
         });
       } catch (err) {
         if (pane(winId, pi)?.gen !== gen) return;
-        patchPane(winId, pi, { status: 'error', error: { code: err?.code || null, message: err?.message || 'Arama başarısız.' }, search: null });
+        patchPane(winId, pi, { status: 'error', error: { code: err?.code || null, message: err?.message || t('files.arama_basarisiz') }, search: null });
       }
     },
 

@@ -13,6 +13,7 @@ import { useFilesStore } from './filesStore.js';
 import { formatSize } from './formatters.js';
 import { isInside } from './paths.js';
 import { activePlaceId, capacityOf, placeIcon } from './placeIcons.js';
+import { t } from '../i18n/index.js';
 
 const locOf = (p) => ({ provider: p.provider, path: p.path, ...(p.device ? { device: p.device } : {}) });
 
@@ -24,7 +25,7 @@ function Capacity({ place }) {
       <span className="block h-1 overflow-hidden rounded-full bg-border" aria-hidden="true">
         <span className={cn('block h-full rounded-full', cap.low ? 'bg-destructive' : 'bg-primary/80')} style={{ width: `${cap.used}%` }} />
       </span>
-      <span className="mt-0.5 block text-[10px] text-muted-foreground tabular-nums">{formatSize(cap.free)} boş / {formatSize(cap.total)}</span>
+      <span className="mt-0.5 block text-[10px] text-muted-foreground tabular-nums">{t('files.formatsize_bos_formatsize2', { formatSize: formatSize(cap.free), formatSize2: formatSize(cap.total) })}</span>
     </span>
   );
 }
@@ -54,7 +55,7 @@ function PlaceButton({ place, active, dropId, touch, onGo, onRemove }) {
       {onRemove && (
         <button
           type="button"
-          aria-label={`${place.name} favorilerden çıkar`}
+          aria-label={t('files.name_favorilerden_cikar', { name: place.name })}
           onClick={() => onRemove(place)}
           className="absolute right-1.5 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-sm text-muted-foreground opacity-0 transition-opacity hover:bg-background hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 cursor-pointer"
         >
@@ -94,37 +95,37 @@ export default function FilesSidebar({ winId, variant = 'rail', onNavigated }) {
   };
 
   return (
-    <nav aria-label="Yerler" className={cn('dex-scroll flex min-h-0 flex-col gap-3 overflow-y-auto overflow-x-hidden p-2', variant === 'rail' ? 'w-56 shrink-0 border-r border-border/70' : 'w-full')}>
-      <section aria-label="Telefon">
-        <MenuLabel>Telefon</MenuLabel>
+    <nav aria-label={t('files.yerler')} className={cn('dex-scroll flex min-h-0 flex-col gap-3 overflow-y-auto overflow-x-hidden p-2', variant === 'rail' ? 'w-56 shrink-0 border-r border-border/70' : 'w-full')}>
+      <section aria-label={t('common.telefon')}>
+        <MenuLabel>{t('common.telefon')}</MenuLabel>
         {places.phone.length === 0 ? (
           <p className="flex items-center gap-2 px-2.5 py-2 text-[11px] text-muted-foreground">
             {status === 'loading' ? <Smartphone className="size-4" aria-hidden="true" /> : <Unplug className="size-4" aria-hidden="true" />}
-            {status === 'loading' ? 'Telefon aranıyor…' : 'Telefon bağlı değil'}
+            {status === 'loading' ? t('common.telefon_araniyor') : t('common.telefon_bagli_degil')}
           </p>
         ) : (
           places.phone.map((p) => <PlaceButton key={p.id} place={p} active={activeId === p.id} dropId={dropId} touch={touch} onGo={go} />)
         )}
       </section>
-      <section aria-label="Bilgisayar">
-        <MenuLabel>Bilgisayar</MenuLabel>
+      <section aria-label={t('common.bilgisayar')}>
+        <MenuLabel>{t('common.bilgisayar')}</MenuLabel>
         {places.pc.map((p) => <PlaceButton key={p.id} place={p} active={activeId === p.id} dropId={dropId} touch={touch} onGo={go} />)}
       </section>
       {favorites.length > 0 && (
-        <section aria-label="Favoriler">
-          <MenuLabel>Favoriler</MenuLabel>
+        <section aria-label={t('files.favoriler')}>
+          <MenuLabel>{t('files.favoriler')}</MenuLabel>
           {favorites.map((p) => <PlaceButton key={p.id} place={p} active={false} dropId={dropId} touch={touch} onGo={go} onRemove={() => removeFavorite(p.rawId)} />)}
         </section>
       )}
       <div className="mt-auto flex flex-col gap-0.5 border-t border-border/70 pt-2">
         <button type="button" onClick={() => addPcFolder()} className="flex items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground cursor-pointer">
-          <FolderPlus className="size-4" aria-hidden="true" /> Klasör ekle…
+          <FolderPlus className="size-4" aria-hidden="true" /> {' '}{t('files.klasor_ekle')}
         </button>
         <button type="button" onClick={() => uploadFromPc(winId, pi)} className="flex items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground cursor-pointer">
-          <Upload className="size-4" aria-hidden="true" /> Dosya yükle…
+          <Upload className="size-4" aria-hidden="true" /> {' '}{t('files.dosya_yukle')}
         </button>
         <button type="button" onClick={() => { store.getState().openDialog(winId, { type: 'trash' }); onNavigated?.(); }} className="flex items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground cursor-pointer">
-          <Trash2 className="size-4" aria-hidden="true" /> Geri dönüşüm kutusu
+          <Trash2 className="size-4" aria-hidden="true" /> {' '}{t('files.geri_donusum_kutusu')}
         </button>
       </div>
     </nav>

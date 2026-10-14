@@ -7,6 +7,7 @@ import { paneFolder, startExternalTransfer } from './filesCommands.js';
 import { useFilesStore } from './filesStore.js';
 import { grantPaths, listenExternalDrops } from './tauriBridge.js';
 import { useSystemStore } from '../state/systemStore.js';
+import { t } from '../i18n/index.js';
 
 /** Nokta bu pencerenin kökünün (data-files-root) üstünde mi? */
 export function ownsPoint(rootEl, x, y) {
@@ -48,7 +49,7 @@ export function useExternalDrop(winId, rootRef, { onHover } = {}) {
       try {
         await startExternalTransfer(await grantPaths(paths), dest.loc);
       } catch (err) {
-        useSystemStore.getState().pushToast?.(err.message || 'Dosyalar eklenemedi.', { tone: 'error' });
+        useSystemStore.getState().pushToast?.(err.message || t('files.dosyalar_eklenemedi'), { tone: 'error' });
       }
     }).then((unlisten) => {
       if (alive) off = unlisten;

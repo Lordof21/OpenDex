@@ -9,6 +9,7 @@ import { countLabel } from './formatters.js';
 import { baseName, deviceKey, isPhone, joinPath, parentOf, sameLoc, sepOf } from './paths.js';
 import { addFolderViaShell, grantPaths, inTauri, pickFiles, pickFolder } from './tauriBridge.js';
 import { useTransferStore } from './transferStore.js';
+import { t } from '../i18n/index.js';
 
 const toast = (message, options) => useSystemStore.getState().pushToast?.(message, options);
 const store = () => useFilesStore.getState();
@@ -49,9 +50,9 @@ export async function openEntry(winId, pi, entry) {
 export async function openOnPc(loc) {
   try {
     await fsApi.open(loc);
-    if (isPhone(loc)) toast('Dosya bilgisayara indirilip açılıyor…', { tone: 'info' });
+    if (isPhone(loc)) toast(t('files.dosya_bilgisayara_indirilip_aciliyor'), { tone: 'info' });
   } catch (err) {
-    toast(err.code === 'permission' ? 'Bu dosya türü güvenlik nedeniyle doğrudan açılmaz; klasörde gösterin.' : err.message || 'Dosya açılamadı.', { tone: 'error' });
+    toast(err.code === 'permission' ? t('files.bu_dosya_turu_guvenlik_nedeniyle') : err.message || t('files.dosya_acilamadi'), { tone: 'error' });
   }
 }
 
@@ -59,7 +60,7 @@ export async function revealOnPc(loc) {
   try {
     await fsApi.reveal(loc);
   } catch (err) {
-    toast(err.message || 'Klasörde gösterilemedi.', { tone: 'error' });
+    toast(err.message || t('files.klasorde_gosterilemedi'), { tone: 'error' });
   }
 }
 
@@ -70,12 +71,12 @@ export async function createFolder(winId, pi) {
   const folder = paneFolder(pane);
   if (!folder) return;
   const taken = new Set(pane.entries.map((e) => e.name.normalize('NFC').toLowerCase()));
-  const name = uniqueName('Yeni klasör', taken);
+  const name = uniqueName(t('files.yeni_klasor'), taken);
   try {
     await fsApi.mkdir(folder, name);
     await store().navigate(winId, pi, pane.loc, { push: false, select: name, rename: true });
   } catch (err) {
-    toast(err.message || 'Klasör oluşturulamadı.', { tone: 'error' });
+    toast(err.message || t('files.klasor_olusturulamadi'), { tone: 'error' });
   }
 }
 
@@ -123,12 +124,12 @@ export async function performDelete(winId, pi, items, permanent) {
     }
     const other = failed.filter((r) => r.error?.code !== 'trash_unavailable');
     if (ok) {
-      const where = permanent ? 'silindi' : isPhone(items[0].loc) ? 'telefonun geri dönüşüm kutusuna taşındı' : 'geri dönüşüm kutusuna taşındı';
+      const where = permanent ? 'silindi' : isPhone(items[0].loc) ? t('files.telefonun_geri_donusum_kutusuna') : t('files.geri_donusum_kutusuna_tasindi');
       toast(`${countLabel(ok)} ${where}.`, { tone: 'success' });
     }
     if (other.length) toast(`${countLabel(other.length)} silinemedi: ${other[0].error?.message || 'bilinmeyen hata'}`, { tone: 'error' });
   } catch (err) {
-    toast(err.message || 'Silinemedi.', { tone: 'error' });
+    toast(err.message || t('files.silinemedi'), { tone: 'error' });
   } finally {
     await store().reload(winId, pi);
   }
@@ -139,7 +140,7 @@ export function copySelection(winId, pi, op = 'copy') {
   const { pane, entries } = selected(winId, pi);
   if (!pane || entries.length === 0) return;
   store().setClipboard({ op, items: entries.map((e) => ({ loc: entryLoc(pane, e), name: e.name, kind: e.kind })) });
-  toast(`${countLabel(entries.length)} ${op === 'cut' ? 'kesildi' : 'kopyalandı'}.`, { tone: 'info', durationMs: 1800 });
+  toast(`${countLabel(entries.length)} ${op === 'cut' ? 'kesildi' : t('files.kopyalandi')}.`, { tone: 'info', durationMs: 1800 });
 }
 
 export const cutSelection = (winId, pi) => copySelection(winId, pi, 'cut');
@@ -158,7 +159,7 @@ export async function startTransfer(spec) {
   try {
     return await useTransferStore.getState().start(spec);
   } catch (err) {
-    toast(err.message || 'Aktarım başlatılamadı.', { tone: 'error' });
+    toast(err.message || t('files.aktarim_baslatilamadi'), { tone: 'error' });
     return null;
   }
 }
@@ -188,7 +189,7 @@ export async function sendSelection(winId, pi, target) {
   const { pane, entries } = selected(winId, pi);
   const dest = defaultDestination(store().places, target);
   if (!pane || !dest || entries.length === 0) {
-    if (!dest) toast(target === 'phone' ? 'Telefon bağlı değil.' : 'Hedef klasör bulunamadı.', { tone: 'warning' });
+    if (!dest) toast(target === 'phone' ? t('files.telefon_bagli_degil') : t('files.hedef_klasor_bulunamadi'), { tone: 'warning' });
     return;
   }
   await startTransfer({ op: 'copy', sources: entries.map((e) => entryLoc(pane, e)), dest });
@@ -222,7 +223,7 @@ export async function addFavorite(loc, name) {
     await fsApi.addFavorite(loc, name || baseName(loc));
     await store().loadPlaces(store().places.device);
   } catch (err) {
-    toast(err.message || 'Favorilere eklenemedi.', { tone: 'error' });
+    toast(err.message || t('files.favorilere_eklenemedi'), { tone: 'error' });
   }
 }
 
@@ -235,7 +236,7 @@ export async function removeFavorite(id) {
 export async function addPcFolder() {
   try {
     if (!inTauri()) {
-      toast('Klasör eklemek yalnız masaüstü uygulamasında yapılabilir.', { tone: 'warning' });
+      toast(t('files.klasor_eklemek_yalniz_masaustu'), { tone: 'warning' });
       return;
     }
     const path = await pickFolder();
@@ -243,7 +244,7 @@ export async function addPcFolder() {
     await addFolderViaShell(path);
     await store().loadPlaces(store().places.device);
   } catch (err) {
-    toast(err.code === 'outside_roots' ? 'Bu klasör güvenlik nedeniyle eklenemez.' : err.message || 'Klasör eklenemedi.', { tone: 'error' });
+    toast(err.code === 'outside_roots' ? t('files.bu_klasor_guvenlik_nedeniyle_eklenemez') : err.message || t('files.klasor_eklenemedi'), { tone: 'error' });
   }
 }
 
@@ -253,14 +254,14 @@ export async function uploadFromPc(winId, pi) {
   if (!dest) return;
   try {
     if (!inTauri()) {
-      toast('Dosya seçmek yalnız masaüstü uygulamasında yapılabilir.', { tone: 'warning' });
+      toast(t('files.dosya_secmek_yalniz_masaustu'), { tone: 'warning' });
       return;
     }
     const paths = await pickFiles();
     if (!paths.length) return;
     await startExternalTransfer(await grantPaths(paths), dest);
   } catch (err) {
-    toast(err.message || 'Dosyalar eklenemedi.', { tone: 'error' });
+    toast(err.message || t('files.dosyalar_eklenemedi'), { tone: 'error' });
   }
 }
 

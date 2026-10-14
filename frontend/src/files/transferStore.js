@@ -4,24 +4,25 @@ import { create } from 'zustand';
 import { useSystemStore } from '../state/systemStore.js';
 import { fsApi } from './fsApi.js';
 import { countLabel, percent } from './formatters.js';
+import { t } from '../i18n/index.js';
 
 export const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
 
 const WHERE = { phone: 'telefona', pc: 'bilgisayara' };
-const FROM = { phone: 'Telefon', pc: 'Bilgisayar' };
+const FROM = { phone: t('common.telefon_2'), pc: t('files.bilgisayar') };
 
 /** Tamamlanan işin kullanıcıya gösterilecek özeti: { message, tone }. Saf (testli). */
 export function summarizeJob(job) {
   const dest = job.dest?.provider;
-  const verb = job.op === 'move' ? 'taşındı' : 'kopyalandı';
-  if (job.state === 'cancelled') return { message: `İşlem iptal edildi (${countLabel(job.done_files, 'dosya')} ${verb}).`, tone: 'info' };
-  if (job.state === 'failed') return { message: job.error?.message || 'Aktarım başarısız oldu.', tone: 'error' };
+  const verb = job.op === 'move' ? t('files.tasindi') : t('files.kopyalandi');
+  if (job.state === 'cancelled') return { message: t('files.islem_iptal_edildi_countlabel_verb', { countLabel: countLabel(job.done_files, 'dosya'), verb }), tone: 'info' };
+  if (job.state === 'failed') return { message: job.error?.message || t('files.aktarim_basarisiz_oldu'), tone: 'error' };
   const base = `${countLabel(job.done_files, 'dosya')} ${WHERE[dest] ?? ''} ${verb}`.replace(/\s+/g, ' ');
   const notes = [];
-  if (job.skipped) notes.push(`${job.skipped} atlandı`);
+  if (job.skipped) notes.push(t('files.skipped_atlandi_2', { skipped: job.skipped }));
   if (job.failed) notes.push(`${job.failed} hata`);
   if (job.failed) return { message: `${base} — ${notes.join(', ')}.`, tone: 'warning' };
-  const gallery = dest === 'phone' && job.done_files > 0 ? ' Galeri ve müzik uygulamaları yeni dosyaları görecek.' : '';
+  const gallery = dest === 'phone' && job.done_files > 0 ? t('files.galeri_ve_muzik_uygulamalari_yeni') : '';
   return { message: `${base}${notes.length ? ` (${notes.join(', ')})` : ''}.${gallery}`, tone: 'success' };
 }
 

@@ -3,6 +3,7 @@
 import React from 'react';
 import { CloudOff, FolderOpen, FolderX, Lock, RefreshCw, SearchX, ShieldAlert, Smartphone } from 'lucide-react';
 import Button from '../ui/Button.jsx';
+import { t } from '../i18n/index.js';
 
 export function SkeletonRows({ rowH = 36, count = 12 }) {
   return (
@@ -31,34 +32,34 @@ function Centered({ icon: Icon, title, hint, children, tone = 'text-muted-foregr
 }
 
 export function EmptyState({ filtered, query, hiddenCount, onShowHidden, onNewFolder }) {
-  if (query) return <Centered icon={SearchX} title="Eşleşen öğe yok" hint={`“${query}” için bu klasörde sonuç bulunamadı.`} />;
+  if (query) return <Centered icon={SearchX} title={t('files.eslesen_oge_yok')} hint={t('files.query_icin_bu_klasorde_sonuc', { query })} />;
   if (filtered && hiddenCount > 0) {
     return (
-      <Centered icon={FolderOpen} title="Bu klasörde yalnız gizli öğeler var" hint={`${hiddenCount} gizli öğe şu an gösterilmiyor.`}>
-        <Button size="xs" variant="outline" onClick={onShowHidden}>Gizli dosyaları göster</Button>
+      <Centered icon={FolderOpen} title={t('files.bu_klasorde_yalniz_gizli_ogeler_var')} hint={t('files.hiddencount_gizli_oge_su_an', { hiddenCount })}>
+        <Button size="xs" variant="outline" onClick={onShowHidden}>{t('files.gizli_dosyalari_goster')}</Button>
       </Centered>
     );
   }
   return (
-    <Centered icon={FolderOpen} title="Bu klasör boş" hint="Dosyaları buraya sürükleyebilir ya da yapıştırabilirsiniz.">
-      <Button size="xs" variant="outline" onClick={onNewFolder}>Yeni klasör</Button>
+    <Centered icon={FolderOpen} title={t('files.bu_klasor_bos')} hint={t('files.dosyalari_buraya_surukleyebilir_ya_da')}>
+      <Button size="xs" variant="outline" onClick={onNewFolder}>{t('files.yeni_klasor')}</Button>
     </Centered>
   );
 }
 
 const ERROR_VIEW = {
-  not_found: { icon: FolderX, title: 'Klasör bulunamadı', hint: 'Silinmiş ya da taşınmış olabilir.' },
-  outside_roots: { icon: ShieldAlert, title: 'Bu konuma erişim izni yok', hint: 'OpenDeX yalnız izin verilen klasörleri gösterir. Kenar çubuğundan “Klasör ekle” ile ekleyebilirsiniz.' },
-  permission: { icon: Lock, title: 'Erişim reddedildi', hint: 'Bu klasörü okuma yetkisi yok.' },
-  device_offline: { icon: Smartphone, title: 'Telefona ulaşılamıyor', hint: 'Kablo ya da kablosuz bağlantıyı kontrol edin. Bağlantı gelince liste kendiliğinden yenilenir.' },
-  timeout: { icon: CloudOff, title: 'Telefon yanıt vermedi', hint: 'Bağlantı yavaş olabilir; yeniden deneyin.' },
+  not_found: { icon: FolderX, title: t('files.klasor_bulunamadi'), hint: t('files.silinmis_ya_da_tasinmis_olabilir') },
+  outside_roots: { icon: ShieldAlert, title: t('files.bu_konuma_erisim_izni_yok'), hint: t('files.opendex_yalniz_izin_verilen') },
+  permission: { icon: Lock, title: t('files.erisim_reddedildi'), hint: t('files.bu_klasoru_okuma_yetkisi_yok') },
+  device_offline: { icon: Smartphone, title: t('files.telefona_ulasilamiyor'), hint: t('files.kablo_ya_da_kablosuz_baglantiyi') },
+  timeout: { icon: CloudOff, title: t('files.telefon_yanit_vermedi'), hint: t('files.baglanti_yavas_olabilir_yeniden') },
 };
 
 export function ErrorState({ error, onRetry }) {
-  const view = ERROR_VIEW[error?.code] || { icon: CloudOff, title: 'Klasör okunamadı', hint: error?.message };
+  const view = ERROR_VIEW[error?.code] || { icon: CloudOff, title: t('files.klasor_okunamadi'), hint: error?.message };
   return (
     <Centered icon={view.icon} title={view.title} hint={view.hint} tone="text-destructive">
-      <Button size="xs" variant="outline" startIcon={<RefreshCw className="size-3" />} onClick={onRetry}>Yeniden dene</Button>
+      <Button size="xs" variant="outline" startIcon={<RefreshCw className="size-3" />} onClick={onRetry}>{t('files.yeniden_dene')}</Button>
     </Centered>
   );
 }

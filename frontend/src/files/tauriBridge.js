@@ -5,6 +5,7 @@
 // Sayfa içindeki bir betik bu jetonu okuyamaz; backend /api/fs/grants ve /api/fs/folders onsuz 403 verir. Tarayıcıda
 // (npm run dev) Tauri yoktur: işlevler `null`/boş döner ve arayüz "yalnız masaüstü uygulamasında" der.
 import { fsApi } from './fsApi.js';
+import { t } from '../i18n/index.js';
 
 export const inTauri = () =>
   typeof window !== 'undefined' && Boolean(window.__TAURI__ || window.__TAURI_INTERNALS__ || window.__TAURI_IPC__);
@@ -38,7 +39,7 @@ export async function pickFiles() {
 /** Kullanıcının bıraktığı/seçtiği yollar için izin ister; backend yalnız bu yolları açar (süreli, kök genişlemez). */
 export async function grantPaths(paths) {
   const token = await shellToken();
-  if (!token) throw Object.assign(new Error('Bu işlem yalnız masaüstü uygulamasında yapılabilir.'), { code: 'permission' });
+  if (!token) throw Object.assign(new Error(t('files.bu_islem_yalniz_masaustu')), { code: 'permission' });
   const { items } = await fsApi.grant(paths, token);
   return items;
 }
@@ -46,7 +47,7 @@ export async function grantPaths(paths) {
 /** Seçilen klasörü KALICI olarak yerler listesine ekler (kabuk jetonu gerekir). */
 export async function addFolderViaShell(path) {
   const token = await shellToken();
-  if (!token) throw Object.assign(new Error('Klasör eklemek yalnız masaüstü uygulamasında yapılabilir.'), { code: 'permission' });
+  if (!token) throw Object.assign(new Error(t('files.klasor_eklemek_yalniz_masaustu')), { code: 'permission' });
   return fsApi.addFolder(path, token);
 }
 

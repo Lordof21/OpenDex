@@ -1,3 +1,4 @@
+import { t } from '../../i18n/index.js';
 // PDF → bellekte açılan, sayfa sayfa çizilen belge (pdf.js). Baytlar hiçbir yere yazılmaz; sayfalar yalnız görünür
 // olduklarında canvas'a çizilir. Eski (legacy) derleme: eski WebView'lerde de çalışır.
 //
@@ -33,8 +34,8 @@ export async function openPdf(buffer) {
   try {
     doc = await loadingTask.promise;
   } catch (err) {
-    if (err?.name === 'PasswordException') throw failure('password', 'Bu PDF parola korumalı; önizlenemiyor.');
-    throw failure('invalid', 'PDF okunamadı (bozuk ya da desteklenmeyen dosya).');
+    if (err?.name === 'PasswordException') throw failure('password', t('files.bu_pdf_parola_korumali_onizlenemiyor'));
+    throw failure('invalid', t('files.pdf_okunamadi_bozuk_ya_da'));
   }
   return {
     pageCount: doc.numPages,

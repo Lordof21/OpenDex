@@ -1,3 +1,4 @@
+import { t, activeLocale } from '../../i18n/index.js';
 // XLSX → sayfa sayfa satırlar (bellekte). Arayüz her sayfadan yalnız ilk SHEET_MAX_ROWS×SHEET_MAX_COLS hücreyi çizer:
 // tarayıcıyı dondurmadan "içine bakmaya" yeter; tamamı için dosya telefondaki/PC'deki uygulamasında açılır.
 export const SHEET_MAX_ROWS = 500;
@@ -6,8 +7,8 @@ export const SHEET_MAX_COLS = 40;
 /** Hücre değeri → gösterim metni. */
 export function formatCell(value) {
   if (value === null || value === undefined) return '';
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? '' : value.toLocaleDateString('tr-TR');
-  if (typeof value === 'boolean') return value ? 'DOĞRU' : 'YANLIŞ';
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? '' : value.toLocaleDateString(activeLocale());
+  if (typeof value === 'boolean') return value ? t('files.dogru') : t('files.yanlis');
   return String(value);
 }
 

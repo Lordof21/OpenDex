@@ -3,6 +3,7 @@
 // değil koda bakar.
 import { ApiError, api, BASE } from '../lib/api.js';
 import { authHeaders, authedUrl, ensureApiToken } from '../lib/apiToken.js';
+import { t } from '../i18n/index.js';
 
 const wire = (loc) => ({ provider: loc.provider, path: loc.path, ...(loc.device ? { device: loc.device } : {}) });
 
@@ -134,7 +135,7 @@ export async function fetchBytes(loc, limit, signal) {
   await ensureApiToken();
   const res = await fetch(`${BASE}/api/fs/content?${locQuery(loc)}`, { headers: authHeaders(), signal, cache: 'no-store' });
   if (!res.ok) throw await errorFrom(res);
-  const tooLarge = () => new ApiError(413, 'Dosya önizleme için çok büyük.', { code: 'too_large' });
+  const tooLarge = () => new ApiError(413, t('files.dosya_onizleme_icin_cok_buyuk'), { code: 'too_large' });
   if (Number(res.headers.get('content-length')) > limit) throw tooLarge();
   const buffer = await res.arrayBuffer();
   if (buffer.byteLength > limit) throw tooLarge();
