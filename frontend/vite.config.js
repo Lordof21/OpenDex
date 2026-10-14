@@ -17,6 +17,31 @@ function devApiToken() {
   }
 }
 
+// `virtual:locale-meta`: [{ code, name }] read from every src/locales/*.json at build time. The language list needs only each
+// language's own name; reading it from the (100 KB each) bundles made the first open of the picker stall while ~20 files
+// were fetched and parsed. Adding a language file still needs no code change — the list is rebuilt from the folder.
+function localeMeta() {
+  const id = 'virtual:locale-meta';
+  const resolved = `\0${id}`;
+  const dir = path.resolve(__dirname, 'src/locales');
+  return {
+    name: 'opendex-locale-meta',
+    resolveId: (source) => (source === id ? resolved : null),
+    load(source) {
+      if (source !== resolved) return null;
+      const meta = fs
+        .readdirSync(dir)
+        .filter((file) => file.endsWith('.json'))
+        .map((file) => {
+          const full = path.join(dir, file);
+          this.addWatchFile(full);
+          return { code: file.replace(/\.json$/, ''), name: JSON.parse(fs.readFileSync(full, 'utf8'))['@dil.ad'] };
+        });
+      return `export default ${JSON.stringify(meta)};`;
+    },
+  };
+}
+
 export default defineConfig(({ command, mode }) => {
   const isProduction = mode === 'production' || command === 'build';
   // The release bundle is obfuscated (see docs/BUILD_AND_RELEASE.md). OPENDEX_NO_OBFUSCATE=1 builds a plain, debuggable bundle —
@@ -26,6 +51,7 @@ export default defineConfig(({ command, mode }) => {
   return {
     plugins: [
       react(),
+      localeMeta(),
       obfuscate && obfuscator({
         apply: 'build',
         options: {
