@@ -135,11 +135,6 @@ export function calculateDynamicFitDpi(targetW, targetH, targetDp = 0, windowW =
 /** Workspace görev yoğunluğunun alt/üst sınırı (paylaşımlı VD pikseli cinsinden DPI). */
 export const WORKSPACE_MIN_DPI = 140;
 export const WORKSPACE_MAX_DPI = 400;
-/** Görünüm ölçeği değişince otomatik yoğunluğun yeniden işlenmesi için en az göreli değişim (uygulama her seferinde yeniden kurulur). */
-export const WORKSPACE_DPI_FOLLOW_RATIO = 0.08;
-/** Henüz yoğunluğu yazılmamış bir Workspace görevi paylaşımlı VD'nin kendi yoğunluğuyla yaşar (ECO_WORKSPACE_DPI). */
-export const WORKSPACE_DEFAULT_DPI = 210;
-
 const clampWorkspaceDpi = (dpi) => Math.max(WORKSPACE_MIN_DPI, Math.min(WORKSPACE_MAX_DPI, Math.round(dpi)));
 
 /**
@@ -208,25 +203,6 @@ export function workspaceTaskAt(tasks, vx, vy) {
     if (vx >= l && vx <= r && vy >= top && vy <= b) return t;
   }
   return null;
-}
-
-/**
- * Görünüm ölçeği (Workspace penceresinin boyutu) değişince hangi görevlerin OTOMATİK yoğunluğu yeniden yazılmalı?
- * Yalnız canlı, `auto` kipindeki görevler; yazılı yoğunluktan en az `ratio` kadar sapanlar (küçük oynamalar uygulamayı
- * her seferinde yeniden kurardı). Yoğunluğu hiç yazılmamış görev, VD'nin kendi yoğunluğuyla yaşıyor sayılır.
- * Dönüş: [{ windowId, density }]
- */
-export function planAutoDensityFollow(tasks, { scale, vdH = 1080, targetDp = 0, ratio = WORKSPACE_DPI_FOLLOW_RATIO } = {}) {
-  if (!(Number(scale) > 0)) return [];
-  const updates = [];
-  for (const task of tasks || []) {
-    if (!task || task.handoffToPhone || task.densityMode === 'manual' || !Array.isArray(task.bounds)) continue;
-    const [l, t, r, b] = task.bounds;
-    const wanted = calculateWorkspaceTaskDpi(r - l, b - t, vdH, { scale, targetDp });
-    const current = Number(task.density) > 0 ? Number(task.density) : WORKSPACE_DEFAULT_DPI;
-    if (Math.abs(wanted - current) / current >= ratio) updates.push({ windowId: task.windowId, density: wanted });
-  }
-  return updates;
 }
 
 /**

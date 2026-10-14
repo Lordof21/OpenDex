@@ -3,10 +3,11 @@
 // Birden çok Dosyalar penceresi açılabilir (`files-<n>`); başlatıcıdan açılış var olanı öne getirir.
 
 import { initialRestorePatch } from './windowModel.js';
+import { t } from '../i18n/index.js';
 
 export const FILES_KIND = 'files';
 export const FILES_PACKAGE = 'com.opendex.files';
-export const FILES_TITLE = 'Dosyalar';
+export const FILES_TITLE = t('common.dosyalar');
 export const FILES_DEFAULT_SIZE = Object.freeze({ w: 1040, h: 680 });
 
 export const isFilesWindow = (win) => win?.kind === FILES_KIND;

@@ -11,6 +11,7 @@ import { createElement, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import WorkspaceTaskPipView from './WorkspaceTaskPipView.jsx';
 import { computePipWindowSize } from './cropMath.js';
+import { t } from '../../i18n/index.js';
 
 const isTauriHost = () =>
   typeof window !== 'undefined' && !!(window.__TAURI__ || window.__TAURI_INTERNALS__ || window.__TAURI_IPC__);
@@ -62,7 +63,7 @@ export async function openWorkspaceTaskPip(task, vd) {
       const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
       const win = new WebviewWindow(`ws-pip-${id}`, {
         url: `/?wspip=${encodeURIComponent(id)}`,
-        title: `${task.title || task.package} · Workspace PiP`,
+        title: t('window.value_workspace_pip', { value: task.title || task.package }),
         width: size.w,
         height: size.h,
         alwaysOnTop: true,

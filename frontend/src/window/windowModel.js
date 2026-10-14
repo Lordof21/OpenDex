@@ -15,10 +15,11 @@ import {
   targetDisplaySizeForMode,
 } from './windowMath.js';
 import { isMirrorPackage } from './mirrorPackage.js';
+import { t } from '../i18n/index.js';
 
 // ───────────────────────────────────────────────────────────────── 1. Başlık
 export const HEADER_MODES = ['follow', 'pinned', 'hover'];
-export const HEADER_MODE_LABELS = { follow: 'Genele uy', pinned: 'Sabit', hover: 'Hover' };
+export const HEADER_MODE_LABELS = { follow: t('window.genele_uy'), pinned: t('window.sabit'), hover: t('window.hover') };
 
 /** `follow` = genel ayara (header_hover_mode) uy, `pinned` = hep görünür, `hover` = hep gizli (üst şeritten açılır). */
 export function normalizeHeaderMode(mode) {

@@ -10,6 +10,7 @@
 // oturumu geri verdi) mezar taşı kaldırılır — yeniden denemeler yeni pencereyi kapatmasın.
 
 import { useSystemStore } from '../../state/systemStore.js';
+import { t as tt } from '../../i18n/index.js';
 
 export const CLOSE_RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 15000];
 export const CLOSE_GRACE_MS = 60_000;
@@ -108,5 +109,5 @@ export function createCloseTracker({
 
 export const closeTracker = createCloseTracker({
   onGiveUp: () =>
-    useSystemStore.getState().pushToast?.('Pencere kapatma isteği arka uca ulaşmadı — bağlantı gelince yeniden denenecek ⚠️'),
+    useSystemStore.getState().pushToast?.(tt('window.pencere_kapatma_istegi_arka_uca')),
 });

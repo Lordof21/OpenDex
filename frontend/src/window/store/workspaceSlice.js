@@ -14,6 +14,7 @@ import { useSystemStore } from '../../state/systemStore.js';
 import { logger } from '../../lib/logger.js';
 import { cascadePosition } from '../windowMath.js';
 import { buildCropWindow, cropWindowId, isCropWindow } from '../cropWindow.js';
+import { t as tt } from '../../i18n/index.js';
 
 /** Aynı görev için iki doğrulama isteği arasındaki en kısa süre (her basışta istek gitmesin). */
 export const VERIFY_MIN_INTERVAL_MS = 1000;
@@ -67,7 +68,7 @@ export function createWorkspaceSlice(set, get) {
         return get()._insertWorkspaceTask(handle, packageName, resolveAppDisplayName(packageName, packageName));
       } catch (err) {
         logger.error('workspace', 'adoptPhoneApp başarısız', err);
-        useSystemStore.getState().pushToast?.(`⚠️ Workspace'e alınamadı: ${err?.message || 'bilinmeyen hata'}`);
+        useSystemStore.getState().pushToast?.(tt('window.workspace_e_alinamadi_value', { value: err?.message || 'bilinmeyen hata' }));
         return null;
       }
     },
@@ -270,7 +271,7 @@ export function createWorkspaceSlice(set, get) {
             ),
           }));
         } else if (res?.status === 'failed') {
-          useSystemStore.getState().pushToast?.('⚠️ Pencere geri getirilemedi. Kapatıp yeniden açmayı deneyin.');
+          useSystemStore.getState().pushToast?.(tt('window.pencere_geri_getirilemedi_kapatip'));
         }
         return res;
       } catch (err) {
@@ -428,6 +429,7 @@ export function createWorkspaceSlice(set, get) {
           bounds,
           renderScale: payload.render_scale || [1.0, 1.0],
           density: payload.density || null,
+          densityMode: payload.density_mode || 'auto',
         };
         set((s) => ({
           windows: s.windows.map((w) =>
@@ -442,6 +444,7 @@ export function createWorkspaceSlice(set, get) {
                               bounds,
                               renderScale: payload.render_scale || t.renderScale || [1.0, 1.0],
                               density: payload.density ?? t.density,
+                              densityMode: payload.density_mode ?? t.densityMode,
                             }
                           : t
                       )

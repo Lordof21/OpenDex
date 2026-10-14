@@ -49,6 +49,7 @@ import { isMirrorPackage } from '../mirrorPackage.js';
 import { isFrontendOnlyWindow } from '../frontendOnly.js';
 import { maybeWarnSmallAppWindow } from './helpers.js';
 import { logger } from '../../lib/logger.js';
+import { t } from '../../i18n/index.js';
 
 const viewportCtx = () =>
   viewportBoxes(
@@ -382,7 +383,7 @@ export function createGeometrySlice(set, get) {
         const pending = cur?.pendingResizeTransition;
         if (pending?.isAwaitingFirstFrame) {
           logger.warn('resize', `yeniden boyutlandırma zaman aşımı (5 sn) win=${id} (${cur.package})`);
-          useSystemStore.getState().pushToast?.('⚠️ Yeniden boyutlandırma zaman aşımına uğradı (5s). Cihaz yanıt vermedi.');
+          useSystemStore.getState().pushToast?.(t('window.yeniden_boyutlandirma_zaman_asimina'));
           // An instant transition already showed the window in its new box: it stays there (the stream keeps fitting
           // into it) instead of jumping back to where the drag started.
           const keep = pending.instant ? { w: pending.to.w, h: pending.to.h, x: pending.to.x, y: pending.to.y } : {};
@@ -763,13 +764,13 @@ export function createGeometrySlice(set, get) {
         let badgeStyle = '';
 
         if (diffPct > 3) {
-          statusDesc = `+%${diffPct.toFixed(1)} FAZLA (Supersampling: Telefon ekranı monitörden %${diffPct.toFixed(1)} daha fazla piksel üretiyor - Ekstra Netlik)`;
+          statusDesc = t('window.value_fazla_supersampling_telefon', { value: diffPct.toFixed(1), value2: diffPct.toFixed(1) });
           badgeStyle = 'color: #38bdf8; font-weight: bold;';
         } else if (diffPct < -3) {
-          statusDesc = `-%${Math.abs(diffPct).toFixed(1)} AZ (Downsampling: Telefon ekranı monitörden %${Math.abs(diffPct).toFixed(1)} daha az piksel üretiyor - Hafif Ölçekleme)`;
+          statusDesc = t('window.value_az_downsampling_telefon_ekrani', { value: Math.abs(diffPct).toFixed(1), value2: Math.abs(diffPct).toFixed(1) });
           badgeStyle = 'color: #f59e0b; font-weight: bold;';
         } else {
-          statusDesc = `%0 TAM EŞLEŞME (1:1 Birebir Piksel Eşleşmesi - Sıfır Bozulma)`;
+          statusDesc = t('window.0_tam_eslesme_1_1_birebir_piksel');
           badgeStyle = 'color: #10b981; font-weight: bold;';
         }
 
@@ -786,7 +787,7 @@ export function createGeometrySlice(set, get) {
         logger.error('resize', `commitResize başarısız win=${id}`, err?.response?.data || err?.message || err);
         useSystemStore
           .getState()
-          .pushToast('Yeniden boyutlandırma başarısız oldu — pencere duraklatıldı, tekrar denemek için üzerine tıklayın.');
+          .pushToast(t('window.yeniden_boyutlandirma_basarisiz_oldu'));
         throw err;
       }
       set((s) => ({

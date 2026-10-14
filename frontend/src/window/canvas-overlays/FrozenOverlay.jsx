@@ -4,6 +4,7 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { Play } from 'lucide-react';
+import { t } from '../../i18n/index.js';
 
 // reason 'link': the connection to the phone dropped — the backend rebuilds the window by itself; a click still retries.
 export default function FrozenOverlay({ onRestore, reason }) {
@@ -31,10 +32,10 @@ export default function FrozenOverlay({ onRestore, reason }) {
         </div>
         <div className="flex flex-col text-left">
           <span className="text-xs font-semibold text-foreground tracking-tight">
-            {link ? 'Bağlantı yenileniyor' : 'Akış Duraklatıldı'}
+            {link ? t('window.baglanti_yenileniyor') : t('window.akis_duraklatildi')}
           </span>
           <span className="text-[10.5px] text-muted-foreground">
-            {link ? 'Kendiliğinden devam eder — takılırsa tıklayın' : 'Devam etmek için tıklayın'}
+            {link ? t('window.kendiliginden_devam_eder_takilirsa') : t('window.devam_etmek_icin_tiklayin')}
           </span>
         </div>
       </motion.div>

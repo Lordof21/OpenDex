@@ -4,6 +4,7 @@ import { useWindowStore } from './windowStore.js';
 import { useSystemStore } from '../state/systemStore.js';
 import AppIcon from '../ui/AppIcon.jsx';
 import { iconPackageOf } from './workspacePackage.js';
+import { t } from '../i18n/index.js';
 
 export default function AltTabSwitcher() {
   const windows = useWindowStore((s) => s.windows);
@@ -17,12 +18,12 @@ export default function AltTabSwitcher() {
   // Collect all switchable items
   const items = [
     ...(settingsOpen
-      ? [{ id: 'opendex', name: 'OpenDeX Ayarları', detail: 'Sistem ayarları', isSettings: true, iconPackage: 'opendex' }]
+      ? [{ id: 'opendex', name: t('common.opendex_ayarlari'), detail: t('window.sistem_ayarlari'), isSettings: true, iconPackage: 'opendex' }]
       : []),
     ...windows.map((w) => ({
       id: w.id,
-      name: w.title || w.display_name || w.package || 'Pencere',
-      detail: w.package || 'Uygulama',
+      name: w.title || w.display_name || w.package || t('common.pencere_2'),
+      detail: w.package || t('common.uygulama'),
       iconPackage: iconPackageOf(w),
       window: w,
     })),
@@ -72,7 +73,7 @@ export default function AltTabSwitcher() {
     <div
       className="pointer-events-none fixed inset-0 z-[95] grid place-items-center select-none"
       role="dialog"
-      aria-label="Pencere değiştirici"
+      aria-label={t('window.pencere_degistirici')}
     >
       <motion.div
         initial={{ opacity: 0, scale: 0.96 }}

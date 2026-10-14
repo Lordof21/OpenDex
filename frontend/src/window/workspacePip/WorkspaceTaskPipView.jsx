@@ -17,6 +17,7 @@ import { newOpId } from '../../lib/opId.js';
 import { computeCropRect, cropPointToStream } from './cropMath.js';
 import { useWorkspaceTaskFeed } from './useWorkspaceTaskFeed.js';
 import { useWorkspaceCropResize } from './useWorkspaceCropResize.js';
+import { t as tt } from '../../i18n/index.js';
 
 const RAISE_THROTTLE_MS = 800;
 const GONE_AUTOCLOSE_MS = 1800;
@@ -231,47 +232,47 @@ export default function WorkspaceTaskPipView({ taskWindowId, onRequestClose, emb
           {atVdLimit && (
             <span
               className="rounded bg-warning/25 px-1.5 py-0.5 font-semibold text-warning"
-              title="Görev çalışma alanının (VD) sınırına ulaştı — daha fazla büyümez"
+              title={tt('window.gorev_calisma_alaninin_vd_sinirina')}
             >
-              VD sınırı
+             {tt('window.vd_siniri')}
             </span>
           )}
           <button
             type="button"
             className="pointer-events-auto rounded bg-scrim px-1.5 py-0.5 opacity-0 transition-opacity hover:bg-scrim/95 focus-visible:opacity-100 group-hover/pip:opacity-100 cursor-pointer"
             onClick={raiseTask}
-            title="Görevi çalışma alanında öne getir"
+            title={tt('window.gorevi_calisma_alaninda_one_getir')}
           >
-            Öne getir
+           {tt('common.one_getir')}
           </button>
         </div>
       ) : (
       <div className="flex h-7 shrink-0 items-center justify-between gap-2 bg-scrim px-2 text-[11px]">
         <span className="truncate font-medium" title={task?.package}>
-          {task?.title || 'Workspace görevi'}
+          {task?.title || tt('window.workspace_gorevi')}
         </span>
         <div className="flex items-center gap-1">
           {atVdLimit && (
             <span
               className="shrink-0 rounded bg-warning/20 px-1 text-[9px] font-semibold text-warning"
-              title="Görev çalışma alanının (VD) sınırına ulaştı — daha fazla büyümez"
+              title={tt('window.gorev_calisma_alaninin_vd_sinirina')}
             >
-              VD sınırı
+             {tt('window.vd_siniri')}
             </span>
           )}
           <button
             type="button"
             className="rounded px-1.5 py-0.5 hover:bg-scrim-foreground/10 cursor-pointer"
             onClick={raiseTask}
-            title="Görevi çalışma alanında öne getir"
+            title={tt('window.gorevi_calisma_alaninda_one_getir')}
           >
-            Öne getir
+           {tt('common.one_getir')}
           </button>
           <button
             type="button"
             className="rounded px-1.5 py-0.5 hover:bg-destructive/30 cursor-pointer"
             onClick={() => onRequestClose?.()}
-            title="PiP'i kapat"
+            title={tt('window.pip_i_kapat')}
           >
             ✕
           </button>
@@ -292,29 +293,29 @@ export default function WorkspaceTaskPipView({ taskWindowId, onRequestClose, emb
 
         {status === 'loading' || (isLive && !hasFrame) ? (
           <div className="absolute inset-0 flex items-center justify-center bg-scrim/70 text-xs text-scrim-foreground/60">
-            Görev akışı bağlanıyor…
+           {tt('window.gorev_akisi_baglaniyor')}
           </div>
         ) : null}
 
         {status === 'phone' ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-scrim p-4 text-center">
-            <p className="text-sm font-semibold">Bu görev şu an telefonda</p>
+            <p className="text-sm font-semibold">{tt('window.bu_gorev_su_an_telefonda')}</p>
             <p className="max-w-[240px] text-[11px] text-scrim-foreground/60">
-              Workspace'e geri aldığınızda bu PiP kaldığı yerden devam eder.
+             {tt('window.workspace_e_geri_aldiginizda_bu_pip')}
             </p>
             <button
               type="button"
               className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground cursor-pointer"
               onClick={bringBack}
             >
-              Workspace'e Geri Al
+             {tt('window.workspace_e_geri_al')}
             </button>
           </div>
         ) : null}
 
         {status === 'gone' ? (
           <div className="absolute inset-0 flex items-center justify-center bg-scrim text-xs text-scrim-foreground/60">
-            Görev artık çalışma alanında değil — PiP kapanıyor…
+           {tt('window.gorev_artik_calisma_alaninda_degil')}
           </div>
         ) : null}
       </div>

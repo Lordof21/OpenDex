@@ -9,10 +9,11 @@ import { WindowTouchSocket, mapClickToDeviceCoords } from '../input/touchInject.
 import { injectDomKeyEvent, isWindowManagerShortcut } from '../input/keyboardInject.js';
 import { useWindowStore } from './windowStore.js';
 import { useWheelKineticScroll } from './useWheelKineticScroll.js';
-import { planAutoDensityFollow, workspaceTaskAt } from './windowMath.js';
+import { workspaceTaskAt } from './windowMath.js';
 import WorkspaceTaskFrame from './WorkspaceTaskFrame.jsx';
 import { logger } from '../lib/logger.js';
 import { setWindowThumbnail } from '../state/windowThumbnailCache.js';
+import { t as tt } from '../i18n/index.js';
 
 export function computeWorkspaceViewport(containerW, containerH, vdW, vdH) {
   const cw = Math.max(1, containerW || 960);
@@ -38,9 +39,6 @@ export function computeWorkspaceViewport(containerW, containerH, vdW, vdH) {
 
   return { videoW, videoH, offsetX, offsetY, scale: videoW / dw, vdW: dw, vdH: dh };
 }
-
-/** Görünüm ölçeği oturduktan (pencere boyutlandırması bitince) bu kadar sonra otomatik yoğunluklar yeniden işlenir. */
-export const DENSITY_FOLLOW_DEBOUNCE_MS = 800;
 
 export default function WorkspaceCanvas({ win }) {
   const containerRef = useRef(null);
@@ -215,24 +213,10 @@ export default function WorkspaceCanvas({ win }) {
     );
   }, [containerSize.w, containerSize.h, vdW, vdH, win.streamW, win.streamH, viewport.scale, viewport.offsetX, viewport.offsetY]);
 
-  // Otomatik yoğunluk, VD pencerelerindeki gibi görevin EKRANDA kapladığı boyuta uyar. Workspace penceresi küçülünce
-  // 1920×1080'lik tuval ölçeklenir; yoğunluk bunu bilmezse yazılar aynı oranda küçülürdü. Yalnız `auto` kipindeki,
-  // canlı görevler; küçük oynamalar (< %8) uygulamayı yeniden kurdurmasın diye yazılmaz. Sürükleme/boyutlandırma
-  // sürerken `followKey` değiştiği için zamanlayıcı sıfırlanır — bırakılınca çerçevenin kendi (ölçek-bilen) kararı yazılır.
-  const followKey = (win.tasks || [])
-    .map((t) => `${t.windowId}:${t.bounds?.join(',')}:${t.density ?? ''}:${t.densityMode}:${t.handoffToPhone ? 1 : 0}`)
-    .join('|');
-  useEffect(() => {
-    if (!hasLiveTasks || win.minimized || !(viewport.scale > 0)) return undefined;
-    const timer = setTimeout(() => {
-      const live = useWindowStore.getState().windows.find((w) => w.isEcoWorkspace);
-      if (!live) return;
-      for (const update of planAutoDensityFollow(live.tasks, { scale: viewport.scale, vdH })) {
-        useWindowStore.getState().setWorkspaceTaskDensity(update.windowId, update.density, 'auto');
-      }
-    }, DENSITY_FOLLOW_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-  }, [viewport.scale, followKey, hasLiveTasks, win.minimized, vdH]);
+  // Workspace kendi uzayıdır: görevlerin yeri, boyutu ve yoğunluğu 1920×1080'lik KENDİ tuvalinde yaşar. Bu pencerenin
+  // boyutu yalnızca o tuvale BAKIŞI değiştirir (yakınlaştırma gibi) — görevlere hiçbir şey yazılmaz. (Eskiden pencere
+  // küçülünce otomatik yoğunluklar ekrandaki boyuta uydurulup yeniden yazılıyordu: içerideki uygulamalar Workspace
+  // penceresini her boyutlandırışta yeniden kuruluyordu.)
 
   const gestureRef = useRef(null);
   const moveRaf = useRef(null);
@@ -362,7 +346,7 @@ export default function WorkspaceCanvas({ win }) {
   }, [win.tasks, viewport.scale, viewport.offsetX, viewport.offsetY]);
 
   return (
-    <div ref={containerRef} className="relative flex-1 h-full w-full overflow-hidden bg-video-backdrop select-none">
+    <div ref={containerRef} data-workspace-canvas="" className="relative flex-1 h-full w-full overflow-hidden bg-video-backdrop select-none">
       <canvas
         ref={canvasRef}
         data-window-id={win.id}
@@ -382,8 +366,8 @@ export default function WorkspaceCanvas({ win }) {
       {!hasFrame && (
         <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-xs text-scrim-foreground/50">
           {hasLiveTasks
-            ? 'Çalışma alanı hazırlanıyor…'
-            : 'Tüm görevler telefonda. Geri almak için görev kartındaki düğmeyi kullanın.'}
+            ? tt('window.calisma_alani_hazirlaniyor')
+            : tt('window.tum_gorevler_telefonda_geri_almak')}
         </div>
       )}
       {(win.tasks || []).map((task, idx) => {

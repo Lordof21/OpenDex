@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { Maximize2, LayoutGrid } from 'lucide-react';
 import { TASKBAR_H } from './windowStore.js';
+import { t } from '../i18n/index.js';
 
 export default function SnapIndicator({ snapSide }) {
   if (!snapSide) return null;
@@ -21,31 +22,31 @@ export default function SnapIndicator({ snapSide }) {
 
   if (snapSide === 'left') {
     style = { left: '0px', top: '0px', bottom: bottomOffset, width: halfWidth };
-    label = 'Sol Ekran Bölünmesi (50%)';
+    label = t('window.sol_ekran_bolunmesi_50');
     Icon = LayoutGrid;
   } else if (snapSide === 'right') {
     style = { right: '0px', top: '0px', bottom: bottomOffset, width: halfWidth };
-    label = 'Sağ Ekran Bölünmesi (50%)';
+    label = t('window.sag_ekran_bolunmesi_50');
     Icon = LayoutGrid;
   } else if (snapSide === 'top' || snapSide === 'max') {
     style = { left: '0px', top: '0px', bottom: bottomOffset, right: '0px' };
-    label = 'Ekranı Kapla (Maksimum)';
+    label = t('window.ekrani_kapla_maksimum');
     Icon = Maximize2;
   } else if (snapSide === 'tl') {
     style = { left: '0px', top: '0px', height: halfHeight, width: halfWidth };
-    label = 'Sol Üst Köşe (25%)';
+    label = t('window.sol_ust_kose_25');
     Icon = LayoutGrid;
   } else if (snapSide === 'tr') {
     style = { right: '0px', top: '0px', height: halfHeight, width: halfWidth };
-    label = 'Sağ Üst Köşe (25%)';
+    label = t('window.sag_ust_kose_25');
     Icon = LayoutGrid;
   } else if (snapSide === 'bl') {
     style = { left: '0px', bottom: bottomOffset, height: halfHeight, width: halfWidth };
-    label = 'Sol Alt Köşe (25%)';
+    label = t('window.sol_alt_kose_25');
     Icon = LayoutGrid;
   } else if (snapSide === 'br') {
     style = { right: '0px', bottom: bottomOffset, height: halfHeight, width: halfWidth };
-    label = 'Sağ Alt Köşe (25%)';
+    label = t('window.sag_alt_kose_25');
     Icon = LayoutGrid;
   }
 

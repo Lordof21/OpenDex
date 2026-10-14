@@ -7,6 +7,7 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { Sparkles } from 'lucide-react';
+import { t } from '../../i18n/index.js';
 
 export default function StealthPhaseOverlay() {
   return (
@@ -43,10 +44,10 @@ export default function StealthPhaseOverlay() {
         {/* Title & Subtitle */}
         <div className="flex flex-col text-left">
           <span className="text-xs font-semibold text-foreground tracking-tight">
-            Görünüm Optimize Ediliyor
+            {t('window.gorunum_optimize_ediliyor')}
           </span>
           <span className="text-[10.5px] text-muted-foreground">
-            Çözünürlük ve piksel dengesi ayarlanıyor…
+            {t('window.cozunurluk_ve_piksel_dengesi')}
           </span>
         </div>
 

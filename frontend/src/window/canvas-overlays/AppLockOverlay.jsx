@@ -8,6 +8,7 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { ShieldCheck, Fingerprint, Smartphone, Check, RotateCw } from 'lucide-react';
+import { t } from '../../i18n/index.js';
 
 export default function AppLockOverlay({
   message,
@@ -94,10 +95,10 @@ export default function AppLockOverlay({
 
         {/* Title & Subtitle */}
         <h3 className="text-base sm:text-lg font-bold text-foreground tracking-tight">
-          Biyometrik Onay Gerekli
+          {t('window.biyometrik_onay_gerekli')}
         </h3>
         <p className="mt-1 text-xs text-muted-foreground font-normal leading-relaxed max-w-[280px]">
-          {message || 'Lütfen telefonunuzdan parmak izinizi okutun veya ekran şifrenizi girin.'}
+          {message || t('window.lutfen_telefonunuzdan_parmak_izinizi')}
         </p>
 
         {/* Security Reassurance Pill */}
@@ -107,10 +108,10 @@ export default function AppLockOverlay({
           </div>
           <div className="min-w-0 flex-1">
             <div className="text-[11px] font-semibold text-foreground flex items-center gap-1.5">
-              <span>Donanım Korumalı Güvenlik</span>
+              <span>{t('window.donanim_korumali_guvenlik')}</span>
             </div>
             <p className="text-[10.5px] text-muted-foreground leading-snug mt-0.5">
-              Şifre ve biyometrik verileriniz cihazınızda güvenle işlenir. Telefonunuzdan kilidi açtığınızda bu pencere otomatik devam eder.
+              {t('window.sifre_ve_biyometrik_verileriniz')}
             </p>
           </div>
         </div>
@@ -137,7 +138,7 @@ export default function AppLockOverlay({
             ) : (
               <Check className="w-3.5 h-3.5 text-image-foreground" strokeWidth={2.5} />
             )}
-            <span>{isContinuing ? 'Kontrol Ediliyor...' : 'Kilidi Açtım • Devam Et'}</span>
+            <span>{isContinuing ? t('window.kontrol_ediliyor') : t('window.kilidi_actim_devam_et')}</span>
           </button>
 
           {/* Secondary Action Row */}
@@ -147,8 +148,8 @@ export default function AppLockOverlay({
                 type="button"
                 disabled={isRetrying}
                 onClick={handleRetry}
-                title="Kilit Kontrolünü Tekrar Dene"
-                aria-label="Kilit Kontrolünü Tekrar Dene"
+                title={t('window.kilit_kontrolunu_tekrar_dene')}
+                aria-label={t('window.kilit_kontrolunu_tekrar_dene')}
                 className="shrink-0 flex items-center justify-center p-2 rounded-xl bg-muted border border-border/70 hover:bg-accent text-muted-foreground hover:text-foreground transition-all active:scale-[0.98] cursor-pointer"
               >
                 <RotateCw className={`w-3.5 h-3.5 ${isRetrying ? 'animate-spin text-status-active' : ''}`} />
@@ -162,7 +163,7 @@ export default function AppLockOverlay({
               className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-muted border border-border/70 hover:bg-accent text-foreground text-xs font-medium transition-all active:scale-[0.98] cursor-pointer"
             >
               <Smartphone className={`w-3.5 h-3.5 ${isWaking ? 'animate-bounce text-warning' : 'text-muted-foreground'}`} />
-              <span>{isWaking ? 'Uyandırılıyor...' : 'Ekranı Uyandır'}</span>
+              <span>{isWaking ? t('window.uyandiriliyor') : t('window.ekrani_uyandir')}</span>
             </button>
 
             <button
@@ -170,7 +171,7 @@ export default function AppLockOverlay({
               onClick={onDismiss}
               className="py-2 px-3 rounded-xl bg-muted/60 border border-border/50 hover:bg-accent text-muted-foreground hover:text-foreground text-xs font-medium transition-all active:scale-[0.98] cursor-pointer"
             >
-              Kapat
+              {t('common.kapat')}
             </button>
           </div>
         </div>

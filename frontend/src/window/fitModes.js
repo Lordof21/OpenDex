@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.js';
 // Görüntü ölçeği — TEK sözlük. Hub, DeX Ayarları, Ayarlar ve VideoCanvas AYNI tabloyu kullanır.
 //
 // Eskiden üç ayrı sözlük vardı: Hub "Doldur/Sığdır/1.25×" (cover/contain/zoom), VideoCanvas'ın anladığı
@@ -5,12 +6,12 @@
 // hiçbir şey yapmıyor, gerçek "Doldur" (uzat) ise Hub'dan ulaşılamıyordu.
 
 export const FIT_MODES = {
-  fit: { label: 'Sığdır', css: 'object-contain', zoom: 1.0 },
-  fill: { label: 'Uzat (doldur)', css: 'object-fill', zoom: 1.0 },
-  cover: { label: 'Kırp (kapla)', css: 'object-cover', zoom: 1.0 },
-  zoom125: { label: '1.25× yakın', css: 'object-cover', zoom: 1.25 },
-  zoom150: { label: '1.5× yakın', css: 'object-cover', zoom: 1.5 },
-  auto: { label: 'Otomatik (genel ayar)', css: null, zoom: 1.0 },
+  fit: { label: t('common.sigdir'), css: 'object-contain', zoom: 1.0 },
+  fill: { label: t('window.uzat_doldur'), css: 'object-fill', zoom: 1.0 },
+  cover: { label: t('window.kirp_kapla'), css: 'object-cover', zoom: 1.0 },
+  zoom125: { label: t('window.1_25_yakin'), css: 'object-cover', zoom: 1.25 },
+  zoom150: { label: t('window.1_5_yakin'), css: 'object-cover', zoom: 1.5 },
+  auto: { label: t('window.otomatik_genel_ayar'), css: null, zoom: 1.0 },
 };
 
 // Hub'daki döngü sırası: tablo sırasıyla birebir.

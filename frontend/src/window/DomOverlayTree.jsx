@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, Code } from 'lucide-react';
 import { api } from '../lib/api.js';
+import { t } from '../i18n/index.js';
 
 /**
  * Zero-Apps ADB XML Element Inspector (Faz 3+ Deneysel Mod).
@@ -158,7 +159,7 @@ export default function DomOverlayTree({ enabled, windowId, deviceW, deviceH, fr
       {copiedText && (
         <div className="absolute top-2 left-1/2 -translate-x-1/2 z-50 rounded-lg bg-info/95 backdrop-blur-md px-3 py-1.5 text-xs font-semibold text-image-foreground shadow-lg border border-info/40 animate-bounce flex items-center gap-2">
           <Check className="h-3.5 w-3.5 text-image-foreground/85 shrink-0" />
-          <span>Basılı Tutularak Kopyalandı:</span>
+          <span>{t('window.basili_tutularak_kopyalandi')}</span>
           <span className="font-mono text-image-foreground/85 max-w-[200px] truncate">"{copiedText}"</span>
         </div>
       )}
@@ -173,7 +174,7 @@ export default function DomOverlayTree({ enabled, windowId, deviceW, deviceH, fr
         return (
           <div
             key={`${node.id || 'node'}-${idx}`}
-            title={`Basılı Tut & Kopyala: ${displayText}`}
+            title={t('window.basili_tut_kopyala_displaytext', { displayText })}
             onPointerDown={(e) => handlePointerDown(e, displayText)}
             onPointerUp={handlePointerUp}
             onPointerLeave={handlePointerLeave}

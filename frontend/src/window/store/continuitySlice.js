@@ -6,6 +6,7 @@ import { useSystemStore } from '../../state/systemStore.js';
 import { logger } from '../../lib/logger.js';
 import { newOpId } from '../../lib/opId.js';
 import { resolveAppDisplayName } from '../../desktop/appRegistry.js';
+import { t as tt } from '../../i18n/index.js';
 
 const reclaimingWindows = new Set();
 
@@ -100,7 +101,7 @@ export function createContinuitySlice(set, get) {
       }
       // Workspace members leave through `workspace_task_removed`; a top-level window is dropped here.
       if (win) get().forgetWindow(windowId);
-      useSystemStore.getState().pushToast?.(`${name} telefonda kapatıldı; pencere kapandı.`);
+      useSystemStore.getState().pushToast?.(tt('window.name_telefonda_kapatildi_pencere', { name }));
     },
 
     /** `window_app_restored`: the app runs again (reopened here or on the phone). */
@@ -113,7 +114,7 @@ export function createContinuitySlice(set, get) {
       try {
         await api.post('/api/windows/focus', { window_id: windowId });
       } catch (err) {
-        useSystemStore.getState().pushToast?.(`⚠️ Uygulama yeniden açılamadı: ${err?.message || 'bilinmeyen hata'}`);
+        useSystemStore.getState().pushToast?.(tt('window.uygulama_yeniden_acilamadi_value', { value: err?.message || 'bilinmeyen hata' }));
       }
     },
 
@@ -130,7 +131,7 @@ export function createContinuitySlice(set, get) {
       try {
         L.info('handoff', 'to_phone_clicked', { windowId, windowing: windowing || 'default' });
         // Optimistic update so UI immediately responds
-        get().setHandoff(windowId, true, 'Uygulama telefonunuza aktarılıyor...');
+        get().setHandoff(windowId, true, tt('window.uygulama_telefonunuza_aktariliyor'));
         // /api/windows/handoff responds with a bare {ok} object — api.post()
         // already returns the parsed body itself, never {data: ...}.
         const body = windowing ? { window_id: windowId, windowing } : { window_id: windowId };
@@ -143,7 +144,7 @@ export function createContinuitySlice(set, get) {
       } catch (err) {
         L.error('handoff', 'to_phone_failed', { windowId, error: err?.message || String(err) });
         get().setHandoff(windowId, false);
-        useSystemStore.getState().pushToast?.(`⚠️ Telefona aktarılamadı: ${err?.message || 'bilinmeyen hata'}`);
+        useSystemStore.getState().pushToast?.(tt('window.telefona_aktarilamadi_value', { value: err?.message || 'bilinmeyen hata' }));
       }
     },
 
@@ -172,7 +173,7 @@ export function createContinuitySlice(set, get) {
         get().setHandoff(windowId, false);
       } catch (err) {
         L.error('reclaim', 'failed', { windowId, error: err?.message || String(err) });
-        useSystemStore.getState().pushToast?.(`⚠️ Geri alınamadı: ${err?.message || 'bilinmeyen hata'}`);
+        useSystemStore.getState().pushToast?.(tt('window.geri_alinamadi_value', { value: err?.message || 'bilinmeyen hata' }));
       } finally {
         reclaimingWindows.delete(windowId);
       }

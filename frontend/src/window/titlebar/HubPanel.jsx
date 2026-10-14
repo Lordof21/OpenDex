@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import {
   Check,
   Gauge,
+  Globe,
   Image as ImageIcon,
   Keyboard,
   LockKeyhole,
@@ -15,13 +16,14 @@ import {
   Send,
 } from 'lucide-react';
 import { cn } from '../../lib/utils.js';
+import { t } from '../../i18n/index.js';
 
 
 export const HubPanel = forwardRef(function HubPanel(
   {
     panelRef,
     compact = false,
-    imageLabel = 'Otomatik',
+    imageLabel = t('common.otomatik_2'),
     onCycleImage,
     absoluteFullscreen = false,
     onFullscreen,
@@ -37,6 +39,10 @@ export const HubPanel = forwardRef(function HubPanel(
     // pencereler: ayna / Dosyalar / kırpma / Workspace kabı) satır hiç gösterilmez. `restartingApp`: işlem sürüyor.
     onRestartApp,
     restartingApp = false,
+    // "Sayfayı yenile": Chromium tabanlı bir tarayıcı penceresinde açık sekmeyi normal yenileme ile yeniden yükler (uygulama ve
+    // diğer sekmeler korunur). Verilmezse (pencerenin web sayfası yok) satır hiç gösterilmez. Hiçbir zaman kendiliğinden çalışmaz.
+    onReloadPage,
+    reloadingPage = false,
     dynamicDp = true,
     onDynamicDp,
     // "Yön tuşları": ekranda Android D-pad kaplaması (TV tarzı gezinme). Oyun kolu değildir; eski adı "Kontroller" idi.
@@ -46,7 +52,7 @@ export const HubPanel = forwardRef(function HubPanel(
     // penceresi: canvas'ında editör yok) satır hiç gösterilmez. `keymapCount` = bu uygulama için tanımlı tuş sayısı.
     onKeymap,
     keymapCount = 0,
-    headerModeLabel = 'Genele uy',
+    headerModeLabel = t('window.genele_uy'),
     headerModeActive = false,
     onCycleHeader,
     workspaceSent = false,
@@ -68,19 +74,19 @@ export const HubPanel = forwardRef(function HubPanel(
       transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
       className="absolute right-2 top-12 z-[120] flex max-h-[calc(100%-3.5rem)] w-[min(356px,calc(100%-16px))] origin-top-right isolate flex-col overflow-hidden rounded-md border border-border bg-popover/95 text-popover-foreground shadow-window select-none backdrop-blur-2xl"
       role="dialog"
-      aria-label="Pencere Hub'ı"
+      aria-label={t('window.pencere_hub_i')}
       onPointerDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
     >
       <div className="grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3 border-b border-border px-4 py-3 bg-muted/30">
         <div className="min-w-0">
-          <p className="truncate text-xs font-semibold">Pencere Hub'ı</p>
+          <p className="truncate text-xs font-semibold">{t('window.pencere_hub_i')}</p>
           <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
-            Görüntü ve pencere davranışı
+            {t('window.goruntu_ve_pencere_davranisi')}
           </p>
         </div>
         <span className="shrink-0 rounded-sm bg-muted px-2 py-1 font-mono text-[9px] font-semibold text-muted-foreground">
-          LIVE
+          {t('window.live')}
         </span>
       </div>
 
@@ -88,25 +94,25 @@ export const HubPanel = forwardRef(function HubPanel(
         {!isCrop && (
           <>
             <p className="px-2 pb-1 pt-1 text-[9px] font-semibold uppercase text-muted-foreground">
-              Görüntü
+              {t('common.goruntu')}
             </p>
             <HubAction
               icon={<ImageIcon className="size-4" />}
-              label="Görüntü ölçeği"
+              label={t('window.goruntu_olcegi')}
               detail={imageLabel}
               onClick={onCycleImage}
-              trailing={<span className="font-mono text-[10px]">Döndür</span>}
+              trailing={<span className="font-mono text-[10px]">{t('window.dondur')}</span>}
             />
             <div className="grid grid-cols-2 gap-1.5 px-1 pt-1">
               <HubTile
                 icon={<Gauge className="size-4" />}
-                label="Dinamik DP"
+                label={t('window.dinamik_dp')}
                 active={dynamicDp}
                 onClick={onDynamicDp}
               />
               <HubTile
                 icon={<Move className="size-4" />}
-                label="Yön tuşları"
+                label={t('window.yon_tuslari')}
                 active={visualControls}
                 onClick={onVisualControls}
               />
@@ -114,10 +120,10 @@ export const HubPanel = forwardRef(function HubPanel(
             {onKeymap && (
               <HubAction
                 icon={<Keyboard className="size-4" />}
-                label="Tuş düzeni"
-                detail={keymapCount > 0 ? `${keymapCount} tuş tanımlı` : 'Klavye tuşlarını dokunmaya eşle'}
+                label={t('window.tus_duzeni')}
+                detail={keymapCount > 0 ? t('window.keymapcount_tus_tanimli', { keymapCount }) : t('window.klavye_tuslarini_dokunmaya_esle')}
                 onClick={onKeymap}
-                trailing={<span className="font-mono text-[10px]">Düzenle</span>}
+                trailing={<span className="font-mono text-[10px]">{t('window.duzenle')}</span>}
               />
             )}
 
@@ -126,61 +132,73 @@ export const HubPanel = forwardRef(function HubPanel(
         )}
 
         <p className="px-2 pb-1 text-[9px] font-semibold uppercase text-muted-foreground">
-          Pencere
+          {t('common.pencere')}
         </p>
         <div className={cn('grid gap-1.5 px-1', compact ? 'grid-cols-2' : 'grid-cols-3')}>
           <HubTile
             icon={<Maximize className="size-4" />}
-            label="Tam ekran"
+            label={t('common.tam_ekran')}
             active={absoluteFullscreen}
             onClick={onFullscreen}
           />
           {!isCrop && (
             <HubTile
               icon={<PictureInPicture2 className="size-4" />}
-              label="Ayrı PiP"
+              label={t('window.ayri_pip')}
               active={pipOpen}
               onClick={onPip}
             />
           )}
           <HubTile
             icon={<Pin className="size-4" />}
-            label="Üstte tut"
+            label={t('window.ustte_tut')}
             active={alwaysOnTop}
             onClick={onAlwaysOnTop}
           />
           {onDisplayLock && (
             <HubTile
               icon={<LockKeyhole className="size-4" />}
-              label={displayLocked ? 'Ekran kilitli' : 'Ekran serbest'}
+              label={displayLocked ? t('window.ekran_kilitli') : t('window.ekran_serbest')}
               active={displayLocked}
               onClick={onDisplayLock}
             />
           )}
           <HubTile
             icon={<PanelTop className="size-4" />}
-            label={`Başlık: ${headerModeLabel}`}
+            label={t('window.baslik_headermodelabel', { headerModeLabel })}
             active={headerModeActive}
             onClick={onCycleHeader}
           />
         </div>
         {onDisplayLock && displayLocked && (
           <p className="px-2 pt-1.5 text-[10px] leading-[14px] text-muted-foreground" data-testid="display-lock-hint">
-            Görüntü boyutu (px) ve DPI sabit. Pencereyi istediğin gibi boyutlandırabilirsin; görüntü sığdırılır.
+            {t('window.goruntu_boyutu_px_ve_dpi_sabit')}
           </p>
         )}
 
-        {onRestartApp && (
+        {(onReloadPage || onRestartApp) && (
           <>
             <div className="my-2 h-px bg-border" />
-            <HubAction
-              icon={<RotateCw className={cn('size-4', restartingApp && 'animate-spin')} />}
-              label={restartingApp ? 'Yeniden başlatılıyor…' : 'Uygulamayı yeniden başlat'}
-              detail={restartingApp ? 'Bu birkaç saniye sürebilir' : 'Takılan ya da siyah kalan uygulamayı pencerede yenile'}
-              onClick={onRestartApp}
-              disabled={restartingApp}
-              trailing={<span className="font-mono text-[10px]">Yenile</span>}
-            />
+            {onReloadPage && (
+              <HubAction
+                icon={<Globe className={cn('size-4', reloadingPage && 'animate-pulse')} />}
+                label={reloadingPage ? t('window.sayfa_yenileniyor') : t('common.sayfayi_yenile')}
+                detail={t('window.acik_web_sayfasini_yeniden_yukle')}
+                onClick={onReloadPage}
+                disabled={reloadingPage}
+                trailing={<span className="font-mono text-[10px]">{t('window.yukle')}</span>}
+              />
+            )}
+            {onRestartApp && (
+              <HubAction
+                icon={<RotateCw className={cn('size-4', restartingApp && 'animate-spin')} />}
+                label={restartingApp ? t('window.yeniden_baslatiliyor') : t('common.uygulamayi_yeniden_baslat')}
+                detail={restartingApp ? t('window.bu_birkac_saniye_surebilir') : t('window.takilan_ya_da_siyah_kalan_uygulamayi')}
+                onClick={onRestartApp}
+                disabled={restartingApp}
+                trailing={<span className="font-mono text-[10px]">{t('window.yenile')}</span>}
+              />
+            )}
           </>
         )}
 
@@ -190,8 +208,8 @@ export const HubPanel = forwardRef(function HubPanel(
 
             <HubAction
               icon={workspaceSent ? <Check className="size-4 text-status-active" /> : <Send className="size-4" />}
-              label={workspaceSent ? "Workspace'e gönderildi" : "Workspace'e gönder"}
-              detail={workspaceSent ? 'Hazır' : 'Mevcut durumu paylaş'}
+              label={workspaceSent ? t('window.workspace_e_gonderildi') : t('window.workspace_e_gonder')}
+              detail={workspaceSent ? t('common.hazir') : t('window.mevcut_durumu_paylas')}
               onClick={onSend}
               emphasized={workspaceSent}
             />
@@ -246,7 +264,7 @@ function HubTile({ icon, label, active, onClick }) {
         onClick?.(e);
       }}
       aria-pressed={active}
-      aria-label={`${label}: ${active ? 'açık' : 'kapalı'}`}
+      aria-label={`${label}: ${active ? t('common.acik') : t('common.kapali')}`}
     >
       <span className="grid size-7 shrink-0 place-items-center rounded-full bg-background/20">
         {icon}

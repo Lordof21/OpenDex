@@ -15,6 +15,9 @@ import { api } from '../lib/api.js';
 import { useOsWindowController } from './titlebar/useOsWindowController.js';
 import SnapLayoutMenu from './titlebar/SnapLayoutMenu.jsx';
 import AudioButton from './titlebar/AudioButton.jsx';
+import ReloadPageButton from './titlebar/ReloadPageButton.jsx';
+import { isFrontendOnlyWindow } from './frontendOnly.js';
+import { isMirrorPackage } from './mirrorPackage.js';
 import HandoffMenu from './titlebar/HandoffMenu.jsx';
 import { useLongPress } from '../ui/useLongPress.js';
 import { WindowControl } from '../ui/IconButton.jsx';
@@ -22,6 +25,7 @@ import { isFilesWindow } from './filesWindow.js';
 import { iconPackageOf } from './workspacePackage.js';
 import AppIcon from '../ui/AppIcon.jsx';
 import { cn } from '../lib/utils.js';
+import { t } from '../i18n/index.js';
 
 export default function TitleBar({
   win,
@@ -65,7 +69,7 @@ export default function TitleBar({
         useSystemStore
           .getState()
           .pushToast?.(
-            'ℹ️ Başlangıç noktasındasınız. Kapatmak için pencere kapatma (X) veya küçültme (-) butonunu kullanın.'
+            t('window.baslangic_noktasindasiniz_kapatmak_2')
           );
       }
     } catch (err) {
@@ -86,6 +90,9 @@ export default function TitleBar({
   const isMaximized = Boolean(win.maximized);
   // Dosyalar penceresi bir telefon uygulaması değildir: Android Geri, pencere sesi ve "telefona aktar" anlamsızdır.
   const isFiles = isFilesWindow(win);
+  // A real Android app + its own stream (not the Workspace container, Files/crop windows or the phone mirror): the only windows
+  // that can have a web page to reload.
+  const hasAppSession = !win.isEcoWorkspace && !isFrontendOnlyWindow(win) && !isMirrorPackage(win.package);
 
   return (
     <>
@@ -117,10 +124,10 @@ export default function TitleBar({
       </div>
 
       {/* RIGHT: Window Controls Bar */}
-      <div className="flex items-center" aria-label="Pencere kontrolleri">
+      <div className="flex items-center" aria-label={t('window.pencere_kontrolleri')}>
         {/* Back Button */}
         {!isFiles && (
-          <WindowControl label="Geri" onClick={handleAndroidBack}>
+          <WindowControl label={t('window.geri')} onClick={handleAndroidBack}>
             <ChevronLeft className="size-4" />
           </WindowControl>
         )}
@@ -138,9 +145,9 @@ export default function TitleBar({
             e.stopPropagation();
             onToggleHub?.();
           }}
-          aria-label="Pencere Hub ayarları"
+          aria-label={t('window.pencere_hub_ayarlari')}
           aria-expanded={hubOpen}
-          data-tooltip="Pencere Hub'ı"
+          data-tooltip={t('window.pencere_hub_i')}
           data-tooltip-position="bottom"
         >
           <Settings2 className="size-4" />
@@ -150,9 +157,12 @@ export default function TitleBar({
             Workspace task's audio. */}
         {!isFiles && <AudioButton windowId={win.sourceTaskId || win.id} />}
 
+        {/* Chromium-based app: reload the foreground tab (appears only when the window really has a page). */}
+        <ReloadPageButton windowId={win.id} enabled={hasAppSession && !isPip} />
+
         {/* Transfer to Phone */}
         {!isFiles && (
-          <WindowControl label="Telefona aktar" aria-haspopup="menu" aria-expanded={Boolean(handoffMenuAnchor)} {...handoffPress}>
+          <WindowControl label={t('common.telefona_aktar')} aria-haspopup="menu" aria-expanded={Boolean(handoffMenuAnchor)} {...handoffPress}>
             <Smartphone className="size-4" />
           </WindowControl>
         )}
@@ -161,7 +171,7 @@ export default function TitleBar({
         <span className="mx-1 h-4 w-px bg-frame-border" aria-hidden="true" />
 
         {/* Minimize */}
-        <WindowControl label="Simge durumuna küçült" onClick={handleMinimize}>
+        <WindowControl label={t('common.simge_durumuna_kucult')} onClick={handleMinimize}>
           <Minus className="size-4" />
         </WindowControl>
 
@@ -178,7 +188,7 @@ export default function TitleBar({
           }}
         >
           <WindowControl
-            label={isMaximized ? 'Önceki boyut' : 'Ekranı kapla'}
+            label={isMaximized ? t('window.onceki_boyut') : t('window.ekrani_kapla')}
             onClick={() => handleMaximize()}
           >
             {isMaximized ? (
@@ -199,7 +209,7 @@ export default function TitleBar({
         </div>
 
         {/* Close Button (Destructive Hover) */}
-        <WindowControl label="Kapat" destructive onClick={handleClose}>
+        <WindowControl label={t('common.kapat')} destructive onClick={handleClose}>
           <X className="size-4" />
         </WindowControl>
       </div>

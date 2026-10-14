@@ -9,6 +9,7 @@ import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Smartphone, Monitor, ArrowLeftRight, Sparkles, ArrowDownToLine, Layers } from 'lucide-react';
 import { useWindowStore } from '../windowStore.js';
+import { t } from '../../i18n/index.js';
 
 export default function HandoffOverlay({ winId }) {
   const [isReclaiming, setIsReclaiming] = useState(false);
@@ -77,10 +78,10 @@ export default function HandoffOverlay({ winId }) {
 
         {/* Title & Subtitle */}
         <h3 className="text-base sm:text-lg font-bold text-foreground tracking-tight">
-          Uygulama Telefona Aktarıldı
+          {t('window.uygulama_telefona_aktarildi')}
         </h3>
         <p className="mt-1 text-xs text-muted-foreground font-normal leading-relaxed max-w-[280px]">
-          Bu uygulama şu anda telefonunuzun ekranında aktif durumda.
+          {t('window.bu_uygulama_su_anda_telefonunuzun')}
         </p>
 
         {/* Ecosystem Continuity Reassurance Pill */}
@@ -90,10 +91,10 @@ export default function HandoffOverlay({ winId }) {
           </div>
           <div className="min-w-0 flex-1">
             <div className="text-[11px] font-semibold text-foreground flex items-center gap-1.5">
-              <span>Kesintisiz Çoklu Ekran</span>
+              <span>{t('window.kesintisiz_coklu_ekran')}</span>
             </div>
             <p className="text-[10.5px] text-muted-foreground leading-snug mt-0.5">
-              Uygulamayı dilediğiniz an tek dokunuşla masaüstü penceresine geri alabilir ve kaldığınız yerden devam edebilirsiniz.
+              {t('window.uygulamayi_dilediginiz_an_tek')}
             </p>
           </div>
         </div>
@@ -120,7 +121,7 @@ export default function HandoffOverlay({ winId }) {
             ) : (
               <ArrowDownToLine className="w-3.5 h-3.5" strokeWidth={2.2} />
             )}
-            <span>{isReclaiming ? 'Masaüstüne Aktarılıyor...' : "PC'ye Geri Al"}</span>
+            <span>{isReclaiming ? t('window.masaustune_aktariliyor') : t('window.pc_ye_geri_al')}</span>
           </button>
 
           {/* Doğrudan kenar: telefon → Workspace (backend dock_to_workspace görevi Display 0'dan
@@ -134,7 +135,7 @@ export default function HandoffOverlay({ winId }) {
             className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-muted hover:bg-accent border border-border/70 text-foreground text-xs font-medium transition-all active:scale-[0.98] cursor-pointer"
           >
             <Layers className="w-3.5 h-3.5" strokeWidth={2} />
-            <span>Çalışma Alanına Al</span>
+            <span>{t('window.calisma_alanina_al')}</span>
           </button>
 
           {/* Secondary CTA */}
@@ -146,7 +147,7 @@ export default function HandoffOverlay({ winId }) {
             }}
             className="w-full py-2 px-3 rounded-xl bg-muted/60 hover:bg-accent border border-border/60 text-muted-foreground hover:text-foreground text-xs font-medium transition-all active:scale-[0.98] cursor-pointer"
           >
-            Pencereyi Kapat
+            {t('window.pencereyi_kapat')}
           </button>
 
           {/* Progress Shimmer during Reclaim */}

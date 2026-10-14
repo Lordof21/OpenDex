@@ -43,6 +43,7 @@ import { useSystemStore } from '../state/systemStore.js';
 import { getSettings } from '../settings/settingsApi.js';
 import { isMirrorPackage } from './mirrorPackage.js';
 import { logger } from '../lib/logger.js';
+import { t } from '../i18n/index.js';
 
 const MIN_W = 240;
 const MIN_H = 320;
@@ -641,8 +642,8 @@ function Grip({ id, className, win, isHeaderOpen = false, onHoverChange, onResiz
   return (
     <div
       role="separator"
-      aria-label="Yeniden boyutlandır"
-      title="Sürükleyerek yeniden boyutlandır"
+      aria-label={t('window.yeniden_boyutlandir')}
+      title={t('window.surukleyerek_yeniden_boyutlandir')}
       className={`absolute z-[75] ${className} ${isTopEdgeDisabled ? 'pointer-events-none opacity-0' : ''}`}
       onPointerDown={isTopEdgeDisabled ? undefined : onPointerDown}
       onPointerMove={isTopEdgeDisabled ? undefined : onPointerMove}

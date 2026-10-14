@@ -20,6 +20,7 @@ import { isFilesWindow } from './filesWindow.js';
 import { isFrontendOnlyWindow } from './frontendOnly.js';
 import { isMirrorPackage } from './mirrorPackage.js';
 import { restartDoneToast, restartFailedToast } from './appRestart.js';
+import { reloadPageWithToast, useWebReloadAvailable } from './webReload.js';
 import ResizeHandle from './ResizeHandle.jsx';
 import VisualControls from './VisualControls.jsx';
 import HubPanel from './titlebar/HubPanel.jsx';
@@ -50,6 +51,7 @@ import { windowVariants } from '../ui/motion.js';
 import { Z_INDEX } from '../ui/zIndex.js';
 import { useSystemStore } from '../state/systemStore.js';
 import { logger } from '../lib/logger.js';
+import { t } from '../i18n/index.js';
 
 // Dosya yöneticisi ayrı parça olarak yüklenir: açılışta paketin boyutunu şişirmez, ilk Dosyalar penceresinde gelir.
 const FilesApp = lazy(() => import('../files/FilesApp.jsx'));
@@ -557,6 +559,19 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
     }
   }, [win.id, restartingApp]);
 
+  // Hub "Sayfayı yenile": Chromium tabanlı tarayıcıda açık sekmeyi normal yenileme ile yeniden yükler (kullanıcı isteğiyle; boyut
+  // değişince kendiliğinden yenilenmez — okunan sayfayı bozar, telefona her seferinde yük bindirir). Satır yalnız Hub açıkken
+  // telefona sorulur ve yalnız web sayfası olan pencerede görünür.
+  const webReloadAvailable = useWebReloadAvailable(win.id, hubOpen && hasAppSession);
+  const [reloadingPage, setReloadingPage] = useState(false);
+  const reloadPage = useCallback(async () => {
+    if (reloadingPage) return;
+    setReloadingPage(true);
+    await reloadPageWithToast(win.id);
+    setReloadingPage(false);
+    setHubOpen(false);
+  }, [win.id, reloadingPage]);
+
   const toggleVisualControls = useCallback(() => {
     useWindowStore.setState((s) => ({
       windows: s.windows.map((w) =>
@@ -583,10 +598,10 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
     logger.trace(`[OpenDeX:HUB 🏠] handleSendToWorkspace tetiklendi -> winId=${win.id} pkg=${win.package}`);
     try {
       await useWindowStore.getState().dockToWorkspace(win.id);
-      useSystemStore.getState().pushToast?.('Pencere çalışma alanına aktarıldı ✓');
+      useSystemStore.getState().pushToast?.(t('window.pencere_calisma_alanina_aktarildi'));
     } catch (err) {
       console.error('[OpenDeX:HUB ❌] dockToWorkspace başarısız:', err);
-      useSystemStore.getState().pushToast?.('Çalışma alanına aktarma başarısız ⚠️');
+      useSystemStore.getState().pushToast?.(t('window.calisma_alanina_aktarma_basarisiz'));
     } finally {
       setTimeout(() => setWorkspaceSent(false), 1800);
       setHubOpen(false);
@@ -826,16 +841,16 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
               pipWindow.document.body
             )}
             <div className="size-full flex flex-col items-center justify-center bg-card/85 p-6 text-center backdrop-blur-md select-none">
-              <p className="text-sm font-semibold text-foreground">Pencere Ayrı Ekranda Açık (PiP)</p>
+              <p className="text-sm font-semibold text-foreground">{t('window.pencere_ayri_ekranda_acik_pip')}</p>
               <p className="text-xs text-muted-foreground mt-1 max-w-[260px]">
-                Görüntü ayrı pencerede akıyor. Masaüstüne dönmek için butona tıklayın veya PiP penceresini kapatın.
+                {t('window.goruntu_ayri_pencerede_akiyor')}
               </p>
               <button
                 type="button"
                 onClick={osWindowController.togglePip}
                 className="mt-3 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground shadow-sm hover:bg-primary/90 cursor-pointer"
               >
-                Masaüstüne Geri Al
+                {t('window.masaustune_geri_al')}
               </button>
             </div>
           </>
@@ -915,6 +930,8 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
             onDisplayLock={hasDisplayLock ? toggleDisplayLock : undefined}
             onRestartApp={hasAppSession ? restartApp : undefined}
             restartingApp={restartingApp}
+            onReloadPage={hasAppSession && webReloadAvailable ? reloadPage : undefined}
+            reloadingPage={reloadingPage}
             dynamicDp={dpiPolicyOf(win, effectiveSettings).mode !== 'custom'}
             onDynamicDp={() => toggleCustomDpi(win.id)}
             visualControls={Boolean(win.visualControls)}

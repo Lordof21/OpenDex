@@ -1,25 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import {
-  X,
-  Square,
-  Copy,
-  ArrowUpRight,
-  ChevronLeft,
-  SlidersHorizontal,
-  Check,
-  Smartphone,
-  PictureInPicture2,
-  ArrowDownToLine,
-  AppWindow,
-} from 'lucide-react';
-import { WindowControl } from '../ui/IconButton.jsx';
-import AppIcon from '../ui/AppIcon.jsx';
-import { MenuSurface } from '../ui/Menu.jsx';
-import AudioButton from './titlebar/AudioButton.jsx';
+import { Smartphone } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useWindowStore } from './windowStore.js';
 import { useSystemStore } from '../state/systemStore.js';
+import { useLiveSettings } from '../settings/liveSettings.js';
 import { cn } from '../lib/utils.js';
 import { computeWorkspaceViewport } from './WorkspaceCanvas.jsx';
 import { calculateWorkspaceTaskDpi, applySubpixelRule, resolveTaskDensity } from './windowMath.js';
@@ -29,31 +14,30 @@ import {
   useWorkspaceTaskPipOpen,
 } from './workspacePip/workspacePipHost.js';
 import { logger } from '../lib/logger.js';
-import { PrecisionSlider } from '../ui/PrecisionSlider.jsx';
+import WorkspaceTaskHeader from './workspaceTask/WorkspaceTaskHeader.jsx';
+import WorkspaceTaskHub from './workspaceTask/WorkspaceTaskHub.jsx';
+import { headerDensityFor } from './workspaceTask/taskMetrics.js';
+import { t as tt } from '../i18n/index.js';
 
 const MIN_TASK_W = 100;
 const MIN_TASK_H = 80;
-
-const DPI_PRESETS = [
-  { label: 'Auto (Dinamik-Fix)', value: 'auto' },
-  { label: '160 DPI (Ultra Kompakt)', value: 160 },
-  { label: '220 DPI (Kompakt Tablet)', value: 220 },
-  { label: '260 DPI (Standart Tablet)', value: 260 },
-  { label: '300 DPI (Büyük & Okunaklı)', value: 300 },
-  { label: '340 DPI (Telefon Modu - Büyük İkonlar)', value: 340 },
-  { label: '400 DPI (Ekstra Büyük)', value: 400 },
-];
+// Hub'ın kalacağı kutu (görev penceresi) bundan küçükse hub sıkı (compact) düzende açılır: açıklamasız satırlar, tek sıra döşeme.
+const HUB_COMPACT_BELOW_H = 560;
+const HUB_COMPACT_BELOW_W = 340;
+// Görev penceresi bundan küçükse hub onu sınır almaz (menuPosition.limitBox'ın en küçük kutusu: 200+16 × 160+16).
+const HUB_MIN_FRAME_W = 216;
+const HUB_MIN_FRAME_H = 176;
 
 // Kenarlar (z-40) + köşeler (z-50, kenarların üstünde); başlıklar testlerde getByTitle ile aranır.
 const RESIZE_HANDLES = [
-  { dir: 'n', title: 'Yukarı Boyutlandır', className: '-top-1 left-3 right-3 h-2 cursor-ns-resize z-40' },
-  { dir: 's', title: 'Aşağı Boyutlandır', className: '-bottom-1 left-3 right-3 h-2 cursor-ns-resize z-40' },
-  { dir: 'w', title: 'Sola Boyutlandır', className: 'top-3 bottom-3 -left-1 w-2 cursor-ew-resize z-40' },
-  { dir: 'e', title: 'Sağa Boyutlandır', className: 'top-3 bottom-3 -right-1 w-2 cursor-ew-resize z-40' },
-  { dir: 'nw', title: 'Sol-Üst Boyutlandır', className: '-top-1.5 -left-1.5 size-3.5 cursor-nwse-resize z-50 rounded-sm' },
-  { dir: 'ne', title: 'Sağ-Üst Boyutlandır', className: '-top-1.5 -right-1.5 size-3.5 cursor-nesw-resize z-50 rounded-sm' },
-  { dir: 'sw', title: 'Sol-Alt Boyutlandır', className: '-bottom-1.5 -left-1.5 size-3.5 cursor-nesw-resize z-50 rounded-sm' },
-  { dir: 'se', title: 'Sağ-Alt Boyutlandır', className: '-bottom-1.5 -right-1.5 size-3.5 cursor-nwse-resize z-50 rounded-sm' },
+  { dir: 'n', title: tt('window.yukari_boyutlandir'), className: '-top-1 left-3 right-3 h-2 cursor-ns-resize z-40' },
+  { dir: 's', title: tt('window.asagi_boyutlandir'), className: '-bottom-1 left-3 right-3 h-2 cursor-ns-resize z-40' },
+  { dir: 'w', title: tt('window.sola_boyutlandir'), className: 'top-3 bottom-3 -left-1 w-2 cursor-ew-resize z-40' },
+  { dir: 'e', title: tt('window.saga_boyutlandir'), className: 'top-3 bottom-3 -right-1 w-2 cursor-ew-resize z-40' },
+  { dir: 'nw', title: tt('window.sol_ust_boyutlandir'), className: '-top-1.5 -left-1.5 size-3.5 cursor-nwse-resize z-50 rounded-sm' },
+  { dir: 'ne', title: tt('window.sag_ust_boyutlandir'), className: '-top-1.5 -right-1.5 size-3.5 cursor-nesw-resize z-50 rounded-sm' },
+  { dir: 'sw', title: tt('window.sol_alt_boyutlandir'), className: '-bottom-1.5 -left-1.5 size-3.5 cursor-nesw-resize z-50 rounded-sm' },
+  { dir: 'se', title: tt('window.sag_alt_boyutlandir'), className: '-bottom-1.5 -right-1.5 size-3.5 cursor-nwse-resize z-50 rounded-sm' },
 ];
 
 export default function WorkspaceTaskFrame({
@@ -68,6 +52,7 @@ export default function WorkspaceTaskFrame({
   isFocused,
   onFocus,
 }) {
+  const frameRef = useRef(null);
   const dragRef = useRef(null);
   const resizeRef = useRef(null);
   const prevBoundsRef = useRef(null);
@@ -75,10 +60,9 @@ export default function WorkspaceTaskFrame({
   const [isHovered, setIsHovered] = useState(false);
   const [isHeaderHovered, setIsHeaderHovered] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  const [showDpiMenu, setShowDpiMenu] = useState(false);
-  const [sliderDpi, setSliderDpi] = useState(
-    typeof task.density === 'number' ? task.density : 260
-  );
+  // Görev hub'ı: ⚙ düğmesine bağlı (anchor = düğme) ya da başlığa sağ tıkla imlecin yanında (anchor = {x, y}).
+  const [hub, setHub] = useState(null);
+  const defaultWindowing = useLiveSettings()?.phone_handoff_windowing || 'fullscreen';
   const hideTimerRef = useRef(null);
   // Telefona park edilmiş: Android task'ı Display 0'da; çerçeve Workspace'teki YERİNİ tutar.
   const isParked = Boolean(task.handoffToPhone);
@@ -102,14 +86,7 @@ export default function WorkspaceTaskFrame({
     };
   }, []);
 
-  // İnce ayar kaydırıcısı: sürüklerken YALNIZ etiket (`sliderDpi`) değişir; daemon'a
-  // (setWorkspaceTaskDensity -> set_task_density) gerçek uygulama jest bitince TEK kez gider — sürükleme
-  // sırasında 120 ms duraksama artık görevi yeniden yerleştirmez. Esc / iptal: eski değere döner, istek yok.
-  const commitDensity = (value) => {
-    useWindowStore.getState().setWorkspaceTaskDensity(task.windowId, value, 'manual');
-  };
-
-  const isHeaderVisible = isHeaderHovered || isDragging || isResizing;
+  const isHeaderVisible = isHeaderHovered || isDragging || isResizing || hub !== null;
 
   // Use the normalized viewport from WorkspaceCanvas (letterbox offsets + uniform scale)
   const vp = viewport || computeWorkspaceViewport(frameW, frameH, vdW || deviceW, vdH || deviceH);
@@ -141,13 +118,13 @@ export default function WorkspaceTaskFrame({
     const hPx = Math.max(50, b - t);
 
     // Yoğunluk kararı tek yerde (çerçeve, Sub-PiP, DeX-içi kırpma): manual → korunur, auto → boyuta göre.
-    const { density: targetDpi, mode: densityMode } = resolveTaskDensity(task, wPx, hPx, effVdH || 1080, { scale });
+    const { density: targetDpi, mode: densityMode } = resolveTaskDensity(task, wPx, hPx, effVdH || 1080);
     const isManual = densityMode === 'manual';
 
     const wDp = Math.round((wPx * 160) / targetDpi);
     const hDp = Math.round((hPx * 160) / targetDpi);
     const swDp = Math.min(wDp, hDp);
-    const modeStr = swDp >= 720 ? 'Desktop (≥720dp)' : swDp >= 600 ? 'Tablet (≥600dp)' : 'Phone (<600dp)';
+    const modeStr = swDp >= 720 ? tt('window.desktop_720dp') : swDp >= 600 ? tt('window.tablet_600dp') : 'Phone (<600dp)';
 
     logger.trace(
       `%c[TaskFrame 📐 COMMIT_RESIZE]%c ${task.title || task.package}\n` +
@@ -175,7 +152,7 @@ export default function WorkspaceTaskFrame({
       if (res?.at_root || res?.status === 'at_root') {
         useSystemStore
           .getState()
-          .pushToast?.('ℹ️ Başlangıç noktasındasınız. Kapatmak için (X) butonunu kullanın.');
+          .pushToast?.(tt('window.baslangic_noktasindasiniz_kapatmak'));
       }
     } catch (err) {
       console.error('[WorkspaceTaskFrame] Back key injection failed:', err);
@@ -311,9 +288,44 @@ export default function WorkspaceTaskFrame({
     }
   };
 
+  // ── Başlık ve hub eylemleri: tek yerde, ikisi de AYNI işlevleri çağırır ──
+  const closeHub = useCallback(() => setHub(null), []);
+  // Hub, GÖREVİN kendi penceresinin (çerçevenin) içinde kalır. Çerçeve hub'ı taşıyamayacak kadar küçükse (ekranda
+  // ~216×176'dan az) Workspace tuvali sınırdır: panel hiçbir zaman erişilemez bir yere konmaz.
+  const hubBox = useCallback(() => {
+    const frame = frameRef.current?.getBoundingClientRect();
+    if (frame && frame.width >= HUB_MIN_FRAME_W && frame.height >= HUB_MIN_FRAME_H) return frame;
+    return frameRef.current?.closest('[data-workspace-canvas]')?.getBoundingClientRect() ?? null;
+  }, []);
+  const openHub = (anchor) => {
+    const rect = hubBox();
+    setHub({ anchor, compact: Boolean(rect) && (rect.height < HUB_COMPACT_BELOW_H || rect.width < HUB_COMPACT_BELOW_W) });
+  };
+  const store = () => useWindowStore.getState();
+  const setDensityAuto = () => {
+    const [l, t, r, b] = task.bounds;
+    store().setWorkspaceTaskDensity(task.windowId, calculateWorkspaceTaskDpi(r - l, b - t, effVdH || 1080), 'auto');
+  };
+  const actions = {
+    toggleHub: (button) => (hub ? setHub(null) : openHub(button)),
+    openHubAt: (point) => openHub(point),
+    back: handleAndroidBack,
+    // `windowing` verilmezse Ayarlar'daki varsayılan kip; hub / başlık menüsünden seçilirse yalnız bu aktarım için.
+    handoff: (windowing) => store().handoffWindowToPhone(task.windowId, windowing),
+    reclaim: () => store().reclaimWindow(task.windowId),
+    toggleMaximize: toggleMaximizeInsideWorkspace,
+    togglePip: () => (pipOpen ? closeWorkspaceTaskPip(task.windowId) : openWorkspaceTaskPip(task, { w: effVdW, h: effVdH })),
+    openCrop: () => store().openWorkspaceCropWindow(task.windowId),
+    popOut: () => store().popOutToDesktop(task.windowId),
+    closeTask: () => store().closeWorkspaceTask(task.windowId),
+    setDensityAuto,
+    setDensity: (value) => store().setWorkspaceTaskDensity(task.windowId, value, 'manual'),
+  };
+
   return (
     <motion.div
       data-task-frame-id={task.windowId}
+      ref={frameRef}
       onClick={() => onFocus?.(task.windowId)}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
@@ -361,236 +373,38 @@ export default function WorkspaceTaskFrame({
         )}
       />
 
-      {/* ─── Sleek Hover-Revealed TitleBar Header (OpenDeX Native Theme) ─── */}
-      <div
-        onMouseEnter={handleMouseEnterHeader}
-        onMouseLeave={handleMouseLeaveHeader}
-        onPointerDown={onHeaderPointerDown}
-        onDoubleClick={toggleMaximizeInsideWorkspace}
-        className={cn(
-          'absolute top-0 left-0 right-0 h-8 rounded-t-[calc(var(--radius-window)-1px)] bg-frame/95 backdrop-blur-xl border-b border-frame-border pl-2.5 pr-1 flex items-center justify-between transition-all duration-200 z-40 select-none shadow-sm',
-          isHeaderVisible
-            ? 'opacity-100 translate-y-0 pointer-events-auto'
-            : 'opacity-0 -translate-y-2 pointer-events-none',
-          isFocused
-            ? 'text-foreground'
-            : 'text-frame-muted hover:text-foreground'
-        )}
-      >
-        {/* LEFT: App Icon & Title */}
-        <div className="flex min-w-0 items-center gap-2 pointer-events-none">
-          <AppIcon pkg={task.package} displayName={task.title} size={20} />
-          <span
-            className="truncate font-mono text-[11px] text-frame-muted font-medium"
-            title={task.title || task.package}
-          >
-            {task.title || task.package}
-          </span>
-          <span
-            className={cn(
-              'shrink-0 rounded px-1 text-[9px] font-medium',
-              isParked ? 'bg-warning/15 text-warning' : 'bg-primary/10 text-primary',
-            )}
-            title={isParked ? 'Bu görev telefonun ekranında çalışıyor' : 'Bu görev paylaşımlı çalışma alanında'}
-          >
-            {isParked ? 'Telefonda' : 'Çalışma Alanı'}
-          </span>
-        </div>
+      {/* ─── Görev başlığı: sık kullanılanlar burada, geri kalanı hub'da (sağ tık ya da ⚙) ─── */}
+      <WorkspaceTaskHeader
+        task={task}
+        density={headerDensityFor(boxW)}
+        visible={isHeaderVisible}
+        focused={isFocused}
+        parked={isParked}
+        maximized={isSnappedMaximized}
+        hubOpen={hub !== null}
+        actions={actions}
+        surfaceProps={{
+          onMouseEnter: handleMouseEnterHeader,
+          onMouseLeave: handleMouseLeaveHeader,
+          onPointerDown: onHeaderPointerDown,
+          onDoubleClick: toggleMaximizeInsideWorkspace,
+        }}
+      />
 
-        {/* RIGHT: Window Controls Matching TitleBar.jsx */}
-        <div className="flex items-center gap-0.5" aria-label="Görev kontrolleri">
-          {/* Android Back */}
-          <WindowControl compact nativeTitle label="Geri" onClick={handleAndroidBack}>
-            <ChevronLeft className="size-3.5" />
-          </WindowControl>
-
-          {/* Per-Task Isolated DPI Control */}
-          <div className={cn('relative', isParked && 'hidden')}>
-            <WindowControl compact nativeTitle
-              label={
-                task.density
-                  ? `DPI: ${task.density} (${task.densityMode === 'manual' ? 'Manuel' : 'Auto'})`
-                  : 'Görev DPI Yoğunluğu'
-              }
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowDpiMenu((prev) => {
-                  const next = !prev;
-                  if (next) {
-                    setSliderDpi(typeof task.density === 'number' ? task.density : 260);
-                  }
-                  return next;
-                });
-              }}
-            >
-              <SlidersHorizontal className="size-3.5" />
-            </WindowControl>
-
-            {showDpiMenu && (
-              <MenuSurface
-                aria-label="Görev yoğunluğu"
-                className="absolute right-0 top-full z-50 mt-1 w-48 border-border/80 bg-popover/95 shadow-xl backdrop-blur-xl"
-                onClick={(e) => e.stopPropagation()}
-                // Menü başlık çubuğunun çocuğu: basış yukarı sızarsa görev sürüklenmeye başlar (kaydırıcıyı
-                // tutunca pencere kayıyordu) ve bırakınca gereksiz bir resize-task isteği giderdi.
-                onPointerDown={(e) => e.stopPropagation()}
-              >
-                <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider border-b border-border/50 mb-1">
-                  Görev Yoğunluğu (DPI)
-                </div>
-                {DPI_PRESETS.map((preset) => {
-                  const isAuto = task.densityMode !== 'manual';
-                  const isActive =
-                    preset.value === 'auto'
-                      ? isAuto
-                      : !isAuto && task.density === preset.value;
-                  return (
-                    <button
-                      key={preset.value}
-                      type="button"
-                      className={cn(
-                        'flex w-full items-center justify-between px-2 py-1.5 text-xs rounded-sm transition-colors text-left cursor-pointer',
-                        isActive
-                          ? 'bg-primary text-primary-foreground font-medium'
-                          : 'hover:bg-accent hover:text-accent-foreground text-foreground'
-                      )}
-                      onClick={() => {
-                        if (preset.value === 'auto') {
-                          const [l, t, r, b] = task.bounds;
-                          const autoDpi = calculateWorkspaceTaskDpi(
-                            r - l,
-                            b - t,
-                            effVdH || 1080,
-                            { scale },
-                          );
-                          useWindowStore
-                            .getState()
-                            .setWorkspaceTaskDensity(task.windowId, autoDpi, 'auto');
-                        } else {
-                          useWindowStore
-                            .getState()
-                            .setWorkspaceTaskDensity(
-                              task.windowId,
-                              preset.value,
-                              'manual'
-                            );
-                        }
-                        setShowDpiMenu(false);
-                      }}
-                    >
-                      <span>{preset.label}</span>
-                      {isActive && <Check className="size-3.5 shrink-0" />}
-                    </button>
-                  );
-                })}
-
-                {/* Fine-tune slider: continuous DPI between presets */}
-                <div className="mt-1 border-t border-border/50 px-2 pt-2 pb-1">
-                  <div className="mb-1.5 flex items-center justify-between">
-                    <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                      İnce Ayar
-                    </span>
-                    <span className="font-mono text-[11px] text-foreground">
-                      {sliderDpi} DPI
-                    </span>
-                  </div>
-                  <PrecisionSlider
-                    value={sliderDpi}
-                    min={120}
-                    max={480}
-                    step={4}
-                    showButtons={false}
-                    onChange={setSliderDpi}
-                    onCommit={commitDensity}
-                    label="DPI ince ayar kaydırıcısı"
-                    unit="DPI"
-                  />
-                </div>
-              </MenuSurface>
-            )}
-          </div>
-
-          {/* Telefon ⟷ Workspace: aynı fiil, yön görevin ŞU ANKİ konumundan gelir */}
-          <WindowControl compact nativeTitle
-            label={isParked ? "Çalışma Alanına Geri Al" : 'Telefona Aktar'}
-            onClick={(e) => {
-              e.stopPropagation();
-              const store = useWindowStore.getState();
-              if (isParked) store.reclaimWindow(task.windowId);
-              else store.handoffWindowToPhone(task.windowId);
-            }}
-          >
-            {isParked ? <ArrowDownToLine className="size-3.5 text-warning" /> : <Smartphone className="size-3.5" />}
-          </WindowControl>
-
-          {/* Workspace PiP: encoder maliyeti SIFIR — aynı akıştan yalnızca bu görevin kutusu */}
-          {/* This task's own audio channel (Android 13+; hidden otherwise) */}
-          <AudioButton windowId={task.windowId} compact />
-
-          {!isParked && (
-            <WindowControl compact nativeTitle
-              label={pipOpen ? "PiP'i Kapat" : "PiP'e Al (Ayrı Pencere)"}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (pipOpen) closeWorkspaceTaskPip(task.windowId);
-                else openWorkspaceTaskPip(task, { w: effVdW, h: effVdH });
-              }}
-            >
-              <PictureInPicture2 className={cn('size-3.5', pipOpen && 'text-info')} />
-            </WindowControl>
-          )}
-
-          {/* DeX içinde normal pencere: aynı akıştan kırpma, encoder maliyeti SIFIR */}
-          {!isParked && (
-            <WindowControl compact nativeTitle
-              label="DeX'te Pencere Olarak Aç (Kırpılmış)"
-              onClick={(e) => {
-                e.stopPropagation();
-                useWindowStore.getState().openWorkspaceCropWindow(task.windowId);
-              }}
-            >
-              <AppWindow className="size-3.5" />
-            </WindowControl>
-          )}
-
-          {/* Pop-Out to Native Desktop Window (kendi VD + encoder'ı ister) */}
-          {!isParked && (
-            <WindowControl compact nativeTitle
-              label="Masaüstüne Çıkar (Pop-Out)"
-              onClick={(e) => {
-                e.stopPropagation();
-                useWindowStore.getState().popOutToDesktop(task.windowId);
-              }}
-            >
-              <ArrowUpRight className="size-3.5" />
-            </WindowControl>
-          )}
-
-          {/* Maximize / Restore Toggle */}
-          <WindowControl compact nativeTitle
-            label={isSnappedMaximized ? 'Geri Yükle' : 'Çalışma Alanını Kapla'}
-            onClick={toggleMaximizeInsideWorkspace}
-          >
-            {isSnappedMaximized ? (
-              <Copy className="size-3 -scale-x-100" />
-            ) : (
-              <Square className="size-3" />
-            )}
-          </WindowControl>
-
-          {/* Close Task */}
-          <WindowControl compact nativeTitle
-            label="Kapat"
-            destructive
-            onClick={(e) => {
-              e.stopPropagation();
-              useWindowStore.getState().closeWorkspaceTask(task.windowId);
-            }}
-          >
-            <X className="size-3.5" />
-          </WindowControl>
-        </div>
-      </div>
+      {hub && (
+        <WorkspaceTaskHub
+          anchor={hub.anchor}
+          boundary={hubBox}
+          compact={hub.compact}
+          task={task}
+          parked={isParked}
+          pipOpen={pipOpen}
+          maximized={isSnappedMaximized}
+          defaultWindowing={defaultWindowing}
+          onClose={closeHub}
+          actions={actions}
+        />
+      )}
 
       {/* ─── Telefonda park kartı: çerçeve yerini korur, altındaki canvas'a tıklama SIZMAZ ─── */}
       {isParked && (
@@ -602,9 +416,9 @@ export default function WorkspaceTaskFrame({
           }}
         >
           <Smartphone className="size-6 text-warning" />
-          <p className="text-xs font-semibold text-scrim-foreground">Telefonda çalışıyor</p>
+          <p className="text-xs font-semibold text-scrim-foreground">{tt('window.telefonda_calisiyor')}</p>
           <p className="max-w-[220px] text-[10.5px] text-scrim-foreground/60">
-            Geri aldığınızda bu yerinde, kaldığı yerden devam eder.
+           {tt('window.geri_aldiginizda_bu_yerinde_kaldigi')}
           </p>
           <button
             type="button"
@@ -614,7 +428,7 @@ export default function WorkspaceTaskFrame({
               useWindowStore.getState().reclaimWindow(task.windowId);
             }}
           >
-            Çalışma Alanına Geri Al
+           {tt('window.calisma_alanina_geri_al_2')}
           </button>
         </div>
       )}
@@ -633,21 +447,21 @@ export default function WorkspaceTaskFrame({
       {isResizing && (() => {
         const liveW = Math.max(50, task.bounds[2] - task.bounds[0]);
         const liveH = Math.max(50, task.bounds[3] - task.bounds[1]);
-        const { density: liveDpi, mode: liveMode } = resolveTaskDensity(task, liveW, liveH, effVdH || 1080, { scale });
+        const { density: liveDpi, mode: liveMode } = resolveTaskDensity(task, liveW, liveH, effVdH || 1080);
         const isManual = liveMode === 'manual';
         const liveWDp = Math.round((liveW * 160) / liveDpi);
         const liveHDp = Math.round((liveH * 160) / liveDpi);
         return (
           <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 px-2.5 py-1 rounded-md bg-popover/95 border border-border text-[11px] font-mono text-popover-foreground shadow-lg pointer-events-none whitespace-nowrap z-50 flex items-center gap-2 backdrop-blur-md">
             <span className="font-semibold text-foreground">
-              {Math.round(liveW)} × {Math.round(liveH)} px
+             {tt('window.value_value2_px', { value: Math.round(liveW), value2: Math.round(liveH) })}
             </span>
             <span className="text-muted-foreground">•</span>
             <span className="text-primary font-medium">
-              {liveWDp} × {liveHDp} dp
+             {tt('window.livewdp_livehdp_dp', { liveWDp, liveHDp })}
             </span>
             <span className="text-muted-foreground text-[9px]">
-              (@{liveDpi} DPI {isManual ? '🔒' : '⚡'})
+             {tt('window.livedpi_dpi_value', { liveDpi, value: isManual ? '🔒' : '⚡' })}
             </span>
           </div>
         );

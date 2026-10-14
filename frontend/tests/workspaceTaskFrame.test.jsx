@@ -48,8 +48,10 @@ describe('WorkspaceTaskFrame component', () => {
     );
 
     expect(getByText('WhatsApp')).toBeInTheDocument();
-    expect(getByTitle(/Masaüstüne Çıkar/)).toBeInTheDocument();
-    expect(getByTitle(/Kapat/)).toBeInTheDocument();
+    // Başlıkta yalnız sık kullanılanlar durur; geri kalanı hub'dadır.
+    expect(getByTitle('Telefona Aktar')).toBeInTheDocument();
+    expect(getByTitle("Görev hub'ı")).toBeInTheDocument();
+    expect(getByTitle('Kapat')).toBeInTheDocument();
   });
 
   it('triggers onFocus when clicked', () => {
@@ -111,34 +113,30 @@ describe('WorkspaceTaskFrame component', () => {
     expect(closeSpy).toHaveBeenCalledWith('task-1');
   });
 
-  it('"DeX\'te pencere olarak aç" düğmesi kırpma penceresi açar; telefonda park görevde yoktur', () => {
+  it("hub'daki DeX'te pencere kırpma penceresi açar; telefonda park görevde yoktur", () => {
     const openSpy = vi.spyOn(useWindowStore.getState(), 'openWorkspaceCropWindow').mockReturnValue('crop-task-1');
     const props = { deviceW: 1920, deviceH: 1080, frameW: 960, frameH: 540, isFocused: true, onFocus: vi.fn() };
     const view = render(<WorkspaceTaskFrame task={MOCK_TASK} {...props} />);
 
-    fireEvent.click(view.getByTitle(/DeX'te Pencere Olarak Aç/));
+    fireEvent.click(view.getByTitle("Görev hub'ı"));
+    fireEvent.click(view.getByTestId('hub-crop'));
     expect(openSpy).toHaveBeenCalledWith('task-1');
     view.unmount();
 
     const parked = render(<WorkspaceTaskFrame task={{ ...MOCK_TASK, handoffToPhone: true }} {...props} />);
-    expect(parked.queryByTitle(/DeX'te Pencere Olarak Aç/)).toBeNull();
+    fireEvent.click(parked.getByTitle("Görev hub'ı"));
+    expect(parked.queryByTestId('hub-crop')).toBeNull();
+    expect(parked.getByTestId('hub-reclaim')).toBeInTheDocument();
   });
 
-  it('clicking pop-out button triggers popOutToDesktop', () => {
+  it("hub'daki Masaüstüne çıkar popOutToDesktop çağırır", () => {
     const popOutSpy = vi.spyOn(useWindowStore.getState(), 'popOutToDesktop');
-    const { getByTitle } = render(
-      <WorkspaceTaskFrame
-        task={MOCK_TASK}
-        deviceW={1920}
-        deviceH={1080}
-        frameW={960}
-        frameH={540}
-        isFocused={true}
-        onFocus={vi.fn()}
-      />
+    const { getByTitle, getByTestId } = render(
+      <WorkspaceTaskFrame task={MOCK_TASK} deviceW={1920} deviceH={1080} frameW={960} frameH={540} isFocused onFocus={vi.fn()} />,
     );
 
-    fireEvent.click(getByTitle(/Masaüstüne Çıkar/));
+    fireEvent.click(getByTitle("Görev hub'ı"));
+    fireEvent.click(getByTestId('hub-popout'));
     expect(popOutSpy).toHaveBeenCalledWith('task-1');
   });
 
@@ -302,7 +300,7 @@ describe('DPI ince ayar kaydırıcısı', () => {
   // 120..480 aralığı 200 px'e yayılır → 260 DPI tutamacı x ≈ 78
   function openMenu() {
     const utils = render(<WorkspaceTaskFrame task={TASK} viewport={VIEWPORT} isFocused onFocus={vi.fn()} />);
-    fireEvent.click(utils.getByTitle(/DPI: 260/));
+    fireEvent.click(utils.getByTitle("Görev hub'ı"));
     const slider = utils.getByRole('slider', { name: 'DPI ince ayar kaydırıcısı' });
     vi.spyOn(slider, 'getBoundingClientRect').mockReturnValue({
       left: 0, width: 200, right: 200, top: 0, bottom: 32, height: 32, x: 0, y: 0, toJSON() {},
@@ -371,8 +369,8 @@ describe('DPI ince ayar kaydırıcısı', () => {
   });
 
   it('menüdeki hazır ayara tıklamak da resize-task isteği tetiklemez (basış başlığa sızmaz)', () => {
-    const { getByText } = openMenu();
-    const preset = getByText('220 DPI (Kompakt Tablet)');
+    const { getByTestId } = openMenu();
+    const preset = getByTestId('hub-dpi-220');
 
     fireEvent.pointerDown(preset, { pointerId: 1, button: 0 });
     fireEvent.pointerUp(preset, { pointerId: 1 });

@@ -8,6 +8,7 @@ import { RouteSelector, audioErrorText } from '../../ui/audioRouting.jsx';
 import { MixerRow } from '../../taskbar/MixerRow.jsx';
 import { pushEscapeHandler } from '../../lib/escapeStack.js';
 import { cn } from '../../lib/utils.js';
+import { t } from '../../i18n/index.js';
 
 export default function AudioButton({ windowId, compact = false }) {
   const app = useAudioMixerStore(selectAppForWindow(windowId));
@@ -34,7 +35,7 @@ export default function AudioButton({ windowId, compact = false }) {
 
   const onPhone = app.on_phone || app.route === 'phone';
   const Icon = onPhone ? Smartphone : app.muted ? VolumeX : Volume2;
-  const label = onPhone ? 'Ses telefonda — ses ayarları' : app.muted ? 'Sesi aç' : 'Sessize al';
+  const label = onPhone ? t('window.ses_telefonda_ses_ayarlari') : app.muted ? t('common.sesi_ac') : t('window.sessize_al');
   const errorText = audioErrorText(app.error);
 
   return (
@@ -60,7 +61,7 @@ export default function AudioButton({ windowId, compact = false }) {
         aria-label={label}
         aria-haspopup="dialog"
         aria-expanded={open}
-        data-tooltip={`${label} (sağ tık: ses ayarları)`}
+        data-tooltip={t('window.label_sag_tik_ses_ayarlari', { label })}
         data-tooltip-position="bottom"
       >
         <Icon className={compact ? 'size-3.5' : 'size-4'} />
@@ -69,20 +70,20 @@ export default function AudioButton({ windowId, compact = false }) {
       {open && (
         <div
           role="dialog"
-          aria-label="Pencere ses ayarları"
+          aria-label={t('window.pencere_ses_ayarlari')}
           className="absolute right-0 top-full z-50 mt-1 w-64 rounded-lg border border-border bg-popover p-2.5 text-popover-foreground shadow-window"
         >
-          <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Ses çıkışı</p>
+          <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('window.ses_cikisi')}</p>
           <RouteSelector
             value={app.route}
             onChange={(route) => setRoute(app.package, route)}
-            label="Bu pencerenin ses çıkışı"
+            label={t('window.bu_pencerenin_ses_cikisi')}
             className="w-full justify-between"
           />
           {onPhone ? (
             <p className="mt-2 flex items-center gap-1.5 text-[10px] text-muted-foreground">
               <Smartphone className="size-3" />
-              {app.on_phone ? 'Uygulama telefona devredildi; sesi telefonda.' : 'Bu uygulamanın sesi telefonda çalıyor.'}
+              {app.on_phone ? 'Uygulama telefona devredildi; sesi telefonda.' : t('window.bu_uygulamanin_sesi_telefonda_caliyor')}
             </p>
           ) : (
             <MixerRow
@@ -90,7 +91,7 @@ export default function AudioButton({ windowId, compact = false }) {
               value={Math.round((app.volume ?? 1) * 100)}
               max={100}
               onChange={(v) => setVolume(app.package, v / 100)}
-              label="Pencere ses düzeyi"
+              label={t('window.pencere_ses_duzeyi')}
               muted={app.muted}
               onToggleMute={() => toggleMuted(app.package)}
               className="mt-1 border-b-0 pb-0"

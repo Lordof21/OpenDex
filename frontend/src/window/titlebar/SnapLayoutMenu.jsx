@@ -1,5 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
+import { t } from '../../i18n/index.js';
 
 const SNAP_LAYOUTS = [
   {
@@ -41,7 +42,7 @@ export default function SnapLayoutMenu({ current, onPick }) {
       transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
       className="absolute right-0 top-full z-[100] w-[240px] pt-1.5 select-none"
       role="menu"
-      aria-label="Yerleşim düzenleri"
+      aria-label={t('window.yerlesim_duzenleri')}
       onPointerDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
     >
@@ -62,7 +63,7 @@ export default function SnapLayoutMenu({ current, onPick }) {
                   e.stopPropagation();
                   onPick(item.zone);
                 }}
-                aria-label={`${item.zone} konumuna yerleştir`}
+                aria-label={t('window.zone_konumuna_yerlestir', { zone: item.zone })}
                 className={`${item.className} rounded-[3px] border border-border/60 bg-background/80 transition-colors hover:border-primary hover:bg-primary/70 ${
                   current === item.zone ? 'border-primary bg-primary/40' : ''
                 } cursor-pointer`}

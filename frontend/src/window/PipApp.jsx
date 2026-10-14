@@ -6,6 +6,7 @@ import TitleBar from './TitleBar.jsx';
 import VideoCanvas from './VideoCanvas.jsx';
 import { getSettings } from '../settings/settingsApi.js';
 import { api } from '../lib/api.js';
+import { t } from '../i18n/index.js';
 
 export default function PipApp({ winId }) {
   const [backendHealthy, setBackendHealthy] = useState(false);
@@ -110,7 +111,7 @@ export default function PipApp({ winId }) {
   if (!win) {
     return (
       <div className="flex h-full w-full items-center justify-center bg-video-backdrop text-scrim-foreground/60 text-sm">
-        Bağlantı bekleniyor...
+        {t('window.baglanti_bekleniyor')}
       </div>
     );
   }

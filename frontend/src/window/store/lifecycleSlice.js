@@ -35,6 +35,7 @@ import { resolveAppDisplayName } from '../../desktop/appRegistry.js';
 import { clearWindowThumbnail } from '../../state/windowThumbnailCache.js';
 import { logger } from '../../lib/logger.js';
 import { applyVisibleOrder } from '../../taskbar/taskbarModel.js';
+import { t as tt } from '../../i18n/index.js';
 
 // Package -> in-flight openWindow() promise. Not store state on purpose: it's
 // an implementation guard, not something a component should ever render from.
@@ -220,7 +221,7 @@ export function createLifecycleSlice(set, get) {
               {
                 id: handle.window_id,
                 package: app.package,
-                title: app.display_name || resolveAppDisplayName(app.package, isMirror ? 'Telefon Ekranını Yansıt' : app.package),
+                title: app.display_name || resolveAppDisplayName(app.package, isMirror ? tt('common.telefon_ekranini_yansit') : app.package),
                 x: initX,
                 y: initY,
                 w: initW,
@@ -430,7 +431,7 @@ export function createLifecycleSlice(set, get) {
             return {
               id: bw.window_id,
               package: bw.package,
-              title: isMirror ? 'Telefon Ekranını Yansıt' : (bw.package.split('.').pop() || bw.package),
+              title: isMirror ? tt('common.telefon_ekranini_yansit') : (bw.package.split('.').pop() || bw.package),
               x: clampedX,
               y: clampedY,
               w: initW,
@@ -522,6 +523,11 @@ export function createLifecycleSlice(set, get) {
     // backend's own explanation (ApiError.detail). Never touches window geometry or the stream: only the app is rebuilt.
     async restartWindowApp(id) {
       return api.post('/api/windows/restart-app', { window_id: id });
+    },
+
+    // "Sayfayı yenile" (see webReload.js): a normal reload of the window's foreground browser tab. User-initiated only.
+    async reloadWindowPage(id) {
+      return api.post('/api/windows/reload-page', { window_id: id });
     },
 
     async handleAndroidBack(id) {

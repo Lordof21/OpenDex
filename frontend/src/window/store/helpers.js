@@ -1,6 +1,7 @@
 // Shared, store-agnostic helpers used by more than one windowStore slice.
 
 import { useSystemStore } from '../../state/systemStore.js';
+import { t } from '../../i18n/index.js';
 
 // One-time, session-scoped hint: maximizedTargetSize() is bounded by the
 // OpenDeX app window's OWN on-screen size (window.innerWidth/innerHeight —
@@ -16,8 +17,8 @@ export function maybeWarnSmallAppWindow(w, h) {
   if (lowResHintShown || (w >= LOW_RES_HINT_W && h >= LOW_RES_HINT_H)) return;
   lowResHintShown = true;
   useSystemStore.getState().pushToast(
-    `OpenDeX penceresi küçük (${w}x${h}) — daha keskin görüntü için OpenDeX ` +
-      'uygulama penceresini büyütün/tam ekran yapın.',
+    t('window.opendex_penceresi_kucuk_wxh_daha', { w, h }) +
+      t('window.uygulama_penceresini_buyutun_tam'),
   );
 }
 
@@ -32,7 +33,7 @@ export function createEcoWorkspaceContainer({ zIndex, focused = false, wsUrl, vd
     id: 'eco-workspace',
     isEcoWorkspace: true,
     package: null,
-    title: 'Çalışma Alanı',
+    title: t('window.calisma_alani'),
     x: 60, y: 60, w: 1280, h: 800,
     zIndex,
     minimized: false,

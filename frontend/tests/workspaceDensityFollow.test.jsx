@@ -1,16 +1,12 @@
-// Workspace görev yoğunluğu (otomatik) VD pencereleriyle AYNI ergonomi kuralına bağlanır: karar görevin paylaşımlı 1920×1080
-// tuvaldeki pikselinde değil, EKRANDA kapladığı boyutta verilir. Eski sabit eğri görünüm ölçeğini bilmiyordu: Workspace penceresi
-// küçüldükçe yazılar aynı oranda küçülüyordu ("çok fazla şey var, yazılar küçük").
+// Yoğunluk hesabı görünüm ölçeğini BİLEBİLİR: DeX-içi kırpma penceresi ve Sub-PiP görevi ekranda kapladığı boyuta göre
+// yoğunlaştırır (VD pencereleriyle aynı ergonomi kuralı). Workspace'in KENDİ çerçevesi ise ölçek vermez: Workspace kendi
+// uzayıdır, penceresinin boyutu görevlerin yoğunluğuna dokunmaz (bkz. workspaceOwnSpace.test.jsx).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  WORKSPACE_DEFAULT_DPI,
   calculateDynamicFitDpi,
   calculateWorkspaceTaskDpi,
-  planAutoDensityFollow,
   resolveTaskDensity,
 } from '../src/window/windowMath.js';
-
-const task = (over = {}) => ({ windowId: 't1', bounds: [100, 100, 1100, 850], density: 210, densityMode: 'auto', ...over });
 
 // Yazı boyutu: ekranda dp başına CSS piksel = (VD'de dp başına piksel) × ölçek = (dpi / 160) × ölçek.
 const cssPxPerDp = (dpi, scale) => (dpi / 160) * scale;
@@ -75,39 +71,5 @@ describe('resolveTaskDensity — çerçeve, Sub-PiP ve kırpma penceresi aynı �
     expect(resolveTaskDensity({ densityMode: 'manual', density: 260 }, 1000, 750, 1080, { scale: 0.5 })).toEqual({
       density: 260, mode: 'manual',
     });
-  });
-});
-
-describe('planAutoDensityFollow — pencere boyutu değişince hangi görevler yeniden yazılır', () => {
-  beforeEach(() => vi.stubGlobal('devicePixelRatio', 1));
-  afterEach(() => vi.unstubAllGlobals());
-
-  it('ölçek değişince otomatik görevin yoğunluğu yeni ölçeğe uyar', () => {
-    const wanted = calculateWorkspaceTaskDpi(1000, 750, 1080, { scale: 0.5 });
-    expect(planAutoDensityFollow([task({ density: 200 })], { scale: 0.5 })).toEqual([{ windowId: 't1', density: wanted }]);
-  });
-
-  it('zaten uyumluysa (%8\'den az fark) hiçbir şey yazılmaz — uygulama gereksiz yeniden kurulmaz', () => {
-    const wanted = calculateWorkspaceTaskDpi(1000, 750, 1080, { scale: 0.5 });
-    expect(planAutoDensityFollow([task({ density: wanted + 4 })], { scale: 0.5 })).toEqual([]);
-  });
-
-  it('kullanıcının sabitlediği (manual) ve telefondaki görevlere dokunulmaz', () => {
-    const tasks = [
-      task({ windowId: 'm', densityMode: 'manual', density: 120 }),
-      task({ windowId: 'p', handoffToPhone: true, density: 120 }),
-    ];
-    expect(planAutoDensityFollow(tasks, { scale: 0.5 })).toEqual([]);
-  });
-
-  it('yoğunluğu hiç yazılmamış görev VD\'nin kendi yoğunluğuyla yaşıyor sayılır (açılışta bir kez uyar)', () => {
-    const wanted = calculateWorkspaceTaskDpi(1000, 750, 1080, { scale: 0.5 });
-    expect(Math.abs(wanted - WORKSPACE_DEFAULT_DPI) / WORKSPACE_DEFAULT_DPI).toBeGreaterThan(0.08);
-    expect(planAutoDensityFollow([task({ density: null })], { scale: 0.5 })).toEqual([{ windowId: 't1', density: wanted }]);
-  });
-
-  it('ölçek bilinmiyorsa (0 / yok) hiçbir şey planlanmaz', () => {
-    expect(planAutoDensityFollow([task({ density: 100 })], { scale: 0 })).toEqual([]);
-    expect(planAutoDensityFollow([task({ density: 100 })], {})).toEqual([]);
   });
 });

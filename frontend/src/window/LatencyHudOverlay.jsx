@@ -15,6 +15,7 @@ import {
   Hourglass,
 } from 'lucide-react';
 import { startBackendRttProbe, useBackendRtt } from '../media/rttProbe.js';
+import { t } from '../i18n/index.js';
 
 // Ölçülemeyen değer HİÇBİR ZAMAN uydurulmaz: null → "—". (Eski sürüm rtt=12/6, fps=60,
 // jitter=0.3 gibi sabitleri ve `fps || 60` gibi "0 ise 60 göster" kalıplarını kullanıyordu.)
@@ -78,25 +79,27 @@ export default function LatencyHudOverlay({ win, decoder, hasFrame }) {
 
   if (!isVisible || !hasFrame) return <span ref={anchorRef} hidden aria-hidden="true" />;
 
-  const backlogged = (stats?.queueMs ?? 0) > 100 || (stats?.resyncs ?? 0) > 0;
+  // Tıkanıklık ANLIK durumu yansıtır: kuyrukta 100ms üzeri birikme varsa veya bu pencerede kare atlanıyorsa.
+  // Kümülatif toplam resync sayacı burayı kalıcı olarak kilitlemez; sistem normale dönünce rozet kendiliğinden kaybolur.
+  const backlogged = (stats?.queueMs ?? 0) > 100 || (stats?.skipped ?? 0) > 0;
 
   // Renk yalnızca GERÇEK bir ölçüme göre; ölçüm yoksa nötr.
   let pingColor = 'text-scrim-foreground/60';
   let pingDotColor = 'bg-scrim-foreground/40';
-  let qualityText = 'Ölçülemiyor';
+  let qualityText = t('window.olculemiyor');
   if (rtt != null) {
     if (rtt > 65) {
       pingColor = 'text-destructive';
       pingDotColor = 'bg-destructive shadow-[0_0_8px_var(--destructive)]';
-      qualityText = 'Gecikmeli';
+      qualityText = t('window.gecikmeli');
     } else if (rtt > 30) {
       pingColor = 'text-warning';
       pingDotColor = 'bg-warning shadow-[0_0_8px_var(--warning)]';
-      qualityText = 'Dengeli';
+      qualityText = t('common.dengeli_2');
     } else {
       pingColor = 'text-status-active';
       pingDotColor = 'bg-status-active shadow-[0_0_8px_var(--status-active)]';
-      qualityText = 'İyi';
+      qualityText = t('common.iyi');
     }
   }
 
@@ -109,7 +112,7 @@ export default function LatencyHudOverlay({ win, decoder, hasFrame }) {
         whileHover={{ scale: 1.03 }}
         whileTap={{ scale: 0.97 }}
         className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-scrim hover:bg-scrim/95 backdrop-blur-md border border-scrim-foreground/10 hover:border-info/40 shadow-window text-[11px] text-scrim-foreground transition-colors duration-150 cursor-pointer"
-        title="Canlı yayın ölçümlerini genişletmek için tıklayın (F8: Gizle/Göster)"
+        title={t('window.canli_yayin_olcumlerini_genisletmek')}
       >
         <span className="relative flex h-2 w-2">
           {rtt != null && <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${pingDotColor}`} />}
@@ -117,27 +120,27 @@ export default function LatencyHudOverlay({ win, decoder, hasFrame }) {
         </span>
 
         <span className={`font-bold tracking-tight ${pingColor}`}>
-          {show(rtt)} <span className="text-[9px] font-normal text-scrim-foreground/60">ms</span>
+          {show(rtt)} <span className="text-[9px] font-normal text-scrim-foreground/60">{t('window.ms')}</span>
         </span>
 
         <span className="text-scrim-foreground/35">•</span>
 
         <span className="font-semibold text-scrim-foreground/85">
-          {show(stats?.fps)} <span className="text-[9px] font-normal text-scrim-foreground/60">FPS</span>
+          {show(stats?.fps)} <span className="text-[9px] font-normal text-scrim-foreground/60">{t('window.fps')}</span>
         </span>
 
         <span className="text-scrim-foreground/35">•</span>
 
         <span
           className="text-[9px] px-1.5 py-0.5 rounded font-semibold tracking-wider uppercase bg-scrim-foreground/10 text-scrim-foreground/85 border border-scrim-foreground/15"
-          title="TCP + WebCodecs"
+          title={t('window.tcp_webcodecs')}
         >
-          TCP
+          {t('window.tcp')}
         </span>
 
         {backlogged && (
-          <span className="text-[9px] px-1 py-0.5 rounded bg-warning/20 text-warning border border-warning/30" title="Yayın tıkandı: biriken kareler atlanıyor / decoder sıfırlandı">
-            TIKANIKLIK
+          <span className="text-[9px] px-1 py-0.5 rounded bg-warning/20 text-warning border border-warning/30" title={t('window.yayin_tikandi_biriken_kareler')}>
+            {t('window.tikaniklik')}
           </span>
         )}
 
@@ -156,7 +159,7 @@ export default function LatencyHudOverlay({ win, decoder, hasFrame }) {
             <div className="flex items-center justify-between pb-2 mb-2 border-b border-scrim-foreground/10">
               <div className="flex items-center gap-1.5 text-info text-[10px] font-bold tracking-wider uppercase">
                 <Activity className="w-3.5 h-3.5 animate-pulse" />
-                <span>YAYIN TELEMETRİSİ</span>
+                <span>{t('window.yayin_telemetrisi')}</span>
               </div>
               <button
                 type="button"
@@ -165,7 +168,7 @@ export default function LatencyHudOverlay({ win, decoder, hasFrame }) {
                   setIsExpanded(false);
                 }}
                 className="text-scrim-foreground/60 hover:text-scrim-foreground p-0.5 rounded transition-colors"
-                title="Küçült"
+                title={t('common.kucult')}
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -175,56 +178,56 @@ export default function LatencyHudOverlay({ win, decoder, hasFrame }) {
               <Row
                 icon={Zap}
                 iconClass="text-warning"
-                label="Arayüz⟷Backend RTT"
-                title="Olay soketi ping/pong ile ölçülür. Telefon⟷PC (ADB) halkasını kapsamaz."
+                label={t('window.arayuz_backend_rtt')}
+                title={t('window.olay_soketi_ping_pong_ile_olculur')}
               >
                 <span className={`font-bold ${pingColor}`}>
                   {show(rtt, ' ms')} <span className="text-[9px] font-normal text-scrim-foreground/60">({qualityText})</span>
                 </span>
               </Row>
 
-              <Row icon={Gauge} iconClass="text-info" label="Kare Hızı (çizilen)" title="Ekrana gerçekten çizilen kare/sn. Statik ekranda 0 olması normaldir.">
+              <Row icon={Gauge} iconClass="text-info" label={t('window.kare_hizi_cizilen')} title={t('window.ekrana_gercekten_cizilen_kare_sn')}>
                 <span className="font-bold text-info">{show(stats?.fps, ' FPS')}</span>
                 {stats?.decodedFps != null && stats.decodedFps !== stats.fps && (
-                  <span className="text-[9px] text-scrim-foreground/50"> · çözülen {stats.decodedFps}</span>
+                  <span className="text-[9px] text-scrim-foreground/50"> {' '}{t('window.cozulen_decodedfps', { decodedFps: stats.decodedFps })}</span>
                 )}
               </Row>
 
-              <Row icon={Timer} iconClass="text-info" label="Çözme Gecikmesi" title="Karenin ağdan gelişinden ekrana çizilmesine kadar geçen süre.">
+              <Row icon={Timer} iconClass="text-info" label={t('window.cozme_gecikmesi')} title={t('window.karenin_agdan_gelisinden_ekrana')}>
                 <span className="text-scrim-foreground">{show(stats?.decodeMs, ' ms')}</span>
               </Row>
 
-              <Row icon={Hourglass} iconClass="text-warning" label="Birikme (kuyruk gecikmesi)" title="Tek yön gecikmenin son 10 sn minimumuna göre fazlası. Sağlıklı akışta ~0; ağ/decoder tıkanınca büyür.">
+              <Row icon={Hourglass} iconClass="text-warning" label={t('window.birikme_kuyruk_gecikmesi')} title={t('window.tek_yon_gecikmenin_son_10_sn')}>
                 <span className={(stats?.queueMs ?? 0) > 100 ? 'text-warning font-bold' : 'text-scrim-foreground'}>{show(stats?.queueMs, ' ms')}</span>
               </Row>
 
-              <Row icon={Radio} iconClass="text-info" label="Jitter" title="Kare varış aralığının kaynak zaman damgası aralığından sapması.">
+              <Row icon={Radio} iconClass="text-info" label={t('window.jitter')} title={t('window.kare_varis_araliginin_kaynak_zaman')}>
                 <span className="text-scrim-foreground">{show(stats?.jitterMs, ' ms')}</span>
               </Row>
 
-              <Row icon={Wifi} iconClass="text-destructive" label="Atlanan Kare / Resync" title="Çözülüp sunumu atlanan eski kareler (hızlı sarma önleme) ve decoder'ın sıfırlanıp keyframe beklediği sayı. TCP'de paket kaybı yoktur.">
+              <Row icon={Wifi} iconClass="text-destructive" label={t('window.atlanan_kare_resync')} title={t('window.cozulup_sunumu_atlanan_eski_kareler')}>
                 <span className={(stats?.resyncs ?? 0) > 0 ? 'text-warning font-bold' : 'text-scrim-foreground/85'}>
-                  {show(stats?.skipped)}/sn <span className="text-[9px] text-scrim-foreground/50">(toplam {show(stats?.totalSkipped)} · resync {show(stats?.resyncs)})</span>
+                  {t('window.show_sn', { show: show(stats?.skipped) })}{' '} <span className="text-[9px] text-scrim-foreground/50">{t('window.toplam_show_resync_show2', { show: show(stats?.totalSkipped), show2: show(stats?.resyncs) })}</span>
                 </span>
               </Row>
 
-              <Row icon={Sparkles} iconClass="text-status-active" label="Alınan Bant Genişliği" title="Ağdan alınan video verisi (Mbps).">
+              <Row icon={Sparkles} iconClass="text-status-active" label={t('window.alinan_bant_genisligi')} title={t('window.agdan_alinan_video_verisi_mbps')}>
                 <span className="text-status-active font-semibold">{show(stats?.bitrateMbps, ' Mbps')}</span>
               </Row>
 
-              <Row icon={Layers} iconClass="text-scrim-foreground/60" label="Cihaz Çözünürlüğü">
+              <Row icon={Layers} iconClass="text-scrim-foreground/60" label={t('window.cihaz_cozunurlugu')}>
                 <span className="text-scrim-foreground/85">
                   {win?.deviceW || win?.w}×{win?.deviceH || win?.h}
                 </span>
               </Row>
 
-              <Row icon={Activity} iconClass="text-info" label="İletim Protokolü">
-                <span className="font-semibold text-scrim-foreground/85">TCP WebCodecs</span>
+              <Row icon={Activity} iconClass="text-info" label={t('window.iletim_protokolu')}>
+                <span className="font-semibold text-scrim-foreground/85">{t('window.tcp_webcodecs_2')}</span>
               </Row>
             </div>
 
             <div className="mt-2 text-[9px] text-scrim-foreground/50 text-center">
-              "—" = ölçülemedi (uydurma değer gösterilmez) · Gizlemek için [F8]
+              {t('window.olculemedi_uydurma_deger_gosterilmez')}
             </div>
           </motion.div>
         )}

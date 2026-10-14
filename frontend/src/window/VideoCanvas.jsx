@@ -35,6 +35,7 @@ import { useSystemStore } from '../state/systemStore.js';
 import { logger } from '../lib/logger.js';
 import { newOpId } from '../lib/opId.js';
 import { resolveFit } from './fitModes.js';
+import { t } from '../i18n/index.js';
 
 const DRAG_MIN_PX = 8;
 
@@ -565,7 +566,7 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
 
       {!hasFrame && !win.appLockPending && !win.handoffToPhone && !win.stealthPhase && (
         <div className="absolute inset-0 flex items-center justify-center text-xs text-scrim-foreground/50">
-          Görüntü bekleniyor…
+          {t('window.goruntu_bekleniyor')}
         </div>
       )}
       <AnimatePresence>
@@ -588,7 +589,7 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
                 await api.post('/api/windows/reclaim', { window_id: win.id }, { opId: op });
               } catch (err) {
                 L.error('applock', 'reclaim_failed', { windowId: win.id, error: err?.message || String(err) });
-                useSystemStore.getState().pushToast?.(`⚠️ Geri alınamadı: ${err?.message || 'bilinmeyen hata'}`);
+                useSystemStore.getState().pushToast?.(t('window.geri_alinamadi_value', { value: err?.message || 'bilinmeyen hata' }));
               }
             }}
             onWakeDevice={async () => {
@@ -599,7 +600,7 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
                 await api.post('/api/device/unlock', undefined, { opId: op });
               } catch (err) {
                 L.error('applock', 'wake_failed', { windowId: win.id, error: err?.message || String(err) });
-                useSystemStore.getState().pushToast?.('⚠️ Telefon ekranı uyandırılamadı.');
+                useSystemStore.getState().pushToast?.(t('window.telefon_ekrani_uyandirilamadi'));
               }
             }}
             onRetryPrompt={async () => {
@@ -614,7 +615,7 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
                 const res = await api.post('/api/windows/applock/retry', { window_id: win.id }, { opId: op });
                 if (!res?.ok) {
                   L.warn('applock', 'retry_rejected', { windowId: win.id, res });
-                  toast('⚠️ Kilit yeniden istenemedi — pencereyi kapatıp yeniden açın.');
+                  toast(t('window.kilit_yeniden_istenemedi_pencereyi'));
                 } else {
                   L.info('applock', 'retry_accepted', { windowId: win.id, ms: Date.now() - started });
                 }
