@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.js';
 // HEVC (H.265) SPS'ten kodlanmış görüntü boyutunu okur (Annex B baytlarından).
 //
 // Neden: WebView2'nin HEVC çözücüsü, VideoDecoderConfig'te codedWidth/codedHeight verilmeyince ve akış içinde SPS
@@ -75,7 +76,7 @@ class BitReader {
     let zeros = 0;
     while (this.bit() === 0) {
       zeros += 1;
-      if (zeros > 31) throw new RangeError('geçersiz ue(v)');
+      if (zeros > 31) throw new RangeError(t('media.gecersiz_ue_v'));
     }
     return (2 ** zeros) - 1 + this.bits(zeros);
   }

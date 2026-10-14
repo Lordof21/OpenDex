@@ -1,47 +1,49 @@
+import { t as tt } from '../i18n/index.js';
+import { activeLocale } from '../i18n/index.js';
 // Telefon Yükü — pure helpers shared by the store, the charts and the panel (no React, no DOM).
 
 export const RANGES = Object.freeze([
   { minutes: 5, label: '5 dk' },
   { minutes: 15, label: '15 dk' },
-  { minutes: 60, label: '1 sa' },
+  { minutes: 60, label: tt('telemetry.1_sa') },
 ]);
 
 // Fixed entity → colour map for the whole panel (colour follows the entity, never its rank).
 export const GROUPS = Object.freeze([
-  { key: 'opendex', label: 'OpenDeX', hint: 'Görüntü sunucusu + yardımcı süreçler', color: 'var(--viz-opendex)' },
-  { key: 'apps', label: 'Açık uygulamalar', hint: 'OpenDeX pencerelerindeki uygulamalar', color: 'var(--viz-apps)' },
-  { key: 'system', label: 'Sistem', hint: 'Ekran birleştirici, kodek, system_server (OpenDeX ile paylaşımlı)', color: 'var(--viz-system)' },
-  { key: 'other', label: 'Diğer', hint: 'Telefondaki geri kalan her şey', color: 'var(--viz-other)' },
+  { key: 'opendex', label: 'OpenDeX', hint: tt('telemetry.goruntu_sunucusu_yardimci_surecler'), color: 'var(--viz-opendex)' },
+  { key: 'apps', label: tt('telemetry.acik_uygulamalar'), hint: tt('telemetry.opendex_pencerelerindeki_uygulamalar'), color: 'var(--viz-apps)' },
+  { key: 'system', label: tt('common.sistem'), hint: tt('telemetry.ekran_birlestirici_kodek_system'), color: 'var(--viz-system)' },
+  { key: 'other', label: tt('common.diger'), hint: tt('telemetry.telefondaki_geri_kalan_her_sey'), color: 'var(--viz-other)' },
 ]);
 
 // The felt temperature only: the SoC runs ~15-20 °C hotter and on the same axis it flattens the line the user cares
 // about (and the 42/45 °C thresholds that are about it). SoC stays in the headline and the table view.
 export const TEMP_SERIES = Object.freeze([
-  { key: 'battery', label: 'Hissedilen sıcaklık (pil)', color: 'var(--viz-battery)', emphasis: true },
+  { key: 'battery', label: tt('telemetry.hissedilen_sicaklik_pil'), color: 'var(--viz-battery)', emphasis: true },
 ]);
 
 export const TEMP_WARN_C = 42;
 export const TEMP_CRITICAL_C = 45;
 
 export const SEVERITY = Object.freeze({
-  critical: { label: 'Kritik', color: 'var(--viz-critical)', rank: 0 },
-  warning: { label: 'Uyarı', color: 'var(--viz-warning)', rank: 1 },
-  info: { label: 'Bilgi', color: 'var(--info)', rank: 2 },
-  good: { label: 'Normal', color: 'var(--viz-good)', rank: 3 },
+  critical: { label: tt('telemetry.kritik'), color: 'var(--viz-critical)', rank: 0 },
+  warning: { label: tt('common.uyari'), color: 'var(--viz-warning)', rank: 1 },
+  info: { label: tt('common.bilgi'), color: 'var(--info)', rank: 2 },
+  good: { label: tt('telemetry.normal'), color: 'var(--viz-good)', rank: 3 },
 });
 
 export const MARKER_KINDS = Object.freeze({
-  app_restart: { short: 'Yeniden başlatma', glyph: '↻' },
-  app_relaunch: { short: 'Yerinde yeniden kurma', glyph: '↺' },
-  dpi_change: { short: 'DPI değişimi', glyph: '◐' },
-  window_open: { short: 'Pencere açıldı', glyph: '+' },
-  window_close: { short: 'Pencere kapandı', glyph: '×' },
-  handoff: { short: 'Telefona aktarım', glyph: '↓' },
-  reclaim: { short: "PC'ye geri alma", glyph: '↑' },
-  thermal: { short: 'Termal seviye', glyph: '!' },
+  app_restart: { short: tt('telemetry.yeniden_baslatma'), glyph: '↻' },
+  app_relaunch: { short: tt('telemetry.yerinde_yeniden_kurma'), glyph: '↺' },
+  dpi_change: { short: tt('telemetry.dpi_degisimi'), glyph: '◐' },
+  window_open: { short: tt('telemetry.pencere_acildi'), glyph: '+' },
+  window_close: { short: tt('telemetry.pencere_kapandi'), glyph: '×' },
+  handoff: { short: tt('telemetry.telefona_aktarim'), glyph: '↓' },
+  reclaim: { short: tt('telemetry.pc_ye_geri_alma'), glyph: '↑' },
+  thermal: { short: tt('telemetry.termal_seviye'), glyph: '!' },
 });
 
-const nf = (digits) => new Intl.NumberFormat('tr-TR', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+const nf = (digits) => new Intl.NumberFormat(activeLocale(), { minimumFractionDigits: digits, maximumFractionDigits: digits });
 const NF0 = nf(0);
 const NF1 = nf(1);
 const NF2 = nf(2);
@@ -53,11 +55,11 @@ export function fmt(value, digits = 1) {
 
 export function fmtTime(t) {
   if (t == null) return '—';
-  return new Intl.DateTimeFormat('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(t * 1000));
+  return new Intl.DateTimeFormat(activeLocale(), { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(t * 1000));
 }
 
 export function fmtClock(t) {
-  return new Intl.DateTimeFormat('tr-TR', { hour: '2-digit', minute: '2-digit' }).format(new Date(t * 1000));
+  return new Intl.DateTimeFormat(activeLocale(), { hour: '2-digit', minute: '2-digit' }).format(new Date(t * 1000));
 }
 
 /** What the user feels: the battery, or the hottest skin/board sensor. */
@@ -147,18 +149,18 @@ export function processTable(samples) {
 }
 
 const SOURCE_LABELS = {
-  temp: { sysfs: 'sensör dosyaları', thermalservice: 'termal servis (HAL)', daemon: 'termal servis (daemon)' },
-  battery: { sysfs: 'pil sürücüsü', daemon: 'OpenDeX daemon' },
+  temp: { sysfs: tt('telemetry.sensor_dosyalari'), thermalservice: tt('telemetry.termal_servis_hal'), daemon: 'termal servis (daemon)' },
+  battery: { sysfs: tt('telemetry.pil_surucusu'), daemon: 'OpenDeX daemon' },
   cpu: { proc: '/proc', daemon: '/proc (daemon)' },
 };
-const SOURCE_TITLES = { temp: 'Sıcaklık', battery: 'Pil', cpu: 'İşlemci' };
+const SOURCE_TITLES = { temp: tt('common.sicaklik'), battery: tt('common.pil_2'), cpu: tt('telemetry.islemci') };
 
 /** "Sıcaklık: termal servis (HAL) · Pil: OpenDeX daemon · İşlemci: /proc" — where every number comes from. */
 export function sourcesText(sources) {
   if (!sources) return null;
   const parts = Object.keys(SOURCE_TITLES).map((k) => {
     const v = sources[k];
-    return `${SOURCE_TITLES[k]}: ${v ? SOURCE_LABELS[k][v] || v : 'okunamıyor'}`;
+    return `${SOURCE_TITLES[k]}: ${v ? SOURCE_LABELS[k][v] || v : tt('telemetry.okunamiyor')}`;
   });
   return parts.join(' · ');
 }
@@ -166,9 +168,9 @@ export function sourcesText(sources) {
 export function powerLabel(battery) {
   const w = battery?.power_w;
   if (!Number.isFinite(w)) {
-    return { value: null, text: battery?.charging ? 'Şarjda · akım okunamıyor' : 'Akım okunamıyor' };
+    return { value: null, text: battery?.charging ? tt('telemetry.sarjda_akim_okunamiyor') : tt('telemetry.akim_okunamiyor') };
   }
-  if (w >= 0.05) return { value: w, text: 'Pile giriyor' };
-  if (battery?.charging) return { value: w, text: 'Şarjda ama boşalıyor' };
-  return { value: w, text: 'Pilden çekiliyor' };
+  if (w >= 0.05) return { value: w, text: tt('telemetry.pile_giriyor') };
+  if (battery?.charging) return { value: w, text: tt('telemetry.sarjda_ama_bosaliyor') };
+  return { value: w, text: tt('telemetry.pilden_cekiliyor') };
 }

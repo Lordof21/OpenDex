@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Minus, Plus, Sparkles, Check } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useRelativeDrag } from './useRelativeDrag.js';
+import { t as tt } from '../i18n/index.js';
 
 const HOLD_DELAY_MS = 300;
 const HOLD_REPEAT_MS = 75;
@@ -28,7 +29,7 @@ export function PrecisionSlider({
   ticks = [],
   className,
   showButtons = true,
-  autoLabel = 'Oto',
+  autoLabel = tt('common.oto'),
   holdoffMs = 0,
 }) {
   const [isHovered, setIsHovered] = useState(false);
@@ -102,7 +103,7 @@ export function PrecisionSlider({
             type="button"
             {...holdButtonProps(-1)}
             disabled={shown <= min}
-            aria-label="Değeri azalt"
+            aria-label={tt('ui.degeri_azalt')}
             className="grid size-8 shrink-0 place-items-center rounded-lg border border-border/70 bg-muted/80 text-muted-foreground transition-all hover:bg-accent hover:text-foreground active:scale-90 disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
           >
             <Minus className="size-3.5" strokeWidth={2.5} />
@@ -195,7 +196,7 @@ export function PrecisionSlider({
             type="button"
             {...holdButtonProps(1)}
             disabled={shown >= max}
-            aria-label="Değeri artır"
+            aria-label={tt('ui.degeri_artir')}
             className="grid size-8 shrink-0 place-items-center rounded-lg border border-border/70 bg-muted/80 text-muted-foreground transition-all hover:bg-accent hover:text-foreground active:scale-90 disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
           >
             <Plus className="size-3.5" strokeWidth={2.5} />

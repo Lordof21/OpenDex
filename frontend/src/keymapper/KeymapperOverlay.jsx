@@ -16,6 +16,7 @@ import { useKeymapStore } from './keymapStore.js';
 import Button from '../ui/Button.jsx';
 import { Dialog } from '../ui/Dialog.jsx';
 import { pushEscapeHandler } from '../lib/escapeStack.js';
+import { t } from '../i18n/index.js';
 
 const AVAILABLE_KEYS = [
   'Space', 'c', 'f', 'r', 'e', 'q', 'v', 'b', 'g', 't', '1', '2', '3', '4', 'Shift', 'Control', 'Alt',
@@ -55,7 +56,7 @@ export default function KeymapperOverlay({ win, isEditing, onCloseEdit, isHeader
     addNodeToPackage(win.package, {
       type: 'tap',
       key: 'Space',
-      label: 'Tıklama',
+      label: t('keymapper.tiklama'),
       rx: 0.5,
       ry: 0.5,
     });
@@ -65,7 +66,7 @@ export default function KeymapperOverlay({ win, isEditing, onCloseEdit, isHeader
     addNodeToPackage(win.package, {
       type: 'dpad',
       key: 'WASD',
-      label: 'Hareket (WASD)',
+      label: t('keymapper.hareket_wasd'),
       rx: 0.25,
       ry: 0.7,
       radius: 0.12,
@@ -156,7 +157,7 @@ export default function KeymapperOverlay({ win, isEditing, onCloseEdit, isHeader
           >
             <div className="flex items-center gap-1 px-1.5 text-xs font-bold text-primary">
               <Gamepad2 className="h-4 w-4 shrink-0" />
-              <span className="hidden sm:inline">Tuş Düzenleyici</span>
+              <span className="hidden sm:inline">{t('keymapper.tus_duzenleyici')}</span>
             </div>
 
             <button
@@ -165,7 +166,7 @@ export default function KeymapperOverlay({ win, isEditing, onCloseEdit, isHeader
               className="flex items-center gap-1 rounded-xl bg-primary/15 border border-primary/30 px-2 py-1 text-xs font-semibold text-primary transition-colors hover:bg-primary/25 cursor-pointer"
             >
               <Plus className="h-3.5 w-3.5" />
-              <span>+ Tuş</span>
+              <span>{t('keymapper.tus')}</span>
             </button>
 
             <button
@@ -174,31 +175,31 @@ export default function KeymapperOverlay({ win, isEditing, onCloseEdit, isHeader
               className="flex items-center gap-1 rounded-xl bg-primary/15 border border-primary/30 px-2 py-1 text-xs font-semibold text-primary transition-colors hover:bg-primary/25 cursor-pointer"
             >
               <Move className="h-3.5 w-3.5" />
-              <span>+ WASD</span>
+              <span>{t('keymapper.wasd')}</span>
             </button>
 
             <button
               type="button"
               onClick={() => resetPackageToDefault(win.package)}
               className="flex items-center gap-1 rounded-xl bg-muted border border-border/70 px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer"
-              title="Varsayılan yerleşime sıfırla"
+              title={t('keymapper.varsayilan_yerlesime_sifirla')}
             >
               <RotateCcw className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Sıfırla</span>
+              <span className="hidden sm:inline">{t('keymapper.sifirla')}</span>
             </button>
 
             <button
               type="button"
               onClick={() => clearPackageKeymap(win.package)}
               className="flex items-center gap-1 rounded-xl bg-destructive/15 border border-destructive/30 px-2 py-1 text-xs text-destructive hover:bg-destructive/25 cursor-pointer"
-              title="Tüm tuşları temizle"
+              title={t('keymapper.tum_tuslari_temizle')}
             >
               <Trash2 className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Temizle</span>
+              <span className="hidden sm:inline">{t('keymapper.temizle')}</span>
             </button>
 
             {/* Opacity Slider */}
-            <div className="flex items-center gap-1 px-1.5" title="Şeffaflık">
+            <div className="flex items-center gap-1 px-1.5" title={t('keymapper.seffaflik')}>
               <Sliders className="h-3.5 w-3.5 text-muted-foreground" />
               <input
                 type="range"
@@ -214,11 +215,11 @@ export default function KeymapperOverlay({ win, isEditing, onCloseEdit, isHeader
             <button
               type="button"
               onClick={onCloseEdit}
-              title="Düzenlemeyi kapat (Esc)"
+              title={t('keymapper.duzenlemeyi_kapat_esc')}
               className="flex items-center gap-1 rounded-xl bg-primary border border-primary/50 px-2.5 py-1 text-xs font-bold text-primary-foreground shadow-sm hover:bg-primary/90 cursor-pointer"
             >
               <Check className="h-3.5 w-3.5" />
-              <span>Kaydet</span>
+              <span>{t('keymapper.kaydet')}</span>
             </button>
           </motion.div>
         )}
@@ -248,12 +249,12 @@ export default function KeymapperOverlay({ win, isEditing, onCloseEdit, isHeader
               }`}
             >
               <div className="relative flex h-24 w-24 items-center justify-center pointer-events-none">
-                <span className="absolute top-1 text-[11px] font-bold text-primary">W</span>
-                <span className="absolute bottom-1 text-[11px] font-bold text-primary">S</span>
-                <span className="absolute left-1 text-[11px] font-bold text-primary">A</span>
-                <span className="absolute right-1 text-[11px] font-bold text-primary">D</span>
+                <span className="absolute top-1 text-[11px] font-bold text-primary">{t('common.w')}</span>
+                <span className="absolute bottom-1 text-[11px] font-bold text-primary">{t('keymapper.s')}</span>
+                <span className="absolute left-1 text-[11px] font-bold text-primary">{t('keymapper.a')}</span>
+                <span className="absolute right-1 text-[11px] font-bold text-primary">{t('common.d')}</span>
                 <div className="h-6 w-6 rounded-full bg-primary/40 border border-border flex items-center justify-center text-[9px] font-bold text-primary-foreground">
-                  JOY
+                  {t('keymapper.joy')}
                 </div>
               </div>
               {isEditing && (
@@ -303,7 +304,7 @@ export default function KeymapperOverlay({ win, isEditing, onCloseEdit, isHeader
                     setEditingKeyNodeId(node.id);
                   }}
                   className="text-muted-foreground hover:text-foreground cursor-pointer"
-                  title="Tuş değiştir"
+                  title={t('keymapper.tus_degistir')}
                 >
                   <Edit3 className="h-3 w-3" />
                 </button>
@@ -314,7 +315,7 @@ export default function KeymapperOverlay({ win, isEditing, onCloseEdit, isHeader
                     removeNodeFromPackage(win.package, node.id);
                   }}
                   className="text-destructive hover:text-destructive/80 cursor-pointer"
-                  title="Sil"
+                  title={t('common.sil')}
                 >
                   <X className="h-3 w-3" />
                 </button>
@@ -328,12 +329,12 @@ export default function KeymapperOverlay({ win, isEditing, onCloseEdit, isHeader
       <Dialog
         open={Boolean(editingKeyNodeId)}
         onClose={() => setEditingKeyNodeId(null)}
-        label="Fiziksel Tuş Seçin"
+        label={t('keymapper.fiziksel_tus_secin')}
         overlayClassName="pointer-events-auto"
         className="w-72 p-4"
       >
-            <h4 className="mb-2 text-xs font-bold text-foreground">Fiziksel Tuş Seçin</h4>
-            <p className="mb-3 text-[11px] text-muted-foreground">Bu dokunma noktasına atanacak klavye tuşu:</p>
+            <h4 className="mb-2 text-xs font-bold text-foreground">{t('keymapper.fiziksel_tus_secin')}</h4>
+            <p className="mb-3 text-[11px] text-muted-foreground">{t('keymapper.bu_dokunma_noktasina_atanacak_klavye')}</p>
 
             <div className="grid grid-cols-4 gap-1.5 mb-3">
               {AVAILABLE_KEYS.map((k) => (
@@ -352,7 +353,7 @@ export default function KeymapperOverlay({ win, isEditing, onCloseEdit, isHeader
             </div>
 
             <Button variant="outline" size="sm" className="w-full" onClick={() => setEditingKeyNodeId(null)}>
-              Vazgeç
+              {t('common.vazgec')}
             </Button>
       </Dialog>
     </div>

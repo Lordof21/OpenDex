@@ -5,6 +5,7 @@
 //
 // Her bozuk/eski/eksik değer sessizce varsayılana döner: bozuk bir kayıt masaüstünü boş bırakamaz.
 import { DEFAULT_WALLPAPER_ID, builtinVariant, getBuiltin, isBuiltinId } from './catalog.js';
+import { t } from '../../i18n/index.js';
 
 export const MODES = ['builtin', 'image', 'solid'];
 export const APPEARANCES = ['auto', 'light', 'dark'];
@@ -134,7 +135,7 @@ export function resolveWallpaper(prefs, { isDark = false, images = [] } = {}) {
 
   if (p.mode === 'solid') {
     const luma = lumaOfHex(p.color);
-    return { ...common, key: `solid:${p.color}`, kind: 'solid', name: 'Düz renk', image: null, color: p.color, imageId: null, fit: 'fill', luma, tone: toneOf(luma, p.dim), variant: themeVariant, themed: false };
+    return { ...common, key: `solid:${p.color}`, kind: 'solid', name: t('desktop.duz_renk'), image: null, color: p.color, imageId: null, fit: 'fill', luma, tone: toneOf(luma, p.dim), variant: themeVariant, themed: false };
   }
 
   const meta = getBuiltin(p.id) ?? getBuiltin(DEFAULT_PREFS.id);

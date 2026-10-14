@@ -2,18 +2,19 @@
 import React from 'react';
 import { cn } from '../lib/utils.js';
 import Button from './Button.jsx';
+import { t } from '../i18n/index.js';
 
 export function EmptyNote({ children, className }) {
   return <p className={cn('px-1 py-2 text-[10px] leading-snug text-muted-foreground', className)}>{children}</p>;
 }
 
 /** Satır içi "emin misin?" şeridi — yıkıcı eylemler ilk dokunuşta çalışmaz. */
-export function ConfirmStrip({ message, confirmLabel = 'Unut', onConfirm, onCancel }) {
+export function ConfirmStrip({ message, confirmLabel = t('ui.unut'), onConfirm, onCancel }) {
   return (
     <div role="alertdialog" aria-label={message} className="my-1 rounded-md border border-destructive/30 bg-destructive/5 p-2">
       <p className="text-[10px] leading-snug text-foreground">{message}</p>
       <div className="mt-1.5 flex justify-end gap-1">
-        <Button size="2xs" variant="ghost" onClick={onCancel}>Vazgeç</Button>
+        <Button size="2xs" variant="ghost" onClick={onCancel}>{t('common.vazgec')}</Button>
         <Button size="2xs" variant="destructive-ghost" onClick={onConfirm}>
           {confirmLabel}
         </Button>

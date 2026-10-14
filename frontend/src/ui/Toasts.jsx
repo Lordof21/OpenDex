@@ -5,6 +5,7 @@ import { LoaderCircle } from 'lucide-react';
 import { useSystemStore } from '../state/systemStore.js';
 import { TONES, classifyToast } from '../notifications/notificationVisuals.js';
 import { islandChildVariants, islandVariants } from './motion.js';
+import { t as tt } from '../i18n/index.js';
 
 // AnimatePresence mode="popLayout" çıkan çocuğa ref bağlar: çocuk bir fonksiyon bileşeni olursa React uyarı verir (ref geçmez /
 // props.ref okunur). Bu yüzden Island BİLEŞEN değil, doğrudan <motion.div> döndüren bir çizim işlevidir; "reduced" kancası
@@ -67,14 +68,14 @@ export default function Toasts() {
           renderIsland({
             key: "reconnecting",
             tone: "warning",
-            title: "Bağlantı koptu",
-            text: "Yeniden deneniyor… pencereleriniz korunuyor",
+            title: tt('ui.baglanti_koptu'),
+            text: tt('ui.yeniden_deneniyor_pencereleriniz'),
             spinning: true,
             reduced,
           })
         )}
         {linkWeak && connectionState === 'connected' && (
-          renderIsland({ key: "link-weak", tone: "warning", title: "Bağlantı zayıf", text: "Telefon yanıt vermiyor — görüntü gecikebilir", spinning: true, reduced })
+          renderIsland({ key: "link-weak", tone: "warning", title: tt('ui.baglanti_zayif'), text: tt('ui.telefon_yanit_vermiyor_goruntu'), spinning: true, reduced })
         )}
         {toasts.slice(-3).map((t) => {
           const { tone, text, title } = classifyToast(t.message, { tone: t.tone, title: t.title });

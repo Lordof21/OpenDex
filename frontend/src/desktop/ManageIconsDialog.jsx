@@ -31,6 +31,7 @@ import {
   trLower,
   withCustomKept,
 } from './manageIcons.js';
+import { t } from '../i18n/index.js';
 
 const STATUS_MS = 8000;
 const PAGE_STEP = 8;
@@ -60,7 +61,7 @@ const AppRow = memo(function AppRow({ app, on, folderNames, needle, onToggle }) 
         aria-checked={on}
         aria-label={name}
         data-manage-row=""
-        title={[app.package, folderNames && `Klasörde: ${folderNames.join(', ')}`].filter(Boolean).join(' · ')}
+        title={[app.package, folderNames && t('desktop.klasorde_value', { value: folderNames.join(', ') })].filter(Boolean).join(' · ')}
         onClick={() => onToggle(app)}
         className="group flex w-full scroll-mt-8 cursor-pointer items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors [contain-intrinsic-size:auto_52px] [content-visibility:auto] hover:bg-accent/50 active:bg-accent/70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       >
@@ -79,7 +80,7 @@ const AppRow = memo(function AppRow({ app, on, folderNames, needle, onToggle }) 
         </span>
         <span className="flex shrink-0 items-center gap-2.5">
           <span className={cn('text-[10px] font-semibold max-[480px]:hidden', on ? 'text-primary' : 'text-muted-foreground')}>
-            {on ? 'Masaüstünde' : 'Eklenmedi'}
+            {on ? t('desktop.masaustunde') : t('desktop.eklenmedi')}
           </span>
           <SwitchThumb checked={on} />
         </span>
@@ -170,15 +171,15 @@ function ManageIconsBody({ onClose, apps, layout, custom, cells, getDefaultLayou
       const current = layoutRef.current;
       const name = appName(app);
       if (packagesOnDesktop(current).has(app.package)) {
-        commit(removeApps(current, [app.package]).layout, `«${name}» masaüstünden kaldırıldı.`);
+        commit(removeApps(current, [app.package]).layout, t('desktop.name_masaustunden_kaldirildi', { name }));
         return;
       }
       const { layout: next, placed } = placeApps(current, [app.package], cells);
       if (!placed) {
-        setStatus({ text: 'Masaüstü dolu — önce bir simgeyi kaldırın.', tone: 'warn' });
+        setStatus({ text: t('desktop.masaustu_dolu_once_bir_simgeyi'), tone: 'warn' });
         return;
       }
-      commit(next, `«${name}» masaüstüne eklendi.`);
+      commit(next, t('desktop.name_masaustune_eklendi', { name }));
     },
     [cells, commit],
   );
@@ -186,29 +187,29 @@ function ManageIconsBody({ onClose, apps, layout, custom, cells, getDefaultLayou
   const addAll = () => {
     const { layout: next, placed, skipped } = placeApps(layoutRef.current, addable.map((app) => app.package), cells);
     if (!placed) {
-      setStatus({ text: 'Masaüstü dolu — önce bir simgeyi kaldırın.', tone: 'warn' });
+      setStatus({ text: t('desktop.masaustu_dolu_once_bir_simgeyi'), tone: 'warn' });
       return;
     }
     commit(
       next,
-      skipped ? `${countLabel(placed)} eklendi · ${countLabel(skipped)} için yer kalmadı.` : `${countLabel(placed)} masaüstüne eklendi.`,
+      skipped ? t('desktop.countlabel_eklendi_countlabel2_icin', { countLabel: countLabel(placed), countLabel2: countLabel(skipped) }) : t('desktop.countlabel_masaustune_eklendi', { countLabel: countLabel(placed) }),
       skipped ? 'warn' : 'info',
     );
   };
 
   const removeAll = () => {
     const { layout: next, removed } = removeApps(layoutRef.current, removable.map((app) => app.package));
-    if (removed) commit(next, `${countLabel(removed)} masaüstünden kaldırıldı.`);
+    if (removed) commit(next, t('desktop.countlabel_masaustunden_kaldirildi', { countLabel: countLabel(removed) }));
   };
 
   const resetDefaults = () => {
-    commit(withCustomKept(getDefaultLayout(), layoutRef.current, cells), 'Önerilen düzen uygulandı.');
+    commit(withCustomKept(getDefaultLayout(), layoutRef.current, cells), t('desktop.onerilen_duzen_uygulandi'));
   };
 
   const undo = () => {
     if (!status?.undo) return;
     onLayoutChange(status.undo);
-    setStatus({ text: 'Değişiklik geri alındı.', tone: 'info' });
+    setStatus({ text: t('desktop.degisiklik_geri_alindi'), tone: 'info' });
   };
 
   const rows = () => [...(listRef.current?.querySelectorAll('[data-manage-row]') ?? [])];
@@ -241,32 +242,32 @@ function ManageIconsBody({ onClose, apps, layout, custom, cells, getDefaultLayou
 
   let empty = null;
   if (apps.length === 0) {
-    empty = <EmptyState icon={PackageOpen} title="Uygulama listesi boş" hint="Telefon bağlıyken uygulamalar burada listelenir." />;
+    empty = <EmptyState icon={PackageOpen} title={t('desktop.uygulama_listesi_bos')} hint={t('desktop.telefon_bagliyken_uygulamalar_burada')} />;
   } else if (visible.length === 0 && query.trim()) {
     empty = (
       <EmptyState
         icon={SearchX}
-        title={`«${query.trim()}» ile eşleşen uygulama yok`}
-        hint="Ad veya paket adının bir bölümünü yazmayı deneyin."
-        action={<Button size="sm" variant="outline" onClick={() => { setQuery(''); searchRef.current?.focus(); }}>Aramayı temizle</Button>}
+        title={t('desktop.trim_ile_eslesen_uygulama_yok', { trim: query.trim() })}
+        hint={t('desktop.ad_veya_paket_adinin_bir_bolumunu')}
+        action={<Button size="sm" variant="outline" onClick={() => { setQuery(''); searchRef.current?.focus(); }}>{t('common.aramayi_temizle')}</Button>}
       />
     );
   } else if (visible.length === 0 && filter === 'off') {
     empty = (
       <EmptyState
         icon={CheckCheck}
-        title="Tüm uygulamalar masaüstünde"
-        hint="Kaldırdığınız uygulamalar burada listelenir."
-        action={<Button size="sm" variant="outline" onClick={() => setFilter('all')}>Tümünü göster</Button>}
+        title={t('desktop.tum_uygulamalar_masaustunde')}
+        hint={t('desktop.kaldirdiginiz_uygulamalar_burada')}
+        action={<Button size="sm" variant="outline" onClick={() => setFilter('all')}>{t('desktop.tumunu_goster')}</Button>}
       />
     );
   } else if (visible.length === 0) {
     empty = (
       <EmptyState
         icon={PackageOpen}
-        title="Masaüstünde uygulama yok"
-        hint="Eklemek için «Eklenmemiş» sekmesine bakın."
-        action={<Button size="sm" variant="outline" onClick={() => setFilter('off')}>Eklenmemişleri göster</Button>}
+        title={t('desktop.masaustunde_uygulama_yok')}
+        hint={t('desktop.eklemek_icin_eklenmemis_sekmesine')}
+        action={<Button size="sm" variant="outline" onClick={() => setFilter('off')}>{t('desktop.eklenmemisleri_goster')}</Button>}
       />
     );
   }
@@ -278,24 +279,24 @@ function ManageIconsBody({ onClose, apps, layout, custom, cells, getDefaultLayou
           <SlidersHorizontal className="size-5" aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1">
-          <h2 id={headingId} className="text-sm font-semibold leading-5">Simgeleri yönet</h2>
+          <h2 id={headingId} className="text-sm font-semibold leading-5">{t('desktop.simgeleri_yonet')}</h2>
           <p className="text-[11px] leading-4 text-muted-foreground [@media(max-height:560px)]:hidden">
-            Hangi uygulamaların masaüstünde görüneceğini seçin. Kaldırdıklarınıza Uygulama Çekmecesi'nden ulaşırsınız.
+            {t('desktop.hangi_uygulamalarin_masaustunde')}
           </p>
         </div>
-        <IconButton label="Kapat" size="sm" onClick={onClose}><X /></IconButton>
+        <IconButton label={t('common.kapat')} size="sm" onClick={onClose}><X /></IconButton>
       </header>
 
       <div className="px-5">
         <div className="flex items-baseline justify-between gap-3 text-[11px]">
-          <span><b className="font-semibold tabular-nums">{stats.onDesktop}</b> uygulama masaüstünde</span>
+          <span><b className="font-semibold tabular-nums">{stats.onDesktop}</b> {' '}{t('desktop.uygulama_masaustunde')}</span>
           <span className={cn('tabular-nums', nearlyFull ? 'text-warning' : 'text-muted-foreground')}>
-            {stats.used} / {cells} yer dolu
+            {t('desktop.used_cells_yer_dolu', { used: stats.used, cells })}
           </span>
         </div>
         <div
           role="progressbar"
-          aria-label="Masaüstü doluluğu"
+          aria-label={t('desktop.masaustu_dolulugu')}
           aria-valuemin={0}
           aria-valuemax={cells}
           aria-valuenow={stats.used}
@@ -312,8 +313,8 @@ function ManageIconsBody({ onClose, apps, layout, custom, cells, getDefaultLayou
             ref={searchRef}
             type="search"
             value={query}
-            placeholder="Uygulama ara"
-            aria-label="Uygulama ara"
+            placeholder={t('desktop.uygulama_ara')}
+            aria-label={t('desktop.uygulama_ara')}
             spellCheck={false}
             autoComplete="off"
             onChange={(event) => setQuery(event.target.value)}
@@ -327,32 +328,32 @@ function ManageIconsBody({ onClose, apps, layout, custom, cells, getDefaultLayou
           />
           {query && (
             <span className="absolute right-1 top-1/2 -translate-y-1/2">
-              <IconButton label="Aramayı temizle" size="xs" onClick={() => { setQuery(''); searchRef.current?.focus(); }}><X /></IconButton>
+              <IconButton label={t('common.aramayi_temizle')} size="xs" onClick={() => { setQuery(''); searchRef.current?.focus(); }}><X /></IconButton>
             </span>
           )}
         </div>
         <SegmentedControl
-          label="Gösterilecek uygulamalar"
+          label={t('desktop.gosterilecek_uygulamalar')}
           value={filter}
           onChange={setFilter}
           options={[
-            { value: 'all', label: `Tümü ${counts.all}` },
-            { value: 'on', label: `Masaüstünde ${counts.on}` },
-            { value: 'off', label: `Eklenmemiş ${counts.off}` },
+            { value: 'all', label: t('desktop.tumu_all', { all: counts.all }) },
+            { value: 'on', label: t('desktop.masaustunde_on', { on: counts.on }) },
+            { value: 'off', label: t('desktop.eklenmemis_off', { off: counts.off }) },
           ]}
         />
       </div>
 
       <div className="flex items-center justify-between gap-2 border-y border-border/60 bg-muted/30 px-5 py-1">
         <span className="text-[11px] text-muted-foreground">
-          {countLabel(visible.length, filtered ? 'sonuç' : 'uygulama')}
+          {countLabel(visible.length, filtered ? t('desktop.sonuc') : 'uygulama')}
         </span>
         <span className="flex items-center gap-0.5">
           <Button size="2xs" variant="ghost" disabled={addable.length === 0} onClick={addAll} startIcon={<Plus className="size-3" />}>
-            {filtered ? 'Görünenleri ekle' : 'Tümünü ekle'} ({addable.length})
+            {filtered ? t('desktop.gorunenleri_ekle') : t('desktop.tumunu_ekle')} ({addable.length})
           </Button>
           <Button size="2xs" variant="ghost" disabled={removable.length === 0} onClick={removeAll} startIcon={<Minus className="size-3" />}>
-            {filtered ? 'Görünenleri kaldır' : 'Tümünü kaldır'} ({removable.length})
+            {filtered ? t('desktop.gorunenleri_kaldir') : t('desktop.tumunu_kaldir')} ({removable.length})
           </Button>
         </span>
       </div>
@@ -379,14 +380,14 @@ function ManageIconsBody({ onClose, apps, layout, custom, cells, getDefaultLayou
             <>
               <span className={cn('min-w-0 truncate', status.tone === 'warn' ? 'text-warning' : 'text-muted-foreground')}>{status.text}</span>
               {status.undo && (
-                <Button size="2xs" variant="ghost" onClick={undo} startIcon={<Undo2 className="size-3" />}>Geri al</Button>
+                <Button size="2xs" variant="ghost" onClick={undo} startIcon={<Undo2 className="size-3" />}>{t('desktop.geri_al')}</Button>
               )}
             </>
           )}
         </div>
         <div className="mt-1 flex items-center justify-between gap-2">
-          <Button size="sm" variant="ghost" onClick={resetDefaults} startIcon={<RotateCcw className="size-3.5" />}>Önerilen düzen</Button>
-          <Button size="sm" onClick={onClose}>Bitti</Button>
+          <Button size="sm" variant="ghost" onClick={resetDefaults} startIcon={<RotateCcw className="size-3.5" />}>{t('desktop.onerilen_duzen')}</Button>
+          <Button size="sm" onClick={onClose}>{t('desktop.bitti')}</Button>
         </div>
       </footer>
     </>
@@ -410,7 +411,7 @@ export default function ManageIconsDialog({ open, onClose, ...body }) {
       open={open}
       onClose={onClose}
       closeOnEscape={false}
-      label="Simgeleri yönet"
+      label={t('desktop.simgeleri_yonet')}
       className="flex h-[min(86vh,680px)] max-w-xl flex-col overflow-hidden"
     >
       {/* Gövde yalnız açıkken kurulur: arama/süzgeç/durum her açılışta temiz başlar; çıkış animasyonunda eski gövde kalır. */}

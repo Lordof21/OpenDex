@@ -5,6 +5,7 @@
 //   - rx, ry: normalized coordinates in [0, 1] relative to device width/height.
 
 import { create } from 'zustand';
+import { t } from '../i18n/index.js';
 
 const STORAGE_KEY = 'opendex_keymap_presets';
 
@@ -62,7 +63,7 @@ export const useKeymapStore = create((set, get) => ({
       id: node.id || `node_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       type: node.type || 'tap',
       key: node.key || 'Space',
-      label: node.label || 'Tıklama',
+      label: node.label || t('keymapper.tiklama'),
       rx: node.rx ?? 0.5,
       ry: node.ry ?? 0.5,
       radius: node.radius ?? 0.1,

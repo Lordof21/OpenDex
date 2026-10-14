@@ -4,6 +4,7 @@
 import { create } from 'zustand';
 import { api } from '../lib/api.js';
 import { useSystemStore } from './systemStore.js';
+import { t } from '../i18n/index.js';
 
 // Association usually completes within 2–6 s of "Connection initiated".
 const JOIN_RECHECK_MS = [2500, 6000];
@@ -13,29 +14,29 @@ const JOIN_GIVE_UP_MS = 12000;
 const BT_HIDE_ON = { permission_denied: true, unsupported_api: true };
 
 const BT_ERROR_TEXT = {
-  permission_denied: 'Telefon bu işleme izin vermedi.',
-  unsupported_api: 'Bu işlem Android 13 veya üzerini gerektirir.',
-  bad_address: 'Geçersiz cihaz adresi.',
-  bad_request: 'Geçersiz istek.',
-  daemon_not_connected: 'Telefon servisi bağlı değil.',
-  daemon_too_old: 'Telefon servisi güncel değil; cihazı yeniden bağlayın.',
-  no_adapter: 'Telefonda Bluetooth donanımı bulunamadı.',
-  no_system_context: 'Telefon servisi Bluetooth\'a erişemedi.',
-  timeout: 'Telefon zamanında yanıt vermedi.',
+  permission_denied: t('state.telefon_bu_isleme_izin_vermedi'),
+  unsupported_api: t('state.bu_islem_android_13_veya_uzerini'),
+  bad_address: t('state.gecersiz_cihaz_adresi'),
+  bad_request: t('state.gecersiz_istek'),
+  daemon_not_connected: t('state.telefon_servisi_bagli_degil'),
+  daemon_too_old: t('state.telefon_servisi_guncel_degil_cihazi'),
+  no_adapter: t('state.telefonda_bluetooth_donanimi'),
+  no_system_context: t('state.telefon_servisi_bluetooth_a_erisemedi'),
+  timeout: t('state.telefon_zamaninda_yanit_vermedi'),
 };
 
 export function btErrorText(code) {
-  return BT_ERROR_TEXT[code] || 'İşlem başarısız.';
+  return BT_ERROR_TEXT[code] || t('common.islem_basarisiz');
 }
 
 const WIFI_DISCONNECT_ERRORS = {
-  daemon_not_connected: 'Telefon yardımcısına ulaşılamıyor.',
-  daemon_too_old: 'Telefon yardımcısı güncel değil — OpenDeX\'i yeniden başlatın.',
-  permission_denied: 'Telefon bu işleme izin vermiyor; bağlantıyı telefondan kesin.',
-  refused: 'Telefon Wi-Fi bağlantısını kesmeyi reddetti; bağlantıyı telefonun Wi-Fi ayarlarından kesin.',
-  timeout: 'Telefon zamanında yanıt vermedi.',
-  no_wifi_service: 'Telefonun Wi-Fi servisine ulaşılamadı.',
-  no_system_context: 'Telefon servisi Wi-Fi\'a erişemedi.',
+  daemon_not_connected: t('state.telefon_yardimcisina_ulasilamiyor'),
+  daemon_too_old: t('state.telefon_yardimcisi_guncel_degil'),
+  permission_denied: t('state.telefon_bu_isleme_izin_vermiyor'),
+  refused: t('state.telefon_wi_fi_baglantisini_kesmeyi'),
+  timeout: t('state.telefon_zamaninda_yanit_vermedi'),
+  no_wifi_service: t('state.telefonun_wi_fi_servisine_ulasilamadi'),
+  no_system_context: t('state.telefon_servisi_wi_fi_a_erisemedi'),
 };
 
 // "Disconnect" is a request the framework queues: the daemon's ok means "accepted", the link drops a moment later. The
@@ -47,12 +48,12 @@ const REJOIN_WATCH_MS = [4000, 9000];
 
 /** Why the network is connected again — told apart by what the daemon said about the disconnect. */
 function rejoinedText(sticky) {
-  if (sticky === true) return 'Telefon ağdan ayrılmadı. Bağlantıyı telefonun Wi-Fi ayarlarından kesin.';
+  if (sticky === true) return t('state.telefon_agdan_ayrilmadi_baglantiyi');
   if (sticky === false) {
-    return 'Telefon ağı bıraktı ama otomatik katılım geri bağladı. Kalıcı olarak ayrılmak için ağı unutun ya da telefondan kesin.';
+    return t('state.telefon_agi_birakti_ama_otomatik');
   }
-  return 'Telefon ağı kısa süre bıraktı ve otomatik katılım geri bağladı — telefon yardımcısı güncel değil. Kalıcı kesme için '
-    + 'py backend/java/build.py ile yardımcıyı yenileyip OpenDeX\'i yeniden başlatın.';
+  return t('state.telefon_agi_kisa_sure_birakti_ve')
+    + t('state.py_backend_java_build_py_ile');
 }
 
 const errorText = (e) => e?.detail || e?.message || String(e);
@@ -102,7 +103,7 @@ export const useConnectivityStore = create((set, get) => ({
       const r = await api.post('/api/device/wifi/scan');
       if (r?.networks) set({ scan: r.networks });
     } catch (e) {
-      toast(`Wi-Fi taraması başarısız: ${errorText(e)}`);
+      toast(t('state.wi_fi_taramasi_basarisiz_errortext', { errorText: errorText(e) }));
     } finally {
       set({ scanning: false });
     }
@@ -117,7 +118,7 @@ export const useConnectivityStore = create((set, get) => ({
       setTimeout(() => {
         if (get().joining === ssid) {
           set({ joining: null });
-          if (get().wifi?.ssid !== ssid) toast(`"${ssid}" ağına bağlanılamadı.`);
+          if (get().wifi?.ssid !== ssid) toast(t('state.ssid_agina_baglanilamadi', { ssid }));
         }
       }, JOIN_GIVE_UP_MS),
     );
@@ -127,7 +128,7 @@ export const useConnectivityStore = create((set, get) => ({
   async connectWifi(ssid, security, password) {
     try {
       const r = await api.post('/api/device/wifi/connect', { ssid, security, password: password || null });
-      if (!r?.ok) return { ok: false, error: 'Telefon bağlantıyı reddetti.' };
+      if (!r?.ok) return { ok: false, error: t('state.telefon_baglantiyi_reddetti') };
       get()._awaitJoin(ssid);
       return { ok: true };
     } catch (e) {
@@ -141,7 +142,7 @@ export const useConnectivityStore = create((set, get) => ({
    */
   async connectSaved(network) {
     if (network.kind === 'open' || network.kind === 'owe') return get().connectWifi(network.ssid, network.kind, null);
-    if (!network.kind) return { ok: false, error: 'Bu ağ türüne buradan bağlanılamaz; telefondan bağlanın.' };
+    if (!network.kind) return { ok: false, error: t('state.bu_ag_turune_buradan_baglanilamaz') };
     try {
       const r = await api.post(`/api/device/wifi/saved/${network.network_id}/connect`);
       if (r?.ok) {
@@ -165,7 +166,7 @@ export const useConnectivityStore = create((set, get) => ({
       return !get().wifi?.connected;
     }
     if (!answer?.ok) {
-      toast(WIFI_DISCONNECT_ERRORS[answer?.error] || 'Telefon Wi-Fi bağlantısını kesmedi.');
+      toast(WIFI_DISCONNECT_ERRORS[answer?.error] || t('state.telefon_wi_fi_baglantisini_kesmedi'));
       await get().loadWifi();
       return !get().wifi?.connected;
     }
@@ -202,9 +203,9 @@ export const useConnectivityStore = create((set, get) => ({
   async forgetWifi(networkId) {
     try {
       const r = await api.post(`/api/device/wifi/saved/${networkId}/forget`);
-      if (!r?.ok) toast('Ağ unutulamadı.');
+      if (!r?.ok) toast(t('state.ag_unutulamadi'));
     } catch (e) {
-      toast(`Ağ unutulamadı: ${errorText(e)}`);
+      toast(t('state.ag_unutulamadi_errortext', { errorText: errorText(e) }));
     }
     await get().loadWifi();
   },

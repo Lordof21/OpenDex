@@ -45,6 +45,7 @@ import {
   sourcesText,
   tempSeverity,
 } from './loadModel.js';
+import { t } from '../i18n/index.js';
 
 const SEVERITY_ICON = { critical: Flame, warning: AlertTriangle, info: Info, good: CheckCircle2 };
 
@@ -77,7 +78,7 @@ function Section({ title, icon: Icon, aside, children, className }) {
 
 function Legend({ items, shape = 'line', values }) {
   return (
-    <ul className="flex flex-wrap items-center gap-x-3 gap-y-1" aria-label="Gösterge">
+    <ul className="flex flex-wrap items-center gap-x-3 gap-y-1" aria-label={t('telemetry.gosterge')}>
       {items.map((it) => (
         <li key={it.key} className="flex items-center gap-1.5 text-[10px] text-muted-foreground" title={it.hint}>
           <span
@@ -114,7 +115,7 @@ function StatTile({ icon: Icon, label, value, unit, sub, trend }) {
 
 function Findings({ insights }) {
   if (!insights.length) {
-    return <p className="text-[10px] text-muted-foreground">İlk ölçümler bekleniyor…</p>;
+    return <p className="text-[10px] text-muted-foreground">{t('telemetry.ilk_olcumler_bekleniyor')}</p>;
   }
   return (
     <ul className="space-y-1.5">
@@ -137,7 +138,7 @@ function Findings({ insights }) {
   );
 }
 
-function DataTable({ columns, rows, caption, empty = 'Veri yok' }) {
+function DataTable({ columns, rows, caption, empty = t('telemetry.veri_yok') }) {
   return (
     <div className="max-h-[260px] overflow-auto dex-scroll rounded-lg ring-1 ring-border/60">
       <table className="w-full border-collapse text-[10px]">
@@ -238,7 +239,7 @@ export function DeviceLoadPanel(motionProps) {
     <motion.section
       {...motionProps}
       transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
-      aria-label="Telefon yükü"
+      aria-label={t('telemetry.telefon_yuku')}
       data-taskbar-portal="true"
       style={{ zIndex: Z_INDEX.flyout }}
       className="absolute bottom-[calc(100%+16px)] right-4 z-flyout flex h-[min(760px,calc(100vh-82px))] w-[min(780px,calc(100vw-32px))] flex-col overflow-hidden rounded-2xl border border-taskbar-border bg-popover text-popover-foreground shadow-2xl sm:right-24 sm:bg-popover/95 sm:backdrop-blur-xl"
@@ -247,7 +248,7 @@ export function DeviceLoadPanel(motionProps) {
         <div className="min-w-0">
           <h2 className="flex items-center gap-1.5 text-[13px] font-semibold">
             <Activity className="size-4 text-muted-foreground" strokeWidth={2} aria-hidden="true" />
-            Telefon Yükü
+            {t('telemetry.telefon_yuku_2')}
           </h2>
           <p className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
             <span
@@ -255,19 +256,19 @@ export function DeviceLoadPanel(motionProps) {
               aria-hidden="true"
             />
             {active && latest && !lastError
-              ? `Canlı · ${fmt(intervalS, 0)} sn'de bir ölçülüyor · son ölçüm ${fmtClock(latest.t)}`
+              ? t('telemetry.canli_value_sn_de_bir_olculuyor_son', { value: fmt(intervalS, 0), fmtClock: fmtClock(latest.t) })
               : active && lastError
-                ? 'Ölçüm alınamıyor — nedeni aşağıda'
+                ? t('telemetry.olcum_alinamiyor_nedeni_asagida')
                 : active
-                  ? 'İlk ölçüm bekleniyor…'
+                  ? t('telemetry.ilk_olcum_bekleniyor')
                   : latest
-                    ? 'Cihaz bağlı değil · son oturumun kaydı'
-                    : 'Cihaz bağlanınca ölçüm başlar'}
+                    ? t('telemetry.cihaz_bagli_degil_son_oturumun_kaydi')
+                    : t('telemetry.cihaz_baglaninca_olcum_baslar')}
           </p>
         </div>
         <div className="flex items-center gap-1.5">
           <SegmentedControl
-            label="Zaman aralığı"
+            label={t('telemetry.zaman_araligi')}
             options={RANGES.map((r) => ({ value: r.minutes, label: r.label }))}
             value={rangeMinutes}
             onChange={setRange}
@@ -283,7 +284,7 @@ export function DeviceLoadPanel(motionProps) {
             )}
           >
             {tableView ? <LineChart className="size-3" aria-hidden="true" /> : <Table2 className="size-3" aria-hidden="true" />}
-            {tableView ? 'Grafik' : 'Tablo'}
+            {tableView ? t('telemetry.grafik') : t('telemetry.tablo')}
           </button>
         </div>
       </header>
@@ -296,7 +297,7 @@ export function DeviceLoadPanel(motionProps) {
           <div role="alert" className="flex gap-2 rounded-lg bg-background px-3 py-2 ring-1 ring-border/70">
             <AlertTriangle className="mt-0.5 size-3.5 shrink-0" style={{ color: 'var(--viz-warning)' }} strokeWidth={2.2} aria-hidden="true" />
             <div className="min-w-0 text-[10px] leading-[15px]">
-              <p className="font-semibold text-foreground">Telefon ölçüm komutunu reddetti; yeniden deneniyor</p>
+              <p className="font-semibold text-foreground">{t('telemetry.telefon_olcum_komutunu_reddetti')}</p>
               <p className="mt-0.5 break-words font-mono text-[9px] text-muted-foreground">{lastError}</p>
             </div>
           </div>
@@ -308,33 +309,33 @@ export function DeviceLoadPanel(motionProps) {
             <p className="flex items-center justify-between gap-2 text-[10px] font-medium text-muted-foreground">
               <span className="flex items-center gap-1.5">
                 <Thermometer className="size-3.5" strokeWidth={2} aria-hidden="true" />
-                Sıcaklık (hissedilen)
+                {t('telemetry.sicaklik_hissedilen')}
               </span>
               {tempSev && <SeverityChip severity={tempSev} />}
             </p>
             <p className="text-[44px] font-semibold leading-none tracking-tight text-foreground">
               {fmt(temp, 1)}
-              <span className="ml-1 text-[16px] font-medium text-muted-foreground">°C</span>
+              <span className="ml-1 text-[16px] font-medium text-muted-foreground">{t('telemetry.c')}</span>
             </p>
             <p className="text-[10px] text-muted-foreground">
               {slope == null
-                ? 'Eğilim için en az 1 dk veri gerekiyor'
+                ? t('telemetry.egilim_icin_en_az_1_dk_veri_gerekiyor')
                 : `${slope >= 0 ? '+' : ''}${fmt(slope, 2)} °C/dk · son 5 dk`}
-              {latest?.temp?.soc != null && ` · işlemci ${fmt(latest.temp.soc, 0)} °C`}
+              {latest?.temp?.soc != null && t('telemetry.islemci_value_c', { value: fmt(latest.temp.soc, 0) })}
             </p>
           </div>
           <StatTile
             icon={Cpu}
-            label="İşlemci"
+            label={t('telemetry.islemci')}
             value={`%${fmt(cpuNow, 0)}`}
-            sub={`OpenDeX payı %${fmt(opendexNow, 0)} · son 1 dk`}
+            sub={t('telemetry.opendex_payi_value_son_1_dk', { value: fmt(opendexNow, 0) })}
             trend={trendOf((s) => s.cpu?.total)}
           />
           {power.value == null ? (
             // No current reading on this phone (vendor denies it to shell): the level is the honest number.
             <StatTile
               icon={latest?.battery?.charging ? BatteryCharging : Zap}
-              label="Pil"
+              label={t('common.pil')}
               value={latest?.battery?.level != null ? `%${latest.battery.level}` : '—'}
               sub={power.text}
               trend={trendOf((s) => s.battery?.level)}
@@ -342,7 +343,7 @@ export function DeviceLoadPanel(motionProps) {
           ) : (
             <StatTile
               icon={latest?.battery?.charging ? BatteryCharging : Zap}
-              label="Pil gücü"
+              label={t('telemetry.pil_gucu')}
               value={`${power.value > 0 ? '+' : ''}${fmt(power.value, 1)}`}
               unit="W"
               sub={`${power.text}${latest?.battery?.level != null ? ` · %${latest.battery.level}` : ''}`}
@@ -351,28 +352,28 @@ export function DeviceLoadPanel(motionProps) {
           )}
           <StatTile
             icon={Radio}
-            label="Arka plan komutu"
+            label={t('telemetry.arka_plan_komutu')}
             value={fmt(totalRate, 0)}
             unit="/dk"
-            sub={`${fmt(heavyRate, 0)}/dk ağır (dumpsys, logcat)`}
+            sub={t('telemetry.value_dk_agir_dumpsys_logcat', { value: fmt(heavyRate, 0) })}
           />
         </div>
 
-        <Section title="Neden ısınıyor?" icon={Flame}>
+        <Section title={t('telemetry.neden_isiniyor')} icon={Flame}>
           <Findings insights={insights} />
         </Section>
 
         {tableView ? (
-          <Section title="Ölçümler" icon={Table2}>
+          <Section title={t('telemetry.olcumler')} icon={Table2}>
             <DataTable
-              caption="Ölçüm tablosu"
+              caption={t('telemetry.olcum_tablosu')}
               columns={[
-                { key: 't', label: 'Saat', render: (r) => <span className="font-mono tabular-nums">{fmtTime(r.t)}</span> },
-                { key: 'bt', label: 'Pil °C', align: 'right', render: (r) => fmt(bodyTemp(r), 1) },
-                { key: 'soc', label: 'İşlemci °C', align: 'right', render: (r) => fmt(r.temp?.soc, 1) },
-                { key: 'cpu', label: 'İşlemci %', align: 'right', render: (r) => fmt(r.cpu?.total, 0) },
+                { key: 't', label: t('telemetry.saat'), render: (r) => <span className="font-mono tabular-nums">{fmtTime(r.t)}</span> },
+                { key: 'bt', label: t('telemetry.pil_c'), align: 'right', render: (r) => fmt(bodyTemp(r), 1) },
+                { key: 'soc', label: t('telemetry.islemci_c'), align: 'right', render: (r) => fmt(r.temp?.soc, 1) },
+                { key: 'cpu', label: t('telemetry.islemci_2'), align: 'right', render: (r) => fmt(r.cpu?.total, 0) },
                 ...GROUPS.map((g) => ({ key: g.key, label: `${g.label} %`, align: 'right', render: (r) => fmt(groupValue(r, g.key), 1) })),
-                { key: 'w', label: 'Güç W', align: 'right', render: (r) => fmt(r.battery?.power_w, 1) },
+                { key: 'w', label: t('telemetry.guc_w'), align: 'right', render: (r) => fmt(r.battery?.power_w, 1) },
               ]}
               rows={[...samples].reverse().map((s) => ({ ...s, id: s.t }))}
             />
@@ -380,12 +381,12 @@ export function DeviceLoadPanel(motionProps) {
         ) : (
           <>
             <Section
-              title="Hissedilen sıcaklık (pil)"
+              title={t('telemetry.hissedilen_sicaklik_pil')}
               icon={Thermometer}
-              aside={<span className="text-[9px] text-muted-foreground">işlemci sıcaklığı tablo görünümünde</span>}
+              aside={<span className="text-[9px] text-muted-foreground">{t('telemetry.islemci_sicakligi_tablo_gorunumunde')}</span>}
             >
               <TimeChart
-                ariaLabel={`Sıcaklık grafiği, son ${rangeMinutes} dakika. Şu an ${fmt(temp, 1)} derece.`}
+                ariaLabel={t('telemetry.sicaklik_grafigi_son_rangeminutes', { rangeMinutes, value: fmt(temp, 1) })}
                 samples={samples}
                 start={start}
                 end={end}
@@ -393,8 +394,8 @@ export function DeviceLoadPanel(motionProps) {
                 yDomain={tempDomain}
                 unit=" °C"
                 refLines={[
-                  { value: TEMP_WARN_C, label: `${TEMP_WARN_C} °C olağan üst sınır` },
-                  { value: TEMP_CRITICAL_C, label: `${TEMP_CRITICAL_C} °C çok sıcak` },
+                  { value: TEMP_WARN_C, label: t('telemetry.temp_warn_c_c_olagan_ust_sinir', { TEMP_WARN_C }) },
+                  { value: TEMP_CRITICAL_C, label: t('telemetry.temp_critical_c_c_cok_sicak', { TEMP_CRITICAL_C }) },
                 ]}
                 markers={markers}
                 intervalS={intervalS}
@@ -406,12 +407,12 @@ export function DeviceLoadPanel(motionProps) {
             </Section>
 
             <Section
-              title="İşlemci — kim ne kadar kullanıyor?"
+              title={t('telemetry.islemci_kim_ne_kadar_kullaniyor')}
               icon={Cpu}
               aside={<Legend items={GROUPS} shape="rect" values={groupNow} />}
             >
               <TimeChart
-                ariaLabel={`İşlemci kullanımı, sahibine göre yığılmış, son ${rangeMinutes} dakika. Şu an yüzde ${fmt(cpuNow, 0)}.`}
+                ariaLabel={t('telemetry.islemci_kullanimi_sahibine_gore', { rangeMinutes, value: fmt(cpuNow, 0) })}
                 mode="stack"
                 samples={samples}
                 start={start}
@@ -427,22 +428,21 @@ export function DeviceLoadPanel(motionProps) {
                 stale={loading && samples.length > 0}
               />
               <p className="mt-1.5 text-[9px] leading-[13px] text-muted-foreground">
-                Telefonun tüm çekirdeklerinin toplam kapasitesine göre. Donanım kodlayıcının kendisi işlemci harcamaz; payını
-                “Görüntü akışları” gösterir.
+                {t('telemetry.telefonun_tum_cekirdeklerinin_toplam')}
               </p>
             </Section>
           </>
         )}
 
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <Section title="Süreçler" icon={Cpu} aside={<span className="text-[9px] text-muted-foreground">aralık ortalaması</span>}>
+          <Section title={t('telemetry.surecler')} icon={Cpu} aside={<span className="text-[9px] text-muted-foreground">{t('telemetry.aralik_ortalamasi')}</span>}>
             <DataTable
-              caption="İzlenen süreçlerin işlemci payı"
-              empty="İzlenen süreç yok"
+              caption={t('telemetry.izlenen_sureclerin_islemci_payi')}
+              empty={t('telemetry.izlenen_surec_yok')}
               columns={[
                 {
                   key: 'label',
-                  label: 'Süreç',
+                  label: t('telemetry.surec'),
                   render: (r) => (
                     <span className="flex min-w-0 items-center gap-1.5">
                       <span className="size-2 shrink-0 rounded-[3px]" style={{ background: groupMeta[r.group]?.color }} aria-hidden="true" />
@@ -450,39 +450,39 @@ export function DeviceLoadPanel(motionProps) {
                     </span>
                   ),
                 },
-                { key: 'now', label: 'Şimdi %', align: 'right', render: (r) => fmt(r.now, 1) },
-                { key: 'avg', label: 'Ort. %', align: 'right', render: (r) => fmt(r.avg, 1) },
+                { key: 'now', label: t('telemetry.simdi'), align: 'right', render: (r) => fmt(r.now, 1) },
+                { key: 'avg', label: t('telemetry.ort'), align: 'right', render: (r) => fmt(r.avg, 1) },
               ]}
               rows={procs.map((p) => ({ ...p, id: p.key }))}
             />
           </Section>
 
           <div className="space-y-3">
-            <Section title="Görüntü akışları" icon={Activity}>
+            <Section title={t('telemetry.goruntu_akislari')} icon={Activity}>
               <DataTable
-                caption="Pencere başına görüntü akışı"
-                empty="Açık pencere yok"
+                caption={t('telemetry.pencere_basina_goruntu_akisi')}
+                empty={t('telemetry.acik_pencere_yok')}
                 columns={[
-                  { key: 'package', label: 'Pencere', render: (r) => <span className="block max-w-[150px] truncate" title={r.package}>{r.package}</span> },
-                  { key: 'res', label: 'Çözünürlük', align: 'right', render: (r) => (r.w && r.h ? `${r.w}×${r.h}` : '—') },
-                  { key: 'fps', label: 'Kare/sn', align: 'right', render: (r) => (r.paused ? 'durdu' : fmt(r.fps, 0)) },
-                  { key: 'mbps', label: 'Mbps', align: 'right', render: (r) => fmt(r.mbps, 1) },
+                  { key: 'package', label: t('common.pencere'), render: (r) => <span className="block max-w-[150px] truncate" title={r.package}>{r.package}</span> },
+                  { key: 'res', label: t('telemetry.cozunurluk'), align: 'right', render: (r) => (r.w && r.h ? `${r.w}×${r.h}` : '—') },
+                  { key: 'fps', label: t('telemetry.kare_sn'), align: 'right', render: (r) => (r.paused ? 'durdu' : fmt(r.fps, 0)) },
+                  { key: 'mbps', label: t('common.mbps'), align: 'right', render: (r) => fmt(r.mbps, 1) },
                 ]}
                 rows={streams.map((s) => ({ ...s, id: s.window_id }))}
               />
             </Section>
 
-            <Section title="OpenDeX'in telefona gönderdiği komutlar" icon={Radio} aside={<span className="text-[9px] text-muted-foreground">dakikada</span>}>
+            <Section title={t('telemetry.opendex_in_telefona_gonderdigi')} icon={Radio} aside={<span className="text-[9px] text-muted-foreground">{t('telemetry.dakikada')}</span>}>
               {adb.length === 0 ? (
-                <p className="text-[10px] text-muted-foreground">Son 1 dakikada komut yok.</p>
+                <p className="text-[10px] text-muted-foreground">{t('telemetry.son_1_dakikada_komut_yok')}</p>
               ) : (
-                <ul className="space-y-1.5" aria-label="Komut hızları">
+                <ul className="space-y-1.5" aria-label={t('telemetry.komut_hizlari')}>
                   {adb.map((r) => (
                     <li key={r.key} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0.5">
                       <span className="flex min-w-0 items-center gap-1.5 text-[10px] text-foreground">
                         <span className="truncate" title={r.label}>{r.label}</span>
                         {r.heavy && (
-                          <span className="shrink-0 rounded-full bg-background px-1.5 py-px text-[8px] font-semibold text-muted-foreground ring-1 ring-border/70">ağır</span>
+                          <span className="shrink-0 rounded-full bg-background px-1.5 py-px text-[8px] font-semibold text-muted-foreground ring-1 ring-border/70">{t('telemetry.agir')}</span>
                         )}
                       </span>
                       <span className="text-[10px] font-semibold tabular-nums text-foreground">{fmt(r.per_min, 0)}</span>
@@ -495,13 +495,13 @@ export function DeviceLoadPanel(motionProps) {
               )}
               {adbTop.length > 0 && (
                 <div className="mt-2.5 border-t border-border/60 pt-2">
-                  <p className="pb-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">En sık komutlar</p>
-                  <ul className="space-y-0.5" aria-label="En sık komutlar">
+                  <p className="pb-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">{t('telemetry.en_sik_komutlar')}</p>
+                  <ul className="space-y-0.5" aria-label={t('telemetry.en_sik_komutlar')}>
                     {adbTop.map((c) => (
                       <li key={`${c.via}|${c.command}`} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-baseline gap-x-2 text-[10px]">
                         <code className="truncate font-mono text-[9.5px] text-foreground" title={c.command}>{c.command}</code>
-                        <span className="rounded-full bg-background px-1.5 py-px text-[8px] font-semibold text-muted-foreground ring-1 ring-border/70" title={c.via === 'daemon' ? 'Telefondaki yardımcı çalıştırdı (adb işlemi başlamadı, ama telefon komutu yine çalıştırır)' : 'adb ile gönderildi'}>
-                          {c.via === 'daemon' ? 'yardımcı' : c.via === 'adb' ? 'adb' : '—'}
+                        <span className="rounded-full bg-background px-1.5 py-px text-[8px] font-semibold text-muted-foreground ring-1 ring-border/70" title={c.via === 'daemon' ? t('telemetry.telefondaki_yardimci_calistirdi_adb') : t('telemetry.adb_ile_gonderildi')}>
+                          {c.via === 'daemon' ? t('telemetry.yardimci') : c.via === 'adb' ? 'adb' : '—'}
                         </span>
                         <span className="font-semibold tabular-nums text-foreground">{fmt(c.per_min, 0)}</span>
                       </li>
@@ -513,9 +513,9 @@ export function DeviceLoadPanel(motionProps) {
           </div>
         </div>
 
-        <Section title="Olaylar" icon={Activity} aside={<span className="text-[9px] text-muted-foreground">grafiklerde dikey çizgiler</span>}>
+        <Section title={t('telemetry.olaylar')} icon={Activity} aside={<span className="text-[9px] text-muted-foreground">{t('telemetry.grafiklerde_dikey_cizgiler')}</span>}>
           {recentMarkers.length === 0 ? (
-            <p className="text-[10px] text-muted-foreground">Bu aralıkta olay yok.</p>
+            <p className="text-[10px] text-muted-foreground">{t('telemetry.bu_aralikta_olay_yok')}</p>
           ) : (
             <ol className="space-y-1">
               {recentMarkers.map((m) => (
@@ -536,10 +536,9 @@ export function DeviceLoadPanel(motionProps) {
         </Section>
 
         <p className="px-0.5 pb-1 text-[9px] leading-[13px] text-muted-foreground">
-          {latest?.sources && <>Kaynaklar — {sourcesText(latest.sources)}.<br /></>}
-          Ölçümün kendi maliyeti: {fmt(intervalS, 0)} sn'de bir tek dosya okuma komutu
-          {latest?.probe_ms != null && ` (~${fmt(latest.probe_ms, 0)} ms)`}, dumpsys yok. Kayıt:
-          <span className="font-mono"> logs/telemetry-&lt;tarih&gt;.jsonl</span>.
+          {latest?.sources && <>{t('telemetry.kaynaklar_sourcestext', { sourcesText: sourcesText(latest.sources) })}<br /></>}
+          {t('telemetry.olcumun_kendi_maliyeti_value_sn_de', { value: fmt(intervalS, 0), value2: latest?.probe_ms != null && ` (~${fmt(latest.probe_ms, 0)} ms)` })}
+          <span className="font-mono"> {' '}{t('telemetry.logs_telemetry_tarih_jsonl')}</span>.
         </p>
       </div>
     </motion.section>
@@ -557,20 +556,20 @@ export function DeviceLoadTrayButton({ open, onOpen, className }) {
     <button
       type="button"
       onClick={onOpen}
-      aria-label={`Telefon yükü${temp != null ? `, ${fmt(temp, 1)} derece` : ''}${alert ? `, ${SEVERITY[worst].label.toLowerCase()}` : ''}`}
-      data-tooltip={temp != null ? `Telefon ${fmt(temp, 1)} °C · yük paneli` : 'Telefon yükü'}
+      aria-label={t('telemetry.telefon_yukuvaluevalue2', { value: temp != null ? t('telemetry.value_derece', { value: fmt(temp, 1) }) : '', value2: alert ? `, ${SEVERITY[worst].label.toLowerCase()}` : '' })}
+      data-tooltip={temp != null ? t('telemetry.telefon_value_c_yuk_paneli', { value: fmt(temp, 1) }) : t('telemetry.telefon_yuku')}
       className={cn(
         // Sağ küme kuralları (Taskbar.jsx): 10 px yarıçap, dış boşluk yok, klavye odak halkası.
-        'relative inline-flex h-9 shrink-0 cursor-pointer select-none items-center gap-1 self-center rounded-[10px] px-1.5 text-taskbar-foreground outline-none transition-colors duration-150 hover:bg-accent/65 focus-visible:ring-2 focus-visible:ring-ring',
+        'relative inline-flex h-8 shrink-0 cursor-pointer select-none items-center gap-0.5 self-center rounded-[9px] px-1 text-taskbar-foreground outline-none transition-colors duration-150 hover:bg-accent/65 focus-visible:ring-2 focus-visible:ring-ring',
         open && 'bg-accent text-accent-foreground',
         className,
       )}
     >
-      <Thermometer className="size-[17px]" strokeWidth={1.9} aria-hidden="true" />
+      <Thermometer className="size-4" strokeWidth={1.9} aria-hidden="true" />
       <span className="font-mono text-[10px] font-semibold tabular-nums">{temp != null ? `${fmt(temp, 0)}°` : '—'}</span>
       {alert && (
         <span
-          className="absolute right-1 top-1.5 size-2 rounded-full ring-[1.5px] ring-taskbar"
+          className="absolute right-0.5 top-1 size-2 rounded-full ring-[1.5px] ring-taskbar"
           style={{ background: SEVERITY[worst].color }}
           aria-hidden="true"
         />

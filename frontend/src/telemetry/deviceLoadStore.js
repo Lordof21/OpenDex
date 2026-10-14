@@ -3,6 +3,7 @@
 
 import { create } from 'zustand';
 import { api } from '../lib/api.js';
+import { t } from '../i18n/index.js';
 
 const KEEP_S = 2 * 60 * 60; // matches the backend's TELEMETRY_HISTORY_S
 const MAX_MARKERS = 1000;
@@ -57,7 +58,7 @@ export const useDeviceLoadStore = create((set, get) => ({
         };
       });
     } catch (err) {
-      set({ loading: false, loadedOnce: true, error: err?.message || 'Yük verisi alınamadı' });
+      set({ loading: false, loadedOnce: true, error: err?.message || t('telemetry.yuk_verisi_alinamadi') });
     }
   },
 

@@ -48,15 +48,16 @@ import { useTheme } from '../state/ThemeContext.jsx';
 import { openOpenDexSettings } from '../settings/SettingsPanel.jsx';
 import { cn } from '../lib/utils.js';
 import { api } from '../lib/api.js';
+import { t } from '../i18n/index.js';
 
 export const COLUMNS = 17;
 export const ROWS = 7;
 export const CELLS = COLUMNS * ROWS; // 119 slots
 
 const SCALE_LABEL = {
-  small: 'Küçük',
-  medium: 'Orta',
-  large: 'Büyük',
+  small: t('desktop.kucuk'),
+  medium: t('common.orta'),
+  large: t('desktop.buyuk'),
 };
 
 const SCALE_VALUE = {
@@ -88,19 +89,19 @@ const CURATED_ESSENTIAL_CATEGORIES = [
 ];
 
 const DEFAULT_FALLBACK_APPS = [
-  { package: 'com.opendex.settings', display_name: 'OpenDeX Ayarları', isBuiltin: true },
-  { package: 'com.opendex.screen_mirror', display_name: 'Telefon Ekranını Yansıt', isBuiltin: true },
-  { package: 'com.opendex.files', display_name: 'Dosyalar', isBuiltin: true },
+  { package: 'com.opendex.settings', display_name: t('common.opendex_ayarlari'), isBuiltin: true },
+  { package: 'com.opendex.screen_mirror', display_name: t('common.telefon_ekranini_yansit'), isBuiltin: true },
+  { package: 'com.opendex.files', display_name: t('common.dosyalar'), isBuiltin: true },
   { package: 'com.android.chrome', display_name: 'Chrome' },
-  { package: 'com.sec.android.app.myfiles', display_name: 'Dosyalarım' },
-  { package: 'com.sec.android.gallery3d', display_name: 'Galeri' },
-  { package: 'com.android.settings', display_name: 'Ayarlar' },
+  { package: 'com.sec.android.app.myfiles', display_name: t('desktop.dosyalarim') },
+  { package: 'com.sec.android.gallery3d', display_name: t('common.galeri') },
+  { package: 'com.android.settings', display_name: t('common.ayarlar') },
   { package: 'com.google.android.youtube', display_name: 'YouTube' },
-  { package: 'com.sec.android.app.camera', display_name: 'Kamera' },
-  { package: 'com.whatsapp', display_name: 'Mesajlar' },
-  { package: 'com.samsung.android.dialer', display_name: 'Çağrı' },
+  { package: 'com.sec.android.app.camera', display_name: t('desktop.kamera') },
+  { package: 'com.whatsapp', display_name: t('common.mesajlar') },
+  { package: 'com.samsung.android.dialer', display_name: t('desktop.cagri') },
   { package: 'com.android.vending', display_name: 'Play Store' },
-  { package: 'com.samsung.android.calendar', display_name: 'Takvim' },
+  { package: 'com.samsung.android.calendar', display_name: t('common.takvim') },
 ];
 
 function buildDefaultSlots(apps) {
@@ -373,7 +374,7 @@ export default function Desktop() {
     // Check collision: if destination is occupied, snap back
     if (current[to]) {
       const occupant = resolve(current[to]);
-      pushToast(`«${occupant?.name || 'Hedef'}» konumu dolu. Simge eski yerine döndü.`);
+      pushToast(t('desktop.value_konumu_dolu_simge_eski_yerine', { value: occupant?.name || 'Hedef' }));
       return;
     }
 
@@ -484,11 +485,11 @@ export default function Desktop() {
   const addIcon = (cell) => {
     const free = firstFreeCell(cell);
     if (free === null) {
-      pushToast('Masaüstü dolu (maksimum 119 simge).');
+      pushToast(t('desktop.masaustu_dolu_maksimum_119_simge'));
       return;
     }
     const id = `custom-${Date.now()}`;
-    const newName = `Yeni Klasör ${custom.length + 1}`;
+    const newName = t('desktop.yeni_klasor_value', { value: custom.length + 1 });
     const newFolder = { id, name: newName, type: 'folder', appIds: [] };
     setCustom((current) => [...current, newFolder]);
     const nextLayout = { ...layout, [free]: id };
@@ -496,7 +497,7 @@ export default function Desktop() {
     setSelected(id);
     setEditingId(id);
     setEditingName(newName);
-    pushToast(`«${newName}» oluşturuldu. Yeniden adlandırmak için hemen yazabilirsiniz.`);
+    pushToast(t('desktop.newname_olusturuldu_yeniden', { newName }));
   };
 
   const startRename = (id) => {
@@ -513,7 +514,7 @@ export default function Desktop() {
       setCustom((current) =>
         current.map((item) => (item.id === id ? { ...item, name: trimmed } : item))
       );
-      pushToast(`Klasör adı güncellendi: «${trimmed}»`);
+      pushToast(t('desktop.klasor_adi_guncellendi_trimmed', { trimmed }));
     }
     setEditingId(null);
   };
@@ -540,7 +541,7 @@ export default function Desktop() {
         ? { ...current, appIds: [...(current.appIds || []), pkg] }
         : current
     );
-    pushToast('Uygulama klasöre eklendi.');
+    pushToast(t('desktop.uygulama_klasore_eklendi'));
   };
 
   const removeAppFromFolder = (folderId, pkg) => {
@@ -556,7 +557,7 @@ export default function Desktop() {
         ? { ...current, appIds: (current.appIds || []).filter((p) => p !== pkg) }
         : current
     );
-    pushToast('Uygulama klasörden çıkarıldı.');
+    pushToast(t('desktop.uygulama_klasorden_cikarildi'));
   };
 
   const resetToCuratedDefaults = () => {
@@ -564,7 +565,7 @@ export default function Desktop() {
     persistLayout(defaults);
     setSelected(null);
     setSpin((v) => v + 1);
-    pushToast('Masaüstü Windows/DeX tarzı varsayılan önemli uygulamalarla düzenlendi.');
+    pushToast(t('desktop.masaustu_windows_dex_tarzi_varsayilan'));
   };
 
   // Remove custom item
@@ -576,7 +577,7 @@ export default function Desktop() {
     }
     persistLayout(next);
     setSelected(null);
-    pushToast('Simge masaüstünden silindi.');
+    pushToast(t('desktop.simge_masaustunden_silindi'));
   };
 
   // Remove app from desktop (hide)
@@ -587,7 +588,7 @@ export default function Desktop() {
     }
     persistLayout(next);
     setSelected(null);
-    pushToast(`«${app.display_name}» masaüstünden kaldırıldı (Launchpad'den erişilebilir).`);
+    pushToast(t('desktop.display_name_masaustunden_kaldirildi', { display_name: app.display_name }));
   };
 
   // "Simgeleri yönet" penceresinin tek yazma yolu: düzeni kaydeder; artık masaüstünde olmayan seçili simge seçimden düşer.
@@ -606,9 +607,9 @@ export default function Desktop() {
       persistLayout(initial);
       setSelected(null);
       setSpin((v) => v + 1);
-      pushToast('Masaüstü düzeni sıfırlandı.');
+      pushToast(t('desktop.masaustu_duzeni_sifirlandi'));
     } catch (err) {
-      pushToast(`Yenileme hatası: ${err.message || err}`);
+      pushToast(t('desktop.yenileme_hatasi_value', { value: err.message || err }));
     } finally {
       setRefreshing(false);
     }
@@ -616,18 +617,18 @@ export default function Desktop() {
 
   // Force re-extract app icon from device
   const handleForceReExtractIcon = async (app) => {
-    pushToast(`«${app.display_name}» ikonu cihazdan yeniden çekiliyor...`);
+    pushToast(t('desktop.display_name_ikonu_cihazdan_yeniden', { display_name: app.display_name }));
     try {
       const res = await api.post(`/api/apps/icon-v2/${encodeURIComponent(app.package)}/refresh`);
       if (res?.ok) {
         setIconVersions((prev) => ({ ...prev, [app.package]: Date.now() }));
         const kb = Math.round(((res.bytes || 0) / 1024) * 10) / 10;
-        pushToast(`[İkon Başarılı] ${app.display_name}: ${kb} KB çekildi (${res.duration_ms || 0}ms)`);
+        pushToast(t('desktop.ikon_basarili_display_name_kb_kb', { display_name: app.display_name, kb, value: res.duration_ms || 0 }));
       } else {
-        pushToast(`[İkon Hatası] ${app.display_name}: ${res?.error || 'Çekilemedi'}`);
+        pushToast(t('desktop.ikon_hatasi_display_name_value', { display_name: app.display_name, value: res?.error || t('desktop.cekilemedi') }));
       }
     } catch (err) {
-      pushToast(`[İkon İstek Hatası] ${app.display_name}: ${err.message || err}`);
+      pushToast(t('desktop.ikon_istek_hatasi_display_name_value', { display_name: app.display_name, value: err.message || err }));
     }
   };
 
@@ -646,14 +647,14 @@ export default function Desktop() {
       return;
     }
     openWindow(entry.app).catch((exc) => {
-      pushToast(exc.message || 'Pencere açılamadı.');
+      pushToast(exc.message || t('desktop.pencere_acilamadi'));
     });
   };
 
   const handleLaunchMirror = () => {
     handleLaunchItem({
       kind: 'app',
-      app: { package: 'com.opendex.screen_mirror', display_name: 'Telefon Ekranını Yansıt' },
+      app: { package: 'com.opendex.screen_mirror', display_name: t('common.telefon_ekranini_yansit') },
     });
   };
 
@@ -683,7 +684,7 @@ export default function Desktop() {
     <main
       ref={rootRef}
       role="main"
-      aria-label="DeX Masaüstü"
+      aria-label={t('desktop.dex_masaustu')}
       className="relative flex h-full w-full flex-col p-2.5 sm:p-4 overflow-hidden select-none"
       onClick={() => {
         setSelected(null);
@@ -696,7 +697,7 @@ export default function Desktop() {
 
       <AnimatePresence mode="wait">
         {loading ? (
-          <DesktopLoadingSkeleton key="loading-skeleton" deviceLabel={deviceLabel || 'Android Cihazı'} />
+          <DesktopLoadingSkeleton key="loading-skeleton" deviceLabel={deviceLabel || t('common.android_cihazi')} />
         ) : (
           <div
             key={spin}
@@ -832,7 +833,7 @@ export default function Desktop() {
       {menu && (
         <MenuSurface
           ref={menuRef}
-          aria-label="Masaüstü menüsü"
+          aria-label={t('desktop.masaustu_menusu')}
           className="absolute z-40 w-[226px]"
           style={{ left: menu.x, top: menu.y }}
           onClick={(event) => event.stopPropagation()}
@@ -843,7 +844,7 @@ export default function Desktop() {
               <MenuLabel>{menuItem.name}</MenuLabel>
               <MenuItem
                 icon={<Play className="size-3.5 text-primary" />}
-                label="Uygulamayı Aç"
+                label={t('desktop.uygulamayi_ac')}
                 onClick={() => {
                   handleLaunchItem(menuItem);
                   closeMenu();
@@ -851,7 +852,7 @@ export default function Desktop() {
               />
               <MenuItem
                 icon={<LayoutGrid className="size-3.5" />}
-                label="Seç"
+                label={t('common.sec')}
                 onClick={() => {
                   setSelected(menu.itemId);
                   closeMenu();
@@ -862,7 +863,7 @@ export default function Desktop() {
                 <>
                   <MenuItem
                     icon={<RefreshCw className="size-3.5 text-muted-foreground" />}
-                    label="İkonu Yeniden Çek (Debug)"
+                    label={t('desktop.ikonu_yeniden_cek_debug')}
                     onClick={() => {
                       handleForceReExtractIcon(menuItem.app);
                       closeMenu();
@@ -870,7 +871,7 @@ export default function Desktop() {
                   />
                   <MenuItem
                     icon={<AppWindow className="size-3.5 text-muted-foreground" />}
-                    label="Paket Bilgisi"
+                    label={t('desktop.paket_bilgisi')}
                     onClick={() => {
                       pushToast(`Paket: ${menuItem.app.package}`);
                       closeMenu();
@@ -879,7 +880,7 @@ export default function Desktop() {
                   <MenuSeparator />
                   <MenuItem
                     icon={<EyeOff className="size-3.5" />}
-                    label="Masaüstünden Kaldır"
+                    label={t('desktop.masaustunden_kaldir')}
                     destructive
                     onClick={() => {
                       removeAppFromDesktop(menuItem.app);
@@ -893,7 +894,7 @@ export default function Desktop() {
                 <>
                   <MenuItem
                     icon={<FolderOpen className="size-3.5 text-primary" />}
-                    label="Klasörü Aç"
+                    label={t('desktop.klasoru_ac')}
                     onClick={() => {
                       handleLaunchItem(menuItem);
                       closeMenu();
@@ -901,7 +902,7 @@ export default function Desktop() {
                   />
                   <MenuItem
                     icon={<Edit2 className="size-3.5 text-muted-foreground" />}
-                    label="Yeniden Adlandır"
+                    label={t('desktop.yeniden_adlandir')}
                     hint="F2"
                     onClick={() => {
                       startRename(menu.itemId);
@@ -910,7 +911,7 @@ export default function Desktop() {
                   />
                   <MenuItem
                     icon={<FolderPlus className="size-3.5 text-muted-foreground" />}
-                    label="Uygulama Ekle / Yönet"
+                    label={t('desktop.uygulama_ekle_yonet')}
                     onClick={() => {
                       setActiveFolder(menuItem);
                       setShowAddAppPicker(true);
@@ -920,7 +921,7 @@ export default function Desktop() {
                   <MenuSeparator />
                   <MenuItem
                     icon={<Trash2 className="size-3.5" />}
-                    label="Sil"
+                    label={t('common.sil')}
                     destructive
                     onClick={() => {
                       removeIcon(menu.itemId);
@@ -934,8 +935,8 @@ export default function Desktop() {
             <>
               <MenuItem
                 icon={<Plus className="size-3.5 text-primary" />}
-                label="Yeni Klasör"
-                hint="Uygulama grubu"
+                label={t('desktop.yeni_klasor')}
+                hint={t('desktop.uygulama_grubu')}
                 onClick={() => {
                   addIcon(menu.cell);
                   closeMenu();
@@ -943,8 +944,8 @@ export default function Desktop() {
               />
               <MenuItem
                 icon={<RotateCcw className="size-3.5" />}
-                label="Varsayılan Düzen (Windows/DeX)"
-                hint="Önemli uygulamalar"
+                label={t('desktop.varsayilan_duzen_windows_dex')}
+                hint={t('desktop.onemli_uygulamalar')}
                 onClick={() => {
                   resetToCuratedDefaults();
                   closeMenu();
@@ -953,7 +954,7 @@ export default function Desktop() {
               <MenuSeparator />
               <MenuItem
                 icon={<Grid2x2 className="size-3.5" />}
-                label="Görünüm modu"
+                label={t('desktop.gorunum_modu')}
                 hint={SCALE_LABEL[scale]}
                 right={<ChevronRight className="size-3.5 text-muted-foreground" />}
                 aria-haspopup="menu"
@@ -963,7 +964,7 @@ export default function Desktop() {
               <MenuSeparator />
               <MenuItem
                 icon={<ImageIcon className="size-3.5" />}
-                label="Arka planı değiştir…"
+                label={t('desktop.arka_plani_degistir')}
                 hint={wallpaper.name}
                 onClick={() => {
                   setShowWallpaper(true);
@@ -972,7 +973,7 @@ export default function Desktop() {
               />
               <MenuItem
                 icon={<Shuffle className="size-3.5" />}
-                label="Rastgele arka plan"
+                label={t('desktop.rastgele_arka_plan')}
                 onClick={() => {
                   randomizeWallpaper();
                   closeMenu();
@@ -981,7 +982,7 @@ export default function Desktop() {
               <MenuSeparator />
               <MenuItem
                 icon={theme === 'dark' ? <Sun className="size-3.5 text-window-minimize" /> : <Moon className="size-3.5 text-app-mail" />}
-                label={theme === 'dark' ? 'Açık tema' : 'Koyu tema'}
+                label={theme === 'dark' ? t('desktop.acik_tema') : t('desktop.koyu_tema')}
                 onClick={() => {
                   toggleTheme();
                   closeMenu();
@@ -989,7 +990,7 @@ export default function Desktop() {
               />
               <MenuItem
                 icon={<MonitorCog className="size-3.5" />}
-                label="Ekran ayarları"
+                label={t('desktop.ekran_ayarlari')}
                 onClick={() => {
                   openSettings();
                   openOpenDexSettings();
@@ -999,7 +1000,7 @@ export default function Desktop() {
               <MenuSeparator />
               <MenuItem
                 icon={<Smartphone className="size-3.5 text-primary" />}
-                label="Telefon Ekranını Yansıt"
+                label={t('common.telefon_ekranini_yansit')}
                 onClick={() => {
                   handleLaunchMirror();
                   closeMenu();
@@ -1007,7 +1008,7 @@ export default function Desktop() {
               />
               <MenuItem
                 icon={<LayoutGrid className="size-3.5" />}
-                label="Uygulama Çekmecesi"
+                label={t('desktop.uygulama_cekmecesi')}
                 onClick={() => {
                   setLaunchpadOpen(true);
                   closeMenu();
@@ -1015,7 +1016,7 @@ export default function Desktop() {
               />
               <MenuItem
                 icon={<SlidersHorizontal className="size-3.5 text-muted-foreground" />}
-                label={hiddenCount > 0 ? `Simgeleri Yönet (${hiddenCount})` : 'Simgeleri Yönet'}
+                label={hiddenCount > 0 ? t('desktop.simgeleri_yonet_hiddencount', { hiddenCount }) : t('desktop.simgeleri_yonet_2')}
                 onClick={() => {
                   setShowHiddenModal(true);
                   closeMenu();
@@ -1030,7 +1031,7 @@ export default function Desktop() {
       {submenu && (
         <MenuSurface
           ref={submenuRef}
-          aria-label="Görünüm modu"
+          aria-label={t('desktop.gorunum_modu')}
           className="absolute z-50 w-[184px]"
           style={{ left: submenu.left, top: submenu.top }}
           onClick={(event) => event.stopPropagation()}
@@ -1067,7 +1068,7 @@ export default function Desktop() {
       />
 
       {/* Active Folder Window Modal */}
-      <Dialog open={Boolean(activeFolder)} onClose={() => setActiveFolder(null)} label="Klasör" className="max-w-lg overflow-hidden">
+      <Dialog open={Boolean(activeFolder)} onClose={() => setActiveFolder(null)} label={t('common.klasor')} className="max-w-lg overflow-hidden">
         {/* JSX çocukları Dialog kapalıyken de hesaplanır: activeFolder null iken .name okumasın */}
         {activeFolder && (
           <>
@@ -1087,10 +1088,10 @@ export default function Desktop() {
                         renameFolder(activeFolder.id, val);
                       }}
                       className="text-base font-bold bg-transparent border-b border-transparent hover:border-border focus:border-primary outline-none px-0.5 max-w-[220px]"
-                      placeholder="Klasör Adı"
+                      placeholder={t('desktop.klasor_adi')}
                     />
                     <p className="text-[11px] text-muted-foreground">
-                      {activeFolder.appIds?.length || 0} uygulama içeriyor · Başlığa tıklayarak yeniden adlandırabilirsiniz
+                      {t('desktop.value_uygulama_iceriyor_basliga', { value: activeFolder.appIds?.length || 0 })}
                     </p>
                   </div>
                 </div>
@@ -1102,7 +1103,7 @@ export default function Desktop() {
                     onClick={() => setShowAddAppPicker((v) => !v)}
                     startIcon={<Plus className="size-3.5" />}
                   >
-                    {showAddAppPicker ? 'Listeyi Gizle' : 'Uygulama Ekle'}
+                    {showAddAppPicker ? t('desktop.listeyi_gizle') : t('desktop.uygulama_ekle_2')}
                   </Button>
                   <button
                     type="button"
@@ -1122,7 +1123,7 @@ export default function Desktop() {
                       <Search className="absolute left-3 top-2.5 size-3.5 text-muted-foreground" />
                       <input
                         type="text"
-                        placeholder="Klasöre eklenecek uygulama ara..."
+                        placeholder={t('desktop.klasore_eklenecek_uygulama_ara')}
                         value={folderAppSearch}
                         onChange={(e) => setFolderAppSearch(e.target.value)}
                         className="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
@@ -1151,7 +1152,7 @@ export default function Desktop() {
                               onClick={() => addAppToFolder(activeFolder.id, app.package)}
                               startIcon={<Plus className="size-3" />}
                             >
-                              Ekle
+                              {t('desktop.ekle')}
                             </Button>
                           </div>
                         ))}
@@ -1181,7 +1182,7 @@ export default function Desktop() {
                                   e.stopPropagation();
                                   removeAppFromFolder(activeFolder.id, pkg);
                                 }}
-                                title="Klasörden çıkar"
+                                title={t('desktop.klasorden_cikar')}
                                 className="absolute top-0.5 right-0.5 size-5 rounded-full bg-destructive/15 text-destructive hover:bg-destructive hover:text-destructive-foreground opacity-0 group-hover/folderapp:opacity-100 transition-opacity grid place-items-center cursor-pointer"
                               >
                                 <X className="size-3" />
@@ -1199,9 +1200,9 @@ export default function Desktop() {
                     ) : (
                       <div className="py-8 text-center">
                         <Folder className="mx-auto size-12 text-muted-foreground/40 mb-2" strokeWidth={1.5} />
-                        <p className="text-sm font-semibold text-foreground">Bu klasör henüz boş</p>
+                        <p className="text-sm font-semibold text-foreground">{t('desktop.bu_klasor_henuz_bos')}</p>
                         <p className="text-xs text-muted-foreground mt-1 max-w-xs mx-auto">
-                          Android uygulamalarınızı buraya ekleyerek masaüstünüzü organize edebilirsiniz.
+                          {t('desktop.android_uygulamalarinizi_buraya')}
                         </p>
                         <Button
                           size="sm"
@@ -1210,7 +1211,7 @@ export default function Desktop() {
                           onClick={() => setShowAddAppPicker(true)}
                           startIcon={<Plus className="size-3.5 text-primary" />}
                         >
-                          Uygulama Ekle
+                          {t('desktop.uygulama_ekle')}
                         </Button>
                       </div>
                     )}

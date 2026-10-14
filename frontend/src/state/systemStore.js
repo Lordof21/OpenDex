@@ -7,6 +7,7 @@ import { api } from '../lib/api.js';
 import { logger } from '../lib/logger.js';
 import { newOpId } from '../lib/opId.js';
 import { setPhoneMetrics } from '../window/windowMath.js';
+import { t as tt } from '../i18n/index.js';
 
 let toastSeq = 0;
 let eventSender = null;
@@ -243,15 +244,15 @@ export const useSystemStore = create((set, get) => ({
       if (res && res.ok === false) {
         get().pushToast(
           res.error === 'screen_did_not_sleep'
-            ? 'Telefon ekranı kapanmadı (cihaz uyku isteğini reddetti).'
+            ? tt('state.telefon_ekrani_kapanmadi_cihaz_uyku')
             : res.error === 'screen_did_not_wake'
-              ? 'Telefon ekranı açılmadı.'
-              : 'Ekran gücü değiştirilemedi.'
+              ? tt('state.telefon_ekrani_acilmadi')
+              : tt('state.ekran_gucu_degistirilemedi')
         );
       }
     } catch (err) {
       L.error('power', 'request_failed', { requested: on, error: err?.message || String(err) });
-      get().pushToast('Ekran gücü komutu gönderilemedi.');
+      get().pushToast(tt('state.ekran_gucu_komutu_gonderilemedi'));
       await get().fetchHardwareStates();
     } finally {
       set({ displayPowerPending: false });
@@ -261,7 +262,7 @@ export const useSystemStore = create((set, get) => ({
   setThermalLevel(level) {
     set({ thermalLevel: level });
     if (level !== 'none' && level !== 'light') {
-      get().pushToast('Cihaz ısındı — kalite geçici olarak düşürüldü.');
+      get().pushToast(tt('state.cihaz_isindi_kalite_gecici_olarak'));
     }
   },
 

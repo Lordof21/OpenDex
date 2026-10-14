@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.js';
 // Device/connection status readout — feeds the taskbar system tray
 // ("Pixel 8 · Kablosuz" indicator in the mockups).
 
@@ -33,8 +34,8 @@ export function sessionRunsOverWifi(devices, phoneIp) {
 }
 
 export function formatDeviceLabel(status) {
-  if (!status?.connected || !status.device) return 'Cihaz bağlı değil';
+  if (!status?.connected || !status.device) return t('common.cihaz_bagli_degil');
   const name = (status.device.model || status.device.serial).replaceAll('_', ' ');
-  const transport = status.device.transport === 'wireless' ? 'Kablosuz' : 'USB';
+  const transport = status.device.transport === 'wireless' ? t('wireless.kablosuz') : 'USB';
   return `${name} · ${transport}`;
 }

@@ -22,15 +22,16 @@ import { useSystemStore } from '../../state/systemStore.js';
 import { cn } from '../../lib/utils.js';
 import { Callout, Chip, ChoiceGroup, Group, Page, ToggleRow, useSettingsUi } from '../controls.jsx';
 import { PROFILES, SECTIONS, activeProfileId, recommendations, sectionSummary } from '../settingsModel.js';
+import { t } from '../../i18n/index.js';
 
 const PROFILE_ICONS = { balanced: Scale, clarity: Sparkles, battery: BatteryCharging, lowdata: Wifi };
 const TILE_ICONS = { display: Monitor, stream: Radio, audio: Speaker, windows: AppWindow };
 
 const CONNECTION = {
-  connected: { label: 'Bağlı', tone: 'success' },
-  reconnecting: { label: 'Yeniden bağlanıyor', tone: 'warning' },
-  checking: { label: 'Denetleniyor', tone: 'muted' },
-  disconnected: { label: 'Bağlantı yok', tone: 'warning' },
+  connected: { label: t('common.bagli'), tone: 'success' },
+  reconnecting: { label: t('settings.yeniden_baglaniyor'), tone: 'warning' },
+  checking: { label: t('settings.denetleniyor'), tone: 'muted' },
+  disconnected: { label: t('settings.baglanti_yok'), tone: 'warning' },
 };
 const TRANSPORT = { usb: 'USB', wifi: 'Wi‑Fi', tcp: 'Wi‑Fi', network: 'Wi‑Fi' };
 
@@ -47,9 +48,9 @@ function DeviceHero({ profileLabel }) {
           <Smartphone className="size-6" strokeWidth={1.7} />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Bağlı cihaz</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{t('settings.bagli_cihaz')}</p>
           <p className="truncate text-[16px] font-semibold leading-[22px] text-foreground" data-testid="overview-device">
-            {deviceLabel || (connectionState === 'connected' ? 'Android cihaz' : 'Cihaz bağlı değil')}
+            {deviceLabel || (connectionState === 'connected' ? t('settings.android_cihaz') : t('common.cihaz_bagli_degil'))}
           </p>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             <Chip tone={conn.tone}>
@@ -57,7 +58,7 @@ function DeviceHero({ profileLabel }) {
               {conn.label}
             </Chip>
             {link && <Chip>{link}</Chip>}
-            <Chip tone="primary">Profil: {profileLabel}</Chip>
+            <Chip tone="primary">{t('settings.profil_profilelabel', { profileLabel })}</Chip>
           </div>
         </div>
       </div>
@@ -104,7 +105,7 @@ export function OverviewSection({ ctl, go }) {
     const chosen = PROFILES.find((p) => p.id === id);
     if (!chosen) return;
     a.applyPatch(chosen.patch);
-    pushToast?.(`«${chosen.label}» profili uygulandı.`);
+    pushToast?.(t('settings.label_profili_uygulandi', { label: chosen.label }));
   };
   const runTip = (tip) => {
     if (tip.action?.patch) a.applyPatch(tip.action.patch);
@@ -113,23 +114,23 @@ export function OverviewSection({ ctl, go }) {
 
   return (
     <Page icon={LayoutDashboard} title={SECTIONS.overview.label} subtitle={SECTIONS.overview.subtitle}>
-      <DeviceHero profileLabel={profile ? profile.label : 'Özel'} />
+      <DeviceHero profileLabel={profile ? profile.label : t('common.ozel')} />
 
       <ChoiceGroup
         icon={Activity}
-        title="Hazır profiller"
-        subtitle="Tek dokunuşla yayın kalitesini kullanım amacınıza göre ayarlayın. DPI, tema ve ses gibi kişisel tercihlere dokunulmaz."
+        title={t('settings.hazir_profiller')}
+        subtitle={t('settings.tek_dokunusla_yayin_kalitesini')}
         options={PROFILES.map((p) => ({ value: p.id, label: p.label, description: p.description, tag: p.tagline }))}
         optionIcons={PROFILE_ICONS}
         value={profileId}
         onChange={applyProfile}
         columns={2}
-        readout={profileId === 'custom' ? 'Özel ayar' : undefined}
+        readout={profileId === 'custom' ? t('settings.ozel_ayar') : undefined}
       />
 
       {tips.length > 0 ? (
-        <section aria-label="Öneriler" className="space-y-2">
-          <h3 className="px-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Öneriler</h3>
+        <section aria-label={t('settings.oneriler')} className="space-y-2">
+          <h3 className="px-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{t('settings.oneriler')}</h3>
           {tips.map((tip) => (
             <Callout
               key={tip.id}
@@ -154,16 +155,16 @@ export function OverviewSection({ ctl, go }) {
       ) : (
         <div className="flex items-center gap-2 rounded-xl border border-border/60 bg-muted/20 px-3.5 py-2.5 text-[11.5px] text-muted-foreground">
           <CheckCircle2 className="size-4 shrink-0 text-status-active" aria-hidden="true" />
-          Ayarlarınız dengeli görünüyor; ek bir önerimiz yok.
+          {t('settings.ayarlariniz_dengeli_gorunuyor_ek_bir')}
         </div>
       )}
 
-      <section aria-label="Şu anki ayarlar" className="space-y-1.5">
-        <h3 className="px-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Şu an</h3>
+      <section aria-label={t('settings.su_anki_ayarlar')} className="space-y-1.5">
+        <h3 className="px-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{t('settings.su_an')}</h3>
         <SummaryTiles live={live} go={go} />
       </section>
 
-      <Group title="Hızlı ayarlar">
+      <Group title={t('settings.hizli_ayarlar')}>
         <ToggleRow item="realResolution" icon={Sparkles} checked={v.smartResize} onToggle={() => a.toggle('dynamic_resolution_enabled', v.smartResize)} />
         <ToggleRow item="dimPhone" icon={Monitor} checked={v.dimPhone} onToggle={() => a.toggle('screen_off_while_mirroring', v.dimPhone)} />
         <ToggleRow item="ambient" icon={ScanSearch} checked={v.ambient} onToggle={() => a.toggle('ambient_backdrop', v.ambient)} />

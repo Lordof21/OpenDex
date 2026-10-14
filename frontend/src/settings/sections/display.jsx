@@ -12,6 +12,7 @@ import {
   SHARPEN_OPTIONS,
   TARGET_DP_OPTIONS,
 } from '../settingsModel.js';
+import { t } from '../../i18n/index.js';
 
 export function DisplaySection({ ctl }) {
   const { values: v, actions: a, liveEffectiveDpi } = ctl;
@@ -19,13 +20,13 @@ export function DisplaySection({ ctl }) {
 
   return (
     <Page icon={Monitor} title={SECTIONS.display.label} subtitle={SECTIONS.display.subtitle}>
-      <Group title="Netlik">
+      <Group title={t('settings.netlik')}>
         <ToggleRow
           item="realResolution"
           icon={Sparkles}
           checked={v.smartResize}
           onToggle={() => a.toggle('dynamic_resolution_enabled', v.smartResize)}
-          detail="Çözünürlük, pencerenin video alanından (başlık çubuğu ve kenarlıklar çıkarılmış haliyle) piksel‑birebir hesaplanır. İçerik yoğunluğu (DPI) 180‑220 bandında dengelenir; böylece yazılar mikro boyuta düşmez ve tam ekranda çok sütunlu düzen korunur."
+          detail={t('settings.cozunurluk_pencerenin_video_alanindan')}
         />
         <ToggleRow item="instantResize" icon={Maximize2} checked={v.instantResize} onToggle={() => a.toggle('resize_instant_apply', v.instantResize)} />
         <ToggleRow item="pixelPerfect" icon={Zap} checked={v.subpixel} onToggle={() => a.toggle('pixel_perfect_dpr', v.subpixel)} />
@@ -39,13 +40,12 @@ export function DisplaySection({ ctl }) {
         onChange={a.setResolution}
         columns={2}
         readout={resolutionTag}
-        detail="Dinamik‑Fix: stream oranı pencerenin video alanına birebir eşlenir, çözünürlük kodlayıcı uyumlu 8 katına hizalanır; esneme, siyah çubuk ya da ölçek küçültme olmaz."
+        detail={t('settings.dinamik_fix_stream_orani_pencerenin')}
       />
 
       <div className="space-y-3">
-        <Callout tone="tip" title="Yoğunluk: iki yoldan biri">
-          Özel DPI ile Target DP birbirini dışlar: birini seçince diğeri otomatiğe döner. Her pencerenin kendi yoğunluğunu
-          DeX hızlı ayar panelinden de değiştirebilirsiniz; burası yeni pencerelerin varsayılanıdır.
+        <Callout tone="tip" title={t('settings.yogunluk_iki_yoldan_biri')}>
+          {t('settings.ozel_dpi_ile_target_dp_birbirini')}
         </Callout>
 
         <ChoiceGroup
@@ -57,7 +57,7 @@ export function DisplaySection({ ctl }) {
           columns={3}
           readout={v.dpi === 'auto' ? `Oto · ${liveEffectiveDpi} DPI` : `${v.dpi} DPI`}
         />
-        <SliderField title="Hassas DPI Yoğunluk Ayarı" readout={v.dpi === 'auto' ? `Otomatik (${liveEffectiveDpi} DPI)` : `${v.dpi} DPI`}>
+        <SliderField title={t('settings.hassas_dpi_yogunluk_ayari')} readout={v.dpi === 'auto' ? `Otomatik (${liveEffectiveDpi} DPI)` : `${v.dpi} DPI`}>
           <PrecisionSlider
             value={v.dpi === 'auto' ? liveEffectiveDpi : Number(v.dpi)}
             min={130}
@@ -66,7 +66,7 @@ export function DisplaySection({ ctl }) {
             auto={v.dpi === 'auto'}
             onCommit={(val) => a.setDpi(String(val))}
             onAuto={() => a.setDpi('auto')}
-            label="Özel DPI yoğunluğu"
+            label={t('common.ozel_dpi_yogunlugu')}
             unit="DPI"
             ticks={[130, 160, 180, 200, 220, 240, 280, 320, 360]}
           />
@@ -79,10 +79,10 @@ export function DisplaySection({ ctl }) {
           value={v.targetDp}
           onChange={a.setTargetDp}
           columns={3}
-          readout={v.targetDp === 'auto' ? 'Otomatik' : `${v.targetDp} dp`}
-          detail="Target DP, en küçük kenarın dp karşılığıdır (smallest width): 600 dp tablet, 720 dp masaüstü, 960 dp geniş içerik düzenini açar. Pencere boyutuna göre DPI buna göre türetilir."
+          readout={v.targetDp === 'auto' ? t('common.otomatik_2') : `${v.targetDp} dp`}
+          detail={t('settings.target_dp_en_kucuk_kenarin_dp')}
         />
-        <SliderField title="Hassas Target DP Çalışma Alanı" readout={v.targetDp === 'auto' ? 'Otomatik (720 dp)' : `${v.targetDp} dp`}>
+        <SliderField title={t('settings.hassas_target_dp_calisma_alani')} readout={v.targetDp === 'auto' ? t('settings.otomatik_720_dp') : `${v.targetDp} dp`}>
           <PrecisionSlider
             value={v.targetDp === 'auto' ? 720 : Number(v.targetDp)}
             min={350}
@@ -91,7 +91,7 @@ export function DisplaySection({ ctl }) {
             auto={v.targetDp === 'auto'}
             onCommit={(val) => a.setTargetDp(String(val))}
             onAuto={() => a.setTargetDp('auto')}
-            label="Mantıksal alan (target dp)"
+            label={t('common.mantiksal_alan_target_dp')}
             unit="dp"
             ticks={[350, 480, 600, 720, 840, 960, 1080]}
           />
@@ -105,7 +105,7 @@ export function DisplaySection({ ctl }) {
         value={v.fit}
         onChange={a.setFit}
         columns={3}
-        detail="Dinamik‑Fix açıkken stream oranı pencereye zaten birebir eşlendiği için üç mod pratikte aynı sonucu verir; fark yalnız sabit çözünürlük stratejilerinde görünür."
+        detail={t('settings.dinamik_fix_acikken_stream_orani')}
       />
 
       <ChoiceGroup item="sharpen" icon={Sparkles} options={SHARPEN_OPTIONS} value={v.sharpen} onChange={a.setSharpen} columns={3} />

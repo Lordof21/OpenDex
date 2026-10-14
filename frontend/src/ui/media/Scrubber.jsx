@@ -11,6 +11,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { cn } from '../../lib/utils.js';
 import { formatTime } from '../../state/useMediaPlaybackController.js';
+import { t } from '../../i18n/index.js';
 
 const KEY_STEP_MS = 5000;
 const KEY_COMMIT_DELAY_MS = 280;
@@ -33,7 +34,7 @@ export function Scrubber({
   percent = 0,
   positionMs = 0,
   durationMs = 0,
-  label = 'Parça konumu',
+  label = t('ui.parca_konumu'),
   onCommit,
   size = 'md',
   tone = 'panel',
@@ -118,7 +119,7 @@ export function Scrubber({
   const elapsedMs = drag !== null || typed !== null ? (shown / 100) * durationMs : positionMs;
   const totalText = durationMs > 0
     ? (remaining ? `-${formatTime(Math.max(0, durationMs - elapsedMs))}` : formatTime(durationMs))
-    : (live ? 'Canlı' : '--:--');
+    : (live ? t('ui.canli') : '--:--');
   const inline = showTimes && timesLayout === 'inline';
 
   const elapsedEl = (
@@ -132,8 +133,8 @@ export function Scrubber({
         'rounded transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         inline ? 'w-10 shrink-0 text-left' : 'px-1',
       )}
-      title={remaining ? 'Toplam süreyi göster' : 'Kalan süreyi göster'}
-      aria-label={remaining ? 'Toplam süreyi göster' : 'Kalan süreyi göster'}
+      title={remaining ? t('ui.toplam_sureyi_goster') : t('ui.kalan_sureyi_goster')}
+      aria-label={remaining ? t('ui.toplam_sureyi_goster') : t('ui.kalan_sureyi_goster')}
     >
       {totalText}
     </button>
@@ -153,7 +154,7 @@ export function Scrubber({
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={Math.round(shown)}
-        aria-valuetext={durationMs > 0 ? `${formatTime(elapsedMs)} / ${formatTime(durationMs)}` : 'Süre bilinmiyor'}
+        aria-valuetext={durationMs > 0 ? `${formatTime(elapsedMs)} / ${formatTime(durationMs)}` : t('ui.sure_bilinmiyor')}
         aria-disabled={!seekable || undefined}
         data-dragging={drag !== null ? 'true' : undefined}
         onPointerDown={onPointerDown}

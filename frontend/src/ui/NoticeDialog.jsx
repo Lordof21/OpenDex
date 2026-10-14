@@ -5,6 +5,7 @@
 import { dismissNotice, runNoticeAction } from '../startup/firstRunNotices.js';
 import Button from './Button.jsx';
 import { Dialog } from './Dialog.jsx';
+import { t } from '../i18n/index.js';
 
 export default function NoticeDialog({ androidId, notice, onDone }) {
   const done = async () => {
@@ -29,11 +30,11 @@ export default function NoticeDialog({ androidId, notice, onDone }) {
           <div className="mt-4 flex justify-end gap-2">
             {notice.action && (
               <Button size="sm" variant="secondary" onClick={() => runNoticeAction(notice)}>
-                Ayarı telefonda aç
+                {t('ui.ayari_telefonda_ac')}
               </Button>
             )}
             <Button size="sm" onClick={done}>
-              Anladım
+              {t('ui.anladim')}
             </Button>
           </div>
         </>

@@ -5,6 +5,7 @@
 // Neden küçültme: 12 MP bir telefon fotoğrafı (8 MB) her açılışta çözülüp 3840×2160 ekrana ölçeklenir; 4K'ya indirmek hem
 // depoyu küçük tutar hem masaüstünün açılış/çizim maliyetini sabitler. Görüntü kalitesi 4K ekranda fark edilmez.
 import { lumaOfRgba } from './prefs.js';
+import { t as tt } from '../../i18n/index.js';
 
 export const MAX_INPUT_BYTES = 40 * 1024 * 1024;
 export const MAX_EDGE = 3840;
@@ -27,12 +28,12 @@ const extensionOf = (name) => (String(name).includes('.') ? String(name).split('
 /** Kullanıcıya gösterilecek ad: uzantısız, kırpılmış, boşsa "Resim". */
 export function baseName(filename) {
   const raw = String(filename || '').replace(/\.[^./\\]+$/, '').trim();
-  return (raw || 'Resim').slice(0, 60);
+  return (raw || tt('desktop.resim')).slice(0, 60);
 }
 
 /** @returns {{ code: string, message: string } | null} */
 export function checkFile(file) {
-  const name = file?.name || 'Resim';
+  const name = file?.name || tt('desktop.resim');
   const type = String(file?.type || '').toLowerCase();
   const known = type ? TYPES.has(type) : EXTENSIONS.has(extensionOf(name));
   if (!known) {
@@ -40,13 +41,13 @@ export function checkFile(file) {
     return {
       code: 'type',
       message: svg
-        ? `«${baseName(name)}» bir SVG; kapak resmi için JPG, PNG, WebP, AVIF, GIF veya BMP kullanın.`
-        : `«${baseName(name)}» bir resim dosyası değil (JPG, PNG, WebP, AVIF, GIF, BMP desteklenir).`,
+        ? tt('desktop.basename_bir_svg_kapak_resmi_icin_jpg', { baseName: baseName(name) })
+        : tt('desktop.basename_bir_resim_dosyasi_degil_jpg', { baseName: baseName(name) }),
     };
   }
-  if (!(file.size > 0)) return { code: 'decode', message: `«${baseName(name)}» boş bir dosya.` };
+  if (!(file.size > 0)) return { code: 'decode', message: tt('desktop.basename_bos_bir_dosya', { baseName: baseName(name) }) };
   if (file.size > MAX_INPUT_BYTES) {
-    return { code: 'size', message: `«${baseName(name)}» çok büyük (en fazla ${Math.round(MAX_INPUT_BYTES / 1048576)} MB).` };
+    return { code: 'size', message: tt('desktop.basename_cok_buyuk_en_fazla_value_mb', { baseName: baseName(name), value: Math.round(MAX_INPUT_BYTES / 1048576) }) };
   }
   return null;
 }
@@ -131,7 +132,7 @@ export async function processImage(file, { render = browserRender } = {}) {
   try {
     out = await render(file, MAX_EDGE);
   } catch {
-    throw new ImageProcessError('decode', `«${baseName(file.name)}» açılamadı (bozuk veya desteklenmeyen resim).`);
+    throw new ImageProcessError('decode', tt('desktop.basename_acilamadi_bozuk_veya', { baseName: baseName(file.name) }));
   }
   return {
     name: baseName(file.name),

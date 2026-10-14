@@ -9,6 +9,7 @@ import { getAlbumArtUrl } from '../lib/utils.js';
 import { formatTime } from './useMediaPlaybackController.js';
 import { isPackageLive } from './notificationStore.js';
 import { resolveAppDisplayName } from '../desktop/appRegistry.js';
+import { t } from '../i18n/index.js';
 
 // Paket adındaki "uygulamayı anlatmayan" parçalar: Spotify'ın com.spotify.music paketi "Spotify" olsun, "Music" değil.
 const TLDS = new Set(['com', 'org', 'net', 'io', 'app', 'co', 'tv', 'me']);
@@ -19,16 +20,16 @@ const GENERIC = new Set(['android', 'apps', 'app', 'mobile', 'client', 'player',
  * `com.google.android.apps.youtube.music` → "Youtube Music". Sıradan durumda ad uygulama listesinden gelir (`appNameOf`).
  */
 export function humanizePackage(pkg) {
-  if (!pkg) return 'Android Medya';
+  if (!pkg) return t('common.android_medya');
   const parts = pkg.split('.').filter((p) => p && !TLDS.has(p));
   const meaningful = parts.filter((p) => !GENERIC.has(p));
   const words = (meaningful.length ? meaningful.slice(-2) : parts.slice(-1)).join(' ');
-  return words.replace(/(^|\s)\S/g, (c) => c.toUpperCase()) || 'Android Medya';
+  return words.replace(/(^|\s)\S/g, (c) => c.toUpperCase()) || t('common.android_medya');
 }
 
 /** Oturumun görünen uygulama adı: bildirimin adı → uygulama listesi → paket adından. */
 export function appNameOf(pkg, fallbackName = null) {
-  if (!pkg) return fallbackName || 'Android Medya';
+  if (!pkg) return fallbackName || t('common.android_medya');
   const resolved = resolveAppDisplayName(pkg, fallbackName);
   return resolved && resolved !== pkg ? resolved : humanizePackage(pkg);
 }
@@ -52,8 +53,8 @@ function fromDaemon(s, idx, mediaStatusByPkg) {
     id: s.package || `daemon-session-${idx}`,
     package: s.package,
     source: appNameOf(s.package),
-    title: s.title || pkgStatus.title || 'Müzik Akışı',
-    artist: s.artist || pkgStatus.artist || 'Android Medya',
+    title: s.title || pkgStatus.title || t('state.muzik_akisi'),
+    artist: s.artist || pkgStatus.artist || t('common.android_medya'),
     album: s.album || pkgStatus.album || '',
     art: artOf(s.album_art, s.art, s.picture, s.artwork, pkgStatus.album_art),
     artPending: Boolean(pkgStatus.art_pending ?? s.art_pending),
@@ -76,8 +77,8 @@ function fromNotification(n, mediaStatusByPkg) {
     id: n.package || String(n.id),
     package: n.package,
     source: appNameOf(n.package, n.appName),
-    title: n.title || 'Medya',
-    artist: n.text || n.artist || 'Android Medya',
+    title: n.title || t('common.medya'),
+    artist: n.text || n.artist || t('common.android_medya'),
     album: '',
     art: artOf(n.picture, n.large_icon, n.album_art, n.extra_picture, n.art, pkgStatus?.album_art),
     artPending: false,
@@ -113,8 +114,8 @@ export function assembleMediaSessions({ mediaStatus, mediaStatusByPkg, notificat
         id: mediaStatus.package || 'live-media',
         package: mediaStatus.package,
         source: appNameOf(mediaStatus.package),
-        title: mediaStatus.title || 'Müzik Akışı',
-        artist: mediaStatus.artist || 'Android Medya',
+        title: mediaStatus.title || t('state.muzik_akisi'),
+        artist: mediaStatus.artist || t('common.android_medya'),
         album: mediaStatus.album || '',
         buffering: isBuffering(mediaStatus.state),
         art: artOf(mediaStatus.album_art, mediaStatus.art, mediaStatus.picture, mediaStatus.album_art_uri, mediaStatus.artwork, mediaStatus.large_icon),

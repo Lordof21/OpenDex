@@ -372,6 +372,14 @@
     transition: background-color 150ms ease, transform 150ms ease, border-color 150ms ease;
   }
   .notif-pill:hover { background: var(--notification-hover); border-color: color-mix(in oklab, var(--notification-border) 80%, transparent); }
+  /* Süzgeç çipi (bildirim merkezi): seçiliyken ters renk — metin rengi zemin, yüzey rengi yazı */
+  .notif-chip {
+    background: color-mix(in oklab, var(--notification-hover) 55%, transparent);
+    border: 1px solid color-mix(in oklab, var(--notification-border) 40%, transparent);
+    transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease, transform 150ms ease;
+  }
+  .notif-chip:hover { background: var(--notification-hover); }
+  .notif-chip[aria-pressed='true'] { background: var(--notification-foreground); color: var(--notification-surface); border-color: transparent; }
   .notif-countdown { transform-origin: left center; animation-name: notif-countdown; animation-timing-function: linear; animation-fill-mode: forwards; }
   .notif-progress { background: linear-gradient(to right, color-mix(in oklab, var(--notification-accent) 85%, transparent), color-mix(in oklab, var(--notification-accent) 35%, transparent)); }
 
@@ -494,12 +502,12 @@
 /* Kapağın erimesi: üstte rozetler için hafif gölge; kapağın üst %55'i tamamen açık, yalnız alt kısım panel yüzeyine
    erir (başlık kapağa 48 px biner — 294 px kapakta alt %16 — o bölge ≈%80+ yüzeydir — okunurluk korunur, kapak "beyazlamaz"). */
 .media-poster-fade {
+  /* Üst: rozetler okunsun diye ince karartma. Alt: yalnız son %12 panel yüzeyine erir — kapak kırpılmaz, kenarı sert kalmaz. */
   background: linear-gradient(180deg,
     color-mix(in oklab, var(--scrim) 38%, transparent) 0%,
     transparent 22%,
-    transparent 55%,
-    color-mix(in oklab, var(--media-surface) 30%, transparent) 70%,
-    color-mix(in oklab, var(--media-surface) 80%, transparent) 84%,
+    transparent 88%,
+    color-mix(in oklab, var(--media-surface) 55%, transparent) 95%,
     var(--media-surface) 100%);
 }
 /* Kapak yoksa: kapak renginden iki yumuşak ışık (statik) — boş gri kutu yerine. */
@@ -511,15 +519,16 @@
 }
 /* Yaşayan kapak: çalarken yavaş Ken Burns kayması (tek compositor katmanı), duraklayınca olduğu yerde donar. */
 .media-kenburns {
-  transform-origin: 50% 38%;
+  transform-origin: 50% 50%;
   animation: media-kenburns 26s ease-in-out infinite alternate;
   animation-play-state: paused;
   will-change: transform;
 }
 .media-kenburns[data-running='true'] { animation-play-state: running; }
 @keyframes media-kenburns {
-  from { transform: scale(1.02) translate3d(0, 0, 0); }
-  to { transform: scale(1.09) translate3d(-1.5%, -1.2%, 0); }
+  /* Kapağı kırpmayacak kadar hafif: en çok %1,5 kenar payı (eskiden %9'a kadar yakınlaşıp kenarları yiyordu). */
+  from { transform: scale(1) translate3d(0, 0, 0); }
+  to { transform: scale(1.03) translate3d(0, 0, 0); }
 }
 /* "Diğer akışlar" satırı (taskbar/media-center/SessionSheet.jsx): üzerine gelince ad 4 px yükselir, alt satır yukarı
    kayıp söner, yerine konum kaydırıcısı aşağıdan gelir. Yalnız transform/opacity; satır yüksekliği sabit (2,5 satır kuralı).

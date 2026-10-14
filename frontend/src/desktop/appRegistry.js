@@ -1,29 +1,30 @@
 // App list client — PackageManager launcher query on the backend.
 
 import { api } from '../lib/api.js';
+import { t } from '../i18n/index.js';
 
 let cache = null;
 
 export const BUILTIN_SYSTEM_APPS = [
-  { package: 'com.opendex.settings', display_name: 'OpenDeX Ayarları', is_system: true, isBuiltin: true },
-  { package: 'com.opendex.screen_mirror', display_name: 'Telefon Ekranını Yansıt', is_system: true, isBuiltin: true },
-  { package: 'com.opendex.files', display_name: 'Dosyalar', is_system: true, isBuiltin: true },
+  { package: 'com.opendex.settings', display_name: t('common.opendex_ayarlari'), is_system: true, isBuiltin: true },
+  { package: 'com.opendex.screen_mirror', display_name: t('common.telefon_ekranini_yansit'), is_system: true, isBuiltin: true },
+  { package: 'com.opendex.files', display_name: t('common.dosyalar'), is_system: true, isBuiltin: true },
 ];
 
 export const DEFAULT_FALLBACK_APPS = [
-  { package: 'com.opendex.settings', display_name: 'OpenDeX Ayarları', is_system: true, isBuiltin: true },
-  { package: 'com.opendex.screen_mirror', display_name: 'Telefon Ekranını Yansıt', is_system: true, isBuiltin: true },
-  { package: 'com.opendex.files', display_name: 'Dosyalar', is_system: true, isBuiltin: true },
+  { package: 'com.opendex.settings', display_name: t('common.opendex_ayarlari'), is_system: true, isBuiltin: true },
+  { package: 'com.opendex.screen_mirror', display_name: t('common.telefon_ekranini_yansit'), is_system: true, isBuiltin: true },
+  { package: 'com.opendex.files', display_name: t('common.dosyalar'), is_system: true, isBuiltin: true },
   { package: 'com.android.chrome', display_name: 'Chrome' },
-  { package: 'com.sec.android.app.myfiles', display_name: 'Dosyalarım' },
-  { package: 'com.sec.android.gallery3d', display_name: 'Galeri' },
-  { package: 'com.android.settings', display_name: 'Ayarlar' },
+  { package: 'com.sec.android.app.myfiles', display_name: t('desktop.dosyalarim') },
+  { package: 'com.sec.android.gallery3d', display_name: t('common.galeri') },
+  { package: 'com.android.settings', display_name: t('common.ayarlar') },
   { package: 'com.google.android.youtube', display_name: 'YouTube' },
-  { package: 'com.sec.android.app.camera', display_name: 'Kamera' },
-  { package: 'com.whatsapp', display_name: 'Mesajlar' },
-  { package: 'com.samsung.android.dialer', display_name: 'Çağrı' },
+  { package: 'com.sec.android.app.camera', display_name: t('desktop.kamera') },
+  { package: 'com.whatsapp', display_name: t('common.mesajlar') },
+  { package: 'com.samsung.android.dialer', display_name: t('desktop.cagri') },
   { package: 'com.android.vending', display_name: 'Play Store' },
-  { package: 'com.samsung.android.calendar', display_name: 'Takvim' },
+  { package: 'com.samsung.android.calendar', display_name: t('common.takvim') },
 ];
 
 export const STATIC_APPS = DEFAULT_FALLBACK_APPS;
@@ -62,9 +63,9 @@ export function getCachedApp(pkg) {
 }
 
 export function resolveAppDisplayName(pkg, fallbackName = null) {
-  if (pkg === 'com.opendex.settings') return 'OpenDeX Ayarları';
-  if (pkg === 'com.opendex.screen_mirror' || pkg === 'com.android.internal.mirror') return 'Telefon Ekranını Yansıt';
-  if (pkg === 'com.opendex.files') return 'Dosyalar';
+  if (pkg === 'com.opendex.settings') return t('common.opendex_ayarlari');
+  if (pkg === 'com.opendex.screen_mirror' || pkg === 'com.android.internal.mirror') return t('common.telefon_ekranini_yansit');
+  if (pkg === 'com.opendex.files') return t('common.dosyalar');
   if (fallbackName && !fallbackName.startsWith('com.') && fallbackName.trim().length > 0) {
     return fallbackName;
   }

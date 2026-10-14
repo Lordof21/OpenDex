@@ -8,6 +8,7 @@ import { SwitchThumb } from '../ui/Switch.jsx';
 import { PrecisionSlider } from '../ui/PrecisionSlider.jsx';
 import { cn } from '../lib/utils.js';
 import { fold, settingItem } from './settingsModel.js';
+import { t } from '../i18n/index.js';
 
 // ───────────────────────────────────────────────────────────────────────────────────────── Bağlam
 
@@ -75,7 +76,7 @@ export function Chip({ tone = 'muted', children, className, ...rest }) {
 }
 
 /** Uzun teknik açıklama için kademeli açılım ("Ayrıntılar"): varsayılan kapalı, ekranı şişirmez. */
-export function Disclosure({ label = 'Ayrıntılar', children, className }) {
+export function Disclosure({ label = t('settings.ayrintilar'), children, className }) {
   const [open, setOpen] = useState(false);
   const id = useId();
   return (

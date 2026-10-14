@@ -7,6 +7,8 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../lib/utils.js';
 import { MARKER_KINDS, fmt, fmtTime, niceTicks, timeTicks } from './loadModel.js';
+import { t as tt } from '../i18n/index.js';
+import { activeLocale } from '../i18n/index.js';
 
 const MARGIN = { top: 12, right: 14, bottom: 22, left: 34 };
 
@@ -182,7 +184,7 @@ export function TimeChart({
           <line x1={M.left} x2={M.left + plotW} y1={M.top + plotH} y2={M.top + plotH} stroke="var(--viz-axis)" strokeWidth="1" shapeRendering="crispEdges" />
           {tTicks.map((t) => (
             <text key={`t${t}`} x={x(t)} y={height - 6} textAnchor="middle" className="fill-muted-foreground text-[9px] tabular-nums">
-              {new Intl.DateTimeFormat('tr-TR', { hour: '2-digit', minute: '2-digit' }).format(new Date(t * 1000))}
+              {new Intl.DateTimeFormat(activeLocale(), { hour: '2-digit', minute: '2-digit' }).format(new Date(t * 1000))}
             </text>
           ))}
 
@@ -295,7 +297,7 @@ export function TimeChart({
       )}
 
       {!samples.length && (
-        <p className="absolute inset-0 grid place-items-center text-[10px] text-muted-foreground">Ölçüm bekleniyor…</p>
+        <p className="absolute inset-0 grid place-items-center text-[10px] text-muted-foreground">{tt('telemetry.olcum_bekleniyor')}</p>
       )}
     </div>
   );

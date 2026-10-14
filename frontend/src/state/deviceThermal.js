@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.js';
 // Telefonun sıcaklığı: tek okuma/biçim kaynağı. Taskbar'daki Cihaz Merkezi ve Hızlı Ayarlar'ın pil sayfası aynı değeri
 // aynı kuralla gösterir.
 //
@@ -9,11 +10,11 @@
 // (Eskiden Hızlı Ayarlar bu durumda "32.4 °C" gösteriyordu.)
 
 export const THERMAL_LABEL = {
-  none: 'Normal',
-  light: 'Hafif ısınma',
-  moderate: 'Orta ısınma',
-  severe: 'Yüksek ısınma',
-  critical: 'Kritik ısınma',
+  none: t('state.normal'),
+  light: t('state.hafif_isinma'),
+  moderate: t('state.orta_isinma'),
+  severe: t('state.yuksek_isinma'),
+  critical: t('state.kritik_isinma'),
 };
 
 /** Pil sıcaklığı (°C) — ölçülemiyorsa null. `temperature_c` yoksa eski `temperature` (onda bir °C) alanına bakar. */

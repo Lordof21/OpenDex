@@ -8,6 +8,7 @@
 // IndexedDB yoksa/engelliyse (gizli pencere, politika) bellek içi yedek devreye girer: özellik çalışır, kalıcı olmaz — ve
 // `persistent` bayrağı bunu arayüze söyler.
 import { MAX_IMAGES } from './prefs.js';
+import { t } from '../../i18n/index.js';
 
 const DB_NAME = 'opendex-wallpapers';
 const DB_VERSION = 1;
@@ -145,15 +146,15 @@ export function createImageStore({ backend, newId, now = Date.now } = {}) {
     async add({ name, blob, thumb, width, height, luma, avg }) {
       const store = await open();
       if ((await store.listMeta()).length >= MAX_IMAGES) {
-        throw new ImageStoreError('limit', `En fazla ${MAX_IMAGES} resim eklenebilir. Önce birini silin.`);
+        throw new ImageStoreError('limit', t('desktop.en_fazla_max_images_resim_eklenebilir', { MAX_IMAGES }));
       }
       const meta = { id: makeId(), name, width, height, luma, avg, bytes: blob.size, addedAt: now() };
       try {
         await store.put(meta, blob, thumb);
       } catch (err) {
         throw isQuota(err)
-          ? new ImageStoreError('quota', 'Depolama alanı dolu. Başka bir resmi silip yeniden deneyin.')
-          : new ImageStoreError('storage', 'Resim kaydedilemedi.');
+          ? new ImageStoreError('quota', t('desktop.depolama_alani_dolu_baska_bir_resmi'))
+          : new ImageStoreError('storage', t('desktop.resim_kaydedilemedi'));
       }
       return meta;
     },
@@ -172,7 +173,7 @@ export function createImageStore({ backend, newId, now = Date.now } = {}) {
       try {
         await store.put(meta, blob, thumb);
       } catch {
-        throw new ImageStoreError('storage', 'Resim geri alınamadı.');
+        throw new ImageStoreError('storage', t('desktop.resim_geri_alinamadi'));
       }
       return meta;
     },

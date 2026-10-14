@@ -1,5 +1,6 @@
 import { logger } from './logger.js';
 import { BASE, ensureApiToken, getApiToken, wsUrl as tokenWsUrl } from './apiToken.js';
+import { t } from '../i18n/index.js';
 
 // Single HTTP surface for the FastAPI backend — every module goes through here
 // so tests can mock one boundary and error handling stays uniform.
@@ -46,7 +47,7 @@ async function request(method, path, body, opts = {}, retries = 6) {
       const timer = controller ? setTimeout(() => controller.abort(), opts.timeoutMs) : null;
       const onExternalAbort = () => controller?.abort();
       if (opts.signal) {
-        if (opts.signal.aborted) throw new ApiError(499, 'İstemci isteği iptal etti.');
+        if (opts.signal.aborted) throw new ApiError(499, t('lib.istemci_istegi_iptal_etti'));
         opts.signal.addEventListener('abort', onExternalAbort, { once: true });
       }
       let res;
@@ -59,8 +60,8 @@ async function request(method, path, body, opts = {}, retries = 6) {
           signal,
         });
       } catch (err) {
-        if (opts.signal?.aborted) throw new ApiError(499, 'İstemci isteği iptal etti.');
-        if (controller?.signal.aborted) throw new ApiError(408, 'İstek zaman aşımına uğradı.');
+        if (opts.signal?.aborted) throw new ApiError(499, t('lib.istemci_istegi_iptal_etti'));
+        if (controller?.signal.aborted) throw new ApiError(408, t('lib.istek_zaman_asimina_ugradi'));
         throw err;
       } finally {
         if (timer) clearTimeout(timer);

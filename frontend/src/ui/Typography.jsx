@@ -3,6 +3,7 @@ import React from 'react';
 import { ChevronLeft } from 'lucide-react';
 import { cn } from '../lib/utils.js';
 import { IconButton } from './IconButton.jsx';
+import { t } from '../i18n/index.js';
 
 export function SectionLabel({ children, action, className }) {
   return (
@@ -24,7 +25,7 @@ const TITLE_SIZE = { sm: 'text-[12px]', md: 'text-[13px] leading-tight', lg: 'te
  * icon → solda ikon kutusu · onBack → solda geri butonu (eski QuickSubHeader) · action → sağda.
  * size: sm (alt görünüm başlığı) | md (ayar bölümü) | lg (taskbar paneli)
  */
-export function PanelHeader({ icon: Icon, iconTone = 'solid', size = 'lg', title, subtitle, onBack, backLabel = 'Geri', action, className }) {
+export function PanelHeader({ icon: Icon, iconTone = 'solid', size = 'lg', title, subtitle, onBack, backLabel = t('ui.geri'), action, className }) {
   return (
     <div className={cn('flex min-w-0 items-center gap-2.5', className)}>
       {onBack && (

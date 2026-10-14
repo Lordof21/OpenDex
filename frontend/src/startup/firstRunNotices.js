@@ -4,30 +4,31 @@
 // UX state, so they deliberately stay out of the backend API contract.
 
 import { api } from '../lib/api.js';
+import { t } from '../i18n/index.js';
 
 const STORAGE_PREFIX = 'opendex.notices.';
 
 export const NOTICES = {
   clipboard_warning: {
     key: 'clipboard_warning',
-    title: 'Pano kullanımı',
+    title: t('startup.pano_kullanimi'),
     message:
-      'OpenDeX yazarken telefonun panosunu kullanır; telefonda kopyaladığınız içerik değişebilir.',
+      t('startup.opendex_yazarken_telefonun_panosunu'),
     action: null,
   },
   keyboard_layout: {
     key: 'keyboard_layout',
-    title: 'Klavye düzeni',
+    title: t('startup.klavye_duzeni'),
     message:
-      'Kısayolların doğru çalışması için telefonun fiziksel klavye düzenini bir kez Türkçe Q olarak ayarlayın.',
+      t('startup.kisayollarin_dogru_calismasi_icin'),
     action: 'open_layout_settings',
   },
   // helper_apk_hint is Faz 2 — defined for completeness, not queued.
   helper_apk_hint: {
     key: 'helper_apk_hint',
-    title: 'Yardımcı uygulama',
+    title: t('startup.yardimci_uygulama'),
     message:
-      'Daha iyi Türkçe desteği ve pencere başına ses için yardımcı uygulamayı kurabilirsiniz.',
+      t('startup.daha_iyi_turkce_destegi_ve_pencere'),
     action: null,
     phase2: true,
   },

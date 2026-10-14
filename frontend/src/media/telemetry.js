@@ -7,12 +7,13 @@
 
 import { useSyncExternalStore } from 'react';
 import { api } from '../lib/api.js';
+import { t } from '../i18n/index.js';
 
 export const POLL_INTERVAL_MS = 2000;
 export const STALE_AFTER_MS = 7000;
 
 /** `locus` backend'in `locus_of` türetmesidir (windows/task_locus.py). */
-export const LOCUS_LABEL = { desktop: 'DeX', workspace: 'Workspace', phone: 'Telefon' };
+export const LOCUS_LABEL = { desktop: 'DeX', workspace: 'Workspace', phone: t('common.telefon_2') };
 
 // ---------------------------------------------------------------- saf seçiciler (testli)
 
@@ -66,7 +67,7 @@ export function coresEquivalent(pct, cores) {
 /** "≈ 1.5 çekirdek" — bilinmiyorsa boş. */
 export function formatCores(pct, cores) {
   const eq = coresEquivalent(pct, cores);
-  return eq == null ? '' : `≈ ${eq.toFixed(1)} çekirdek`;
+  return eq == null ? '' : t('media.value_cekirdek', { value: eq.toFixed(1) });
 }
 
 // ---------------------------------------------------------------- yoklayıcı

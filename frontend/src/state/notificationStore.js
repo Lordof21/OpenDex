@@ -5,6 +5,7 @@ import { sendEventMessage } from '../events/eventStream.js';
 import { logger } from '../lib/logger.js';
 import { ART_RETRY_DELAYS_MS, VERIFY_DELAYS_MS, isStaleMediaEvent, resolveArt, trackIdOf } from './mediaModel.js';
 import { useSystemStore } from './systemStore.js';
+import { t as tt } from '../i18n/index.js';
 
 // Paket başına zamanlayıcılar (store durumu DEĞİL: yalnızca uygulama koruması, arayüz bunlardan render etmez).
 const artRetryTimers = new Map(); // pkg -> { trackId, timers[] }   kapak gelmeyen yeni şarkıda `fresh` okuma merdiveni
@@ -285,7 +286,7 @@ export const useNotificationStore = create((set, get) => ({
       };
     });
     const name = get().notifications.find((n) => n.package === pkg)?.appName || pkg.split('.').pop();
-    useSystemStore.getState().pushToast?.(`${name} artık medya oynatmıyor; liste güncellendi.`);
+    useSystemStore.getState().pushToast?.(tt('state.name_artik_medya_oynatmiyor_liste', { name }));
     get().fetchMediaStatus(null, { fresh: true }).catch(() => {});
   },
   mediaStatus: null,

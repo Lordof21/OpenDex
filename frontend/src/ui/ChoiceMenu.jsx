@@ -15,14 +15,11 @@ import { motion, useReducedMotion } from 'framer-motion';
 import { Check, Info } from 'lucide-react';
 import { pushEscapeHandler } from '../lib/escapeStack.js';
 import { Z_INDEX } from './zIndex.js';
+import { isPoint, placeFloating } from './menuPosition.js';
 import { cn } from '../lib/utils.js';
 import { EASE_OUT } from '../taskbar/media-center/choreography.js';
 
 export const CHOICE_MENU_WIDTH_PX = 228;
-const GAP_PX = 8;
-const EDGE_PX = 8;
-
-const isPoint = (anchor) => anchor != null && typeof anchor.x === 'number' && typeof anchor.y === 'number';
 
 /** Bağlantı öğesinin içinde bulunduğu medya kapsamının ortam rengi (yoksa boş): portal aynı renkle boyansın. */
 function scopeOf(anchor) {
@@ -85,23 +82,10 @@ export function ChoiceMenu({ anchor, title, label, options, current, notice, onP
   const [{ accent }] = useState(() => scopeOf(anchor));
 
   useLayoutEffect(() => {
-    const height = ref.current?.offsetHeight || 0;
-    const maxLeft = window.innerWidth - CHOICE_MENU_WIDTH_PX - EDGE_PX;
-    const clampLeft = (left) => Math.max(EDGE_PX, Math.min(maxLeft, left));
-    if (isPoint(anchor)) {
-      const flipUp = anchor.y + GAP_PX + height > window.innerHeight - EDGE_PX && anchor.y - GAP_PX - height >= EDGE_PX;
-      const left = clampLeft(anchor.x + CHOICE_MENU_WIDTH_PX > window.innerWidth - EDGE_PX ? anchor.x - CHOICE_MENU_WIDTH_PX : anchor.x);
-      setPos({
-        top: flipUp ? anchor.y - GAP_PX - height : anchor.y + GAP_PX,
-        left,
-        originX: anchor.x - left,
-        originY: flipUp ? height : 0,
-      });
-      return;
-    }
-    const rect = anchor.getBoundingClientRect();
-    const left = clampLeft(rect.left + rect.width / 2 - CHOICE_MENU_WIDTH_PX / 2);
-    setPos({ top: rect.bottom + GAP_PX, left, originX: rect.left + rect.width / 2 - left, originY: 0 });
+    setPos(placeFloating({
+      anchor, width: CHOICE_MENU_WIDTH_PX, height: ref.current?.offsetHeight || 0,
+      vw: window.innerWidth, vh: window.innerHeight,
+    }));
   }, [anchor]);
 
   useEffect(() => {

@@ -1,3 +1,4 @@
+import { t, activeLocale } from '../i18n/index.js';
 // "Simgeleri Yönet" saf mantığı: hangi uygulama masaüstünde, süzme/gruplama, yerleştirme ve kaldırma.
 // Arayüzden (React/DOM) bağımsızdır; ManageIconsDialog yalnız bunları çağırır — davranış tek yerde test edilir.
 //
@@ -6,10 +7,10 @@
 
 export const FILTERS = Object.freeze(['all', 'on', 'off']);
 
-const collator = new Intl.Collator('tr-TR', { sensitivity: 'base', numeric: true });
+const collator = new Intl.Collator(activeLocale(), { sensitivity: 'base', numeric: true });
 const isCustomId = (id) => typeof id === 'string' && id.startsWith('custom-');
 
-export const trLower = (text) => String(text || '').toLocaleLowerCase('tr-TR');
+export const trLower = (text) => String(text || '').toLocaleLowerCase(activeLocale());
 export const appName = (app) => app?.display_name || app?.name || app?.package || '';
 
 /** Masaüstünde duran uygulama paketleri (klasör/kısayol kimlikleri hariç). */
@@ -26,7 +27,7 @@ export function folderMembership(custom) {
     if (!Array.isArray(item?.appIds)) continue;
     for (const pkg of item.appIds) {
       const names = map.get(pkg) || [];
-      names.push(item.name || 'Klasör');
+      names.push(item.name || t('common.klasor'));
       map.set(pkg, names);
     }
   }
@@ -57,7 +58,7 @@ export function filterCounts(apps, onSet) {
 
 function sectionOf(app) {
   if (app.isBuiltin) return { key: 'opendex', label: 'OpenDeX' };
-  const first = appName(app).trim().charAt(0).toLocaleUpperCase('tr-TR');
+  const first = appName(app).trim().charAt(0).toLocaleUpperCase(activeLocale());
   return /\p{L}/u.test(first) ? { key: first, label: first } : { key: '#', label: '#' };
 }
 
@@ -148,5 +149,5 @@ export function withCustomKept(defaults, current, cells) {
 
 /** "3 uygulama" — Türkçede sayıdan sonra çoğul eki yoktur. */
 export function countLabel(n, noun = 'uygulama') {
-  return `${new Intl.NumberFormat('tr-TR').format(n)} ${noun}`;
+  return `${new Intl.NumberFormat(activeLocale()).format(n)} ${noun}`;
 }

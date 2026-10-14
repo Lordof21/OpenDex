@@ -5,6 +5,7 @@ import { Check } from 'lucide-react';
 import { cn } from '../../lib/utils.js';
 import { imageStore } from './imageStore.js';
 import { artStyle, blurStyle, dimStyle } from './layerStyle.js';
+import { t } from '../../i18n/index.js';
 
 // ── Klavye ile gezilen seçim ızgarası ───────────────────────────────────────────────────────────────────────
 
@@ -138,12 +139,12 @@ export function useThumbUrls(images, loadThumb = loadThumbBlob) {
 // ── Canlı önizleme ──────────────────────────────────────────────────────────────────────────────────────────
 
 const MOCK_APPS = [
-  ['Dosyalar', 'bg-app-files'],
-  ['Tarayıcı', 'bg-app-browser'],
-  ['Galeri', 'bg-app-gallery'],
-  ['E-posta', 'bg-app-mail'],
-  ['Ayarlar', 'bg-app-settings'],
-  ['Notlar', 'bg-app-lovable'],
+  [t('common.dosyalar'), 'bg-app-files'],
+  [t('desktop.tarayici'), 'bg-app-browser'],
+  [t('common.galeri'), 'bg-app-gallery'],
+  [t('common.e_posta'), 'bg-app-mail'],
+  [t('common.ayarlar'), 'bg-app-settings'],
+  [t('desktop.notlar'), 'bg-app-lovable'],
 ];
 
 /**
@@ -154,7 +155,7 @@ export function PreviewStage({ wallpaper, thumbUrl }) {
   return (
     <figure
       data-wallpaper-tone={wallpaper.tone}
-      aria-label={`Önizleme: ${wallpaper.name}`}
+      aria-label={t('common.onizleme_name', { name: wallpaper.name })}
       className="relative m-0 aspect-video w-full select-none overflow-hidden rounded-xl bg-muted shadow-sm ring-1 ring-border/70"
     >
       <div className="absolute" style={blurStyle(Math.round(wallpaper.blur * 0.3))}>

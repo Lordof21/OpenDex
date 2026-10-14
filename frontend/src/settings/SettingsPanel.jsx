@@ -52,6 +52,7 @@ import { DisplaySection } from './sections/display.jsx';
 import { AudioSection, StreamSection } from './sections/stream.jsx';
 import { AppearanceSection, PowerSection, WindowsSection } from './sections/windows.jsx';
 import { AboutSection, AdvancedSection } from './sections/system.jsx';
+import { t } from '../i18n/index.js';
 
 export const OPENDEX_SETTINGS_EVENT = 'opendex:open-settings';
 
@@ -123,7 +124,7 @@ function SectionBody({ section, ctl, go }) {
 function SearchField({ value, onChange, inputRef, onSubmit, compact = false, autoFocus = false }) {
   return (
     <label className={cn('relative flex min-w-0 items-center', compact ? 'w-full' : 'w-full max-w-[400px]')}>
-      <span className="sr-only">Ayarlarda ara</span>
+      <span className="sr-only">{t('settings.ayarlarda_ara')}</span>
       <Search className="pointer-events-none absolute left-2.5 size-3.5 text-muted-foreground" aria-hidden="true" />
       <input
         ref={inputRef}
@@ -134,7 +135,7 @@ function SearchField({ value, onChange, inputRef, onSubmit, compact = false, aut
         onKeyDown={(event) => {
           if (event.key === 'Enter') onSubmit?.();
         }}
-        placeholder="Ayarlarda ara…"
+        placeholder={t('settings.ayarlarda_ara_2')}
         autoComplete="off"
         spellCheck={false}
         className="h-8 w-full rounded-lg border border-border/70 bg-background/80 pl-8 pr-14 text-[12px] text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary/50 focus:bg-background focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-search-cancel-button]:hidden"
@@ -142,20 +143,20 @@ function SearchField({ value, onChange, inputRef, onSubmit, compact = false, aut
       {value ? (
         <button
           type="button"
-          aria-label="Aramayı temizle"
+          aria-label={t('common.aramayi_temizle')}
           onClick={() => onChange('')}
           className="absolute right-1.5 grid size-5 cursor-pointer place-items-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
         >
           <X className="size-3" />
         </button>
       ) : (
-        !compact && <kbd className="pointer-events-none absolute right-2 rounded border border-border/70 bg-muted/60 px-1 font-mono text-[9px] font-semibold text-muted-foreground">Ctrl K</kbd>
+        !compact && <kbd className="pointer-events-none absolute right-2 rounded border border-border/70 bg-muted/60 px-1 font-mono text-[9px] font-semibold text-muted-foreground">{t('settings.ctrl_k')}</kbd>
       )}
     </label>
   );
 }
 
-const SEARCH_SUGGESTIONS = ['DPI', 'FPS', 'Ses', 'Tema', 'Telefona aktar', 'Pil'];
+const SEARCH_SUGGESTIONS = ['DPI', 'FPS', t('settings.ses'), t('settings.tema'), t('settings.telefona_aktar'), t('common.pil_2')];
 
 function SearchResults({ query, results, onOpen, onSuggest }) {
   if (!results.length) {
@@ -164,8 +165,8 @@ function SearchResults({ query, results, onOpen, onSuggest }) {
         <span className="grid size-12 place-items-center rounded-2xl bg-muted text-muted-foreground" aria-hidden="true">
           <SearchX className="size-6" strokeWidth={1.6} />
         </span>
-        <p className="text-[14px] font-semibold text-foreground">«{query.trim()}» için sonuç yok</p>
-        <p className="text-[12px] leading-[17px] text-muted-foreground">Farklı bir sözcük deneyin ya da bir konu seçin:</p>
+        <p className="text-[14px] font-semibold text-foreground">{t('settings.trim_icin_sonuc_yok', { trim: query.trim() })}</p>
+        <p className="text-[12px] leading-[17px] text-muted-foreground">{t('settings.farkli_bir_sozcuk_deneyin_ya_da_bir')}</p>
         <div className="mt-1 flex flex-wrap justify-center gap-1.5">
           {SEARCH_SUGGESTIONS.map((word) => (
             <button
@@ -182,9 +183,9 @@ function SearchResults({ query, results, onOpen, onSuggest }) {
     );
   }
   return (
-    <section aria-label="Arama sonuçları" className="mx-auto w-full max-w-[720px] space-y-2">
+    <section aria-label={t('settings.arama_sonuclari')} className="mx-auto w-full max-w-[720px] space-y-2">
       <p className="px-1 text-[11px] text-muted-foreground" role="status">
-        {results.length} sonuç
+        {t('settings.count_sonuc', { count: results.length })}
       </p>
       <ul className="divide-y divide-border/60 overflow-hidden rounded-xl border border-border/70 bg-muted/30">
         {results.map((result) => {
@@ -245,7 +246,7 @@ function NavButton({ id, active, layout, badge, onSelect }) {
             'grid min-w-4 place-items-center rounded-full bg-warning/20 px-1 text-[9px] font-bold leading-4 text-warning',
             rail && 'absolute -right-0.5 -top-0.5',
           )}
-          aria-label={`${badge} öneri`}
+          aria-label={t('settings.badge_oneri', { badge })}
         >
           {badge}
         </span>
@@ -265,7 +266,7 @@ function SideNav({ layout, section, tipCount, onSelect }) {
   };
   return (
     <nav
-      aria-label="Ayar bölümleri"
+      aria-label={t('settings.ayar_bolumleri')}
       onKeyDown={onKeyDown}
       className={cn(
         'flex shrink-0 flex-col overflow-y-auto border-r border-border/60 bg-muted/20 select-none',
@@ -284,7 +285,7 @@ function SideNav({ layout, section, tipCount, onSelect }) {
         </div>
       ))}
       {layout === 'wide' && (
-        <p className="mt-auto px-2.5 pt-2 text-[10px] leading-[14px] text-muted-foreground/80">OpenDeX Engine v4.2 · Scrcpy v4.1</p>
+        <p className="mt-auto px-2.5 pt-2 text-[10px] leading-[14px] text-muted-foreground/80">{t('settings.opendex_engine_v4_2_scrcpy_v4_1')}</p>
       )}
     </nav>
   );
@@ -295,12 +296,12 @@ function MobileList({ live, tipCount, onSelect }) {
   return (
     <div className="space-y-4">
       {SECTION_GROUPS.map((group) => (
-        <section key={group.id} aria-label={group.label || 'Ayarlar'} className="space-y-1.5">
+        <section key={group.id} aria-label={group.label || t('settings.ayarlar')} className="space-y-1.5">
           {group.label && <h3 className="px-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{group.label}</h3>}
           <ul className="divide-y divide-border/60 overflow-hidden rounded-xl border border-border/70 bg-muted/30">
             {group.sections.map((id) => {
               const Icon = SECTION_ICONS[id];
-              const summary = id === 'overview' ? (tipCount ? `${tipCount} öneri` : SECTIONS[id].subtitle) : sectionSummary(id, live) || SECTIONS[id].subtitle;
+              const summary = id === 'overview' ? (tipCount ? t('settings.tipcount_oneri', { tipCount }) : SECTIONS[id].subtitle) : sectionSummary(id, live) || SECTIONS[id].subtitle;
               return (
                 <li key={id}>
                   <button
@@ -539,7 +540,7 @@ export default function SettingsPanel() {
           <motion.section
             key="opendex-settings-window"
             role="dialog"
-            aria-label="Tüm OpenDeX ayarları"
+            aria-label={t('settings.tum_opendex_ayarlari')}
             onPointerDown={focusSettings}
             className={cn(
               'pointer-events-auto absolute flex flex-col overflow-hidden border border-border/80 bg-popover/95 backdrop-blur-2xl transition-shadow duration-200 select-none shadow-none',
@@ -558,11 +559,11 @@ export default function SettingsPanel() {
               className="flex h-12 shrink-0 items-center gap-3 border-b border-border/70 bg-muted/40 px-3 select-none cursor-default"
             >
               <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-primary text-[11px] font-bold text-primary-foreground" aria-hidden="true">
-                D
+                {t('common.d')}
               </span>
               <div className={cn('min-w-0 select-none', narrow ? 'flex-1' : layout === 'rail' ? 'w-[110px] shrink-0' : 'w-[170px] shrink-0')}>
-                <p className="truncate text-[12.5px] font-semibold leading-none text-foreground">{narrow ? 'Ayarlar' : 'OpenDeX Ayarları'}</p>
-                {!narrow && <p className="mt-1 truncate text-[9.5px] leading-none text-muted-foreground">Zero‑APK · saf ADB köprüsü</p>}
+                <p className="truncate text-[12.5px] font-semibold leading-none text-foreground">{narrow ? t('common.ayarlar') : t('common.opendex_ayarlari')}</p>
+                {!narrow && <p className="mt-1 truncate text-[9.5px] leading-none text-muted-foreground">{t('settings.zero_apk_saf_adb_koprusu')}</p>}
               </div>
               {!narrow && (
                 <div className="flex min-w-0 flex-1 justify-center">
@@ -572,16 +573,16 @@ export default function SettingsPanel() {
               {layout === 'wide' && (
                 <span className="hidden shrink-0 items-center gap-1.5 rounded-full bg-background px-2.5 py-1 text-[10px] font-medium text-muted-foreground lg:inline-flex">
                   <span className={cn('size-1.5 rounded-full', connected ? 'bg-status-active' : 'bg-muted-foreground')} />
-                  {connected ? 'Bağlı' : 'Bağlı değil'}
+                  {connected ? t('common.bagli') : t('settings.bagli_degil')}
                 </span>
               )}
               <div className="flex shrink-0 items-center">
-                <IconButton label="Simge durumuna küçült" size="sm" tooltipPosition="bottom" onClick={minimizeSettings}>
+                <IconButton label={t('common.simge_durumuna_kucult')} size="sm" tooltipPosition="bottom" onClick={minimizeSettings}>
                   <Minus />
                 </IconButton>
                 {!sheet && (
                   <IconButton
-                    label={settingsMaximized ? 'Küçült' : 'Tam ekran'}
+                    label={settingsMaximized ? t('common.kucult') : t('common.tam_ekran')}
                     aria-pressed={settingsMaximized}
                     size="sm"
                     tooltipPosition="bottom"
@@ -590,7 +591,7 @@ export default function SettingsPanel() {
                     <Maximize2 />
                   </IconButton>
                 )}
-                <IconButton label="Kapat" size="sm" danger="close" tooltipPosition="bottom" tooltipAlign="end" onClick={closeSettings}>
+                <IconButton label={t('common.kapat')} size="sm" danger="close" tooltipPosition="bottom" tooltipAlign="end" onClick={closeSettings}>
                   <X />
                 </IconButton>
               </div>
@@ -609,7 +610,7 @@ export default function SettingsPanel() {
                         className="-ml-1 inline-flex cursor-pointer items-center gap-1 rounded-md px-1 py-0.5 text-[12px] font-semibold text-primary outline-none transition-colors hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-ring"
                       >
                         <ChevronLeft className="size-4" aria-hidden="true" />
-                        Ayarlar
+                        {t('settings.ayarlar')}
                         <span className="ml-1 font-normal text-muted-foreground">/ {SECTIONS[section].label}</span>
                       </button>
                     )}

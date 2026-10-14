@@ -1,3 +1,4 @@
+import { t, activeLocale } from '../i18n/index.js';
 // Pil sayfasının metinleri (taskbar/BatteryDetail.jsx). Veri GET /api/device/battery/health'ten gelir
 // (backend/app/device/battery_health.py); burada yalnızca BİÇİMLENİR. Kural: bilinmeyen değer "—" olur, hiçbir şey uydurulmaz
 // (sayfa eskiden "%68", "4.12 V", "Tam şarja tahmini 48 dakika" gibi sabit yer tutucular gösteriyordu).
@@ -5,11 +6,11 @@
 export const MISSING = '—';
 
 const STATUS_LABEL = {
-  charging: 'Şarj oluyor',
-  discharging: 'Kullanımda',
-  full: 'Dolu',
-  not_charging: 'Şarj duraklatıldı',
-  unknown: 'Durum bilinmiyor',
+  charging: t('common.sarj_oluyor'),
+  discharging: t('state.kullanimda'),
+  full: t('state.dolu'),
+  not_charging: t('state.sarj_duraklatildi'),
+  unknown: t('state.durum_bilinmiyor'),
 };
 
 export const statusLabel = (status) => STATUS_LABEL[status] || STATUS_LABEL.unknown;
@@ -24,30 +25,30 @@ export function formatDuration(minutes) {
 }
 
 /** 4431 → "4.431" (Türkçe binlik ayracı); bilinmiyorsa "—". */
-export const formatMah = (mah) => (Number.isFinite(mah) ? Math.round(mah).toLocaleString('tr-TR') : MISSING);
+export const formatMah = (mah) => (Number.isFinite(mah) ? Math.round(mah).toLocaleString(activeLocale()) : MISSING);
 
 export const formatCelsius = (c) => (Number.isFinite(c) ? `${c.toFixed(1)} °C` : MISSING);
 
 export function formatDate(ms) {
   if (!Number.isFinite(ms)) return MISSING;
-  return new Date(ms).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+  return new Date(ms).toLocaleDateString(activeLocale(), { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
 }
 
 const SOURCE_LABEL = {
-  pc_port: 'Bilgisayar USB portu',
-  adapter: 'Şarj adaptörü',
-  pd: 'Hızlı şarj adaptörü (USB-PD)',
-  fast: 'Hızlı şarj adaptörü',
-  wireless: 'Kablosuz şarj',
-  usb: 'USB kaynağı',
+  pc_port: t('state.bilgisayar_usb_portu'),
+  adapter: t('state.sarj_adaptoru'),
+  pd: t('state.hizli_sarj_adaptoru_usb_pd'),
+  fast: t('state.hizli_sarj_adaptoru'),
+  wireless: t('state.kablosuz_sarj'),
+  usb: t('state.usb_kaynagi'),
 };
 
 /** "Bilgisayar USB portu (SDP) · en çok 2.5 W" — kaynak yoksa (fişte değil) "Takılı değil". */
 export function chargeSourceText(charging) {
-  if (!charging?.source) return 'Takılı değil';
+  if (!charging?.source) return t('state.takili_degil');
   const base = SOURCE_LABEL[charging.source] || SOURCE_LABEL.usb;
   const type = charging.usb_type ? ` (${charging.usb_type})` : '';
-  const limit = Number.isFinite(charging.limit_w) ? ` · en çok ${charging.limit_w} W` : '';
+  const limit = Number.isFinite(charging.limit_w) ? t('state.en_cok_limit_w_w', { limit_w: charging.limit_w }) : '';
   return `${base}${type}${limit}`;
 }
 
@@ -55,19 +56,19 @@ export function chargeSourceText(charging) {
 export function powerText(charging) {
   if (!charging || !Number.isFinite(charging.current_ma) || !charging.direction) return MISSING;
   const w = Number.isFinite(charging.battery_w) ? `≈ ${charging.battery_w} W · ` : '';
-  return `${w}${charging.current_ma} mA${charging.direction === 'out' ? ' tüketim' : ''}`;
+  return `${w}${charging.current_ma} mA${charging.direction === 'out' ? t('state.tuketim') : ''}`;
 }
 
 /** "Tam doluma ≈ 2 sa 13 dk" / "Kalan ≈ 10 sa"; yön ya da akım yoksa null (satır hiç çizilmez). */
 export function etaText(eta) {
   if (!eta) return null;
   const when = formatDuration(eta.minutes);
-  if (eta.kind === 'full') return `Tam doluma ≈ ${when}${eta.tapers ? ' (%80 sonrası yavaşlar)' : ''}`;
-  return `Bu hızla kalan ≈ ${when}`;
+  if (eta.kind === 'full') return `Tam doluma ≈ ${when}${eta.tapers ? t('state.80_sonrasi_yavaslar') : ''}`;
+  return t('state.bu_hizla_kalan_when', { when });
 }
 
-const STATE_LABEL = { ok: 'Normal', warm: 'Sıcak', hot: 'Çok sıcak' };
-const BATTERY_STATE_LABEL = { ok: 'Serin / güvenli', warm: 'Sıcak', hot: 'Çok sıcak' };
+const STATE_LABEL = { ok: t('state.normal'), warm: t('state.sicak_2'), hot: t('state.cok_sicak') };
+const BATTERY_STATE_LABEL = { ok: t('state.serin_guvenli'), warm: t('state.sicak_2'), hot: t('state.cok_sicak') };
 
 export function temperatureText(celsius, state, { battery = false } = {}) {
   if (!Number.isFinite(celsius)) return MISSING;
@@ -82,26 +83,26 @@ export function healthText(health) {
 }
 
 export const HEALTH_TITLE = {
-  android: 'Android\'in pil sağlığı değeri (telefonun sağlık donanım katmanı).',
-  gauge: 'Pil ölçüm çipinin bildirdiği dolu / tasarım kapasitesi oranı.',
+  android: t('state.android_in_pil_sagligi_degeri'),
+  gauge: t('state.pil_olcum_cipinin_bildirdigi_dolu'),
   estimate:
-    'Telefon yüzdeyi doğrudan bildirmiyor: şu anki yükün (mAh) pil yüzdesine bölünmesiyle bulunan tam kapasite, tasarım kapasitesiyle kıyaslandı. Birkaç puan sapabilir.',
+    t('state.telefon_yuzdeyi_dogrudan_bildirmiyor'),
 };
 
 export function capacityText(capacity) {
   if (!capacity || (!Number.isFinite(capacity.full_mah) && !Number.isFinite(capacity.design_mah))) return MISSING;
   const full = Number.isFinite(capacity.full_mah) ? formatMah(capacity.full_mah) : MISSING;
-  const design = Number.isFinite(capacity.design_mah) ? ` / ${formatMah(capacity.design_mah)} mAh tasarım` : ' mAh';
+  const design = Number.isFinite(capacity.design_mah) ? t('state.formatmah_mah_tasarim', { formatMah: formatMah(capacity.design_mah) }) : ' mAh';
   return `${full}${design}`;
 }
 
 export const protectionText = (protection) => {
   if (!protection) return null;
-  if (!protection.on) return protection.kind === 'xiaomi' ? 'Kapalı (Xiaomi)' : 'Kapalı';
+  if (!protection.on) return protection.kind === 'xiaomi' ? t('state.kapali_xiaomi') : t('common.kapali_2');
   if (protection.kind === 'android') {
-    return protection.policy === 'long_life' ? 'Açık · ömür koruması (Android)' : 'Açık · uyarlanabilir şarj (Android)';
+    return protection.policy === 'long_life' ? t('state.acik_omur_korumasi_android') : t('state.acik_uyarlanabilir_sarj_android');
   }
-  return protection.night_charge ? 'Açık · gece şarjı dahil (Xiaomi)' : 'Açık (Xiaomi)';
+  return protection.night_charge ? t('state.acik_gece_sarji_dahil_xiaomi') : t('state.acik_xiaomi');
 };
 
 /** "2 sa · +15% (+900 mAh)" — bu bağlantı oturumunda pilin verdiği/aldığı; yük sayacı yoksa mAh kısmı düşer. */
@@ -121,26 +122,26 @@ export function diagnosisText(code, report) {
     case 'slow_port':
       return {
         tone: 'warn',
-        text: `Bilgisayarın USB portu yavaş şarj veriyor${Number.isFinite(limitW) ? ` (en çok ${limitW} W)` : ''}. Hızlı şarj için telefonu adaptöre ya da Type-C PD portuna takın.`,
+        text: t('state.bilgisayarin_usb_portu_yavas_sarj', { value: Number.isFinite(limitW) ? t('state.en_cok_limitw_w', { limitW }) : '' }),
       };
     case 'slow_adapter':
       return {
         tone: 'warn',
-        text: `Şarj adaptörü yavaş${Number.isFinite(limitW) ? ` (en çok ${limitW} W)` : ''}. Daha güçlü bir adaptör ve kablo hızlı şarj sağlar.`,
+        text: t('state.sarj_adaptoru_yavasvalue_daha_guclu', { value: Number.isFinite(limitW) ? t('state.en_cok_limitw_w', { limitW }) : '' }),
       };
     case 'draining_while_plugged':
       return {
         tone: 'warn',
-        text: 'Şarj kaynağı telefonun tükettiğinden az veriyor: ekran yayını sürerken pil boşalıyor. Daha güçlü bir şarj kaynağı kullanın.',
+        text: t('state.sarj_kaynagi_telefonun_tukettiginden'),
       };
     case 'charge_paused':
-      return { tone: 'info', text: 'Şarj duraklatıldı (ısı ya da şarj cihazı kaynaklı olabilir).' };
+      return { tone: 'info', text: t('state.sarj_duraklatildi_isi_ya_da_sarj') };
     case 'protection_holding':
-      return { tone: 'info', text: 'Pil koruması şarjı bu seviyede tutuyor — masaüstü kullanımında pil ömrünü korur.' };
+      return { tone: 'info', text: t('state.pil_korumasi_sarji_bu_seviyede') };
     case 'charge_throttled_hot':
       return {
         tone: 'warn',
-        text: `Pil ${Number.isFinite(temp) ? `${temp.toFixed(1)} °C` : 'sıcak'}: şarj hızı donanım tarafından kısılıyor olabilir. Telefonu serin tutun.`,
+        text: t('state.pil_value_sarj_hizi_donanim', { value: Number.isFinite(temp) ? t('state.value_c', { value: temp.toFixed(1) }) : t('state.sicak') }),
       };
     default:
       return null;

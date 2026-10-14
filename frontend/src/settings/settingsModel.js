@@ -6,26 +6,27 @@
 // başlık/açıklama arayüzde de aramada da aynı kaynaktan gelir, bu yüzden arama asla gerçek ekrandan sapmaz.
 
 import { FIT_MODES } from '../window/fitModes.js';
+import { t, activeLocale } from '../i18n/index.js';
 
 // ───────────────────────────────────────────────────────────────────────────────────────── Bölümler
 
 /** Sol menü sırası. `label` boş = grup başlığı gösterilmez. */
 export const SECTION_GROUPS = [
   { id: 'start', label: '', sections: ['overview'] },
-  { id: 'experience', label: 'Deneyim', sections: ['display', 'stream', 'audio', 'windows', 'appearance'] },
-  { id: 'device', label: 'Cihaz & Sistem', sections: ['power', 'advanced', 'about'] },
+  { id: 'experience', label: t('settings.deneyim'), sections: ['display', 'stream', 'audio', 'windows', 'appearance'] },
+  { id: 'device', label: t('settings.cihaz_sistem'), sections: ['power', 'advanced', 'about'] },
 ];
 
 export const SECTIONS = {
-  overview: { id: 'overview', label: 'Genel Bakış', subtitle: 'Durum, hazır profiller ve öneriler' },
-  display: { id: 'display', label: 'Görüntü', subtitle: 'Netlik, yoğunluk ve ekran sığdırma' },
-  stream: { id: 'stream', label: 'Yayın', subtitle: 'Kodlayıcı, kare hızı ve bant genişliği' },
-  audio: { id: 'audio', label: 'Ses', subtitle: 'Yönlendirme ve ses kodlayıcı' },
-  windows: { id: 'windows', label: 'Pencereler & Geçiş', subtitle: 'Pencere davranışı ve telefon ⟷ PC geçişi' },
-  appearance: { id: 'appearance', label: 'Görünüm', subtitle: 'Tema ve arka plan' },
-  power: { id: 'power', label: 'Güç & Cihaz', subtitle: 'Pil tasarrufu ve cihaz hafızası' },
-  advanced: { id: 'advanced', label: 'Gelişmiş & Teşhis', subtitle: 'Günlükler, kapasite testi ve sistem bilgisi' },
-  about: { id: 'about', label: 'Hakkında', subtitle: 'Mimari ilkeler ve platform sınırları' },
+  overview: { id: 'overview', label: t('settings.genel_bakis'), subtitle: t('settings.durum_hazir_profiller_ve_oneriler') },
+  display: { id: 'display', label: t('common.goruntu'), subtitle: t('settings.netlik_yogunluk_ve_ekran_sigdirma') },
+  stream: { id: 'stream', label: t('settings.yayin'), subtitle: t('settings.kodlayici_kare_hizi_ve_bant_genisligi') },
+  audio: { id: 'audio', label: t('common.ses'), subtitle: t('settings.yonlendirme_ve_ses_kodlayici') },
+  windows: { id: 'windows', label: t('settings.pencereler_gecis'), subtitle: t('settings.pencere_davranisi_ve_telefon_pc_gecisi') },
+  appearance: { id: 'appearance', label: t('common.gorunum'), subtitle: t('settings.tema_ve_arka_plan') },
+  power: { id: 'power', label: t('settings.guc_cihaz'), subtitle: t('settings.pil_tasarrufu_ve_cihaz_hafizasi') },
+  advanced: { id: 'advanced', label: t('settings.gelismis_teshis'), subtitle: t('settings.gunlukler_kapasite_testi_ve_sistem') },
+  about: { id: 'about', label: t('settings.hakkinda'), subtitle: t('settings.mimari_ilkeler_ve_platform_sinirlari') },
 };
 
 export const SECTION_ORDER = SECTION_GROUPS.flatMap((group) => group.sections);
@@ -41,213 +42,213 @@ export const isSection = (id) => Object.prototype.hasOwnProperty.call(SECTIONS, 
 export const SETTING_ITEMS = {
   realResolution: {
     section: 'display',
-    title: 'Yeniden boyutlandırmada gerçek çözünürlük iste',
-    description: 'Daha keskin görüntü; boyut değişiminde kısa bir donma olabilir. Zayıf cihazlarda kapalı tutulabilir.',
-    keywords: ['keskin', 'netlik', 'dinamik', 'boyutlandır', 'resize', 'donma'],
+    title: t('settings.yeniden_boyutlandirmada_gercek'),
+    description: t('settings.daha_keskin_goruntu_boyut_degisiminde'),
+    keywords: ['keskin', 'netlik', 'dinamik', t('settings.boyutlandir'), 'resize', 'donma'],
   },
   instantResize: {
     section: 'display',
-    title: 'Anında Boyutlandır',
-    description: 'Pencere bırakıldığı an yeni boyuta geçer; yeni görüntü gelene kadar eski görüntü ölçeklenmiş görünür.',
-    keywords: ['resize', 'hızlı', 'gecikme'],
+    title: t('settings.aninda_boyutlandir'),
+    description: t('settings.pencere_birakildigi_an_yeni_boyuta'),
+    keywords: ['resize', t('settings.hizli'), 'gecikme'],
   },
   resolutionMode: {
     section: 'display',
-    title: 'Çözünürlük ve Görünüm Stratejisi',
-    description: 'Pencerenize uygulanacak çözünürlük, ekran oranı ve dikey içerik yoğunluğunu seçin.',
-    keywords: ['çözünürlük', '1080p', '2k', 'tablet', 'dinamik', 'fix', 'zoom', 'oran'],
+    title: t('settings.cozunurluk_ve_gorunum_stratejisi'),
+    description: t('settings.pencerenize_uygulanacak_cozunurluk'),
+    keywords: [t('settings.cozunurluk'), '1080p', '2k', 'tablet', 'dinamik', 'fix', 'zoom', 'oran'],
   },
   customDpi: {
     section: 'display',
-    title: 'Özel DPI / İçerik Yoğunluğu',
-    description: 'Ekrandaki metin, ikon ve içerik boyutunu sabit bir DPI ile belirleyin (Target DP yerine).',
-    keywords: ['dpi', 'yoğunluk', 'metin boyutu', 'ölçek', 'büyük yazı', 'erişilebilirlik'],
+    title: t('settings.ozel_dpi_icerik_yogunlugu'),
+    description: t('settings.ekrandaki_metin_ikon_ve_icerik'),
+    keywords: ['dpi', t('settings.yogunluk'), 'metin boyutu', t('settings.olcek'), t('settings.buyuk_yazi'), t('settings.erisilebilirlik')],
   },
   targetDp: {
     section: 'display',
-    title: 'Mantıksal DP Alan Pazarlığı (Target DP)',
-    description: 'Android\'e iletilen mantıksal çalışma alanını (dp) belirleyin: tablet, masaüstü ya da geniş düzen.',
-    keywords: ['dp', 'target', 'sw600', 'tablet düzeni', 'çalışma alanı', 'smallest width'],
+    title: t('settings.mantiksal_dp_alan_pazarligi_target_dp'),
+    description: t('settings.android_e_iletilen_mantiksal_calisma'),
+    keywords: ['dp', 'target', 'sw600', t('settings.tablet_duzeni'), t('settings.calisma_alani'), 'smallest width'],
   },
   fitMode: {
     section: 'display',
-    title: 'Görüntü Sığdırma',
-    description: 'Görüntü pencereye nasıl oturur: kenardan kenara, oranı koruyarak ya da kırparak.',
-    keywords: ['fit', 'kaplama', 'siyah çubuk', 'letterbox', 'kırp', 'uzat', 'canvas'],
+    title: t('common.goruntu_sigdirma'),
+    description: t('settings.goruntu_pencereye_nasil_oturur'),
+    keywords: ['fit', 'kaplama', t('settings.siyah_cubuk'), 'letterbox', t('settings.kirp'), 'uzat', 'canvas'],
   },
   sharpen: {
     section: 'display',
-    title: 'Doku & Kenar Keskinleştirme',
-    description: 'Metin ve simge kenarlarındaki cıvıklığı gideren GPU filtresi.',
-    keywords: ['sharpening', 'shader', 'lanczos', 'cas', 'netlik', 'bulanık'],
+    title: t('settings.doku_kenar_keskinlestirme'),
+    description: t('settings.metin_ve_simge_kenarlarindaki'),
+    keywords: ['sharpening', 'shader', 'lanczos', 'cas', 'netlik', t('settings.bulanik')],
   },
   pixelPerfect: {
     section: 'display',
-    title: 'Fiziksel 1:1 Subpixel Eşleme (Pixel‑Perfect DPR)',
-    description: 'Windows %125 ölçekleme bulanıklığını önler; telefon piksellerini monitörün fiziksel ızgarasına kilitler.',
-    keywords: ['dpr', 'subpixel', 'bulanık', 'windows ölçekleme', 'pixel perfect'],
+    title: t('settings.fiziksel_1_1_subpixel_esleme_pixel'),
+    description: t('settings.windows_125_olcekleme_bulanikligini'),
+    keywords: ['dpr', 'subpixel', t('settings.bulanik'), t('settings.windows_olcekleme'), 'pixel perfect'],
   },
   codec: {
     section: 'stream',
-    title: 'Video Kodlama & Sıkıştırma Motoru',
-    description: 'Görüntü netliğini belirleyen donanım kodlayıcı. H.265 (HEVC) metin kenarlarını belirgin korur.',
-    keywords: ['h265', 'hevc', 'h264', 'av1', 'kodek', 'encoder', 'sıkıştırma'],
+    title: t('settings.video_kodlama_sikistirma_motoru'),
+    description: t('settings.goruntu_netligini_belirleyen_donanim'),
+    keywords: ['h265', 'hevc', 'h264', 'av1', 'kodek', 'encoder', t('settings.sikistirma')],
   },
   fps: {
     section: 'stream',
-    title: 'Maksimum FPS',
-    description: 'Ekran tazeleme ve kare hızı: yüksek değer akıcı, düşük değer tasarruflu.',
-    keywords: ['kare hızı', 'akıcılık', 'fps', '60', '30', 'pil'],
+    title: t('common.maksimum_fps'),
+    description: t('settings.ekran_tazeleme_ve_kare_hizi_yuksek'),
+    keywords: [t('settings.kare_hizi'), t('settings.akicilik'), 'fps', '60', '30', 'pil'],
   },
   bitrate: {
     section: 'stream',
-    title: 'Video Bit Hızı',
-    description: 'Görüntü netliğini ve bant genişliğini ayarlar. 2K/4K modlarda yüksek değer önerilir.',
-    keywords: ['mbps', 'bant genişliği', 'kalite', 'bitrate', 'ağ'],
+    title: t('common.video_bit_hizi'),
+    description: t('settings.goruntu_netligini_ve_bant_genisligini'),
+    keywords: ['mbps', t('settings.bant_genisligi'), 'kalite', 'bitrate', t('settings.ag')],
   },
   windowLimit: {
     section: 'stream',
-    title: 'Maksimum Canlı Pencere / Enkoder Sınırı',
-    description: 'Aynı anda canlı video yayını yapacak en çok pencere sayısı.',
-    keywords: ['encoder', 'enkoder', 'pencere sayısı', 'limit', 'kapasite'],
+    title: t('settings.maksimum_canli_pencere_enkoder_siniri'),
+    description: t('settings.ayni_anda_canli_video_yayini_yapacak'),
+    keywords: ['encoder', 'enkoder', t('settings.pencere_sayisi'), 'limit', 'kapasite'],
   },
   audioRoute: {
     section: 'audio',
-    title: 'Ses Çıkışı',
-    description: 'Android seslerinin nereye gideceği. Uygulama başına Medya Merkezi ya da mikserden değiştirilebilir.',
-    keywords: ['hoparlör', 'telefon', 'dex', 'ikisi', 'yönlendirme', 'kulaklık', 'ses'],
+    title: t('common.ses_cikisi'),
+    description: t('settings.android_seslerinin_nereye_gidecegi'),
+    keywords: [t('settings.hoparlor'), 'telefon', 'dex', 'ikisi', t('settings.yonlendirme'), t('settings.kulaklik'), 'ses'],
   },
   audioSync: {
     section: 'audio',
-    title: 'Telefon–DeX ince ayarı',
-    description: '«İkisi» rotasında telefon ve DeX sesini kulakla hizalayın.',
+    title: t('common.telefon_dex_ince_ayari'),
+    description: t('settings.ikisi_rotasinda_telefon_ve_dex_sesini'),
     keywords: ['senkron', 'gecikme', 'hizalama', 'ince ayar', 'eko', 'sync'],
   },
   audioCodec: {
     section: 'audio',
-    title: 'Ses Kodlayıcı (Audio Codec)',
-    description: 'Ses iletimi için kodlayıcı: ham PCM sıfır gecikme, Opus düşük veri.',
+    title: t('settings.ses_kodlayici_audio_codec'),
+    description: t('settings.ses_iletimi_icin_kodlayici_ham_pcm'),
     keywords: ['pcm', 'opus', 'codec', 'gecikme'],
   },
   windowingMode: {
     section: 'windows',
-    title: 'Varsayılan Pencereleme Davranışı',
-    description: 'Yeni bir pencerenin nerede doğacağı: paylaşımlı Eko alan, bağımsız ekranlar ya da otomatik.',
-    keywords: ['eko', 'çalışma alanı', 'workspace', 'bağımsız', 'hibrit', 'vd', 'sanal ekran'],
+    title: t('common.varsayilan_pencereleme_davranisi'),
+    description: t('settings.yeni_bir_pencerenin_nerede_dogacagi'),
+    keywords: ['eko', t('settings.calisma_alani'), 'workspace', t('settings.bagimsiz'), 'hibrit', 'vd', 'sanal ekran'],
   },
   handoffWindowing: {
     section: 'windows',
-    title: 'Telefona Aktarma Kipi',
-    description: 'Telefona aktarılan uygulama tam ekran mı yoksa HyperOS serbest penceresinde mi açılsın.',
+    title: t('common.telefona_aktarma_kipi'),
+    description: t('settings.telefona_aktarilan_uygulama_tam_ekran'),
     keywords: ['freeform', 'serbest pencere', 'tam ekran', 'aktar', 'handoff', 'hyperos'],
   },
   appClosed: {
     section: 'windows',
-    title: 'Uygulama Telefonda Kapatılınca',
-    description: 'Telefondan kapatılan uygulamanın penceresi kapansın ya da "Yeniden aç" kartı göstersin.',
-    keywords: ['son kullanılanlar', 'kapat', 'yeniden aç', 'rozet'],
+    title: t('common.uygulama_telefonda_kapatilinca'),
+    description: t('settings.telefondan_kapatilan_uygulamanin_2'),
+    keywords: [t('settings.son_kullanilanlar'), 'kapat', t('settings.yeniden_ac'), 'rozet'],
   },
   headerHover: {
     section: 'windows',
-    title: 'Sürükleyici Başlık (varsayılan)',
-    description: '«Genele uy» pencerelerde başlık çubuğu fare üst şeride gelince açılır.',
-    keywords: ['başlık çubuğu', 'hover', 'gizli başlık', 'titlebar'],
+    title: t('common.surukleyici_baslik_varsayilan'),
+    description: t('settings.genele_uy_pencerelerde_baslik_cubugu'),
+    keywords: [t('settings.baslik_cubugu'), 'hover', t('settings.gizli_baslik'), 'titlebar'],
   },
   dpLock: {
     section: 'windows',
-    title: 'Varsayılan Flex DP Kilidi',
-    description: 'Boyutlandırmada DPI\'ı sabit tutar (sıfır donma).',
-    keywords: ['kilit', 'flex', 'dp', 'sabit yoğunluk', 'resize'],
+    title: t('common.varsayilan_flex_dp_kilidi'),
+    description: t('settings.boyutlandirmada_dpi_i_sabit_tutar'),
+    keywords: ['kilit', 'flex', 'dp', t('settings.sabit_yogunluk'), 'resize'],
   },
   stealth: {
     section: 'windows',
-    title: 'Stealth DP: Telefonda Açık Uygulamayı DeX\'te Açarken',
-    description: 'Telefonda çalışan uygulama DeX\'te açılırken geçiş kaplamanın arkasında, sessizce uyarlanır.',
-    keywords: ['stealth', 'sanal ekran', 'dpi geçişi', 'kaplama'],
+    title: t('settings.stealth_dp_telefonda_acik_uygulamayi'),
+    description: t('settings.telefonda_calisan_uygulama_dex_te'),
+    keywords: ['stealth', 'sanal ekran', t('settings.dpi_gecisi'), 'kaplama'],
   },
   handoffPrelanding: {
     section: 'windows',
-    title: 'Telefona Aktarırken Ön-İniş',
-    description: 'Boyut ve DPI değişimi telefonda değil, PC penceresinin perdesi arkasında yaşanır.',
-    keywords: ['ön iniş', 'prelanding', 'aktar', 'geçiş', 'yanlış yerleşim'],
+    title: t('settings.telefona_aktarirken_on_inis'),
+    description: t('settings.boyut_ve_dpi_degisimi_telefonda_degil'),
+    keywords: [t('settings.on_inis'), 'prelanding', 'aktar', t('settings.gecis'), t('settings.yanlis_yerlesim')],
   },
   densityRefresh: {
     section: 'windows',
-    title: 'DPI Sonrası Uygulamayı Yenile',
-    description: 'DPI değişen uygulamanın arayüzünü yeni yoğunlukta durumu koruyarak yeniden kurdurur.',
-    keywords: ['yenile', 'youtube', 'yoğunluk', 'density', 'yeniden kur'],
+    title: t('settings.dpi_sonrasi_uygulamayi_yenile'),
+    description: t('settings.dpi_degisen_uygulamanin_arayuzunu'),
+    keywords: ['yenile', 'youtube', t('settings.yogunluk'), 'density', 'yeniden kur'],
   },
   densityRefreshHard: {
     section: 'windows',
-    title: 'Sert Yenileme (Süreci Yeniden Başlat)',
-    description: 'Yalnızca nazik yenileme yetmiyorsa: uygulama süreci yeniden başlatılır.',
-    keywords: ['süreç', 'restart', 'zorla', 'arka plan servisi'],
+    title: t('settings.sert_yenileme_sureci_yeniden_baslat'),
+    description: t('settings.yalnizca_nazik_yenileme_yetmiyorsa_2'),
+    keywords: [t('settings.surec'), 'restart', 'zorla', 'arka plan servisi'],
   },
   theme: {
     section: 'appearance',
-    title: 'Masaüstü Görünüm Teması',
-    description: 'Arayüzün genel temasını seçin: açık ya da karanlık.',
-    keywords: ['tema', 'karanlık', 'koyu', 'açık', 'dark', 'light', 'gece'],
+    title: t('settings.masaustu_gorunum_temasi'),
+    description: t('settings.arayuzun_genel_temasini_secin_acik_ya'),
+    keywords: ['tema', t('settings.karanlik'), 'koyu', t('common.acik'), 'dark', 'light', 'gece'],
   },
   ambient: {
     section: 'appearance',
-    title: 'Sinematik Arka Plan (Ambient Backdrop)',
-    description: 'Sığdır modunda kenarlardaki siyah çubuklar yerine yumuşak bulanık bir arka plan yansıtır.',
-    keywords: ['arka plan', 'siyah çubuk', 'glass', 'bulanık', 'ambient'],
+    title: t('settings.sinematik_arka_plan_ambient_backdrop'),
+    description: t('settings.sigdir_modunda_kenarlardaki_siyah'),
+    keywords: ['arka plan', t('settings.siyah_cubuk'), 'glass', t('settings.bulanik'), 'ambient'],
   },
   dimPhone: {
     section: 'power',
-    title: 'Kullanırken telefon ekranını karart',
-    description: 'Görüntü kalitesini ve yayını etkilemeden telefonda gerçek pil tasarrufu sağlar.',
-    keywords: ['pil', 'ekran kapat', 'karart', 'uyku', 'tasarruf', 'ısı'],
+    title: t('settings.kullanirken_telefon_ekranini_karart'),
+    description: t('settings.goruntu_kalitesini_ve_yayini'),
+    keywords: ['pil', 'ekran kapat', 'karart', 'uyku', 'tasarruf', t('settings.isi')],
   },
   rememberDevices: {
     section: 'power',
-    title: 'Bu bilgisayarda cihazları hatırla',
-    description: 'Bağlanan cihazlar Kayıtlı Cihazlar listesine eklenir ve tek tıkla yeniden bağlanır.',
-    keywords: ['kayıtlı cihaz', 'paylaşılan bilgisayar', 'gizlilik', 'tek tık', 'bağlan'],
+    title: t('settings.bu_bilgisayarda_cihazlari_hatirla'),
+    description: t('settings.baglanan_cihazlar_kayitli_cihazlar'),
+    keywords: [t('settings.kayitli_cihaz'), t('settings.paylasilan_bilgisayar'), 'gizlilik', t('settings.tek_tik'), t('settings.baglan')],
   },
   inspector: {
     section: 'advanced',
-    title: 'Öğeyi Denetle & XML Inspector Katmanı',
-    description: 'Deneysel: ekrandaki metin ve buton koordinatlarını şeffaf bir DOM katmanı olarak yansıtır.',
-    keywords: ['inspector', 'uiautomator', 'xml', 'dom', 'geliştirici', 'beta'],
+    title: t('settings.ogeyi_denetle_xml_inspector_katmani'),
+    description: t('settings.deneysel_ekrandaki_metin_ve_buton'),
+    keywords: ['inspector', 'uiautomator', 'xml', 'dom', t('settings.gelistirici'), 'beta'],
   },
   logs: {
     section: 'advanced',
-    title: 'Tanılama Günlüğü',
-    description: 'Sorunu yeniden ürettikten hemen sonra günlükleri tek parça panoya kopyalayın.',
-    keywords: ['log', 'günlük', 'hata', 'destek', 'pano', 'kopyala', 'rapor'],
+    title: t('settings.tanilama_gunlugu'),
+    description: t('settings.sorunu_yeniden_urettikten_hemen_sonra'),
+    keywords: ['log', t('settings.gunluk'), 'hata', 'destek', 'pano', 'kopyala', 'rapor'],
   },
   trace: {
     section: 'advanced',
-    title: 'Ayrıntılı izleme',
-    description: 'Seçilen akışların ayrıntılı kayıtlarını tarayıcı konsoluna ve backend terminaline açar.',
+    title: t('settings.ayrintili_izleme'),
+    description: t('settings.secilen_akislarin_ayrintili'),
     keywords: ['trace', 'izleme', 'konsol', 'debug', 'handoff', 'video'],
   },
   encoderTest: {
     section: 'advanced',
-    title: 'Encoder Kapasite Testi',
-    description: 'Cihazın aynı anda kaç pencere yayınlayabildiğini gerçek cihazda ölçer.',
-    keywords: ['kapasite', 'stres', 'test', 'pencere sayısı', 'encoder'],
+    title: t('settings.encoder_kapasite_testi'),
+    description: t('settings.cihazin_ayni_anda_kac_pencere'),
+    keywords: ['kapasite', 'stres', 'test', t('settings.pencere_sayisi'), 'encoder'],
   },
   systemInfo: {
     section: 'advanced',
-    title: 'Sistem Bilgisi',
-    description: 'Sürüm, çekirdek bileşenler ve doğrulanmış sınırlar.',
-    keywords: ['sürüm', 'scrcpy', 'versiyon', 'engine', 'protokol'],
+    title: t('settings.sistem_bilgisi'),
+    description: t('settings.surum_cekirdek_bilesenler_ve'),
+    keywords: [t('settings.surum'), 'scrcpy', 'versiyon', 'engine', 'protokol'],
   },
   architecture: {
     section: 'about',
-    title: 'Açık Kaynak Sistem Mimarisi',
-    description: 'Sıfır kurulum (Zero‑APK): telefona yabancı APK kurulmaz, root gerekmez.',
-    keywords: ['zero apk', 'root', 'knox', 'garanti', 'adb', 'gizlilik', 'açık kaynak'],
+    title: t('settings.acik_kaynak_sistem_mimarisi'),
+    description: t('settings.sifir_kurulum_zero_apk_telefona'),
+    keywords: ['zero apk', 'root', 'knox', 'garanti', 'adb', 'gizlilik', t('settings.acik_kaynak')],
   },
   directReply: {
     section: 'about',
-    title: 'Bildirimlerden Doğrudan Yanıt Neden Yapılamaz?',
-    description: 'Android güvenlik bariyeri (PendingIntent & RemoteInput) ve OpenDeX\'in doğal çözümü.',
-    keywords: ['bildirim', 'yanıt', 'whatsapp', 'remoteinput', 'reply', 'telegram'],
+    title: t('settings.bildirimlerden_dogrudan_yanit_neden'),
+    description: t('settings.android_guvenlik_bariyeri'),
+    keywords: ['bildirim', t('settings.yanit'), 'whatsapp', 'remoteinput', 'reply', 'telegram'],
   },
 };
 
@@ -260,7 +261,7 @@ const FOLD = { ç: 'c', ğ: 'g', ı: 'i', ö: 'o', ş: 's', ü: 'u', â: 'a', î
 /** Küçük harf + Türkçe aksan katlama: "cozunurluk" ⇢ "çözünürlük", "ISIK" ⇢ "ışık" ile de eşleşir. */
 export function fold(text) {
   return String(text ?? '')
-    .toLocaleLowerCase('tr')
+    .toLocaleLowerCase(activeLocale())
     .replace(/[çğıöşüâîû]/g, (ch) => FOLD[ch] || ch)
     .replace(/i̇/g, 'i')
     .trim();
@@ -297,112 +298,112 @@ export function searchSettings(query, { limit = 12, items = SETTING_ITEMS } = {}
     }
     if (all) results.push({ id, section: item.section, title: item.title, description: item.description, score });
   }
-  results.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title, 'tr'));
+  results.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title, activeLocale()));
   return results.slice(0, limit);
 }
 
 // ───────────────────────────────────────────────────────────────────────────────────────── Seçenekler
 
 export const RESOLUTION_OPTIONS = [
-  { value: 'dynamic', label: 'Dinamik', description: 'Pencerenin o anki boyutuna otomatik uyar. Ek ayar gerektirmez.', tag: 'Otomatik Esnek' },
-  { value: 'phone_scale', label: 'Telefon ölçeği (Zoom)', description: 'Uygulamalar telefondaki düzenle açılır; pencereyi büyütmek yakınlaştırır.', tag: 'Telefon Düzeni' },
-  { value: 'dynamic_fix', label: 'Dinamik‑Fix (Tam Oturtma)', description: 'Video alanının oranını birebir izler: siyah çubuk ve esneme kalmaz.', tag: 'Tam Oran' },
-  { value: '1080p', label: 'Sabit 1080p Standart', description: '16:9 geniş ekran standart masaüstü görünümü.', tag: '1920×1080' },
-  { value: 'tablet', label: 'Tablet Modu', description: 'Dikey alanı yüksek: tek ekranda daha çok metin, kod ve web içeriği.', tag: '1920×1200' },
-  { value: '2k', label: 'Sabit 2K Masaüstü', description: 'Geniş ve 2K monitörler için yüksek piksel netliği.', tag: '2560×1440' },
-  { value: '2.5k', label: '2.5K Tablet', description: 'En yüksek dikey alan: doküman okuma ve uzun sayfalar için.', tag: '2560×1600' },
+  { value: 'dynamic', label: t('common.dinamik'), description: t('settings.pencerenin_o_anki_boyutuna_otomatik'), tag: t('settings.otomatik_esnek') },
+  { value: 'phone_scale', label: t('settings.telefon_olcegi_zoom'), description: t('settings.uygulamalar_telefondaki_duzenle'), tag: t('settings.telefon_duzeni') },
+  { value: 'dynamic_fix', label: t('settings.dinamik_fix_tam_oturtma'), description: t('settings.video_alaninin_oranini_birebir_izler'), tag: t('settings.tam_oran') },
+  { value: '1080p', label: t('settings.sabit_1080p_standart'), description: t('settings.16_9_genis_ekran_standart_masaustu'), tag: '1920×1080' },
+  { value: 'tablet', label: t('settings.tablet_modu'), description: t('settings.dikey_alani_yuksek_tek_ekranda_daha'), tag: '1920×1200' },
+  { value: '2k', label: t('settings.sabit_2k_masaustu'), description: t('settings.genis_ve_2k_monitorler_icin_yuksek'), tag: '2560×1440' },
+  { value: '2.5k', label: t('settings.2_5k_tablet'), description: t('settings.en_yuksek_dikey_alan_dokuman_okuma_ve'), tag: '2560×1600' },
 ];
 
 export const DPI_OPTIONS = [
-  { value: 'auto', label: 'Otomatik', description: 'Pencere boyutuna göre ergonomik ölçekleme.', tag: 'Önerilen' },
-  { value: '180', label: '180 DPI', description: 'Geniş çalışma alanı, çok sütunlu masaüstü düzeni.', tag: 'Masaüstü' },
-  { value: '200', label: '200 DPI', description: 'Gözü yormayan altın oran; çoğu 1080p panel için ideal.', tag: 'Optimum' },
-  { value: '220', label: '220 DPI', description: 'Dengeli yazı boyutu, tablet görünümü.', tag: 'Kompakt' },
-  { value: '240', label: '240 DPI', description: 'Geniş dokunmatik hedefler ve büyük metinler.', tag: 'Büyük Metin' },
-  { value: '320', label: '320 DPI', description: 'En büyük simge ve metinler, üst düzey okunabilirlik.', tag: 'Erişilebilirlik' },
+  { value: 'auto', label: t('common.otomatik'), description: t('settings.pencere_boyutuna_gore_ergonomik'), tag: t('common.onerilen') },
+  { value: '180', label: '180 DPI', description: t('settings.genis_calisma_alani_cok_sutunlu'), tag: t('common.masaustu') },
+  { value: '200', label: '200 DPI', description: t('settings.gozu_yormayan_altin_oran_cogu_1080p'), tag: t('settings.optimum') },
+  { value: '220', label: '220 DPI', description: t('settings.dengeli_yazi_boyutu_tablet_gorunumu'), tag: t('settings.kompakt') },
+  { value: '240', label: '240 DPI', description: t('settings.genis_dokunmatik_hedefler_ve_buyuk'), tag: t('settings.buyuk_metin') },
+  { value: '320', label: '320 DPI', description: t('settings.en_buyuk_simge_ve_metinler_ust_duzey'), tag: t('settings.erisilebilirlik_2') },
 ];
 
 export const TARGET_DP_OPTIONS = [
-  { value: 'auto', label: 'Otomatik', description: 'Pencere boyutuna göre dinamik, ergonomik çalışma alanı.', tag: 'Önerilen' },
-  { value: '600', label: '600 dp', description: 'Tablet düzeni: iki sütunlu (master‑detail) arayüzleri açar.', tag: 'Tablet' },
-  { value: '720', label: '720 dp', description: 'Standart masaüstü: çok sütunlu DeX tarzı arayüz.', tag: 'Masaüstü' },
-  { value: '840', label: '840 dp', description: 'Geniş ekranlarda üretkenlik ve okunabilirlik dengesi.', tag: 'Geniş' },
-  { value: '960', label: '960 dp', description: '16:10 dikey alan ve maksimum içerik görünürlüğü.', tag: 'Yoğun' },
+  { value: 'auto', label: t('common.otomatik'), description: t('settings.pencere_boyutuna_gore_dinamik'), tag: t('common.onerilen') },
+  { value: '600', label: '600 dp', description: t('settings.tablet_duzeni_iki_sutunlu_master'), tag: t('common.tablet') },
+  { value: '720', label: '720 dp', description: t('settings.standart_masaustu_cok_sutunlu_dex'), tag: t('common.masaustu') },
+  { value: '840', label: '840 dp', description: t('settings.genis_ekranlarda_uretkenlik_ve'), tag: t('settings.genis') },
+  { value: '960', label: '960 dp', description: t('settings.16_10_dikey_alan_ve_maksimum_icerik'), tag: t('common.yogun') },
 ];
 
 export const CODEC_OPTIONS = [
-  { value: 'auto', label: 'Otomatik', description: 'Cihazın donanımına göre en iyi kodlayıcıyı seçer (H.265 tercihli).', tag: 'Önerilen' },
-  { value: 'h265', label: 'H.265 (HEVC)', description: 'Daha keskin metin, daha az renk kanaması, aynı bit hızında yüksek kalite.', tag: 'Maksimum Netlik' },
-  { value: 'av1', label: 'AV1', description: 'Yeni nesil, ultra verimli. Yalnızca destekleyen işlemcilerde çalışır.', tag: 'Yeni Nesil' },
-  { value: 'h264', label: 'H.264', description: 'Eski donanımlar için evrensel uyumluluk.', tag: 'Uyumlu' },
+  { value: 'auto', label: t('common.otomatik'), description: t('settings.cihazin_donanimina_gore_en_iyi'), tag: t('common.onerilen') },
+  { value: 'h265', label: 'H.265 (HEVC)', description: t('settings.daha_keskin_metin_daha_az_renk'), tag: t('settings.maksimum_netlik_2') },
+  { value: 'av1', label: 'AV1', description: t('settings.yeni_nesil_ultra_verimli_yalnizca'), tag: t('settings.yeni_nesil') },
+  { value: 'h264', label: 'H.264', description: t('settings.eski_donanimlar_icin_evrensel'), tag: t('settings.uyumlu') },
 ];
 
 export const SHARPEN_OPTIONS = [
-  { value: 'smart', label: 'Akıllı', description: 'Gözü yormadan doğal ve temiz kenar netliği.', tag: 'Önerilen' },
-  { value: 'ultra', label: 'Ultra Keskin', description: 'Yüksek kontrastlı, kristal harfler (Lanczos/CAS).', tag: 'Ultra' },
-  { value: 'off', label: 'Kapalı', description: 'Filtresiz düz çizim.', tag: 'Standart' },
+  { value: 'smart', label: t('settings.akilli'), description: t('settings.gozu_yormadan_dogal_ve_temiz_kenar'), tag: t('common.onerilen') },
+  { value: 'ultra', label: t('settings.ultra_keskin'), description: t('settings.yuksek_kontrastli_kristal_harfler'), tag: t('settings.ultra') },
+  { value: 'off', label: t('common.kapali_2'), description: t('settings.filtresiz_duz_cizim'), tag: t('settings.standart') },
 ];
 
 export const FPS_OPTIONS = [
-  { value: '15', label: '15 FPS', description: 'Düşük veri kullanımı.', tag: 'Tasarruf' },
-  { value: '30', label: '30 FPS', description: 'Standart akıcılık.', tag: 'Dengeli' },
-  { value: '60', label: '60 FPS', description: 'Maksimum akıcılık.', tag: 'Önerilen' },
+  { value: '15', label: '15 FPS', description: t('settings.dusuk_veri_kullanimi'), tag: t('settings.tasarruf') },
+  { value: '30', label: '30 FPS', description: t('settings.standart_akicilik'), tag: t('common.dengeli_2') },
+  { value: '60', label: '60 FPS', description: t('settings.maksimum_akicilik'), tag: t('common.onerilen') },
 ];
 
 export const BITRATE_OPTIONS = [
-  { value: '2', label: '2 Mbps', description: 'Zayıf ağ için.', tag: 'Düşük' },
-  { value: '4', label: '4 Mbps', description: 'Orta kalite.', tag: 'Dengeli' },
-  { value: '8', label: '8 Mbps', description: 'Kristal netlik.', tag: 'Varsayılan' },
-  { value: '12', label: '12 Mbps', description: 'Ultra HD.', tag: 'Yüksek' },
-  { value: '16', label: '16 Mbps', description: '2K netlik için önerilir.', tag: '2K' },
-  { value: '20', label: '20 Mbps', description: 'En yüksek kalite.', tag: 'Maksimum' },
+  { value: '2', label: t('settings.2_mbps'), description: t('settings.zayif_ag_icin'), tag: t('settings.dusuk') },
+  { value: '4', label: t('common.4_mbps'), description: t('settings.orta_kalite'), tag: t('common.dengeli_2') },
+  { value: '8', label: t('common.8_mbps'), description: t('settings.kristal_netlik'), tag: t('common.varsayilan') },
+  { value: '12', label: t('common.12_mbps'), description: t('settings.ultra_hd'), tag: t('settings.yuksek') },
+  { value: '16', label: t('common.16_mbps'), description: t('settings.2k_netlik_icin_onerilir'), tag: '2K' },
+  { value: '20', label: t('common.20_mbps'), description: t('settings.en_yuksek_kalite'), tag: t('settings.maksimum') },
 ];
 
 export const WINDOW_LIMIT_OPTIONS = [
-  { value: 'auto', label: 'Otomatik', description: 'Cihazın test edilmiş donanım sınırını kullanır.', tag: 'Donanım Sınırı' },
-  { value: '2', label: '2 Pencere', description: 'Yan yana iki canlı pencere.', tag: '2 Aktif' },
-  { value: '3', label: '3 Pencere', description: 'Dengeli kaynak kullanımı.', tag: '3 Aktif' },
-  { value: '4', label: '4 Pencere', description: 'Çoklu görev için ideal.', tag: '4 Aktif' },
-  { value: '6', label: '6 Pencere', description: 'Yüksek performanslı cihazlar.', tag: '6 Aktif' },
-  { value: '16', label: '16 Pencere', description: 'Maksimum donanım kapasitesi.', tag: 'Maks. 16' },
+  { value: 'auto', label: t('common.otomatik'), description: t('settings.cihazin_test_edilmis_donanim_sinirini'), tag: t('settings.donanim_siniri') },
+  { value: '2', label: t('settings.2_pencere'), description: t('settings.yan_yana_iki_canli_pencere'), tag: t('settings.2_aktif') },
+  { value: '3', label: t('settings.3_pencere'), description: t('settings.dengeli_kaynak_kullanimi'), tag: t('settings.3_aktif') },
+  { value: '4', label: t('settings.4_pencere'), description: t('settings.coklu_gorev_icin_ideal'), tag: t('settings.4_aktif') },
+  { value: '6', label: t('settings.6_pencere'), description: t('settings.yuksek_performansli_cihazlar'), tag: t('settings.6_aktif') },
+  { value: '16', label: t('settings.16_pencere'), description: t('settings.maksimum_donanim_kapasitesi'), tag: t('settings.maks_16') },
 ];
 
 export const FIT_OPTIONS = [
-  { value: 'fill', label: FIT_MODES.fill.label, description: 'Pencereyi kenardan kenara doldurur; siyah boşluk kalmaz.', tag: 'Önerilen' },
-  { value: 'contain', label: FIT_MODES.fit.label, description: 'Oranı korur, uzatmaz; yanlarda siyah çubuk kalabilir.', tag: 'Sıfır Esneme' },
-  { value: 'cover', label: FIT_MODES.cover.label, description: 'Uzatmadan yakınlaşır; kenardaki butonlar taşabilir.', tag: 'Zoom / Kırpma' },
+  { value: 'fill', label: FIT_MODES.fill.label, description: t('settings.pencereyi_kenardan_kenara_doldurur'), tag: t('common.onerilen') },
+  { value: 'contain', label: FIT_MODES.fit.label, description: t('settings.orani_korur_uzatmaz_yanlarda_siyah'), tag: t('settings.sifir_esneme') },
+  { value: 'cover', label: FIT_MODES.cover.label, description: t('settings.uzatmadan_yakinlasir_kenardaki'), tag: t('settings.zoom_kirpma') },
 ];
 
 export const AUDIO_CODEC_OPTIONS = [
-  { value: 'pcm', label: 'Ham PCM', description: 'Sıfır gecikmeli, doğrudan işlenebilir ham ses akışı.', tag: 'Sıfır Gecikme' },
-  { value: 'opus', label: 'Opus', description: 'Düşük bant genişliği kullanan sıkıştırılmış ses akışı.', tag: 'Düşük Veri' },
+  { value: 'pcm', label: t('settings.ham_pcm'), description: t('settings.sifir_gecikmeli_dogrudan_islenebilir'), tag: t('settings.sifir_gecikme') },
+  { value: 'opus', label: t('settings.opus'), description: t('settings.dusuk_bant_genisligi_kullanan'), tag: t('settings.dusuk_veri') },
 ];
 
 export const AUDIO_ROUTE_TEXT = {
-  phone: { description: 'Sesler telefonun hoparlöründen ya da bağlı kulaklıktan çalar.', tag: 'Telefonda çal' },
-  pc: { description: 'Android sesleri bilgisayara (DeX) aktarılır; telefon sessiz kalır.', tag: 'Önerilen' },
-  both: { description: 'Sesler aynı anda hem telefondan hem DeX\'ten çalar; iki çıkış aynı ana hizalanır.', tag: 'Eşzamanlı' },
+  phone: { description: t('settings.sesler_telefonun_hoparlorunden_ya_da'), tag: t('settings.telefonda_cal') },
+  pc: { description: t('settings.android_sesleri_bilgisayara_dex'), tag: t('common.onerilen') },
+  both: { description: t('settings.sesler_ayni_anda_hem_telefondan_hem'), tag: t('settings.eszamanli') },
 };
 
 export const THEME_OPTIONS = [
-  { value: 'light', label: 'Açık', description: 'Temiz gri‑beyaz yüzeyler, yüksek okunabilirlik.', tag: 'Varsayılan' },
-  { value: 'dark', label: 'Karanlık', description: 'Derin gece tonları ve cam efekti; gözü yormaz.', tag: 'Gece' },
+  { value: 'light', label: t('common.acik_2'), description: t('settings.temiz_gri_beyaz_yuzeyler_yuksek'), tag: t('common.varsayilan') },
+  { value: 'dark', label: t('settings.karanlik_2'), description: t('settings.derin_gece_tonlari_ve_cam_efekti_gozu'), tag: t('settings.gece') },
 ];
 
 export const WINDOWING_MODE_OPTIONS = [
-  { value: 'eco', label: 'Eko Çalışma Alanı', description: 'Paylaşımlı tek encoder: en düşük ısı ve pil.', tag: '1 encoder' },
-  { value: 'independent', label: 'Bağımsız Ekranlar', description: 'Her pencere kendi sanal ekranında: en yüksek uyumluluk.', tag: 'Pencere başına VD' },
-  { value: 'hybrid', label: 'Hibrit (Otomatik)', description: 'Cihaz kapasitesine göre otomatik seçer.', tag: 'Önerilen' },
+  { value: 'eco', label: t('common.eko_calisma_alani'), description: t('settings.paylasimli_tek_encoder_en_dusuk_isi'), tag: '1 encoder' },
+  { value: 'independent', label: t('common.bagimsiz_ekranlar'), description: t('settings.her_pencere_kendi_sanal_ekraninda_en'), tag: t('settings.pencere_basina_vd') },
+  { value: 'hybrid', label: t('common.hibrit_otomatik'), description: t('settings.cihaz_kapasitesine_gore_otomatik_secer'), tag: t('common.onerilen') },
 ];
 
 export const HANDOFF_OPTIONS = [
-  { value: 'fullscreen', label: 'Tam ekran', description: 'Uygulama telefonun ekranını tamamen kaplar.', tag: 'Önerilen' },
-  { value: 'freeform', label: 'Serbest pencere', description: 'HyperOS\'un kendi küçük penceresi; taşınabilir ve yeniden boyutlanabilir.', tag: 'Küçük pencere' },
+  { value: 'fullscreen', label: t('common.tam_ekran'), description: t('settings.uygulama_telefonun_ekranini_tamamen'), tag: t('common.onerilen') },
+  { value: 'freeform', label: t('common.serbest_pencere'), description: t('settings.hyperos_un_kendi_kucuk_penceresi'), tag: t('common.kucuk_pencere') },
 ];
 
 export const APP_CLOSED_OPTIONS = [
-  { value: 'close', label: 'Pencereyi kapat', description: 'Telefondan kapatılan uygulamanın penceresi de kapanır.', tag: 'Varsayılan' },
-  { value: 'badge', label: 'Pencerede göster', description: 'Pencere kalır; üstünde «Yeniden aç / Kapat» kartı çıkar.', tag: 'Yeniden aç' },
+  { value: 'close', label: t('common.pencereyi_kapat'), description: t('settings.telefondan_kapatilan_uygulamanin'), tag: t('common.varsayilan') },
+  { value: 'badge', label: t('common.pencerede_goster'), description: t('settings.pencere_kalir_ustunde_yeniden_ac'), tag: t('common.yeniden_ac') },
 ];
 
 // ───────────────────────────────────────────────────────────────────────────────────────── Değer okumaları
@@ -432,23 +433,23 @@ export function sectionSummary(sectionId, live) {
   const get = (key) => settingValue(live, key);
   switch (sectionId) {
     case 'display': {
-      const dpi = Number(get('custom_dpi')) > 0 ? `${get('custom_dpi')} DPI` : Number(get('target_dp')) > 0 ? `${get('target_dp')} dp` : 'Oto yoğunluk';
-      return `${labelOf(RESOLUTION_OPTIONS, get('resolution_mode')) || 'Dinamik'} · ${dpi}`;
+      const dpi = Number(get('custom_dpi')) > 0 ? `${get('custom_dpi')} DPI` : Number(get('target_dp')) > 0 ? `${get('target_dp')} dp` : t('settings.oto_yogunluk');
+      return `${labelOf(RESOLUTION_OPTIONS, get('resolution_mode')) || t('settings.dinamik')} · ${dpi}`;
     }
     case 'stream': {
-      const codec = { auto: 'Oto', h265: 'H.265', h264: 'H.264', av1: 'AV1' }[get('video_codec')] || 'Oto';
+      const codec = { auto: t('common.oto'), h265: 'H.265', h264: 'H.264', av1: 'AV1' }[get('video_codec')] || t('common.oto');
       return `${codec} · ${get('max_fps')} FPS · ${Math.round(get('video_bit_rate') / 1_000_000)} Mbps`;
     }
     case 'audio':
-      return { pc: 'DeX', phone: 'Telefon', both: 'İkisi' }[get('audio_output_mode')] || 'DeX';
+      return { pc: 'DeX', phone: t('common.telefon_2'), both: t('common.ikisi') }[get('audio_output_mode')] || 'DeX';
     case 'windows': {
-      const mode = { eco: 'Eko', independent: 'Bağımsız', hybrid_auto: 'Hibrit' }[get('windowing_mode')] || 'Hibrit';
-      return `${mode} · ${get('phone_handoff_windowing') === 'freeform' ? 'Serbest aktarım' : 'Tam ekran aktarım'}`;
+      const mode = { eco: t('settings.eko'), independent: t('settings.bagimsiz_2'), hybrid_auto: t('settings.hibrit') }[get('windowing_mode')] || t('settings.hibrit');
+      return `${mode} · ${get('phone_handoff_windowing') === 'freeform' ? t('settings.serbest_aktarim') : t('settings.tam_ekran_aktarim')}`;
     }
     case 'appearance':
-      return live?.ambient_backdrop === false ? 'Arka plan kapalı' : 'Sinematik arka plan';
+      return live?.ambient_backdrop === false ? t('settings.arka_plan_kapali') : t('settings.sinematik_arka_plan');
     case 'power':
-      return get('screen_off_while_mirroring') ? 'Telefon ekranı kararır' : 'Telefon ekranı açık';
+      return get('screen_off_while_mirroring') ? t('settings.telefon_ekrani_kararir') : t('settings.telefon_ekrani_acik');
     default:
       return '';
   }
@@ -463,9 +464,9 @@ export function sectionSummary(sectionId, live) {
 export const PROFILES = [
   {
     id: 'balanced',
-    label: 'Dengeli',
-    tagline: 'Günlük kullanım',
-    description: 'Akıcı 60 FPS ve temiz metin; pil ve ısı makul kalır.',
+    label: t('common.dengeli'),
+    tagline: t('settings.gunluk_kullanim'),
+    description: t('settings.akici_60_fps_ve_temiz_metin_pil_ve'),
     patch: {
       video_codec: 'auto', max_fps: 60, video_bit_rate: 8_000_000, sharpening_mode: 'adaptive',
       dynamic_resolution_enabled: true, screen_off_while_mirroring: false,
@@ -473,9 +474,9 @@ export const PROFILES = [
   },
   {
     id: 'clarity',
-    label: 'Maksimum Netlik',
-    tagline: 'Metin ve tasarım işleri',
-    description: 'H.265, 16 Mbps ve ultra keskinlik; en kristal görüntü.',
+    label: t('settings.maksimum_netlik'),
+    tagline: t('settings.metin_ve_tasarim_isleri'),
+    description: t('settings.h_265_16_mbps_ve_ultra_keskinlik_en'),
     patch: {
       video_codec: 'h265', max_fps: 60, video_bit_rate: 16_000_000, sharpening_mode: 'ultra',
       dynamic_resolution_enabled: true, screen_off_while_mirroring: false,
@@ -483,9 +484,9 @@ export const PROFILES = [
   },
   {
     id: 'battery',
-    label: 'Pil & Isı',
-    tagline: 'Uzun oturumlar',
-    description: '30 FPS, düşük bit hızı ve karartılmış telefon ekranı.',
+    label: t('settings.pil_isi_2'),
+    tagline: t('settings.uzun_oturumlar'),
+    description: t('settings.30_fps_dusuk_bit_hizi_ve_karartilmis'),
     patch: {
       video_codec: 'auto', max_fps: 30, video_bit_rate: 4_000_000, sharpening_mode: 'off',
       dynamic_resolution_enabled: false, screen_off_while_mirroring: true,
@@ -493,9 +494,9 @@ export const PROFILES = [
   },
   {
     id: 'lowdata',
-    label: 'Zayıf Ağ',
-    tagline: 'Wi‑Fi / mobil bağlantı',
-    description: 'H.265 ile 2 Mbps: en düşük bant genişliğinde kullanılabilir görüntü.',
+    label: t('settings.zayif_ag'),
+    tagline: t('settings.wi_fi_mobil_baglanti'),
+    description: t('settings.h_265_ile_2_mbps_en_dusuk_bant'),
     patch: {
       video_codec: 'h265', max_fps: 30, video_bit_rate: 2_000_000, sharpening_mode: 'adaptive',
       dynamic_resolution_enabled: false, screen_off_while_mirroring: false,
@@ -532,37 +533,37 @@ export function recommendations(live, { limit = 3 } = {}) {
 
   if (settingValue(live, 'density_refresh_hard')) {
     out.push({
-      id: 'hard-refresh', tone: 'warn', title: 'Sert yenileme açık',
-      body: 'DPI değişince uygulamaların süreci yeniden başlatılır; çalan müzik gibi arka plan servisleri kesilir.',
-      action: { label: 'Kapat', patch: { density_refresh_hard: false } },
+      id: 'hard-refresh', tone: 'warn', title: t('settings.sert_yenileme_acik'),
+      body: t('settings.dpi_degisince_uygulamalarin_sureci'),
+      action: { label: t('common.kapat'), patch: { density_refresh_hard: false } },
     });
   }
   if (bitrate > 0 && bitrate <= 2_000_000 && fps >= 60) {
     out.push({
-      id: 'low-bitrate-high-fps', tone: 'warn', title: 'Düşük bit hızı + 60 FPS',
-      body: '2 Mbps\'de 60 kare görüntüde blok ve bulanıklık yaratır. Kare hızını düşürün ya da bit hızını artırın.',
-      action: { label: '8 Mbps yap', patch: { video_bit_rate: 8_000_000 } },
+      id: 'low-bitrate-high-fps', tone: 'warn', title: t('settings.dusuk_bit_hizi_60_fps'),
+      body: t('settings.2_mbps_de_60_kare_goruntude_blok_ve'),
+      action: { label: t('settings.8_mbps_yap'), patch: { video_bit_rate: 8_000_000 } },
     });
   }
   if (!settingValue(live, 'dynamic_resolution_enabled') && ['dynamic', 'dynamic_fit', 'dynamic_fix'].includes(settingValue(live, 'resolution_mode'))) {
     out.push({
-      id: 'real-resolution-off', tone: 'info', title: 'Gerçek çözünürlük kapalı',
-      body: 'Pencereyi büyüttüğünüzde görüntü yeniden netleşmez, ölçeklenmiş kalır.',
-      action: { label: 'Aç', patch: { dynamic_resolution_enabled: true } },
+      id: 'real-resolution-off', tone: 'info', title: t('settings.gercek_cozunurluk_kapali'),
+      body: t('settings.pencereyi_buyuttugunuzde_goruntu'),
+      action: { label: t('common.ac'), patch: { dynamic_resolution_enabled: true } },
     });
   }
   if (settingValue(live, 'video_codec') === 'h264') {
     out.push({
-      id: 'codec-h264', tone: 'info', title: 'H.265 daha keskin metin verir',
-      body: 'H.264 yalnızca eski donanımlar içindir; telefonunuz destekliyorsa Otomatik daha net bir görüntü sağlar.',
-      action: { label: 'Otomatik yap', patch: { video_codec: 'auto' } },
+      id: 'codec-h264', tone: 'info', title: t('settings.h_265_daha_keskin_metin_verir'),
+      body: t('settings.h_264_yalnizca_eski_donanimlar'),
+      action: { label: t('settings.otomatik_yap'), patch: { video_codec: 'auto' } },
     });
   }
   if (settingValue(live, 'audio_output_mode') === 'both' && Number(settingValue(live, 'audio_sync_offset_ms')) === 0) {
     out.push({
-      id: 'audio-sync', tone: 'info', title: '«İkisi» için ses ince ayarı',
-      body: 'Telefon ve DeX sesi arasında yankı duyarsanız kulakla hizalayabilirsiniz.',
-      action: { label: 'Ayara git', section: 'audio' },
+      id: 'audio-sync', tone: 'info', title: t('settings.ikisi_icin_ses_ince_ayari'),
+      body: t('settings.telefon_ve_dex_sesi_arasinda_yanki'),
+      action: { label: t('settings.ayara_git'), section: 'audio' },
     });
   }
   const rank = { warn: 0, info: 1 };

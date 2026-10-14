@@ -2,8 +2,9 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { Cpu } from 'lucide-react';
 import { staggerContainer, staggerItem } from '../ui/motion.js';
+import { t } from '../i18n/index.js';
 
-export default function DesktopLoadingSkeleton({ deviceLabel = 'Android Cihazı' }) {
+export default function DesktopLoadingSkeleton({ deviceLabel = t('common.android_cihazi') }) {
   // 16 squircle icon skeletons arranged in responsive tablet grid
   const dummyItems = Array.from({ length: 16 }, (_, i) => i);
 
@@ -37,7 +38,7 @@ export default function DesktopLoadingSkeleton({ deviceLabel = 'Android Cihazı'
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary animate-ping" />
           </div>
           <span className="text-[10.5px] font-medium text-muted-foreground">
-            Uygulamalar ve ikon düzeni taranıyor...
+            {t('desktop.uygulamalar_ve_ikon_duzeni_taraniyor')}
           </span>
         </div>
       </motion.div>

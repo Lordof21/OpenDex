@@ -100,6 +100,24 @@ describe('LatencyHudOverlay', () => {
     showHud();
     expect(screen.getAllByText('—').length).toBeGreaterThan(0);
   });
+
+  it('tıkanıklık sırasında TIKANIKLIK rozeti görünür, sistem normale dönünce (resync sayısı kalsa bile) rozet kaybolur', () => {
+    const decoder = fakeDecoder();
+    render(<LatencyHudOverlay win={WIN} decoder={decoder} hasFrame />);
+    showHud();
+
+    // Normal durum
+    act(() => decoder.emit({ ...STATS(60, 8), queueMs: 10, skipped: 0, resyncs: 0 }));
+    expect(screen.queryByText('TIKANIKLIK')).not.toBeInTheDocument();
+
+    // Tıkanıklık başladı (queueMs > 100 veya skipped > 0)
+    act(() => decoder.emit({ ...STATS(25, 4), queueMs: 140, skipped: 5, resyncs: 1 }));
+    expect(screen.getByText('TIKANIKLIK')).toBeInTheDocument();
+
+    // Sistem toparlandı (queueMs ve skipped sıfırlandı, resyncs kümülatif olarak 1 kaldı)
+    act(() => decoder.emit({ ...STATS(60, 8), queueMs: 5, skipped: 0, resyncs: 1 }));
+    expect(screen.queryByText('TIKANIKLIK')).not.toBeInTheDocument();
+  });
 });
 
 const hub = (active) => ({

@@ -1,5 +1,6 @@
 import { api } from './api.js';
 import { logger } from './logger.js';
+import { t } from '../i18n/index.js';
 
 async function safeGet(path) {
   try {
@@ -24,22 +25,22 @@ export async function buildDiagnosticsReport({ backendLines = 300, browserLines 
     safeGet('/api/diagnostics/log-level'),
   ]);
 
-  const out = [`# OpenDeX tanılama raporu — ${new Date().toISOString()}`];
-  out.push(`Tarayıcı: ${typeof navigator !== 'undefined' ? navigator.userAgent : '?'}`);
-  out.push(`Tarayıcı izleme: ${logger.getTrace().join(',') || 'kapalı'}`);
-  out.push(`Backend izleme: ${level?.trace?.join(',') || (level?.__error ? `okunamadı (${level.__error})` : 'kapalı')}`);
-  out.push(`Backend log dosyası: ${level?.log_file || '?'}`);
+  const out = [t('lib.opendex_tanilama_raporu_toisostring', { toISOString: new Date().toISOString() })];
+  out.push(t('lib.tarayici_value', { value: typeof navigator !== 'undefined' ? navigator.userAgent : '?' }));
+  out.push(t('lib.tarayici_izleme_value', { value: logger.getTrace().join(',') || t('common.kapali') }));
+  out.push(`Backend izleme: ${level?.trace?.join(',') || (level?.__error ? t('lib.okunamadi_error', { __error: level.__error }) : t('common.kapali'))}`);
+  out.push(t('lib.backend_log_dosyasi_value', { value: level?.log_file || '?' }));
 
-  out.push(...block('Telefon ekranı (gerçek durum)', [JSON.stringify(power)]));
-  out.push(...block('Yayın sağlığı (resync/skip_ahead sayaçları)', [JSON.stringify(streams)]));
+  out.push(...block(t('lib.telefon_ekrani_gercek_durum'), [JSON.stringify(power)]));
+  out.push(...block(t('lib.yayin_sagligi_resync_skip_ahead'), [JSON.stringify(streams)]));
   out.push(
     ...block(
       `Backend logu (son ${backendLines})`,
-      tail?.__error ? [`(alınamadı: ${tail.__error})`] : tail?.lines?.length ? tail.lines : ['(boş)'],
+      tail?.__error ? [t('lib.alinamadi_error', { __error: tail.__error })] : tail?.lines?.length ? tail.lines : [t('lib.bos')],
     ),
   );
   const browser = logger.dump(browserLines);
-  out.push(...block(`Tarayıcı logu (son ${browserLines})`, browser.length ? browser : ['(boş)']));
+  out.push(...block(t('lib.tarayici_logu_son_browserlines', { browserLines }), browser.length ? browser : [t('lib.bos')]));
   return out.join('\n');
 }
 

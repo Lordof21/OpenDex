@@ -21,6 +21,7 @@
 import { api } from '../lib/api.js';
 import { appAudioMixer } from './appAudioMixer.js';
 import { deviceClock } from './deviceClock.js';
+import { t as tt } from '../i18n/index.js';
 
 export const CHIRP_MS = 20;
 export const PHONE_BAND = [1500, 3100];            // the phone sweeps UP …
@@ -443,22 +444,22 @@ export function calibrationMessage(result) {
   if (!result) return '';
   if (result.ok) {
     const gap = Math.round(result.gapMs);
-    const heard = gap <= -1 ? `Telefon DeX'ten ≈ ${-gap} ms önde duyuluyordu` : gap >= 1 ? `Telefon DeX'ten ≈ ${gap} ms geride duyuluyordu` : 'Telefon ve DeX zaten hizalıydı';
-    return `${heard}; ince ayar ${result.offsetMs > 0 ? '+' : ''}${result.offsetMs} ms yapıldı (ölçüm tutarlılığı ±${Math.max(0.1, result.spreadMs).toFixed(1)} ms).`;
+    const heard = gap <= -1 ? tt('media.telefon_dex_ten_value_ms_onde', { value: -gap }) : gap >= 1 ? `Telefon DeX'ten ≈ ${gap} ms geride duyuluyordu` : tt('media.telefon_ve_dex_zaten_hizaliydi');
+    return tt('media.heard_ince_ayar_valueoffsetms_ms', { heard, value: result.offsetMs > 0 ? '+' : '', offsetMs: result.offsetMs, value2: Math.max(0.1, result.spreadMs).toFixed(1) });
   }
   switch (result.reason) {
-    case 'mic_denied': return 'Mikrofon izni verilmedi.';
-    case 'mic_unavailable': return 'Mikrofon bulunamadı ya da kullanılamıyor.';
-    case 'no_audio': return 'Ses motoru başlatılamadı.';
-    case 'not_supported': return 'Bu cihazda hizalama yok (telefon yardımcısı güncel değil ya da uygulama başına ses kapalı).';
-    case 'clock': return 'Telefonun saati okunamadı.';
-    case 'probe_failed': return 'Telefon ölçü sesini çalamadı.';
-    case 'late': return 'Sayfa ölçü sesini zamanında çalamadı; tekrar deneyin.';
-    case 'recording_gap': return 'Kayıt kesildi; tekrar deneyin.';
-    case 'too_quiet': return 'Sesler duyulamadı: telefonu dizüstünün yanına koyun, telefonun medya sesini açın, DeX sesi hoparlörden çıksın ve medyayı duraklatın.';
-    case 'no_pairs': return 'Ölçü sesleri eşleştirilemedi: hoparlör seslerini orta seviyeye (yaklaşık %60) getirip tekrar deneyin.';
-    case 'inconsistent': return 'Ölçüm tutarsız çıktı: seslerin sonuna kadar açık olması mikrofonda bozulmaya yol açar; hoparlör seslerini orta seviyeye (yaklaşık %60) getirip tekrar deneyin.';
-    case 'cancelled': return 'Ölçüm iptal edildi; mikrofon kapatıldı.';
-    default: return 'Ölçüm tamamlanamadı.';
+    case 'mic_denied': return tt('media.mikrofon_izni_verilmedi');
+    case 'mic_unavailable': return tt('media.mikrofon_bulunamadi_ya_da');
+    case 'no_audio': return tt('media.ses_motoru_baslatilamadi');
+    case 'not_supported': return tt('media.bu_cihazda_hizalama_yok_telefon');
+    case 'clock': return tt('media.telefonun_saati_okunamadi');
+    case 'probe_failed': return tt('media.telefon_olcu_sesini_calamadi');
+    case 'late': return tt('media.sayfa_olcu_sesini_zamaninda_calamadi');
+    case 'recording_gap': return tt('media.kayit_kesildi_tekrar_deneyin');
+    case 'too_quiet': return tt('media.sesler_duyulamadi_telefonu_dizustunun');
+    case 'no_pairs': return tt('media.olcu_sesleri_eslestirilemedi_hoparlor');
+    case 'inconsistent': return tt('media.olcum_tutarsiz_cikti_seslerin_sonuna');
+    case 'cancelled': return tt('common.olcum_iptal_edildi_mikrofon_kapatildi');
+    default: return tt('media.olcum_tamamlanamadi');
   }
 }

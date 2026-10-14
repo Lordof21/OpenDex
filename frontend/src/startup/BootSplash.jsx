@@ -15,6 +15,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { bootSteps } from './bootSteps.js';
+import { t } from '../i18n/index.js';
 
 const HEALTH_POLL_MS = 350;
 const HEALTH_MAX_ATTEMPTS = 35; // ≈ 12 s for the backend process to answer at all
@@ -196,14 +197,14 @@ export default function BootSplash({ onReady }) {
         <div className="text-center mb-5">
           <div className="flex items-center justify-center gap-2 mb-1">
             <h1 className="text-[22px] font-black tracking-tight text-foreground">
-              Open<span className="text-primary">DeX</span>
+              {t('startup.open')}<span className="text-primary">{t('startup.dex')}</span>
             </h1>
             <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-primary/12 text-primary border border-primary/20">
-              v0.1.0
+              {t('startup.v0_1_0')}
             </span>
           </div>
           <p className="text-[11px] text-muted-foreground font-medium">
-            Yeni Nesil Android Masaüstü ve Çoklu Görev Motoru
+            {t('startup.yeni_nesil_android_masaustu_ve_coklu')}
           </p>
         </div>
 
@@ -297,9 +298,9 @@ export default function BootSplash({ onReady }) {
               <div className="flex items-start gap-2.5 p-3 rounded-lg border border-border/60 bg-muted/40 text-foreground mb-3">
                 <AlertTriangle className="size-4 text-window-close shrink-0 mt-0.5" />
                 <div className="text-xs">
-                  <p className="font-semibold text-foreground mb-0.5">Bağlantı kurulamadı</p>
+                  <p className="font-semibold text-foreground mb-0.5">{t('startup.baglanti_kurulamadi')}</p>
                   <p className="text-[10.5px] text-muted-foreground leading-relaxed">
-                    OpenDeX arka uç servisi yanıt vermiyor. Yeniden deneyin; sorun sürerse OpenDeX&apos;i kapatıp yeniden açın.
+                    {t('startup.opendex_arka_uc_servisi_yanit')}
                   </p>
                 </div>
               </div>
@@ -310,7 +311,7 @@ export default function BootSplash({ onReady }) {
                 className="w-full flex items-center justify-center gap-2 h-9 rounded-md bg-primary text-primary-foreground text-[11px] font-semibold transition-colors hover:bg-primary/90 cursor-pointer"
               >
                 <RotateCw className="size-3.5" />
-                <span>Yeniden Dene</span>
+                <span>{t('startup.yeniden_dene')}</span>
               </button>
             </motion.div>
           )}
@@ -320,7 +321,7 @@ export default function BootSplash({ onReady }) {
       {/* ── Alt Etiket ──────────────────────────────────────────────────────── */}
       <div className="absolute bottom-4 z-10 flex items-center gap-2 text-[10px] font-medium tracking-wider text-muted-foreground uppercase">
         <Sparkles className="size-3 text-primary/50" />
-        <span>OpenDeX Engine · Localhost IPC Gateway</span>
+        <span>{t('startup.opendex_engine_localhost_ipc_gateway')}</span>
       </div>
     </motion.div>
   );

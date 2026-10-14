@@ -7,6 +7,7 @@ import { DEFAULT_PREFS, MAX_IMAGES, isHexColor, normalizePrefs, migrateLegacy, p
 import { isBuiltinId } from './catalog.js';
 import { imageStore as defaultImageStore, requestPersistentStorage } from './imageStore.js';
 import { processImage as defaultProcess } from './processImage.js';
+import { t } from '../../i18n/index.js';
 
 export const PREFS_KEY = 'opendex_wallpaper_v2';
 export const LEGACY_KEY = 'opendex_wallpaper';
@@ -133,7 +134,7 @@ export function createWallpaperStore({ images: imageApi = defaultImageStore, pro
             added.push(meta);
             set((s) => ({ images: [...s.images, meta] }));
           } catch (err) {
-            rejected.push({ name: file?.name || 'Resim', message: err?.message || 'Resim eklenemedi.' });
+            rejected.push({ name: file?.name || t('desktop.resim'), message: err?.message || t('desktop.resim_eklenemedi') });
           }
         }
         if (added.length) {

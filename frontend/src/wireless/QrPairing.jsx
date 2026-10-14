@@ -24,6 +24,7 @@ import { useSystemStore } from '../state/systemStore.js';
 import { Dialog } from '../ui/Dialog.jsx';
 import { IconButton } from '../ui/IconButton.jsx';
 import { cn } from '../lib/utils.js';
+import { t } from '../i18n/index.js';
 
 // ── Themed QR Skeleton ────────────────────────────────────────────────────────
 function QrCodeSkeleton() {
@@ -91,10 +92,10 @@ export function ManualIpEntry({ initialIp = '' }) {
     setTcpipBusy(true);
     try {
       const res = await api.post('/api/device/tcpip?port=5555');
-      pushToast(res?.message || '🎉 TCP 5555 modu aktif!');
+      pushToast(res?.message || t('wireless.tcp_5555_modu_aktif'));
       setPort('5555');
     } catch (err) {
-      pushToast(err?.detail || 'USB bağlı cihaz bulunamadı.');
+      pushToast(err?.detail || t('wireless.usb_bagli_cihaz_bulunamadi'));
     } finally {
       setTcpipBusy(false);
     }
@@ -105,9 +106,9 @@ export function ManualIpEntry({ initialIp = '' }) {
     setBusy(true);
     try {
       await api.post('/api/pairing/manual', { ip, port: Number(port) });
-      pushToast('Bağlantı kuruluyor...');
+      pushToast(t('wireless.baglanti_kuruluyor'));
     } catch (err) {
-      pushToast(err.detail || 'Bağlantı başarısız — IP/Port veya Güvenlik Duvarını kontrol edin.');
+      pushToast(err.detail || t('wireless.baglanti_basarisiz_ip_port_veya'));
     } finally {
       setBusy(false);
     }
@@ -119,10 +120,10 @@ export function ManualIpEntry({ initialIp = '' }) {
       <div className="rounded-lg border border-border/70 bg-muted/40 p-3">
         <div className="flex items-center gap-2 mb-1.5">
           <Zap className="size-3.5 shrink-0 text-primary" />
-          <span className="text-[11.5px] font-semibold text-foreground">En Hızlı Yöntem: Tek Tıkla Kablosuz (5555)</span>
+          <span className="text-[11.5px] font-semibold text-foreground">{t('wireless.en_hizli_yontem_tek_tikla_kablosuz')}</span>
         </div>
         <p className="text-[10.5px] text-muted-foreground leading-relaxed mb-3">
-          Telefonu USB ile 1 saniye takın ve butona basın. Kabloyu çekip sonsuza dek kablosuz kullanabilirsiniz.
+          {t('wireless.telefonu_usb_ile_1_saniye_takin_ve')}
         </p>
         <button
           type="button"
@@ -135,14 +136,14 @@ export function ManualIpEntry({ initialIp = '' }) {
           ) : (
             <Zap className="size-3.5" />
           )}
-          <span>{tcpipBusy ? '5555 Modu Etkinleştiriliyor…' : 'USB ile 5555 Modunu Etkinleştir'}</span>
+          <span>{tcpipBusy ? t('wireless.5555_modu_etkinlestiriliyor') : t('wireless.usb_ile_5555_modunu_etkinlestir')}</span>
         </button>
       </div>
 
       {/* Manuel IP */}
       <div className="rounded-lg border border-border/60 bg-background/60 p-3">
         <p className="text-[10.5px] text-muted-foreground mb-2.5">
-          Veya IP ve Port bilgilerini manuel girin:
+          {t('wireless.veya_ip_ve_port_bilgilerini_manuel')}
         </p>
         <form onSubmit={connect} className="flex items-center gap-2 w-full">
           <input
@@ -155,7 +156,7 @@ export function ManualIpEntry({ initialIp = '' }) {
           <input
             value={port}
             onChange={(e) => setPort(e.target.value)}
-            placeholder="Port"
+            placeholder={t('wireless.port')}
             required
             pattern="\d+"
             className="w-24 h-8 rounded-md border border-border/70 bg-background px-3 text-[11px] font-mono text-foreground placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary/30 focus:outline-none transition-all"
@@ -166,7 +167,7 @@ export function ManualIpEntry({ initialIp = '' }) {
             className="h-8 px-3 rounded-md bg-primary text-primary-foreground text-[11px] font-semibold flex items-center gap-1.5 transition-colors hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
           >
             {busy ? <span className="size-3 rounded-full border-2 border-current border-t-transparent animate-spin" /> : <ArrowRight className="size-3.5" />}
-            <span>{busy ? 'Bağlanıyor…' : 'Bağlan'}</span>
+            <span>{busy ? t('common.baglaniyor') : t('common.baglan')}</span>
           </button>
         </form>
       </div>
@@ -174,9 +175,9 @@ export function ManualIpEntry({ initialIp = '' }) {
       {/* 5555 avantaj ipucu */}
       <div className="rounded-lg border border-border/60 bg-muted/30 p-2.5 text-[10px] text-muted-foreground leading-relaxed">
         <span className="font-semibold text-foreground block mb-0.5 flex items-center gap-1.5">
-          <ShieldCheck className="size-3.5 inline text-primary" /> Neden 5555 Modu?
+          <ShieldCheck className="size-3.5 inline text-primary" /> {' '}{t('wireless.neden_5555_modu')}
         </span>
-        Dinamik port veya eşleme kodlarıyla uğraşmadan, USB kablosunu bir kez takıp çıkardığınızda kalıcı kablosuz bağlantı sağlar. Telefon Hotspot modundayken de çalışır.
+        {t('wireless.dinamik_port_veya_esleme_kodlariyla')}
       </div>
     </div>
   );
@@ -226,14 +227,14 @@ export function PairingCodeEntry() {
   const pair = async (e) => {
     e.preventDefault();
     const code = digits.join('');
-    if (code.length !== 6) { pushToast('Lütfen 6 haneli kodu tam girin.'); return; }
+    if (code.length !== 6) { pushToast(t('wireless.lutfen_6_haneli_kodu_tam_girin')); return; }
     setBusy(true);
     try {
       await api.post('/api/pairing/pair-code', { ip, port: Number(pairPort), pairing_code: code });
       setPaired(true);
-      pushToast('🎉 Eşleştirme Başarılı! Şimdi bağlantı portunu girin.');
+      pushToast(t('wireless.eslestirme_basarili_simdi_baglanti'));
     } catch (err) {
-      pushToast(err.detail || 'Eşleştirme başarısız — Kodu veya IP:Portu kontrol edin.');
+      pushToast(err.detail || t('wireless.eslestirme_basarisiz_kodu_veya_ip'));
     } finally {
       setBusy(false);
     }
@@ -244,9 +245,9 @@ export function PairingCodeEntry() {
     setConnectBusy(true);
     try {
       await api.post('/api/pairing/manual', { ip, port: Number(connectPort) });
-      pushToast('Bağlantı kuruluyor...');
+      pushToast(t('wireless.baglanti_kuruluyor'));
     } catch (err) {
-      pushToast(err.detail || 'Bağlantı başarısız — Bağlantı portunu kontrol edin.');
+      pushToast(err.detail || t('wireless.baglanti_basarisiz_baglanti_portunu'));
     } finally {
       setConnectBusy(false);
     }
@@ -261,22 +262,22 @@ export function PairingCodeEntry() {
       >
         <div className="flex items-center gap-2 text-[12px] font-semibold text-foreground">
           <CheckCircle2 className="size-4 text-status-active shrink-0" />
-          <span>Cihaz Başarıyla Eşleştirildi!</span>
+          <span>{t('wireless.cihaz_basariyla_eslestirildi')}</span>
         </div>
         <div className="rounded-lg border border-border/60 bg-muted/40 p-3 text-[10.5px] text-muted-foreground leading-relaxed">
           <span className="font-semibold text-foreground block mb-1 flex items-center gap-1.5">
-            <AlertCircle className="size-3.5 inline" /> Xiaomi / HyperOS / Samsung İpucu
+            <AlertCircle className="size-3.5 inline" /> {' '}{t('wireless.xiaomi_hyperos_samsung_ipucu')}
           </span>
-          Telefonda <b className="text-foreground">«Kablosuz Hata Ayıklama»</b> anahtarını bir kez kapatıp tekrar açın; bağlantı portu güncellenecektir.
+          {t('common.telefonda')}{' '} <b className="text-foreground">{t('wireless.kablosuz_hata_ayiklama')}</b> {' '}{t('wireless.anahtarini_bir_kez_kapatip_tekrar')}
         </div>
         <div className="rounded-lg border border-border/70 bg-muted/40 p-3 text-[10.5px] text-muted-foreground leading-relaxed">
           <span className="font-semibold text-foreground block mb-1 flex items-center gap-1.5 text-[11px]">
-            <AlertTriangle className="size-3.5 inline text-warning shrink-0" /> Port Numarası Boş / Görünmüyor mu?
+            <AlertTriangle className="size-3.5 inline text-warning shrink-0" /> {' '}{t('wireless.port_numarasi_bos_gorunmuyor_mu')}
           </span>
-          Telefonunuz Hotspot (Erişim Noktası) modundaysa Android bağlantı portunu vermez (telefon host, laptop alıcı olamaz). Bu durumda lütfen <b className="text-foreground">«5555 / USB»</b> sekmesini kullanın veya laptop'tan Hotspot açarak telefonu bağlayın.
+          {t('wireless.telefonunuz_hotspot_erisim_noktasi')}{' '} <b className="text-foreground">{t('wireless.5555_usb')}</b> {' '}{t('wireless.sekmesini_kullanin_veya_laptop_tan')}
         </div>
         <p className="text-[10.5px] text-muted-foreground">
-          Ana ekrandaki <b className="text-foreground">«IP adresi ve Bağlantı Noktası»</b> satırından bağlantı portunu girin:
+          {t('wireless.ana_ekrandaki')}{' '} <b className="text-foreground">{t('wireless.ip_adresi_ve_baglanti_noktasi')}</b> {' '}{t('wireless.satirindan_baglanti_portunu_girin')}
         </p>
         <form onSubmit={connect} className="flex items-center gap-2 w-full">
           <span className="h-8 flex items-center px-3 rounded-md border border-border/70 bg-muted/50 text-[11px] font-mono text-muted-foreground shrink-0">
@@ -285,7 +286,7 @@ export function PairingCodeEntry() {
           <input
             value={connectPort}
             onChange={(e) => setConnectPort(e.target.value)}
-            placeholder="Bağlantı Portu"
+            placeholder={t('wireless.baglanti_portu')}
             required
             autoFocus
             pattern="\d+"
@@ -297,7 +298,7 @@ export function PairingCodeEntry() {
             className="h-8 px-3 rounded-md bg-primary text-primary-foreground text-[11px] font-semibold flex items-center gap-1.5 transition-colors hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
           >
             {connectBusy ? <span className="size-3 rounded-full border-2 border-current border-t-transparent animate-spin" /> : <ArrowRight className="size-3.5" />}
-            <span>{connectBusy ? 'Bağlanıyor…' : 'Bağlan'}</span>
+            <span>{connectBusy ? t('common.baglaniyor') : t('common.baglan')}</span>
           </button>
         </form>
       </motion.div>
@@ -310,26 +311,26 @@ export function PairingCodeEntry() {
       <div className="rounded-lg border border-border/70 bg-muted/40 p-3 text-[10.5px] text-muted-foreground leading-relaxed">
         <span className="font-semibold text-foreground block mb-1 flex items-center gap-1.5 text-[11px]">
           <AlertTriangle className="size-3.5 inline text-warning shrink-0" />
-          Telefon Hotspot Olamaz
+          {t('wireless.telefon_hotspot_olamaz')}
         </span>
-        Telefon dağıtıcı (Hotspot), laptop alıcı durumundayken Android bağlantı portu açmaz. İki cihaz da <b className="text-foreground">aynı Wi-Fi ağına</b> bağlı olmalı veya <b className="text-foreground">Laptop'un Mobil Etkin Noktası</b> açılmalıdır (ya da <b className="text-foreground">«5555 / USB»</b> sekmesini kullanın).
+        {t('wireless.telefon_dagitici_hotspot_laptop_alici')}{' '} <b className="text-foreground">{t('wireless.ayni_wi_fi_agina')}</b> {' '}{t('wireless.bagli_olmali_veya')}{' '} <b className="text-foreground">{t('wireless.laptop_un_mobil_etkin_noktasi')}</b> {' '}{t('wireless.acilmalidir_ya_da')}{' '} <b className="text-foreground">{t('wireless.5555_usb')}</b> {' '}{t('wireless.sekmesini_kullanin')}
       </div>
 
       <p className="text-[10.5px] text-muted-foreground">
-        Telefonda <b className="text-foreground">«Cihazı eşleme koduyla eşle»</b> penceresindeki IP, Port ve 6 haneli kodu girin:
+        {t('common.telefonda')}{' '} <b className="text-foreground">{t('wireless.cihazi_esleme_koduyla_esle')}</b> {' '}{t('wireless.penceresindeki_ip_port_ve_6_haneli')}
       </p>
       <div className="flex items-center gap-2">
         <input
           value={ip}
           onChange={(e) => setIp(e.target.value)}
-          placeholder="IP (192.168.1.105)"
+          placeholder={t('wireless.ip_192_168_1_105')}
           required
           className="flex-1 h-8 rounded-md border border-border/70 bg-background px-3 text-[11px] font-mono text-foreground placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary/30 focus:outline-none transition-all"
         />
         <input
           value={pairPort}
           onChange={(e) => setPairPort(e.target.value)}
-          placeholder="Eşleme Portu"
+          placeholder={t('wireless.esleme_portu')}
           required
           pattern="\d+"
           className="w-28 h-8 rounded-md border border-border/70 bg-background px-3 text-[11px] font-mono text-foreground placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary/30 focus:outline-none transition-all"
@@ -362,7 +363,7 @@ export function PairingCodeEntry() {
           <span className="size-3.5 rounded-full border-2 border-current border-t-transparent animate-spin" />
         ) : (
           <>
-            <span>Cihazı Eşleştir</span>
+            <span>{t('wireless.cihazi_eslestir')}</span>
             <ArrowRight className="size-3.5" />
           </>
         )}
@@ -371,9 +372,9 @@ export function PairingCodeEntry() {
       {/* Nereden Alırım Rehberi */}
       <div className="rounded-lg border border-border/60 bg-muted/30 p-2.5 text-[10px] text-muted-foreground leading-relaxed">
         <span className="font-semibold text-foreground block mb-0.5 flex items-center gap-1.5">
-          <Smartphone className="size-3.5 inline text-primary" /> Kodu Nereden Alırım?
+          <Smartphone className="size-3.5 inline text-primary" /> {' '}{t('wireless.kodu_nereden_alirim')}
         </span>
-        Telefonda <b className="text-foreground">Ayarlar → Geliştirici Seçenekleri → Kablosuz Hata Ayıklama</b> menüsüne girip <b className="text-foreground">«Cihazı eşleme koduyla eşle»</b> seçeneğine dokunun.
+        {t('common.telefonda')}{' '} <b className="text-foreground">{t('wireless.ayarlar_gelistirici_secenekleri')}</b> {' '}{t('wireless.menusune_girip')}{' '} <b className="text-foreground">{t('wireless.cihazi_esleme_koduyla_esle')}</b> {' '}{t('wireless.secenegine_dokunun')}
       </div>
     </form>
   );
@@ -398,7 +399,7 @@ export default function QrPairing({ onClose }) {
     try {
       const res = await api.post('/api/pairing/qr');
       if (!res.service_name || !res.password || !res.text) {
-        throw new Error('Geçerli eşleştirme verisi alınamadı. Backend yanıtı eksik alan içeriyor.');
+        throw new Error(t('wireless.gecerli_eslestirme_verisi_alinamadi'));
       }
       const dataUrl = await QRCode.toDataURL(res.text, {
         width: 200,
@@ -431,9 +432,9 @@ export default function QrPairing({ onClose }) {
   }, [activeTab, loading, error, qrDataUrl]);
 
   const TABS = [
-    { id: 'qr',   label: 'QR Kod',       desc: 'Kamerayla tara',       icon: QrCode },
-    { id: 'code', label: '6 Haneli Kod',  desc: 'PIN / Kod ile',        icon: Hash },
-    { id: 'ip',   label: '5555 / USB',    desc: 'Tek tıkla kablosuz',   icon: Zap },
+    { id: 'qr',   label: t('wireless.qr_kod'),       desc: t('wireless.kamerayla_tara'),       icon: QrCode },
+    { id: 'code', label: t('wireless.6_haneli_kod_2'),  desc: t('wireless.pin_kod_ile'),        icon: Hash },
+    { id: 'ip',   label: t('wireless.5555_usb_2'),    desc: t('wireless.tek_tikla_kablosuz'),   icon: Zap },
   ];
 
   return (
@@ -441,7 +442,7 @@ export default function QrPairing({ onClose }) {
     <Dialog
       open
       onClose={onClose}
-      label="Kablosuz Eşleştirme"
+      label={t('wireless.kablosuz_eslestirme')}
       align="top"
       overlayClassName="p-3 pb-10 pt-6 sm:p-6 sm:pt-10"
       className="relative flex max-w-[480px] shrink-0 flex-col overflow-hidden rounded-xl"
@@ -450,22 +451,22 @@ export default function QrPairing({ onClose }) {
         {/* ── Titlebar ──────────────────────────────────────────────────── */}
         <header className="flex h-11 shrink-0 items-center gap-2 border-b border-border/70 bg-muted/40 px-3 select-none">
           <span className="grid size-6 shrink-0 place-items-center rounded-[7px] bg-primary text-[10px] font-semibold text-primary-foreground">
-            W
+            {t('common.w')}
           </span>
           <div className="min-w-0 flex-1">
             <p className="truncate text-[12px] font-semibold leading-none text-foreground">
-              Kablosuz Eşleştirme
+              {t('wireless.kablosuz_eslestirme')}
             </p>
             <p className="mt-0.5 truncate text-[9px] text-muted-foreground">
-              OpenDeX · ADB Kablosuz Bağlantı Merkezi
+              {t('wireless.opendex_adb_kablosuz_baglanti_merkezi')}
             </p>
           </div>
           <span className="hidden shrink-0 items-center gap-1.5 rounded-full bg-background px-2 py-1 text-[9px] font-medium text-muted-foreground sm:inline-flex">
             <span className="size-1.5 rounded-full bg-status-active" />
-            Dinleniyor
+            {t('wireless.dinleniyor')}
           </span>
           {onClose && (
-            <IconButton label="Kapat" size="sm" danger="close" tooltipPosition="bottom" tooltipAlign="end" onClick={onClose}>
+            <IconButton label={t('common.kapat')} size="sm" danger="close" tooltipPosition="bottom" tooltipAlign="end" onClick={onClose}>
               <X />
             </IconButton>
           )}
@@ -532,7 +533,7 @@ export default function QrPairing({ onClose }) {
                 <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-border/60 bg-muted/40">
                   <Wifi className="size-3 shrink-0 text-primary" />
                   <span className="text-[10.5px] text-muted-foreground">
-                    Wi-Fi ağı için ideal · Windows ağınızın <b className="text-foreground">"Özel Ağ"</b> olduğundan emin olun
+                    {t('wireless.wi_fi_agi_icin_ideal_windows_aginizin')}{' '} <b className="text-foreground">{t('wireless.ozel_ag')}</b> {' '}{t('wireless.oldugundan_emin_olun')}
                   </span>
                 </div>
 
@@ -540,13 +541,13 @@ export default function QrPairing({ onClose }) {
                 <div className="rounded-lg border border-border/70 bg-muted/40 p-3 text-[10.5px] text-muted-foreground leading-relaxed">
                   <span className="font-semibold text-foreground block mb-1 flex items-center gap-1.5 text-[11px]">
                     <AlertTriangle className="size-3.5 inline text-warning shrink-0" />
-                    Önemli Ağ Kuralı: Telefon Hotspot Olamaz
+                    {t('wireless.onemli_ag_kurali_telefon_hotspot')}
                   </span>
-                  Telefon dağıtıcı (Hotspot), laptop alıcı durumundayken Android kablosuz hata ayıklamayı başlatmaz. İki cihaz da <b className="text-foreground">aynı Wi-Fi ağına</b> bağlı olmalı veya <b className="text-foreground">Laptop'un Mobil Etkin Noktası</b> açılmalıdır (ya da <b className="text-foreground">«5555 / USB»</b> sekmesini kullanın).
+                  {t('wireless.telefon_dagitici_hotspot_laptop_alici_2')}{' '} <b className="text-foreground">{t('wireless.ayni_wi_fi_agina')}</b> {' '}{t('wireless.bagli_olmali_veya')}{' '} <b className="text-foreground">{t('wireless.laptop_un_mobil_etkin_noktasi')}</b> {' '}{t('wireless.acilmalidir_ya_da')}{' '} <b className="text-foreground">{t('wireless.5555_usb')}</b> {' '}{t('wireless.sekmesini_kullanin')}
                 </div>
 
                 <p className="text-[10.5px] text-muted-foreground leading-relaxed">
-                  Telefonda <b className="text-foreground">Ayarlar → Geliştirici Seçenekleri → Kablosuz Hata Ayıklama → «QR kod ile eşleştir»</b> yolunu izleyip bu kodu tarayın.
+                  {t('common.telefonda')}{' '} <b className="text-foreground">{t('wireless.ayarlar_gelistirici_secenekleri_2')}</b> {' '}{t('wireless.yolunu_izleyip_bu_kodu_tarayin')}
                 </p>
 
                 {/* QR display */}
@@ -556,7 +557,7 @@ export default function QrPairing({ onClose }) {
                   ) : error ? (
                     <div className="flex flex-col items-center gap-2.5 w-full p-4 rounded-lg border border-border/60 bg-muted/35">
                       <AlertTriangle className="size-5 text-muted-foreground" />
-                      <p className="text-[11px] font-semibold text-foreground">QR Kod Üretilemedi</p>
+                      <p className="text-[11px] font-semibold text-foreground">{t('wireless.qr_kod_uretilemedi')}</p>
                       <p className="text-[10px] text-muted-foreground text-center">{error}</p>
                       <button
                         type="button"
@@ -564,7 +565,7 @@ export default function QrPairing({ onClose }) {
                         className="flex items-center gap-1.5 h-8 px-3 rounded-md bg-primary text-primary-foreground text-[11px] font-semibold transition-colors hover:bg-primary/90 cursor-pointer"
                       >
                         <RotateCw className="size-3.5" />
-                        <span>Tekrar Dene</span>
+                        <span>{t('wireless.tekrar_dene')}</span>
                       </button>
                     </div>
                   ) : qrDataUrl ? (
@@ -572,7 +573,7 @@ export default function QrPairing({ onClose }) {
                       <div className="p-2 bg-white rounded-lg border border-border/60 shadow-sm">
                         <img
                           src={qrDataUrl}
-                          alt="OpenDeX Wireless Pairing QR"
+                          alt={t('wireless.opendex_wireless_pairing_qr')}
                           className="size-[160px] rounded block"
                         />
                       </div>
@@ -582,7 +583,7 @@ export default function QrPairing({ onClose }) {
                         className="flex items-center gap-1.5 text-[10.5px] font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
                       >
                         <RefreshCw className="size-3" />
-                        <span>Kodu Yenile</span>
+                        <span>{t('wireless.kodu_yenile')}</span>
                       </button>
                     </div>
                   ) : null}
@@ -600,7 +601,7 @@ export default function QrPairing({ onClose }) {
                     >
                       <AlertTriangle className="size-3.5 shrink-0 text-warning" />
                       <span className="min-w-0 flex-1 text-[10.5px] leading-snug text-foreground">
-                        Telefon taramıyor gibi mi görünüyor? <b className="font-semibold">6 Haneli Kod</b> mDNS gerektirmez →
+                        {t('wireless.telefon_taramiyor_gibi_mi_gorunuyor')}{' '} <b className="font-semibold">{t('wireless.6_haneli_kod')}</b> {' '}{t('wireless.mdns_gerektirmez')}
                       </span>
                     </motion.button>
                   )}
@@ -621,7 +622,7 @@ export default function QrPairing({ onClose }) {
                 <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-border/60 bg-muted/40">
                   <ShieldCheck className="size-3 shrink-0 text-primary" />
                   <span className="text-[10.5px] text-muted-foreground">
-                    mDNS ve Güvenlik Duvarı engellerini aşar · Doğrudan güvenli TCP
+                    {t('wireless.mdns_ve_guvenlik_duvari_engellerini')}
                   </span>
                 </div>
                 <PairingCodeEntry />
@@ -641,7 +642,7 @@ export default function QrPairing({ onClose }) {
                 <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-border/60 bg-muted/40">
                   <Zap className="size-3 shrink-0 text-primary" />
                   <span className="text-[10.5px] text-muted-foreground">
-                    Kabloyu 1 kez tak, sonsuza dek kablosuz kullan
+                    {t('wireless.kabloyu_1_kez_tak_sonsuza_dek')}
                   </span>
                 </div>
                 <ManualIpEntry />
@@ -660,7 +661,7 @@ export default function QrPairing({ onClose }) {
               <div className="flex items-center gap-2">
                 <ShieldCheck className="size-3.5 shrink-0 text-muted-foreground" />
                 <span className="text-[11px] font-semibold text-foreground group-hover:text-primary transition-colors">
-                  Neden "Özel Ağ (Private)" Gereklidir?
+                  {t('wireless.neden_ozel_ag_private_gereklidir')}
                 </span>
               </div>
               {showArchGuide
@@ -681,18 +682,18 @@ export default function QrPairing({ onClose }) {
                     {[
                       {
                         num: '1',
-                        title: 'Windows Güvenlik Duvarı (Özel Ağ Kuralı)',
-                        body: 'Ağ profili "Ortak (Public)" ise Windows, mDNS (UDP 5353) yayınlarını engeller. QR eşleştirme için Wi-Fi profilinin "Özel Ağ (Private)" olması gerekir.',
+                        title: t('wireless.windows_guvenlik_duvari_ozel_ag_kurali'),
+                        body: t('wireless.ag_profili_ortak_public_ise_windows'),
                       },
                       {
                         num: '2',
-                        title: 'Android Hotspot İzolasyonu',
-                        body: 'Taşınabilir Hotspot ağlarında Android, istemciler arası Multicast paketlerini pil/güvenlik gerekçesiyle köprülemez — bu bir hata değil, yerleşik güvenlik kuralıdır.',
+                        title: t('wireless.android_hotspot_izolasyonu'),
+                        body: t('wireless.tasinabilir_hotspot_aglarinda_android'),
                       },
                       {
                         num: '3',
-                        title: 'OpenDeX Çözümü',
-                        body: '«6 Haneli Kod» ve «5555 Modu», mDNS\'i tamamen devre dışı bırakıp doğrudan TCP soketiyle bağlantı kurar.',
+                        title: t('wireless.opendex_cozumu'),
+                        body: t('wireless.6_haneli_kod_ve_5555_modu_mdns_i'),
                         accent: true,
                       },
                     ].map((item) => (

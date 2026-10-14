@@ -27,6 +27,7 @@ import {
   THEME_OPTIONS,
   WINDOWING_MODE_OPTIONS,
 } from '../settingsModel.js';
+import { t } from '../../i18n/index.js';
 
 const WINDOWING_ICONS = { eco: Zap, independent: Monitor, hybrid: Sparkles };
 const HANDOFF_ICONS = { fullscreen: Maximize2, freeform: AppWindow };
@@ -44,10 +45,10 @@ export function WindowsSection({ ctl }) {
         value={v.windowingMode}
         onChange={a.setWindowingMode}
         columns={3}
-        detail="Bu yalnızca «yeni bir pencere nerede doğsun» varsayılanıdır; her pencerenin başlığından elle değiştirilebilir (özel ayar genel ayardan baskındır)."
+        detail={t('settings.bu_yalnizca_yeni_bir_pencere_nerede')}
       />
 
-      <Group title="Pencere davranışı">
+      <Group title={t('settings.pencere_davranisi')}>
         <ToggleRow item="headerHover" icon={GripHorizontal} checked={v.headerHover} onToggle={() => a.toggle('header_hover_mode', v.headerHover)} />
         <ToggleRow item="dpLock" icon={Lock} checked={v.dpLock} onToggle={() => a.toggle('dp_lock_enabled', v.dpLock)} />
       </Group>
@@ -63,17 +64,15 @@ export function WindowsSection({ ctl }) {
           columns={2}
         >
           <p className="mt-2 text-[11px] leading-[15px] text-muted-foreground">
-            Bu seçim yalnız «Telefona aktar» düğmesinin varsayılanıdır. Tek seferlik değiştirmek için pencere başlığına sağ tıklayın;
-            telefonda kendi açtığınız uygulamalar her zaman tam ekran açılır.
+            {t('settings.bu_secim_yalniz_telefona_aktar')}
           </p>
         </ChoiceGroup>
         <ChoiceGroup item="appClosed" icon={Blocks} options={APP_CLOSED_OPTIONS} value={v.appClosed} onChange={a.setAppClosed} columns={2} />
       </div>
 
       <div className="space-y-3">
-        <Callout tone="tip" title="Geçiş uyumluluğu (ileri düzey)">
-          Telefon ⟷ PC geçişinde uygulamaların arayüzünü yeni yoğunlukta doğru kurmasını sağlar. Varsayılanlar çoğu cihaz için
-          doğrudur; yalnızca belirli bir uygulamada geçiş sorunu görürseniz değiştirin.
+        <Callout tone="tip" title={t('settings.gecis_uyumlulugu_ileri_duzey')}>
+          {t('settings.telefon_pc_gecisinde_uygulamalarin')}
         </Callout>
         <Group>
           <ToggleRow
@@ -81,30 +80,30 @@ export function WindowsSection({ ctl }) {
             icon={ShieldCheck}
             checked={v.stealth}
             onToggle={() => a.toggle('stealth_dpi_enabled', v.stealth)}
-            detail="Telefonda zaten çalışan bir uygulama DeX'te açılırken sanal ekran önce telefonun DPI'ında doğar, uygulama yerleşince pencerenin DPI'ına geçer (geçiş kaplamanın arkasında olur). Telefon ↔ PC aktarımı bu ayardan bağımsızdır: orada DPI tek adımda değişir."
+            detail={t('settings.telefonda_zaten_calisan_bir_uygulama')}
           />
           <ToggleRow
             item="handoffPrelanding"
             icon={Smartphone}
             checked={v.handoffPrelanding}
             onToggle={() => a.toggle('handoff_prelanding', v.handoffPrelanding)}
-            detail="«Telefona aktar» denince sanal ekran, PC penceresinin perdesi arkasında telefonun kendi çözünürlüğüne ve yoğunluğuna tek adımda çekilir; uygulama orada yeni boyutta yeniden kurulur, görev ancak ondan sonra telefona taşınır. DeX boyutlu bir pencereden bile telefonda yanlış yerleşimli bir arayüz görünmez; kendini uyarlamayan uygulamalarda aktarım birkaç saniye uzar. Kapalıysa taşıma boyut ve DPI'ı tek adımda değiştirir."
+            detail={t('settings.telefona_aktar_denince_sanal_ekran_pc')}
           />
           <ToggleRow
             item="densityRefresh"
             icon={RefreshCw}
             checked={v.densityRefresh}
             onToggle={() => a.toggle('density_refresh_enabled', v.densityRefresh)}
-            detail="Bir uygulama DPI değişimini yaşadıysa (telefondan pencereye taşıma, canlı DPI, telefona dönüş) arayüzünü yeni yoğunlukta yeniden kurmaya zorlar (YouTube gibi arayüzünü eski yoğunlukta tutan uygulamalar için). Uygulama kapanmaz: etkinlikler aynı süreçte, durumları korunarak yeniden kurulur. Kapatılırsa hiçbir şey yenilenmez."
+            detail={t('settings.bir_uygulama_dpi_degisimini_yasadiysa')}
           />
           <ToggleRow
             item="densityRefreshHard"
             icon={RefreshCw}
-            badge="İleri"
+            badge={t('settings.ileri')}
             checked={v.densityRefreshHard}
             onToggle={() => a.toggle('density_refresh_hard', v.densityRefreshHard)}
             disabled={!v.densityRefresh}
-            detail="Yalnızca nazik yenileme yetmiyorsa açın: uygulamanın süreci Android'in durum koruyan yoluyla yeniden başlatılır. Arka plan servisleri (ör. çalan müzik) kesilir."
+            detail={t('settings.yalnizca_nazik_yenileme_yetmiyorsa')}
           />
         </Group>
       </div>
@@ -128,16 +127,16 @@ export function PowerSection({ ctl }) {
   const { values: v, actions: a } = ctl;
   return (
     <Page icon={BatteryCharging} title={SECTIONS.power.label} subtitle={SECTIONS.power.subtitle}>
-      <Group title="Pil & ısı">
+      <Group title={t('settings.pil_isi')}>
         <ToggleRow item="dimPhone" icon={Monitor} checked={v.dimPhone} onToggle={() => a.toggle('screen_off_while_mirroring', v.dimPhone)} />
       </Group>
-      <Group title="Cihaz hafızası">
+      <Group title={t('settings.cihaz_hafizasi')}>
         <ToggleRow
           item="rememberDevices"
           icon={ShieldCheck}
           checked={v.rememberDevices}
           onToggle={() => a.toggle('remember_devices', v.rememberDevices)}
-          detail="Kapatırsanız yeni eşleşen cihazlar hatırlanmaz — paylaşılan bilgisayarlar için önerilir. Bağlanma her zaman elle tıklamayla olur; bu ayar yalnızca hatırlamayı etkiler, telefondaki Kablosuz Hata Ayıklama güvenini silmez."
+          detail={t('settings.kapatirsaniz_yeni_eslesen_cihazlar')}
         />
       </Group>
     </Page>

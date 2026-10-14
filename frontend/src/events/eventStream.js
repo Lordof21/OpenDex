@@ -12,6 +12,7 @@ import { useAudioMixerStore } from '../state/audioMixerStore.js';
 import { useConnectivityStore } from '../state/connectivityStore.js';
 import { useDeviceLoadStore } from '../telemetry/deviceLoadStore.js';
 import { logger } from '../lib/logger.js';
+import { t } from '../i18n/index.js';
 
 const RECONNECT_DELAYS_MS = [1000, 2000, 5000];
 
@@ -152,8 +153,8 @@ export function handleEvent(event) {
       const p = event.payload || {};
       systemStore.pushToast?.(
         p.outcome === 'moved'
-          ? "Uygulama kaldığı yerden PC'de devam ediyor."
-          : "Uygulama telefonda kapatılmıştı — PC'de yeniden başlatıldı.",
+          ? t('events.uygulama_kaldigi_yerden_pc_de_devam')
+          : t('events.uygulama_telefonda_kapatilmisti_pc_de'),
       );
       break;
     }
@@ -207,7 +208,7 @@ export function handleEvent(event) {
       windowStore.applyBackendEvent(event);
       windowStore.syncWindowsWithBackend();
       systemStore.setConnectionState('connected');
-      systemStore.pushToast('Cihaz yeniden bağlandı ✓');
+      systemStore.pushToast(t('events.cihaz_yeniden_baglandi'));
       systemStore.fetchBatteryInfo();
       systemStore.fetchHardwareStates();
       systemStore.fetchVolumeStreams();
@@ -235,7 +236,7 @@ export function handleEvent(event) {
       break;
     case 'device_bind_failed':
       // Bringing a session up failed and was undone; the backend retries by itself (growing pauses).
-      systemStore.pushToast('Telefona bağlanılamadı — yeniden deneniyor…');
+      systemStore.pushToast(t('events.telefona_baglanilamadi_yeniden'));
       break;
     case 'devices_changed':
       applyDeviceState(event.payload);
@@ -247,8 +248,8 @@ export function handleEvent(event) {
       break;
     case 'encoder_limit_hit':
       systemStore.pushToast(
-        `Maksimum pencere sayısına ulaşıldı (${event.payload.max_windows}). ` +
-          'Önce bir pencere kapatın veya küçültün.',
+        t('events.maksimum_pencere_sayisina_ulasildi', { max_windows: event.payload.max_windows }) +
+          t('events.once_bir_pencere_kapatin_veya_kucultun'),
       );
       break;
     case 'app_lock_pending': {
@@ -259,7 +260,7 @@ export function handleEvent(event) {
           windowStore.setAppLock(event.payload.package, true, event.payload.message);
         }
       }
-      systemStore.pushToast(event.payload.message || '🔒 Uygulama Kilitli: Lütfen telefonunuzdan kilidi açınız.');
+      systemStore.pushToast(event.payload.message || t('events.uygulama_kilitli_lutfen'));
       break;
     }
     case 'app_lock_resolved': {
@@ -270,7 +271,7 @@ export function handleEvent(event) {
           windowStore.setAppLock(event.payload.package, false);
         }
       }
-      systemStore.pushToast('🔒 Kilit açıldı, pencereye aktarılıyor ✓');
+      systemStore.pushToast(t('events.kilit_acildi_pencereye_aktariliyor'));
       break;
     }
     case 'app_lock_timeout': {
@@ -281,7 +282,7 @@ export function handleEvent(event) {
       const target = event.payload?.window_id || event.payload?.package;
       const timeoutMessage =
         event.payload.message ||
-        'Kilit açma zaman aşımına uğradı. Telefonunuzdan kilidi açtıktan sonra "Tekrar Dene"ye basın.';
+        t('events.kilit_acma_zaman_asimina_ugradi');
       if (target) {
         windowStore.setAppLock(target, true, timeoutMessage);
         if (event.payload?.package && target !== event.payload.package) {
@@ -297,7 +298,7 @@ export function handleEvent(event) {
       const target = event.payload?.window_id || event.payload?.package;
       const cancelMessage =
         event.payload?.message ||
-        'Kilit iptal edildi. Uygulamayı açmak için "Tekrar Dene"ye basın — kilit yeniden sorulacak.';
+        t('events.kilit_iptal_edildi_uygulamayi_acmak');
       if (target) {
         windowStore.setAppLock(target, true, cancelMessage);
         if (event.payload?.package && target !== event.payload.package) {

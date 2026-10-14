@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.js';
 /**
  * OpenDeX frontend logger — kategori tabanlı, varsayılan olarak SESSİZ, hiçbir şey kaybolmaz.
  *
@@ -240,7 +241,7 @@ export const logger = {
    */
   swallow(cat, what) {
     return (err) => {
-      record('debug', cat, `${what}: hata yok sayıldı`, err);
+      record('debug', cat, t('lib.what_hata_yok_sayildi', { what }), err);
     };
   },
 
@@ -284,10 +285,10 @@ export const logger = {
     window.__opendexLogCapture = true;
 
     window.addEventListener('error', (ev) => {
-      record('error', 'app', `yakalanmamış hata: ${ev.message}`, { file: ev.filename, line: ev.lineno, col: ev.colno });
+      record('error', 'app', t('lib.yakalanmamis_hata_message', { message: ev.message }), { file: ev.filename, line: ev.lineno, col: ev.colno });
     });
     window.addEventListener('unhandledrejection', (ev) => {
-      record('error', 'app', `yakalanmamış promise reddi: ${safeStringify(ev.reason, 200)}`);
+      record('error', 'app', t('lib.yakalanmamis_promise_reddi', { safeStringify: safeStringify(ev.reason, 200) }));
     });
     for (const level of ['warn', 'error']) {
       console[level] = (...args) => {

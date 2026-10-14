@@ -9,13 +9,14 @@
 //
 // `themed: true` olanlar tema değişkenlerini (var(--workspace) …) kullanır: tema ne ise o görünür, "Hep açık/koyu" uygulanmaz.
 import { bokeh, landscape, mesh, night, ribbons, waves } from './art.js';
+import { t } from '../../i18n/index.js';
 
 export const DEFAULT_WALLPAPER_ID = 'flow';
 
 export const CATEGORIES = [
-  { id: 'abstract', label: 'Soyut' },
-  { id: 'scenery', label: 'Manzara' },
-  { id: 'minimal', label: 'Sade' },
+  { id: 'abstract', label: t('desktop.soyut') },
+  { id: 'scenery', label: t('desktop.manzara') },
+  { id: 'minimal', label: t('desktop.sade') },
 ];
 
 const themedVars = (image, color = 'var(--workspace)') => ({ image, color });
@@ -305,20 +306,20 @@ const MAKERS = {
 
 // `luma` = ölçülmüş/öngörülen ortalama parlaklık (kodlanmış sRGB, 0–1). Doğrulama aracı bunları gerçek çizimle karşılaştırır.
 const META = [
-  { id: 'flow', name: 'Akış', category: 'abstract', luma: { light: 0.78, dark: 0.29 } },
-  { id: 'aurora', name: 'Kutup Işığı', category: 'abstract', luma: { light: 0.86, dark: 0.26 } },
-  { id: 'opal', name: 'Opal', category: 'abstract', luma: { light: 0.9, dark: 0.23 } },
-  { id: 'bloom', name: 'Çiçeklenme', category: 'abstract', luma: { light: 0.83, dark: 0.2 } },
-  { id: 'bokeh', name: 'Bokeh', category: 'abstract', luma: { light: 0.9, dark: 0.15 } },
-  { id: 'dunes', name: 'Kumullar', category: 'scenery', luma: { light: 0.86, dark: 0.17 } },
-  { id: 'mountains', name: 'Dağ Silsilesi', category: 'scenery', luma: { light: 0.85, dark: 0.14 } },
-  { id: 'ocean', name: 'Okyanus', category: 'scenery', luma: { light: 0.86, dark: 0.12 } },
-  { id: 'night', name: 'Yıldızlı Gece', category: 'scenery', luma: { light: 0.91, dark: 0.08 } },
-  { id: 'plain', name: 'Düz', category: 'minimal', luma: { light: 0.89, dark: 0.05 } },
-  { id: 'dawn', name: 'Şafak', category: 'minimal', luma: { light: 0.88, dark: 0.07 } },
-  { id: 'dusk', name: 'Alacakaranlık', category: 'minimal', luma: { light: 0.86, dark: 0.07 } },
-  { id: 'linen', name: 'Keten', category: 'minimal', luma: { light: 0.89, dark: 0.06 } },
-  { id: 'graphite', name: 'Grafit', category: 'minimal', luma: { light: 0.87, dark: 0.12 } },
+  { id: 'flow', name: t('common.akis'), category: 'abstract', luma: { light: 0.78, dark: 0.29 } },
+  { id: 'aurora', name: t('desktop.kutup_isigi'), category: 'abstract', luma: { light: 0.86, dark: 0.26 } },
+  { id: 'opal', name: t('desktop.opal'), category: 'abstract', luma: { light: 0.9, dark: 0.23 } },
+  { id: 'bloom', name: t('desktop.ciceklenme'), category: 'abstract', luma: { light: 0.83, dark: 0.2 } },
+  { id: 'bokeh', name: t('desktop.bokeh'), category: 'abstract', luma: { light: 0.9, dark: 0.15 } },
+  { id: 'dunes', name: t('desktop.kumullar'), category: 'scenery', luma: { light: 0.86, dark: 0.17 } },
+  { id: 'mountains', name: t('desktop.dag_silsilesi'), category: 'scenery', luma: { light: 0.85, dark: 0.14 } },
+  { id: 'ocean', name: t('desktop.okyanus'), category: 'scenery', luma: { light: 0.86, dark: 0.12 } },
+  { id: 'night', name: t('desktop.yildizli_gece'), category: 'scenery', luma: { light: 0.91, dark: 0.08 } },
+  { id: 'plain', name: t('desktop.duz'), category: 'minimal', luma: { light: 0.89, dark: 0.05 } },
+  { id: 'dawn', name: t('desktop.safak'), category: 'minimal', luma: { light: 0.88, dark: 0.07 } },
+  { id: 'dusk', name: t('desktop.alacakaranlik'), category: 'minimal', luma: { light: 0.86, dark: 0.07 } },
+  { id: 'linen', name: t('desktop.keten'), category: 'minimal', luma: { light: 0.89, dark: 0.06 } },
+  { id: 'graphite', name: t('desktop.grafit'), category: 'minimal', luma: { light: 0.87, dark: 0.12 } },
 ];
 
 export const BUILTIN_WALLPAPERS = META.map((meta) => ({ ...meta, themed: Boolean(MAKERS[meta.id].themed) }));

@@ -5,14 +5,15 @@ import { Headphones, Monitor, Smartphone } from 'lucide-react';
 import { appAudioMixer } from '../media/appAudioMixer.js';
 import { cn } from '../lib/utils.js';
 import { SegmentedControl } from './SegmentedControl.jsx';
+import { t } from '../i18n/index.js';
 
 // THE route vocabulary — every surface (mixer row, title-bar popover, Media Center chip + menu, quick settings, settings
 // page) is built from this list, so the same choice is never named two ways. `value` is the wire name (backend `pc` =
 // DeX): Telefon = only the phone plays it · DeX = only DeX · İkisi = both, aligned to the same instant.
 export const ROUTE_OPTIONS = [
-  { value: 'phone', label: 'Telefon', icon: Smartphone, detail: 'Yalnız telefonda' },
-  { value: 'pc', label: 'DeX', icon: Monitor, detail: 'Yalnız DeX\'te (bilgisayar)' },
-  { value: 'both', label: 'İkisi', icon: Headphones, detail: 'DeX\'te ve telefonda, aynı anda' },
+  { value: 'phone', label: t('common.telefon'), icon: Smartphone, detail: t('ui.yalniz_telefonda') },
+  { value: 'pc', label: 'DeX', icon: Monitor, detail: t('ui.yalniz_dex_te_bilgisayar') },
+  { value: 'both', label: t('common.ikisi'), icon: Headphones, detail: t('ui.dex_te_ve_telefonda_ayni_anda') },
 ];
 
 const ROUTE_BY_VALUE = Object.fromEntries(ROUTE_OPTIONS.map((r) => [r.value, r]));
@@ -21,21 +22,21 @@ const ROUTE_BY_VALUE = Object.fromEntries(ROUTE_OPTIONS.map((r) => [r.value, r])
 export const routeOption = (route) => ROUTE_BY_VALUE[route] || ROUTE_BY_VALUE.phone;
 
 const ERROR_TEXT = {
-  uid_already_captured: 'Bu uygulama sesini başka bir uygulamayla paylaşıyor; aynı anda yalnız biri yönlendirilebilir.',
-  too_many_captures: 'Aynı anda en çok 8 uygulamanın sesi yönlendirilebilir.',
-  daemon_not_connected: 'Telefondaki OpenDeX servisine ulaşılamıyor.',
-  daemon_too_old: 'Telefondaki OpenDeX servisi eski; yeniden bağlanın.',
-  capture_lost: 'Ses yakalama kesildi, yeniden deneniyor.',
-  package_not_found: 'Uygulama telefonda bulunamadı.',
-  timeout: 'Telefon yanıt vermedi, yeniden deneniyor.',
-  not_supported: 'Uygulama başına ses Android 13+ ve güncel telefon servisi gerektirir.',
-  internal_package: 'OpenDeX\'in kendi pencereleri ayrı bir ses kanalına sahip değil.',
+  uid_already_captured: t('ui.bu_uygulama_sesini_baska_bir'),
+  too_many_captures: t('ui.ayni_anda_en_cok_8_uygulamanin_sesi'),
+  daemon_not_connected: t('ui.telefondaki_opendex_servisine'),
+  daemon_too_old: t('ui.telefondaki_opendex_servisi_eski'),
+  capture_lost: t('ui.ses_yakalama_kesildi_yeniden_deneniyor'),
+  package_not_found: t('ui.uygulama_telefonda_bulunamadi'),
+  timeout: t('ui.telefon_yanit_vermedi_yeniden'),
+  not_supported: t('ui.uygulama_basina_ses_android_13_ve'),
+  internal_package: t('ui.opendex_in_kendi_pencereleri_ayri_bir'),
 };
 
 export function audioErrorText(error) {
   if (!error) return null;
   const key = String(error).split(':')[0];
-  return ERROR_TEXT[key] || 'Ses yönlendirilemedi.';
+  return ERROR_TEXT[key] || t('ui.ses_yonlendirilemedi');
 }
 
 const SEGMENT_OPTIONS = ROUTE_OPTIONS.map(({ value, label, icon, detail }) => ({ value, label, icon, title: detail }));
