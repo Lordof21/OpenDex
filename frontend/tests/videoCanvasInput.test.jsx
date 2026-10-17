@@ -179,3 +179,24 @@ describe('VideoCanvas — tuş editörü açıkken klavye editörün', () => {
     expect(api.post).toHaveBeenCalledWith('/api/input/key', { window_id: 'w1', kind: 'char', char: 'q' });
   });
 });
+
+describe('VideoCanvas — oyun kipinde Ctrl+W pencere kısayolu değil, oyun tuşudur', () => {
+  const ctrlW = () => act(() => { window.dispatchEvent(keyEvent('keydown', 'w', { ctrlKey: true })); });
+
+  it('tuş düzeni varken Ctrl+W joystick\'in W\'si olarak çalışır (fareyi bırakmak için Ctrl basılıyken ilerlemek mümkün)', () => {
+    render(<VideoCanvas win={WIN} />);
+    socket().calls.length = 0;
+    ctrlW();
+    expect(names()).toEqual(['down', 'move']);                                  // joystick yukarı itildi
+    expect(api.post).not.toHaveBeenCalledWith('/api/input/key', expect.anything());
+  });
+
+  it('tuş düzeni YOKKEN Ctrl+W hâlâ pencere kısayoludur: tuval onu telefona yazmaz', () => {
+    useKeymapStore.setState({ presets: { 'com.game': [] } });
+    render(<VideoCanvas win={WIN} />);
+    socket().calls.length = 0;
+    ctrlW();
+    expect(socket().calls).toEqual([]);
+    expect(api.post).not.toHaveBeenCalled();                                    // kapatma App.jsx'in genel dinleyicisindedir
+  });
+});

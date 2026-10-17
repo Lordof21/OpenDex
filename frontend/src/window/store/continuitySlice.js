@@ -12,6 +12,9 @@ const reclaimingWindows = new Set();
 
 const STEALTH_VEIL_DEFAULT_MS = 2800;
 
+/** Telefondan dönen pencerenin akışı, backend'in geri yüklediği geometriyle gelip yerleşsin diye uzlaştırma bu kadar sonra bakar. */
+const RECLAIM_RECONCILE_DELAY_MS = 700;
+
 /** How long the "optimizing" veil may stay up without a `live` event: a phase that knows it takes longer (the handoff's
  * pre-landing rebuilds the app behind it) announces its own `deadline_ms`; anything else keeps the short default. */
 export function stealthVeilDeadlineMs(payload) {
@@ -48,21 +51,32 @@ export function createContinuitySlice(set, get) {
       }));
     },
 
-    setAppLock(packageOrId, isPending, message = '') {
+    /**
+     * Uygulama kilidi durumu. `phase`: 'waiting' (kilit telefonda soruldu) | 'cancelled' (jestle iptal edildi) | 'timeout' (süre doldu);
+     * `since`: bu evrenin başladığı an (katmanın geri sayımı buradan başlar, "tekrar dene" yeni bir `since` verir).
+     */
+    setAppLock(packageOrId, isPending, message = '', phase = 'waiting') {
+      const since = Date.now();
       set((s) => ({
         appLockMap: {
           ...s.appLockMap,
-          [packageOrId]: isPending ? { isPending: true, message } : null,
+          [packageOrId]: isPending ? { isPending: true, message, phase, since } : null,
         },
         windows: s.windows.map((w) =>
           w.package === packageOrId || w.id === packageOrId
-            ? { ...w, appLockPending: isPending, appLockMessage: message }
+            ? { ...w, appLockPending: isPending, appLockMessage: message, appLockPhase: phase, appLockSince: since }
             : w,
         ),
       }));
     },
 
     setHandoff(packageOrId, isHandoff, message = '') {
+      const matches = (w) => w.package === packageOrId || w.id === packageOrId;
+      // Telefondaydı, şimdi geri döndü (geri getir ya da uygulama kendiliğinden döndü): backend sanal ekranı AYRILIRKEN
+      // kaydettiği pencere geometrisine döndürür. Pencere o arada büyüdüyse / küçüldüyse (ya da kip değiştiyse) akış artık
+      // pencerenin tuvaline tam oturmaz (yanlarda boşluk) — yeniden boyutlandırınca düzelmesinin sebebi buydu. Dönüşte pencere
+      // KENDİ güncel kutusuna göre bir kez uzlaştırılır; akış zaten uygunsa hiçbir istek gitmez.
+      const returning = !isHandoff ? get().windows.filter((w) => matches(w) && w.handoffToPhone && !w.isEcoWorkspace).map((w) => w.id) : [];
       set((s) => ({
         handoffMap: {
           ...s.handoffMap,
@@ -86,6 +100,11 @@ export function createContinuitySlice(set, get) {
           };
         }),
       }));
+      for (const id of returning) {
+        setTimeout(() => {
+          get().applyDynamicResolutionToOpenWindows({ onlyId: id }).catch(() => {});
+        }, RECLAIM_RECONCILE_DELAY_MS);
+      }
     },
 
     // ---- app closed ON THE PHONE (backend AppPresenceMonitor) ----------------------------

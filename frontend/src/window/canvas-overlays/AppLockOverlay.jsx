@@ -1,183 +1,114 @@
-// OpenDeX Spatial Liquid Glass AppLock Overlay
-// Designed with Apple Face ID / Samsung Knox Vault / HarmonyOS NEXT Liquid Glass aesthetic:
-// - Frosted multi-layer ambient blur with biometric security breathing ring
-// - Human-centric reassurance (no intimidating debug jargon)
-// - Tactile liquid emerald action pills with spring physics
-// - Fluid responsive layout matching any window geometry (compact phone to 4K desktop)
-
-import React, { useState } from 'react';
-import { motion } from 'framer-motion';
-import { ShieldCheck, Fingerprint, Smartphone, Check, RotateCw } from 'lucide-react';
+// Uygulama kilidi katmanı. Telefondaki OEM AppLock'u (Xiaomi / Samsung) pencere içinde bir durum olarak anlatır:
+//   waiting   — kilit telefonda soruldu; kullanıcı parmak izini okutacak / şifreyi girecek (backend en çok 15 sn bekler)
+//   cancelled — kilit ekranı jestle / ana ekranla kapatıldı (açılmadı)
+//   timeout   — süre doldu
+// Kullanıcının bu ekranda yapabileceği tek şey "telefona dönmek"tir; bu yüzden metin NEREDE (telefonda) ve NE (parmak izi / şifre)
+// olduğunu söyler, sayaç ne kadar bekleneceğini gösterir, kapalı ekranlar için "ekranı uyandır" bir tık uzakta durur.
+import React from 'react';
+import { Fingerprint, LockKeyhole, RotateCw, Smartphone, TimerOff, X } from 'lucide-react';
+import Button from '../../ui/Button.jsx';
 import { t } from '../../i18n/index.js';
+import { resolveAppDisplayName } from '../../desktop/appRegistry.js';
+import {
+  CountdownGlyph,
+  OverlayActions,
+  OverlayGlyph,
+  OverlayLayer,
+  OverlayPanel,
+  OverlayStatus,
+  OverlayText,
+  OverlayTitle,
+  StepTracker,
+  useActionSize,
+  useBusyAction,
+  useCountdown,
+  useOverlaySize,
+} from './overlayKit.jsx';
 
-export default function AppLockOverlay({
-  message,
-  onReclaim,
-  onWakeDevice,
-  onRetryPrompt,
-  onDismiss,
-}) {
-  const [isContinuing, setIsContinuing] = useState(false);
-  const [isWaking, setIsWaking] = useState(false);
-  const [isRetrying, setIsRetrying] = useState(false);
+/** backend wait_for_app_lock_unlock `timeout_s` — sayaç halkası bu süreye göre boşalır. */
+export const APPLOCK_WAIT_S = 15;
 
-  const handleContinue = async () => {
-    if (isContinuing) return;
-    setIsContinuing(true);
-    try {
-      if (onReclaim) await onReclaim();
-    } finally {
-      setIsContinuing(false);
-    }
-  };
+function Body({ phase, pkg, title, since, onReclaim, onWakeDevice, onRetryPrompt, onDismiss }) {
+  const size = useOverlaySize();
+  const app = resolveAppDisplayName(pkg, title) || t('overlay.bu_uygulama');
+  const left = useCountdown(APPLOCK_WAIT_S, since);
+  const [wake, waking] = useBusyAction(onWakeDevice, 800);
+  const [retry, retrying] = useBusyAction(onRetryPrompt, 800);
+  const [reclaim, reclaiming] = useBusyAction(onReclaim);
+  const primarySize = useActionSize(true);
+  const actionSize = useActionSize();
+  const waiting = phase === 'waiting';
 
-  const handleWake = async () => {
-    if (isWaking) return;
-    setIsWaking(true);
-    try {
-      if (onWakeDevice) await onWakeDevice();
-    } finally {
-      setTimeout(() => setIsWaking(false), 800);
-    }
-  };
-
-  // Re-runs the backend's up-to-15s unlock-wait sequence (fire-and-forget —
-  // resolves almost instantly, the actual polling happens server-side) so a
-  // failed fingerprint/PIN attempt doesn't force closing and cold-relaunching
-  // the app.
-  const handleRetry = async () => {
-    if (isRetrying) return;
-    setIsRetrying(true);
-    try {
-      if (onRetryPrompt) await onRetryPrompt();
-    } finally {
-      setTimeout(() => setIsRetrying(false), 800);
-    }
-  };
+  const copy = {
+    waiting: [t('overlay.kilit_baslik_bekleniyor'), t('overlay.kilit_aciklama_bekleniyor', { app })],
+    cancelled: [t('overlay.kilit_iptal_baslik'), t('overlay.kilit_iptal_aciklama')],
+    timeout: [t('overlay.kilit_zaman_baslik'), t('overlay.kilit_zaman_aciklama')],
+  }[phase] || [];
 
   return (
-    <motion.div
-      key="overlay-applock"
-      initial={{ opacity: 0, scale: 0.96 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.96 }}
-      transition={{ type: 'spring', damping: 28, stiffness: 340 }}
-      className="absolute inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-background/60 backdrop-blur-2xl select-none"
-      onClick={(e) => e.stopPropagation()}
-      onPointerDown={(e) => e.stopPropagation()}
-    >
-      {/* Specular Ambient Glow Spot */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden flex items-center justify-center">
-        <div className="w-80 h-80 rounded-full bg-gradient-to-tr from-status-active/15 via-primary/10 to-status-active/15 blur-3xl opacity-60 animate-pulse-ring" />
+    <OverlayPanel labelledBy="applock-title" describedBy="applock-text">
+      {waiting ? (
+        <CountdownGlyph icon={Fingerprint} seconds={APPLOCK_WAIT_S} runKey={since} tone="ok" />
+      ) : (
+        <OverlayGlyph icon={phase === 'timeout' ? TimerOff : LockKeyhole} tone="warn" />
+      )}
+
+      <div className="flex flex-col items-center gap-1">
+        <OverlayTitle id="applock-title">{copy[0]}</OverlayTitle>
+        <OverlayText id="applock-text" hideOnXs>{copy[1]}</OverlayText>
       </div>
 
-      <div className="relative max-w-sm w-full rounded-3xl bg-popover/90 border border-border/80 shadow-2xl backdrop-blur-2xl p-5 sm:p-6 flex flex-col items-center text-center">
-
-        {/* Biometric Shield Hero Graphic */}
-        <div className="relative mb-3.5 flex items-center justify-center">
-          {/* Animated concentric breathing halo */}
-          <motion.div
-            animate={{ scale: [1, 1.25, 1], opacity: [0.25, 0.5, 0.25] }}
-            transition={{ repeat: Infinity, duration: 2.6, ease: 'easeInOut' }}
-            className="absolute -inset-3 rounded-full bg-status-active/20 blur-xl"
+      {waiting && (
+        <>
+          <OverlayStatus>
+            {t('overlay.kilit_durum_bekleniyor')}
+            <span aria-hidden="true" className="ml-1.5 text-foreground">· {t('overlay.kilit_kalan_sure', { seconds: left })}</span>
+          </OverlayStatus>
+          <StepTracker
+            label={t('overlay.kilit_adimlar')}
+            current={0}
+            steps={[
+              { id: 'wait', label: t('overlay.kilit_adim_bekleniyor') },
+              { id: 'verify', label: t('overlay.kilit_adim_dogrulandi') },
+              { id: 'move', label: t('overlay.kilit_adim_aktariliyor') },
+            ]}
           />
+        </>
+      )}
 
-          <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-status-active/20 via-status-active/10 to-transparent border border-status-active/40 text-status-active shadow-sm">
-            <Fingerprint className="w-8 h-8 text-status-active animate-pulse" strokeWidth={1.75} />
-            
-            {/* Live Security Radar Pulse */}
-            <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-status-active opacity-75" />
-              <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-status-active border-2 border-background" />
-            </span>
-          </div>
-        </div>
-
-        {/* Title & Subtitle */}
-        <h3 className="text-base sm:text-lg font-bold text-foreground tracking-tight">
-          {t('window.biyometrik_onay_gerekli')}
-        </h3>
-        <p className="mt-1 text-xs text-muted-foreground font-normal leading-relaxed max-w-[280px]">
-          {message || t('window.lutfen_telefonunuzdan_parmak_izinizi')}
-        </p>
-
-        {/* Security Reassurance Pill */}
-        <div className="mt-4 w-full rounded-2xl bg-muted/50 border border-border/60 p-3 text-left flex items-start gap-2.5 shadow-inner">
-          <div className="p-1 rounded-lg bg-status-active/15 border border-status-active/30 text-status-active shrink-0 mt-0.5">
-            <ShieldCheck className="w-3.5 h-3.5" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="text-[11px] font-semibold text-foreground flex items-center gap-1.5">
-              <span>{t('window.donanim_korumali_guvenlik')}</span>
-            </div>
-            <p className="text-[10.5px] text-muted-foreground leading-snug mt-0.5">
-              {t('window.sifre_ve_biyometrik_verileriniz')}
-            </p>
-          </div>
-        </div>
-
-        {/* Action Button Group */}
-        <div className="mt-5 flex flex-col items-center w-full gap-2">
-          {/* Primary CTA */}
-          <button
-            type="button"
-            disabled={isContinuing}
-            onClick={handleContinue}
-            className={`relative overflow-hidden flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-xl text-xs font-semibold shadow-md transition-all cursor-pointer ${
-              isContinuing
-                ? 'bg-status-active/70 text-image-foreground cursor-wait opacity-90'
-                : 'bg-status-active hover:bg-status-active/90 text-image-foreground shadow-status-active/20 active:scale-[0.98]'
-            }`}
-          >
-            {isContinuing ? (
-              <motion.div
-                animate={{ rotate: 360 }}
-                transition={{ repeat: Infinity, duration: 0.85, ease: 'linear' }}
-                className="h-3.5 w-3.5 rounded-full border-2 border-image-foreground/30 border-t-image-foreground"
-              />
-            ) : (
-              <Check className="w-3.5 h-3.5 text-image-foreground" strokeWidth={2.5} />
-            )}
-            <span>{isContinuing ? t('window.kontrol_ediliyor') : t('window.kilidi_actim_devam_et')}</span>
-          </button>
-
-          {/* Secondary Action Row */}
-          <div className="flex items-center gap-2 w-full">
-            {onRetryPrompt && (
-              <button
-                type="button"
-                disabled={isRetrying}
-                onClick={handleRetry}
-                title={t('window.kilit_kontrolunu_tekrar_dene')}
-                aria-label={t('window.kilit_kontrolunu_tekrar_dene')}
-                className="shrink-0 flex items-center justify-center p-2 rounded-xl bg-muted border border-border/70 hover:bg-accent text-muted-foreground hover:text-foreground transition-all active:scale-[0.98] cursor-pointer"
-              >
-                <RotateCw className={`w-3.5 h-3.5 ${isRetrying ? 'animate-spin text-status-active' : ''}`} />
-              </button>
-            )}
-
-            <button
-              type="button"
-              disabled={isWaking}
-              onClick={handleWake}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-muted border border-border/70 hover:bg-accent text-foreground text-xs font-medium transition-all active:scale-[0.98] cursor-pointer"
-            >
-              <Smartphone className={`w-3.5 h-3.5 ${isWaking ? 'animate-bounce text-warning' : 'text-muted-foreground'}`} />
-              <span>{isWaking ? t('window.uyandiriliyor') : t('window.ekrani_uyandir')}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={onDismiss}
-              className="py-2 px-3 rounded-xl bg-muted/60 border border-border/50 hover:bg-accent text-muted-foreground hover:text-foreground text-xs font-medium transition-all active:scale-[0.98] cursor-pointer"
-            >
-              {t('common.kapat')}
-            </button>
-          </div>
-        </div>
-
-      </div>
-    </motion.div>
+      <OverlayActions>
+        {!waiting && onRetryPrompt && (
+          <Button size={primarySize} loading={retrying} onClick={retry} startIcon={<RotateCw className="size-3.5" />} autoFocus>
+            {phase === 'timeout' ? t('overlay.tekrar_dene') : t('overlay.kilidi_yeniden_iste')}
+          </Button>
+        )}
+        <Button size={actionSize} variant="outline" loading={waking} onClick={wake} startIcon={<Smartphone className="size-3.5" />}>
+          {waking ? t('window.uyandiriliyor') : t('window.ekrani_uyandir')}
+        </Button>
+        {waiting && size !== 'xs' && (
+          <Button size={actionSize} variant="ghost" loading={reclaiming} onClick={reclaim}>
+            {reclaiming ? t('window.kontrol_ediliyor') : t('window.kilidi_actim_devam_et')}
+          </Button>
+        )}
+        <Button
+          size={actionSize}
+          variant="ghost"
+          onClick={onDismiss}
+          className="text-muted-foreground"
+          aria-label={size === 'xs' ? t('common.kapat') : undefined}
+          startIcon={size === 'xs' ? <X className="size-3.5" /> : undefined}
+        >
+          {size === 'xs' ? null : t('common.kapat')}
+        </Button>
+      </OverlayActions>
+    </OverlayPanel>
   );
 }
 
+export default function AppLockOverlay({ phase = 'waiting', pkg, title, since, ...handlers }) {
+  return (
+    <OverlayLayer tone="veil" data-testid="applock-overlay" data-phase={phase}>
+      <Body phase={phase} pkg={pkg} title={title} since={since} {...handlers} />
+    </OverlayLayer>
+  );
+}

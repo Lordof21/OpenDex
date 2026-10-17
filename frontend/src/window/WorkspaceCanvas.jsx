@@ -7,13 +7,20 @@ import { useEffect, useRef, useState } from 'react';
 import { WindowVideoDecoder } from '../media/videoDecoder.js';
 import { WindowTouchSocket, mapClickToDeviceCoords } from '../input/touchInject.js';
 import { injectDomKeyEvent, isWindowManagerShortcut } from '../input/keyboardInject.js';
+import { useHoverInject } from '../input/hoverInject.js';
 import { useWindowStore } from './windowStore.js';
 import { useWheelKineticScroll } from './useWheelKineticScroll.js';
+import { handleKeymapperInput, releaseKeymapperInput } from '../keymapper/keymapperEngine.js';
+import { hasLayout, layoutKey, useKeymapStore } from '../keymapper/keymapStore.js';
+import { useMouseLook } from '../keymapper/useMouseLook.js';
+import MouseLookBadge from '../keymapper/MouseLookBadge.jsx';
 import { workspaceTaskAt } from './windowMath.js';
 import WorkspaceTaskFrame from './WorkspaceTaskFrame.jsx';
 import { logger } from '../lib/logger.js';
 import { setWindowThumbnail } from '../state/windowThumbnailCache.js';
 import { t as tt } from '../i18n/index.js';
+
+const NO_NODES = Object.freeze([]);
 
 export function computeWorkspaceViewport(containerW, containerH, vdW, vdH) {
   const cw = Math.max(1, containerW || 960);
@@ -45,6 +52,8 @@ export default function WorkspaceCanvas({ win }) {
   const canvasRef = useRef(null);
   const decoderRef = useRef(null);
   const touchRef = useRef(null);
+  // Odaktaki görevin tuş düzeni (aşağıda doldurulur): klavye işleyicisi pencere yeniden bağlanmadan en güncel değeri okur.
+  const keymapRef = useRef({ taskId: null, nodes: [], editing: false, getFrame: () => null });
   const [hasFrame, setHasFrame] = useState(false);
   const [containerSize, setContainerSize] = useState(() => {
     if (typeof window !== 'undefined' && win?.maximized) {
@@ -150,15 +159,34 @@ export default function WorkspaceCanvas({ win }) {
     if (win.frozen || !anchorId || !hasLiveTasks) return undefined;
     const targetWindow = canvasRef.current?.ownerDocument?.defaultView || window;
 
+    // Odaktaki görevin tuş düzeni (VD penceresindeki gibi): eşlenmiş tuş dokunmaya çevrilir, eşlenmeyen telefona yazılır.
+    const keymapHandle = (e, isDown) => {
+      const km = keymapRef.current;
+      if (!km.taskId || km.nodes.length === 0) return false;
+      const frame = km.getFrame();
+      if (!frame) return false;
+      return handleKeymapperInput(e, isDown, km.taskId, km.nodes, touchRef.current, frame.w, frame.h, frame);
+    };
+
     const onKeyDown = (e) => {
       if (e.target.closest?.('input, textarea, select, [contenteditable]')) return;
-      if (isWindowManagerShortcut(e)) return;
+      // Tuş düzenleyici açıkken klavye ona aittir (arkadaki telefona yazılmaz).
+      if (keymapRef.current.editing) return;
+      // Oyun kipinde (odaktaki görevin aktif tuş düzeni var) Ctrl+W / Ctrl+M oyuna gider: fareyi serbest bırakmak için basılı Ctrl + W ile ilerlemek oyunu kapatmasın.
+      if (isWindowManagerShortcut(e, { game: keymapRef.current.nodes.length > 0, layout: hasLayout(keymapRef.current.taskId, keymapRef.current.package) })) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') return;
       if (!win.focused && targetWindow === window) return;
+      if (keymapHandle(e, true)) return;
       e.preventDefault();
       injectDomKeyEvent(anchorId, e).catch((err) => {
         console.error('[Keyboard:ERR ❌] Failed to inject (workspace):', err);
       });
+    };
+
+    const onKeyUp = (e) => {
+      if (e.target.closest?.('input, textarea, select, [contenteditable]')) return;
+      if (keymapRef.current.editing) return;
+      keymapHandle(e, false);
     };
 
     const onPaste = (e) => {
@@ -170,15 +198,70 @@ export default function WorkspaceCanvas({ win }) {
     };
 
     targetWindow.addEventListener('keydown', onKeyDown);
+    targetWindow.addEventListener('keyup', onKeyUp);
     targetWindow.addEventListener('paste', onPaste);
     return () => {
       targetWindow.removeEventListener('keydown', onKeyDown);
+      targetWindow.removeEventListener('keyup', onKeyUp);
       targetWindow.removeEventListener('paste', onPaste);
     };
   }, [anchorId, win.focused, win.frozen, hasLiveTasks]);
 
   const vdW = win.vdW || 1920;
   const vdH = win.vdH || 1080;
+
+  // ── Tuş düzeni + fareyle bakış (odaktaki görev) ─────────────────────────────────────────────────────────────
+  // Düzen görevin KENDİ kutusuna yaslanır (rx, ry ∈ [0,1] görev içinde): kutu VD uzayından STREAM uzayına çevrilir (dokunma
+  // soketinin uzayı — toStreamCoords ile aynı ölçek).
+  const focusedTask = (() => {
+    const live = (win.tasks || []).filter((task) => !task.handoffToPhone);
+    return live.find((task) => task.windowId === win.focusedTaskId) || (win.focusedTaskId ? null : live[live.length - 1]) || null;
+  })();
+  const keymapNodes = useKeymapStore((s) => (focusedTask ? s.getActiveKeymap(layoutKey(s, focusedTask.windowId, focusedTask.package)) : undefined)) || NO_NODES;
+  // Bu çalışma alanındaki HERHANGİ bir görevin düzeni düzenleniyorsa (odaktaki olmasa bile — hub'dan başka görevin editörü açılabilir) giriş editörün.
+  const keymapEditing = useKeymapStore((s) => s.editWindowId != null && s.livePlayWindowId !== s.editWindowId && (win.tasks || []).some((task) => task.windowId === s.editWindowId));
+  const mousePrefs = useKeymapStore((s) => s.prefs);
+  const streamBox = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const resized = canvas.width && canvas.height && (canvas.width !== 300 || canvas.height !== 150);
+    return { cw: resized ? canvas.width : (win.streamW || canvas.width || vdW), ch: resized ? canvas.height : (win.streamH || canvas.height || vdH) };
+  };
+  const getKeymapFrame = () => {
+    const box = streamBox();
+    const bounds = focusedTask?.bounds;
+    if (!box || !bounds) return null;
+    const sx = box.cw / vdW;
+    const sy = box.ch / vdH;
+    const [l, t, r, b] = bounds;
+    return { x: l * sx, y: t * sy, w: Math.max(1, (r - l) * sx), h: Math.max(1, (b - t) * sy) };
+  };
+  keymapRef.current = { taskId: focusedTask?.windowId ?? null, package: focusedTask?.package ?? null, nodes: keymapNodes, editing: keymapEditing, getFrame: getKeymapFrame };
+
+  // Odak başka göreve geçince / pencere kapanınca eski görevin basılı tuşları ve bakış parmağı kaldırılır.
+  const focusedTaskId = focusedTask?.windowId ?? null;
+  useEffect(() => {
+    if (!focusedTaskId) return undefined;
+    return () => releaseKeymapperInput(focusedTaskId, touchRef.current);
+  }, [focusedTaskId]);
+
+  const inputLive = Boolean(win.focused) && !win.frozen && !win.minimized && hasLiveTasks && Boolean(focusedTask) && !keymapEditing;
+  const mouseLook = useMouseLook({
+    canvasRef,
+    targetId: focusedTaskId,
+    nodes: keymapNodes,
+    enabled: mousePrefs.mouseLook,
+    active: inputLive,
+    sensitivity: mousePrefs.mouseSensitivity,
+    getFrame: getKeymapFrame,
+    getTouch: () => touchRef.current,
+    getScale: () => {
+      const box = streamBox();
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (!box || !rect || !(rect.width > 0) || !(rect.height > 0)) return null;
+      return { sx: box.cw / rect.width, sy: box.ch / rect.height };
+    },
+  });
 
   // Wheel scroll / touchpad pinch — ported from VideoCanvas.jsx (same
   // kinetic-inertia model), also missing entirely before this fix.
@@ -253,20 +336,29 @@ export default function WorkspaceCanvas({ win }) {
     touchRef.current?.up(p.x, p.y);
   };
 
+  // Hover (Ctrl basılıyken fare üstte): odaktaki görevin tuş düzeni (oyun kipi) ya da düzenleyici varsa kapalı.
+  const hover = useHoverInject({ touchRef, enabled: !keymapEditing && keymapNodes.length === 0 });
+
   const onPointerDown = (e) => {
     if (e.button !== 0) return;
+    hover.cancel();
     useWindowStore.getState().focusWindow(win.id);
     // Basılan görev gerçekten duruyor mu? Telefon/OEM katmanı onu kendiliğinden küçülttüyse (yukarı kaydırma, uzun süre
     // kullanılmama) backend yerine koyar; sağlam görev için tek okuma, görev başına en çok saniyede bir.
     const canvasRect = canvasRef.current?.getBoundingClientRect();
+    let pressedTask = null;
     if (canvasRect && viewport.scale > 0) {
       const pressed = workspaceTaskAt(
         useWindowStore.getState().windows.find((w) => w.isEcoWorkspace)?.tasks,
         (e.clientX - canvasRect.left) / viewport.scale,
         (e.clientY - canvasRect.top) / viewport.scale,
       );
+      pressedTask = pressed || null;
       if (pressed) useWindowStore.getState().verifyWorkspaceTask(pressed.windowId);
     }
+    // Fareyle bakış açıkken ODAKTAKİ görevde tıklama dokunma değildir (ilk tıklama fareyi yakalar; yakalıyken sol tık düzendeki
+    // tuşa gider). Fare zaten yakalıysa konum anlamsızdır. Başka göreve ya da boşluğa tıklama normal çalışır (odak değişir).
+    if ((mouseLook.status === 'locked' || (pressedTask && pressedTask.windowId === focusedTaskId)) && mouseLook.claimPointer(e)) return;
     try { canvasRef.current?.setPointerCapture(e.pointerId); } catch {}
     const p = toStreamCoords(e.clientX, e.clientY);
     gestureRef.current = { startClient: { x: e.clientX, y: e.clientY }, last: e, moved: false };
@@ -294,7 +386,10 @@ export default function WorkspaceCanvas({ win }) {
 
   const onPointerMove = (e) => {
     const g = gestureRef.current;
-    if (!g) return;
+    if (!g) {
+      hover.move(e, () => toStreamCoords(e.clientX, e.clientY), win.fps);
+      return;
+    }
     const dx = e.clientX - g.startClient.x;
     const dy = e.clientY - g.startClient.y;
     if (!g.moved && Math.hypot(dx, dy) < DRAG_MIN_PX) return;
@@ -361,7 +456,9 @@ export default function WorkspaceCanvas({ win }) {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
+        onPointerLeave={hover.cancel}
       />
+      <MouseLookBadge status={mouseLook.status} />
       {!hasLiveTasks && <div className="absolute inset-0 bg-video-backdrop" />}
       {!hasFrame && (
         <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-xs text-scrim-foreground/50">

@@ -224,7 +224,7 @@ describe('WorkspaceTaskFrame component', () => {
           {
             id: 'eco-workspace',
             isEcoWorkspace: true,
-            tasks: [{ windowId: 'task-1', package: 'com.app', bounds: [100, 100, 1100, 700], renderScale: [0.7, 0.7] }],
+            tasks: [{ windowId: 'task-1', package: 'com.app', bounds: [100, 100, 1100, 700] }],
           },
         ],
       });
@@ -252,7 +252,7 @@ describe('WorkspaceTaskFrame component', () => {
           {
             id: 'eco-workspace',
             isEcoWorkspace: true,
-            tasks: [{ windowId: 'task-2', package: 'com.oem.app', bounds: [50, 50, 850, 650], renderScale: [0.8, 0.8] }],
+            tasks: [{ windowId: 'task-2', package: 'com.oem.app', bounds: [50, 50, 850, 650] }],
           },
         ],
       });

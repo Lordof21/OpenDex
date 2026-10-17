@@ -268,14 +268,14 @@ describe('Hub varyantı', () => {
 
   it('video penceresinde tüm eylemler vardır', () => {
     const { queryByText } = render(<HubPanel />);
-    for (const label of ['Görüntü ölçeği', 'Dinamik DP', 'Yön tuşları', 'Ayrı PiP', "Workspace'e gönder", 'Tam ekran', 'Üstte tut']) {
+    for (const label of ['Görüntü ölçeği', 'Dinamik DP', 'Ayrı PiP', "Workspace'e gönder", 'Tam ekran', 'Üstte tut']) {
       expect(queryByText(label), label).not.toBeNull();
     }
   });
 
   it('kırpma penceresinde video/akış eylemleri gizlenir; pencere eylemleri kalır', () => {
     const { queryByText } = render(<HubPanel variant="workspace-crop" />);
-    for (const label of ['Görüntü ölçeği', 'Dinamik DP', 'Yön tuşları', 'Ayrı PiP', "Workspace'e gönder"]) {
+    for (const label of ['Görüntü ölçeği', 'Dinamik DP', 'Ayrı PiP', "Workspace'e gönder"]) {
       expect(queryByText(label), label).toBeNull();
     }
     for (const label of ['Tam ekran', 'Üstte tut']) {

@@ -1,66 +1,54 @@
 // The window's app was closed ON THE PHONE (swiped away in Recents, force-stopped) and the user chose to keep such
 // windows ("Pencerede göster"). Reopen relaunches it on this window's display; Close closes it.
-
-import React, { useState } from 'react';
-import { motion } from 'framer-motion';
+import React from 'react';
 import { RotateCcw, Smartphone, X } from 'lucide-react';
-import { useWindowStore } from '../windowStore.js';
+import Button from '../../ui/Button.jsx';
+import AppIcon from '../../ui/AppIcon.jsx';
 import { t } from '../../i18n/index.js';
+import { resolveAppDisplayName } from '../../desktop/appRegistry.js';
+import { useWindowStore } from '../windowStore.js';
+import {
+  OverlayActions,
+  OverlayGlyph,
+  OverlayLayer,
+  OverlayPanel,
+  OverlayText,
+  OverlayTitle,
+  useActionSize,
+  useBusyAction,
+  useOverlaySize,
+} from './overlayKit.jsx';
 
-export default function AppClosedOverlay({ windowId, title, onClose }) {
-  const [reopening, setReopening] = useState(false);
-
-  const reopen = async () => {
-    if (reopening) return;
-    setReopening(true);
-    try {
-      await useWindowStore.getState().reopenClosedApp(windowId);
-    } finally {
-      setReopening(false);
-    }
-  };
-
+function Body({ windowId, pkg, title, onClose }) {
+  const size = useOverlaySize();
+  const app = resolveAppDisplayName(pkg, title) || title || t('overlay.bu_uygulama');
+  const [reopen, reopening] = useBusyAction(() => useWindowStore.getState().reopenClosedApp(windowId));
+  const primarySize = useActionSize(true);
+  const actionSize = useActionSize();
+  const showIcon = Boolean(pkg) && size !== 'xs';
   return (
-    <motion.div
-      key="overlay-app-closed"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.15 }}
-      role="alertdialog"
-      aria-label={t('window.uygulama_telefonda_kapatildi')}
-      className="absolute inset-0 z-50 flex items-center justify-center bg-background/65 p-4 backdrop-blur-md select-none"
-      onClick={(e) => e.stopPropagation()}
-      onPointerDown={(e) => e.stopPropagation()}
-    >
-      <div className="flex w-full max-w-xs flex-col items-center gap-2 rounded-2xl border border-border/80 bg-popover/95 p-5 text-center shadow-2xl">
-        <span className="grid size-11 place-items-center rounded-xl border border-border/70 bg-muted/60 text-muted-foreground">
-          <Smartphone className="size-5" strokeWidth={1.75} />
-        </span>
-        <p className="text-sm font-semibold text-foreground">{t('window.uygulama_telefonda_kapatildi')}</p>
-        <p className="text-[11px] leading-snug text-muted-foreground">
-          {t('window.valuetelefonunuzda_kapatildi_bu', { value: title ? `${title} ` : '' })}
-        </p>
-        <div className="mt-2 flex w-full gap-2">
-          <button
-            type="button"
-            onClick={reopen}
-            disabled={reopening}
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-opacity disabled:opacity-60 cursor-pointer"
-          >
-            <RotateCcw className={`size-3.5 ${reopening ? 'animate-spin' : ''}`} />
-            {reopening ? t('window.aciliyor') : t('common.yeniden_ac')}
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold hover:bg-accent cursor-pointer"
-          >
-            <X className="size-3.5" />
-            {t('common.kapat')}
-          </button>
-        </div>
+    <OverlayPanel labelledBy="app-closed-title" describedBy="app-closed-text">
+      {showIcon ? <AppIcon pkg={pkg} displayName={app} size={size === 'md' ? 44 : 36} /> : <OverlayGlyph icon={Smartphone} tone="muted" />}
+      <div className="flex flex-col items-center gap-1">
+        <OverlayTitle id="app-closed-title">{t('overlay.kapatildi_baslik', { app })}</OverlayTitle>
+        <OverlayText id="app-closed-text" hideOnXs>{t('overlay.kapatildi_aciklama')}</OverlayText>
       </div>
-    </motion.div>
+      <OverlayActions>
+        <Button size={primarySize} className="flex-1" loading={reopening} onClick={reopen} startIcon={<RotateCcw className="size-3.5" />} autoFocus>
+          {reopening ? t('window.aciliyor') : t('common.yeniden_ac')}
+        </Button>
+        <Button size={actionSize} variant="outline" className="flex-1" onClick={onClose} startIcon={<X className="size-3.5" />}>
+          {t('common.kapat')}
+        </Button>
+      </OverlayActions>
+    </OverlayPanel>
+  );
+}
+
+export default function AppClosedOverlay({ windowId, pkg, title, onClose }) {
+  return (
+    <OverlayLayer tone="veil" data-testid="app-closed-overlay">
+      <Body windowId={windowId} pkg={pkg} title={title} onClose={onClose} />
+    </OverlayLayer>
   );
 }

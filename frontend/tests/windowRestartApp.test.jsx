@@ -73,12 +73,12 @@ describe('Hub: "Uygulamayı yeniden başlat" görünürlüğü', () => {
 
 describe('Hub: "Uygulamayı yeniden başlat" eylemi', () => {
   it('bu pencerenin uygulamasını yeniden başlatma uç noktasına gönderir; başarıyı arka ucun söylediği şekilde bildirir', async () => {
-    api.post.mockResolvedValueOnce({ ok: true, window_id: 'w1', action: 'relaunched' });
+    api.post.mockResolvedValueOnce({ ok: true, window_id: 'w1', action: 'restarted' });
     openHub(VIDEO);
 
     fireEvent.click(screen.getByText('Uygulamayı yeniden başlat'));
 
-    await waitFor(() => expect(pushToast).toHaveBeenCalledWith(restartDoneToast({ action: 'relaunched' })));
+    await waitFor(() => expect(pushToast).toHaveBeenCalledWith(restartDoneToast({ action: 'restarted' })));
     expect(api.post).toHaveBeenCalledWith('/api/windows/restart-app', { window_id: 'w1' });
     // Yalnız uygulama yenilenir: pencerenin boyutu / akışı için başka hiçbir istek gitmez.
     expect(api.post.mock.calls.map(([url]) => url)).toEqual(['/api/windows/restart-app']);
@@ -121,8 +121,8 @@ describe('Hub: "Uygulamayı yeniden başlat" eylemi', () => {
 
 describe('appRestart: toast metinleri', () => {
   it('her gerçek sonuç kendi cümlesini söyler (istenen değil, doğrulanan)', () => {
-    const texts = ['restarted', 'relaunched', 'launched'].map((action) => restartDoneToast({ action }));
-    expect(new Set(texts).size).toBe(3);
+    const texts = ['restarted', 'launched'].map((action) => restartDoneToast({ action }));
+    expect(new Set(texts).size).toBe(2);
     expect(restartDoneToast({ action: 'launched' })).toContain('başlatıldı');
   });
 

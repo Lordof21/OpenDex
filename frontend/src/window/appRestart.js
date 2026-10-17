@@ -1,11 +1,10 @@
 import { t } from '../i18n/index.js';
 // Hub → "Uygulamayı yeniden başlat": the window's APP is rebuilt inside the same window (backend: windows/app_restart.py —
-// process restart, else onDestroy→onCreate in place, else a cold start when nothing was running). The backend VERIFIES
+// process restart, else a cold start when nothing was running). The backend VERIFIES
 // what it did, so the toast says what really happened, not what was asked for.
 
 const DONE = {
   restarted: t('window.uygulama_yeniden_baslatildi'),
-  relaunched: t('window.uygulama_yerinde_yeniden_kuruldu'),
   launched: t('window.uygulama_calismiyordu_baslatildi'),
 };
 

@@ -18,16 +18,20 @@ import { stealthVeilDeadlineMs } from './store/continuitySlice.js';
 import { useWheelKineticScroll } from './useWheelKineticScroll.js';
 
 import { useLiveSettings } from '../settings/liveSettings.js';
-import { useKeymapStore } from '../keymapper/keymapStore.js';
+import { hasLayout, layoutKey, useKeymapStore } from '../keymapper/keymapStore.js';
 import { handleKeymapperInput, releaseKeymapperInput } from '../keymapper/keymapperEngine.js';
 import KeymapperOverlay from '../keymapper/KeymapperOverlay.jsx';
+import MouseLookBadge from '../keymapper/MouseLookBadge.jsx';
+import { useMouseLook } from '../keymapper/useMouseLook.js';
 import DomOverlayTree from './DomOverlayTree.jsx';
 import LatencyHudOverlay from './LatencyHudOverlay.jsx';
 import { injectDomKeyEvent, isWindowManagerShortcut } from '../input/keyboardInject.js';
+import { useHoverInject } from '../input/hoverInject.js';
 import { api } from '../lib/api.js';
 import StealthPhaseOverlay from './canvas-overlays/StealthPhaseOverlay.jsx';
 import FrozenOverlay from './canvas-overlays/FrozenOverlay.jsx';
 import AppLockOverlay from './canvas-overlays/AppLockOverlay.jsx';
+import WaitingOverlay from './canvas-overlays/WaitingOverlay.jsx';
 import HandoffOverlay from './canvas-overlays/HandoffOverlay.jsx';
 import AppClosedOverlay from './canvas-overlays/AppClosedOverlay.jsx';
 import { setWindowThumbnail } from '../state/windowThumbnailCache.js';
@@ -99,9 +103,12 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
 
   const editWindowId = useKeymapStore((s) => s.editWindowId);
   const setEditWindowId = useKeymapStore((s) => s.setEditWindowId);
-  const getKeymapForPackage = useKeymapStore((s) => s.getKeymapForPackage);
   const isEditingKeymap = editWindowId === win.id;
-  const keymapNodes = getKeymapForPackage(win.package);
+  // "Oyna": düzenleyici açıkken de tuş / fare gerçekten telefona gider (düzenleyici yalnız kaplama olarak kalır).
+  const livePlayWindowId = useKeymapStore((s) => s.livePlayWindowId);
+  const editorBlocksInput = isEditingKeymap && livePlayWindowId !== win.id;
+  // Motorun kullanacağı düğümler: düzen kapatılmışsa boş, devre dışı düğümler çıkarılmış (kararlı referans: gereksiz yeniden kurulum yok).
+  const keymapNodes = useKeymapStore((s) => s.getActiveKeymap(layoutKey(s, win.id, win.package)));
 
   useEffect(() => {
     if (win.frozen) return;
@@ -113,8 +120,9 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
       if (e.target.closest?.('input, textarea, select, [contenteditable]')) return;
       // The key editor is open: the keyboard belongs to it. Without this every key pressed while editing was also typed
       // into the phone behind the overlay.
-      if (isEditingKeymap) return;
-      if (isWindowManagerShortcut(e)) return;
+      if (editorBlocksInput) return;
+      // Oyun kipinde (aktif tuş düzeni var) Ctrl+W / Ctrl+M oyuna gider: fareyi serbest bırakmak için basılı Ctrl + W ile ilerlemek oyunu kapatmasın.
+      if (isWindowManagerShortcut(e, { game: keymapNodes.length > 0, layout: hasLayout(win.id, win.package) })) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') return;
 
       if (!win.focused && targetWindow === window) {
@@ -141,14 +149,14 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
 
     const onKeyUp = (e) => {
       if (e.target.closest?.('input, textarea, select, [contenteditable]')) return;
-      if (isEditingKeymap) return;
+      if (editorBlocksInput) return;
       if (keymapNodes && keymapNodes.length > 0 && win.focused) {
         handleKeymapperInput(e, false, win.id, keymapNodes, touchRef.current, win.deviceW, win.deviceH);
       }
     };
 
     const onPaste = (e) => {
-      if (isEditingKeymap) return;
+      if (editorBlocksInput) return;
       const text = e.clipboardData?.getData('text/plain');
       if (text && touchRef.current) {
         e.preventDefault();
@@ -165,7 +173,7 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
       targetWindow.removeEventListener('keyup', onKeyUp);
       targetWindow.removeEventListener('paste', onPaste);
     };
-  }, [win.id, win.focused, win.frozen, win.deviceW, win.deviceH, isEditingKeymap, keymapNodes]);
+  }, [win.id, win.focused, win.frozen, win.deviceW, win.deviceH, editorBlocksInput, keymapNodes]);
 
   useEffect(() => {
     return () => {
@@ -375,15 +383,39 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
   }, []);
 
   // Same for the app-level cases: another window took the focus, this one was frozen/minimized, or the key editor opened.
-  const inputLive = Boolean(win.focused) && !win.frozen && !win.minimized && !isEditingKeymap;
+  const inputLive = Boolean(win.focused) && !win.frozen && !win.minimized && !editorBlocksInput;
   useEffect(() => {
     if (!inputLive) releaseAllRef.current();
   }, [inputLive]);
 
+  // Fareyle bakış / nişan (oyun düzeni): imleç yakalanır, hareketi bakış parmağını kaydırır; Ctrl fareyi serbest bırakır.
+  const mousePrefs = useKeymapStore((s) => s.prefs);
+  const mouseLook = useMouseLook({
+    canvasRef,
+    targetId: win.id,
+    nodes: keymapNodes,
+    enabled: mousePrefs.mouseLook,
+    active: inputLive,
+    sensitivity: mousePrefs.mouseSensitivity,
+    getFrame: () => ({ x: 0, y: 0, w: win.deviceW, h: win.deviceH }),
+    getTouch: () => touchRef.current,
+    getScale: () => {
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (!rect || !(rect.width > 0) || !(rect.height > 0)) return null;
+      return { sx: win.deviceW / rect.width, sy: win.deviceH / rect.height };
+    },
+  });
+
+  // Hover (Ctrl basılıyken fare üstte): oyun kipinde ve tuş düzenleyici açıkken kapalı; hızı pencerenin kare hızını izler.
+  const hover = useHoverInject({ touchRef, enabled: !editorBlocksInput && keymapNodes.length === 0 });
+
   const onPointerDown = (e) => {
-    if (e.button !== 0 || isEditingKeymap) return;
+    if (e.button !== 0 || editorBlocksInput) return;
+    hover.cancel();
     useWindowStore.getState().focusWindow(win.id);
     e.preventDefault();
+    // Fareyle bakış açıkken tıklama dokunma DEĞİLDİR: ilk tıklama fareyi yakalar; yakalıyken sol tık düzendeki tuşa gider.
+    if (mouseLook.claimPointer(e)) return;
     try {
       canvasRef.current?.setPointerCapture(e.pointerId);
     } catch (captureErr) {
@@ -419,9 +451,12 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
   };
 
   const onPointerMove = (e) => {
-    if (isEditingKeymap) return;
+    if (editorBlocksInput) return;
     const g = gestureRef.current;
-    if (!g) return;
+    if (!g) {
+      hover.move(e, () => toDevice(e), win.fps);
+      return;
+    }
     e.preventDefault();
     const dx = e.clientX - g.startClient.x;
     const dy = e.clientY - g.startClient.y;
@@ -439,12 +474,12 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
   };
 
   const onPointerUp = (e) => {
-    if (isEditingKeymap) return;
+    if (editorBlocksInput) return;
     endGesture(e);
   };
 
   const onPointerCancel = (e) => {
-    if (isEditingKeymap) return;
+    if (editorBlocksInput) return;
     endGesture(e);
   };
 
@@ -455,13 +490,13 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
     backTargetId: win.id,
     deviceH: win.deviceH,
     deviceW: win.deviceW,
-    shouldSkip: () => isEditingKeymap,
+    shouldSkip: () => editorBlocksInput,
     getDeviceCoords: (e, canvas, rect) => {
       const cw = canvas.width || win.deviceW;
       const ch = canvas.height || win.deviceH;
       return mapPointerToDevice(e.clientX, e.clientY, rect, cw, ch);
     },
-    deps: [win.id, win.deviceW, win.deviceH, effectiveFitMode, zoomScale, isEditingKeymap],
+    deps: [win.id, win.deviceW, win.deviceH, effectiveFitMode, zoomScale, editorBlocksInput],
   });
 
   const activeAmbient = ambientSnapshot;
@@ -518,6 +553,7 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerCancel}
+        onPointerLeave={hover.cancel}
         onLostPointerCapture={onPointerCancel}
       />
 
@@ -556,6 +592,7 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
         onCloseEdit={() => setEditWindowId(null)}
         isHeaderOpen={isHeaderOpen}
       />
+      <MouseLookBadge status={mouseLook.status} />
 
       {/* Real-time Latency & Network Diagnostics HUD in top-right of screen */}
       <LatencyHudOverlay
@@ -564,11 +601,7 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
         hasFrame={hasFrame}
       />
 
-      {!hasFrame && !win.appLockPending && !win.handoffToPhone && !win.stealthPhase && (
-        <div className="absolute inset-0 flex items-center justify-center text-xs text-scrim-foreground/50">
-          {t('window.goruntu_bekleniyor')}
-        </div>
-      )}
+      {!hasFrame && !win.appLockPending && !win.handoffToPhone && !win.stealthPhase && <WaitingOverlay />}
       <AnimatePresence>
         {win.stealthPhase && <StealthPhaseOverlay key="stealth-overlay" />}
 
@@ -579,7 +612,10 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
         {win.appLockPending && (
           <AppLockOverlay
             key="applock-overlay"
-            message={win.appLockMessage}
+            phase={win.appLockPhase || 'waiting'}
+            since={win.appLockSince}
+            pkg={win.package}
+            title={win.title}
             onReclaim={async () => {
               const op = newOpId();
               const L = logger.withOp(op);
@@ -628,14 +664,15 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
           />
         )}
 
-        {win.handoffToPhone && <HandoffOverlay key="handoff-overlay" winId={win.id} />}
+        {win.handoffToPhone && <HandoffOverlay key="handoff-overlay" winId={win.id} pkg={win.package} title={win.title} />}
 
         {win.appClosedOnPhone && !win.handoffToPhone && (
           <AppClosedOverlay
             key="app-closed-overlay"
             windowId={win.id}
+            pkg={win.package}
             title={win.title}
-            onClose={() => useWindowStore.getState().closeWindow(win.id)}
+            onClose={() => useWindowStore.getState().closeWindow(win.id, 'app-closed-overlay')}
           />
         )}
       </AnimatePresence>

@@ -284,9 +284,9 @@ export function handleEvent(event) {
         event.payload.message ||
         t('events.kilit_acma_zaman_asimina_ugradi');
       if (target) {
-        windowStore.setAppLock(target, true, timeoutMessage);
+        windowStore.setAppLock(target, true, timeoutMessage, 'timeout');
         if (event.payload?.package && target !== event.payload.package) {
-          windowStore.setAppLock(event.payload.package, true, timeoutMessage);
+          windowStore.setAppLock(event.payload.package, true, timeoutMessage, 'timeout');
         }
       }
       systemStore.pushToast(`⚠️ ${timeoutMessage}`);
@@ -300,9 +300,9 @@ export function handleEvent(event) {
         event.payload?.message ||
         t('events.kilit_iptal_edildi_uygulamayi_acmak');
       if (target) {
-        windowStore.setAppLock(target, true, cancelMessage);
+        windowStore.setAppLock(target, true, cancelMessage, 'cancelled');
         if (event.payload?.package && target !== event.payload.package) {
-          windowStore.setAppLock(event.payload.package, true, cancelMessage);
+          windowStore.setAppLock(event.payload.package, true, cancelMessage, 'cancelled');
         }
       }
       systemStore.pushToast(`🔒 ${cancelMessage}`);

@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Smartphone } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useWindowStore } from './windowStore.js';
 import { useSystemStore } from '../state/systemStore.js';
@@ -16,6 +15,9 @@ import {
 import { logger } from '../lib/logger.js';
 import WorkspaceTaskHeader from './workspaceTask/WorkspaceTaskHeader.jsx';
 import WorkspaceTaskHub from './workspaceTask/WorkspaceTaskHub.jsx';
+import ParkedOnPhoneOverlay from './canvas-overlays/ParkedOnPhoneOverlay.jsx';
+import KeymapperOverlay from '../keymapper/KeymapperOverlay.jsx';
+import { layoutKey, useKeymapStore } from '../keymapper/keymapStore.js';
 import { headerDensityFor } from './workspaceTask/taskMetrics.js';
 import { t as tt } from '../i18n/index.js';
 
@@ -67,6 +69,12 @@ export default function WorkspaceTaskFrame({
   // Telefona park edilmiş: Android task'ı Display 0'da; çerçeve Workspace'teki YERİNİ tutar.
   const isParked = Boolean(task.handoffToPhone);
   const pipOpen = useWorkspaceTaskPipOpen(task.windowId);
+  // Tuş düzeni: bu görevin düzeni düzenleniyor mu / tanımlı mı. Düzenleyici görevin kutusunun İÇİNDE açılır (VD penceresindeki gibi).
+  const keymapEditing = useKeymapStore((s) => s.editWindowId === task.windowId);
+  // Görevin düzeni: kendi düzeni varsa o (`win:<id>`), yoksa uygulamanın düzeni.
+  const keymapCount = useKeymapStore((s) => s.presets[layoutKey(s, task.windowId, task.package)]?.length || 0);
+  const keymapEnabled = useKeymapStore((s) => !s.layoutOff[layoutKey(s, task.windowId, task.package)]);
+  const overlayWin = useMemo(() => ({ id: task.windowId, package: task.package }), [task.windowId, task.package]);
 
   const handleMouseEnterHeader = () => {
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
@@ -318,6 +326,12 @@ export default function WorkspaceTaskFrame({
     openCrop: () => store().openWorkspaceCropWindow(task.windowId),
     popOut: () => store().popOutToDesktop(task.windowId),
     closeTask: () => store().closeWorkspaceTask(task.windowId),
+    openKeymap: () => useKeymapStore.getState().setEditWindowId(task.windowId),
+    toggleKeymap: () => {
+      const keymap = useKeymapStore.getState();
+      const key = layoutKey(keymap, task.windowId, task.package);
+      keymap.setLayoutEnabled(key, Boolean(keymap.layoutOff[key]));
+    },
     setDensityAuto,
     setDensity: (value) => store().setWorkspaceTaskDensity(task.windowId, value, 'manual'),
   };
@@ -373,6 +387,16 @@ export default function WorkspaceTaskFrame({
         )}
       />
 
+      {/* ─── Tuş düzeni: odaktaki görevde rozetler, düzenlenirken editör ─── */}
+      {(keymapEditing || (isFocused && keymapCount > 0)) && !isParked && (
+        <KeymapperOverlay
+          win={overlayWin}
+          isEditing={keymapEditing}
+          onCloseEdit={() => useKeymapStore.getState().setEditWindowId(null)}
+          isHeaderOpen={isHeaderVisible}
+        />
+      )}
+
       {/* ─── Görev başlığı: sık kullanılanlar burada, geri kalanı hub'da (sağ tık ya da ⚙) ─── */}
       <WorkspaceTaskHeader
         task={task}
@@ -398,6 +422,8 @@ export default function WorkspaceTaskFrame({
           compact={hub.compact}
           task={task}
           parked={isParked}
+          keymapCount={keymapCount}
+          keymapEnabled={keymapEnabled}
           pipOpen={pipOpen}
           maximized={isSnappedMaximized}
           defaultWindowing={defaultWindowing}
@@ -408,29 +434,10 @@ export default function WorkspaceTaskFrame({
 
       {/* ─── Telefonda park kartı: çerçeve yerini korur, altındaki canvas'a tıklama SIZMAZ ─── */}
       {isParked && (
-        <div
-          className="pointer-events-auto absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 rounded-window border border-dashed border-warning/50 bg-scrim p-3 text-center backdrop-blur-sm"
-          onPointerDown={(e) => {
-            e.stopPropagation();
-            onFocus?.(task.windowId);
-          }}
-        >
-          <Smartphone className="size-6 text-warning" />
-          <p className="text-xs font-semibold text-scrim-foreground">{tt('window.telefonda_calisiyor')}</p>
-          <p className="max-w-[220px] text-[10.5px] text-scrim-foreground/60">
-           {tt('window.geri_aldiginizda_bu_yerinde_kaldigi')}
-          </p>
-          <button
-            type="button"
-            className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground cursor-pointer"
-            onClick={(e) => {
-              e.stopPropagation();
-              useWindowStore.getState().reclaimWindow(task.windowId);
-            }}
-          >
-           {tt('window.calisma_alanina_geri_al_2')}
-          </button>
-        </div>
+        <ParkedOnPhoneOverlay
+          onFocus={() => onFocus?.(task.windowId)}
+          onReclaim={() => useWindowStore.getState().reclaimWindow(task.windowId)}
+        />
       )}
 
       {/* ─── 8-Directional Interactive Resize Handles ───────────────────── */}
