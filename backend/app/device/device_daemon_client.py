@@ -192,6 +192,8 @@ class DeviceDaemonClient:
 
         # Set to True after first successful spawn to skip pgrep on reconnects
         self._daemon_known_running: bool = False
+        # Awaited with the serial right before a missing daemon is spawned; returns True when it restarted adbd.
+        self.before_spawn: Callable[[str], Awaitable[bool]] | None = None
 
         # Populated from the daemon's "greeting" on connect (see _dispatch_event).
         self.daemon_version: str | None = None
@@ -323,6 +325,13 @@ class DeviceDaemonClient:
 
         if is_running:
             return
+
+        # The daemon is gone and about to be replaced: the one moment a phone-side fix that restarts adbd costs nothing
+        # (usb_stability). adbd's restart may take the adb forward with it — set it up again.
+        if self.before_spawn is not None:
+            with contextlib.suppress(Exception):
+                if await self.before_spawn(serial):
+                    await self._adb.forward(self._port, _DAEMON_SOCKET_NAME, serial=serial)
 
         # 3. Clean up any stale process before spawning (for an auth respawn: the one that rejected our answer — it was
         # started with another token, e.g. before the token file was replaced).
@@ -669,11 +678,11 @@ class DeviceDaemonClient:
         resp = await self._send_rpc_full(body, "media_get", timeout=2.5)
         return resp if resp and resp.get("type") == "media_update" else None
 
-    async def is_package_playing(self, package: str) -> bool | None:
-        """Does ``package`` have a media session that is playing (or buffering to play) RIGHT NOW? The phone is asked live
-        (`media_get`); the pushed cache is the fallback when that read fails. None: unknown (no daemon, unreadable session
-        list) — callers that would destroy something on "no" must treat unknown as unknown, not as "not playing" (the
-        daemon's own contract: `active:false` + `error` is "could not read", never "nothing plays")."""
+    async def _sessions_of(self, package: str) -> list[dict[str, Any]] | None:
+        """The media sessions of ``package`` as the phone reports them RIGHT NOW (`media_get`; the pushed cache is the fallback
+        when that read fails). [] — it has none. None: unknown (no daemon, unreadable session list): callers that would destroy
+        something on "no" must treat unknown as unknown, not as "no session" (the daemon's own contract: `active:false` +
+        `error` is "could not read", never "nothing plays")."""
         if not package or not self.is_connected:
             return None
         snapshot: dict[str, Any] | None = None
@@ -688,11 +697,15 @@ class DeviceDaemonClient:
             # `active:false` without an error is the daemon's promise that the phone has no media session at all.
             sessions = [snapshot] if snapshot.get("active") else []
         wanted = package.lower()
-        return any(
-            isinstance(s, dict) and str(s.get("package", "")).lower() == wanted
-            and (s.get("is_playing") is True or s.get("state") == "BUFFERING")
-            for s in sessions
-        )
+        return [s for s in sessions if isinstance(s, dict) and str(s.get("package", "")).lower() == wanted]
+
+    async def holds_media_session(self, package: str) -> bool | None:
+        """Does ``package`` hold a live media session — playing, buffering or PAUSED? A paused video is still a session: its page,
+        position and queue live in the app's process. None: unknown."""
+        sessions = await self._sessions_of(package)
+        if sessions is None:
+            return None
+        return any(s.get("is_playing") is True or s.get("state") in ("PLAYING", "BUFFERING", "PAUSED") for s in sessions)
 
     # =========================================================================
     # Fast RPC Command Dispatcher (< 1ms execution)
@@ -850,11 +863,12 @@ class DeviceDaemonClient:
         """
         if not self.is_connected:
             return False
-        clean_task = "".join(filter(str.isdigit, str(task_id)))
-        clean_disp = "".join(filter(str.isdigit, str(display_id)))
-        if not clean_task or not clean_disp:
-            return False
-        return await self._send_rpc(f"move_task {int(clean_task)} {int(clean_disp)}", "move_task")
+        # Integers only: "7;exec" must be refused, not filtered down to task 7 (the wrong task would move). Callers fall back to adb.
+        try:
+            task, display = int(task_id), int(display_id)
+        except (TypeError, ValueError):
+            raise ValueError(f"task and display ids must be integers, got {task_id!r} / {display_id!r}") from None
+        return await self._send_rpc(f"move_task {task} {display}", "move_task")
 
     async def restart_task_activity(self, task_id: int | str) -> bool:
         """Invokes ITaskOrganizerController.restartTaskTopActivityProcessIfVisible(token)
@@ -872,6 +886,30 @@ class DeviceDaemonClient:
         res = await self._send_rpc_full(f"restart_task_activity {int(clean_task)}", "restart_task_activity", timeout=2.5)
         log.info("🔄 [OpenDexDaemon:RESTART_TASK_ACTIVITY] taskId=%s -> %s", clean_task, res)
         return bool(res and res.get("ok", False))
+
+    async def reorder_task(self, task_id: int | str, *, front: bool) -> bool:
+        """Raises (`front`) or lowers a task within its display by id, with no activity start — one WindowContainerTransaction.
+        Lowering parks a task just moved onto the phone screen UNDER whatever the user is using there; raising works for a
+        task whose top activity `am start -n` cannot name (not exported: SecurityException for the shell uid). False while
+        disconnected, with an older jar (no ``task_reorder``) or when the task is gone."""
+        clean_task = "".join(filter(str.isdigit, str(task_id)))
+        if not clean_task or not self.supports("task_reorder"):
+            return False
+        res = await self._send_rpc_full(f"task_reorder {int(clean_task)} {'front' if front else 'back'}", "task_reorder", timeout=2.5)
+        return bool(res and res.get("ok", False))
+
+    async def park_task(self, task_id: int | str, display_id: int | str = 0) -> dict[str, Any] | None:
+        """Moves a task onto a display AND lowers it in one daemon call, so it never shows there (the close of a window parks
+        the app on the phone: a separate lowering from the PC left the closed window's frame on the phone for ~220 ms). The
+        reply: ``ok`` (the move was accepted) and ``lowered`` (the task is below the phone's other tasks). None: the jar has no
+        `park_task`, the daemon is disconnected or the ids are not numbers — the caller falls back to move + `reorder_task`."""
+        clean_task = "".join(filter(str.isdigit, str(task_id)))
+        clean_disp = "".join(filter(str.isdigit, str(display_id)))
+        if not clean_task or not clean_disp or not self.supports("park_task"):
+            return None
+        res = await self._send_rpc_full(f"park_task {int(clean_task)} {int(clean_disp)}", "park_task", timeout=3.5)
+        log.info("📥 [OpenDexDaemon:PARK_TASK] taskId=%s -> display=%s: %s", clean_task, clean_disp, res)
+        return res
 
     async def get_task_geometry(self, task_id: int | str) -> dict[str, Any] | None:
         """Queries in-memory TaskInfo bounds directly from ActivityTaskManager via Binder IPC.
@@ -1244,6 +1282,15 @@ class DeviceDaemonClient:
         if not str(task_id).strip().isdigit():
             return None
         return await self._read("task_info", f"task_info {int(task_id)}", timeout=2.0)
+
+    async def assist_content(self, task_id: int | str) -> dict[str, Any] | None:
+        """What the app of `task_id` says it is showing (its AssistContent, the call a system assistant makes): ``{web_uri,
+        structured, intent}`` — YouTube answers the watch URL and ``{"@videoId", "@videoTimeStamp", "@isPlayerMinimized" …}``.
+        Read over Binder inside the daemon (AssistReader.java): no UI is touched. None when the daemon (an older jar) or the
+        app does not answer."""
+        if not str(task_id).strip().isdigit():
+            return None
+        return await self._read("assist_content", f"assist_content {int(task_id)}", timeout=3.0)
 
     async def top_activities(self) -> list[dict[str, Any]] | None:
         """[{task, display, visible, top: "pkg/.Activity"}] of every root task."""

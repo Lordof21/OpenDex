@@ -115,7 +115,8 @@ async def test_binary_mode_is_requested_with_b():
     assert seen[0]["mode"] == "b" and outcome.stdout == b"\x00\xff"
 
 
-@pytest.mark.parametrize("command", ["", "x" * (64 * 1024 + 1), "lone \ud800 surrogate"])
+@pytest.mark.parametrize(   # ids: a 64 KB value in the test id overflows the 32767-char PYTEST_CURRENT_TEST variable on Windows
+    "command", ["", "x" * (64 * 1024 + 1), "lone \ud800 surrogate"], ids=["empty", "over-the-size-limit", "lone-surrogate"])
 async def test_a_command_that_cannot_be_carried_is_left_to_adb(command):
     client = make_client(lambda body: result(b"never"))
     assert await client.run_shell(command, timeout_s=2) is None

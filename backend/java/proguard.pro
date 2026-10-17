@@ -38,6 +38,9 @@
 -keep class com.opendex.tools.EventLogReader { *; }
 -keep class com.opendex.tools.LoadProbe { *; }
 -keep class com.opendex.tools.Battery { *; }
+# AssistReader$Receiver is a real IAssistDataReceiver.Stub (a Binder the system server calls back): its overrides must keep their names.
+-keep class com.opendex.tools.AssistReader { *; }
+-keep class com.opendex.tools.AssistReader$Receiver { *; }
 -keep class com.opendex.tools.BinderDump { *; }
 
 # Keep enum methods and serialization

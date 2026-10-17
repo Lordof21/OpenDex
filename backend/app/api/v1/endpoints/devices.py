@@ -8,6 +8,7 @@ import time
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Path
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app.api.deps import ActiveSerialDep, AppContextDep, RequireDevice
@@ -96,12 +97,16 @@ async def switch_device_tcpip(ctx: AppContextDep, port: int = 5555):
     """USB -> Wi-Fi (`adb tcpip`) with the open windows. `ok` only once the wireless link is VERIFIED and the session
     moved onto it; otherwise 502 and the session stays on USB (see AppContext.switch_to_tcpip)."""
     if ctx.serial is None:
-        raise HTTPException(status_code=409, detail="Bağlı cihaz yok.")
+        return JSONResponse({"detail": "Bağlı cihaz yok.", "code": "no_device"}, status_code=409)
     try:
         serial = await ctx.switch_to_tcpip(port)
     except Exception as exc:
         log.warning("[ADB Wireless] TCP/IP switch failed: %s", exc)
-        raise HTTPException(status_code=502, detail=str(exc) or "Kablosuz geçiş başarısız — USB kablosunu çıkarmayın.") from exc
+        # `code` is what the UI translates; `detail` stays a Turkish fallback for API clients.
+        return JSONResponse(
+            {"detail": str(exc) or "Kablosuz geçiş başarısız — USB kablosunu çıkarmayın.", "code": getattr(exc, "code", "failed")},
+            status_code=502,
+        )
     ip, _, port_str = serial.rpartition(":")
     return {
         "ok": True, "ip": ip, "port": int(port_str), "serial": serial,

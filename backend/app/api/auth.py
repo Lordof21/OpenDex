@@ -117,6 +117,21 @@ def _presented_token(scope: Scope, headers: Headers) -> str | None:
     return None
 
 
+def describe_client(scope: Scope) -> str:
+    """Who knocked, for the rejection log: the page's Origin / Referer (which UI instance — dev server, built page, another
+    port) and the program (User-Agent), plus the peer's port (`netstat -ano` maps it to a process). Headers only — the
+    presented token is never read into the log."""
+    headers = Headers(scope=scope)
+    client = scope.get("client")
+    parts = [f"origin={headers.get('origin') or '-'}"]
+    if referer := headers.get("referer"):
+        parts.append(f"referer={referer[:80]}")
+    parts.append(f"ua={(headers.get('user-agent') or '-')[:90]}")
+    if client:
+        parts.append(f"peer={client[0]}:{client[1]}")
+    return " ".join(parts)
+
+
 class ApiAuthMiddleware:
     def __init__(self, app: ASGIApp, *, token: str) -> None:
         if len(token) < MIN_TOKEN_LEN:
@@ -158,8 +173,8 @@ class ApiAuthMiddleware:
         if now - self._last_failure_log < 10.0:
             return
         log.warning(
-            "🔐 [Auth] %s %s anahtarsız/yanlış anahtarla reddedildi (%d istek)",
-            scope["type"], scope["path"], self._failures_since_log,
+            "🔐 [Auth] %s %s anahtarsız/yanlış anahtarla reddedildi (%d istek) — %s",
+            scope["type"], scope["path"], self._failures_since_log, describe_client(scope),
         )
         self._last_failure_log = now
         self._failures_since_log = 0

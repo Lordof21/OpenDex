@@ -16,6 +16,11 @@ from app.input.touch_control import (
     inject_drag,
     inject_long_press,
     inject_touch,
+    HOVER_BURST,
+    HOVER_MAX_HZ,
+    HoverGate,
+    inject_hover,
+    serialize_hover,
     serialize_touch,
 )
 
@@ -236,6 +241,17 @@ class TestTouchTracker:
         _, action0, pid0, x0, y0, *_ = _unpack(p0)
         assert action0 == TouchAction.UP and (x0, y0) == (10, 20) and pid0 == 0xFFFFFFFFFFFFFFFE
 
+    async def test_release_secondary_leaves_keyboard_mapper_fingers_alone(self):
+        # Pointers 2+ are the keyboard mapper's joystick / tap keys: a mouse press (pointer 0) must not lift them.
+        control = _Capture()
+        tracker = TouchTracker()
+        tracker.note(control, TouchAction.DOWN, 10, 20, pointer_id=2)
+        tracker.note(control, TouchAction.DOWN, 30, 40, pointer_id=3)
+        assert not tracker.has_secondary_pointers()
+        assert await tracker.release_secondary(control, 1280, 720) is False
+        assert control.sent == []
+        assert tracker.pressed
+
     async def test_release_secondary_lifts_only_secondary_pointers(self):
         control = _Capture()
         tracker = TouchTracker()
@@ -252,3 +268,43 @@ class TestTouchTracker:
         _, action1, pid1, x1, y1, *_ = _unpack(p1)
         assert action1 == TouchAction.UP and (x1, y1) == (50, 60) and pid1 == 0xFFFFFFFFFFFFFFFD
 
+
+
+class TestHover:
+    def test_wire_format_is_a_mouse_hover_move_with_no_pressure_or_buttons(self):
+        data = serialize_hover(100, 200, 1280, 720)
+        assert len(data) == 32
+        assert _unpack(data) == (2, TouchAction.HOVER_MOVE, 0xFFFFFFFFFFFFFFFF, 100, 200, 1280, 720, 0, 0, 0)
+
+    def test_a_position_past_the_edge_is_clamped_onto_it(self):
+        assert _unpack(serialize_hover(5000, -3, 1280, 720))[3:5] == (1280, 0)
+
+    async def test_inject_hover_sends_one_message(self):
+        control = _Capture()
+        await inject_hover(control, 1, 2, 1280, 720)
+        assert len(control.sent) == 1 and _unpack(control.sent[0])[1] == TouchAction.HOVER_MOVE
+
+    def test_the_gate_lets_the_burst_through_then_holds_the_rate(self):
+        now = [0.0]
+        gate = HoverGate(clock=lambda: now[0])
+        assert [gate.allow() for _ in range(HOVER_BURST + 3)] == [True] * HOVER_BURST + [False] * 3
+        now[0] += 1.0 / HOVER_MAX_HZ                      # one token has refilled
+        assert gate.allow() is True and gate.allow() is False
+
+    def test_the_average_never_passes_the_ceiling(self):
+        now = [0.0]
+        gate = HoverGate(clock=lambda: now[0])
+        passed = 0
+        for _ in range(3000):                              # a client hammering at 1000 Hz for 3 s
+            now[0] += 0.001
+            passed += gate.allow()
+        assert passed <= 3 * HOVER_MAX_HZ + HOVER_BURST
+
+    def test_a_client_at_exactly_the_ceiling_with_jitter_is_not_throttled(self):
+        now = [0.0]
+        gate = HoverGate(clock=lambda: now[0])
+        results = []
+        for i in range(240):
+            now[0] += (1.0 / HOVER_MAX_HZ) * (0.7 if i % 2 else 1.3)   # alternating short / long gaps, 120 Hz on average
+            results.append(gate.allow())
+        assert all(results)

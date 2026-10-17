@@ -8,19 +8,32 @@ Wire format (scrcpy v3.x INJECT_TOUCH_EVENT, 32 bytes):
     u8  type(=2)  u8 action  u64 pointerId
     i32 x  i32 y  u16 screenW  u16 screenH
     u16 pressure  i32 actionButton  i32 buttons
+
+Hover (the pointer over the screen with no finger down) is the same message with action HOVER_MOVE and the mouse pointer id:
+the scrcpy server (v3.3.1 and v4.x alike) turns exactly that pair into a SOURCE_MOUSE / TOOL_TYPE_MOUSE hover event.
 """
 from __future__ import annotations
 
 import asyncio
 import struct
+import time
+from collections.abc import Callable
 from enum import IntEnum
 from typing import Protocol
 
 _TYPE_INJECT_TOUCH_EVENT = 2
 _TYPE_INJECT_SCROLL_EVENT = 3
+_POINTER_ID_MOUSE = 0xFFFFFFFFFFFFFFFF
 _POINTER_ID_VIRTUAL_FINGER = 0xFFFFFFFFFFFFFFFE
 _POINTER_ID_SECONDARY_FINGER = 0xFFFFFFFFFFFFFFFD
 _PRESSURE_FULL = 0xFFFF
+
+# The most hover positions one connection may deliver per second. The UI already sends at the window's own frame rate
+# (60 at most today); this is the ceiling that holds whatever a client does.
+HOVER_MAX_HZ = 120
+# A few positions may arrive back to back (timer jitter on the client, a packet that was held up): a bucket this deep absorbs
+# that without ever letting the average pass HOVER_MAX_HZ.
+HOVER_BURST = 4
 
 # Android's own gesture detector recognizes long-press by DURATION — there is no
 # special "long press" message type.
@@ -50,10 +63,22 @@ class TouchAction(IntEnum):
     DOWN = 0  # AMOTION_EVENT_ACTION_DOWN
     UP = 1    # AMOTION_EVENT_ACTION_UP
     MOVE = 2  # AMOTION_EVENT_ACTION_MOVE
+    HOVER_MOVE = 7  # AMOTION_EVENT_ACTION_HOVER_MOVE — only meaningful for the mouse pointer (see serialize_hover)
 
 
 class ControlWriter(Protocol):
     async def send(self, payload: bytes) -> None: ...
+
+
+def _pack_touch(action: int, pointer_id: int, x: int, y: int, screen_w: int, screen_h: int, pressure: int) -> bytes:
+    # action_button/buttons are for MOUSE click semantics (ACTION_BUTTON_PRESS/
+    # RELEASE) and MUST stay 0 for a touchscreen finger (POINTER_ID_GENERIC_
+    # FINGER): scrcpy's own client always zeroes them for simulated touch.
+    # Sending BUTTON_PRIMARY here builds a MotionEvent whose button state is
+    # inconsistent with SOURCE_TOUCHSCREEN — some views/gesture detectors then
+    # silently swallow the event (matches the "screen renders, zero input
+    # reacts" symptom exactly). A hover has no button either.
+    return struct.pack("!BBQiiHHHii", _TYPE_INJECT_TOUCH_EVENT, action, pointer_id, x, y, screen_w, screen_h, pressure, 0, 0)
 
 
 def serialize_touch(
@@ -68,27 +93,38 @@ def serialize_touch(
 ) -> bytes:
     if not (0 <= x <= screen_w and 0 <= y <= screen_h):
         raise ValueError(f"({x},{y}) outside screen {screen_w}x{screen_h}")
-    # action_button/buttons are for MOUSE click semantics (ACTION_BUTTON_PRESS/
-    # RELEASE) and MUST stay 0 for a touchscreen finger (POINTER_ID_GENERIC_
-    # FINGER): scrcpy's own client always zeroes them for simulated touch.
-    # Sending BUTTON_PRIMARY here builds a MotionEvent whose button state is
-    # inconsistent with SOURCE_TOUCHSCREEN — some views/gesture detectors then
-    # silently swallow the event (matches the "screen renders, zero input
-    # reacts" symptom exactly).
-    resolved_pointer_id = resolve_pointer_id(pointer_id)
-    return struct.pack(
-        "!BBQiiHHHii",
-        _TYPE_INJECT_TOUCH_EVENT,
-        action,
-        resolved_pointer_id,
-        x,
-        y,
-        screen_w,
-        screen_h,
-        pressure if action != TouchAction.UP else 0,
-        0,
-        0,
+    return _pack_touch(
+        action, resolve_pointer_id(pointer_id), x, y, screen_w, screen_h, pressure if action != TouchAction.UP else 0,
     )
+
+
+def serialize_hover(x: int, y: int, screen_w: int, screen_h: int) -> bytes:
+    """The mouse pointer resting over (x, y) with no button and no finger down. A position past the edge is pulled onto it: a
+    pointer at the border of the window is a normal place for it to be, not an error."""
+    return _pack_touch(
+        TouchAction.HOVER_MOVE, _POINTER_ID_MOUSE, max(0, min(x, screen_w)), max(0, min(y, screen_h)), screen_w, screen_h, 0,
+    )
+
+
+class HoverGate:
+    """Lets at most HOVER_MAX_HZ hover positions per second through one connection (a token bucket HOVER_BURST deep); the rest
+    are dropped, never queued — a hover that is late is worth nothing, the next position replaces it."""
+
+    __slots__ = ("_clock", "_tokens", "_stamp")
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock
+        self._tokens = float(HOVER_BURST)
+        self._stamp = clock()
+
+    def allow(self) -> bool:
+        now = self._clock()
+        self._tokens = min(float(HOVER_BURST), self._tokens + (now - self._stamp) * HOVER_MAX_HZ)
+        self._stamp = now
+        if self._tokens < 1.0:
+            return False
+        self._tokens -= 1.0
+        return True
 
 
 def _float_to_i16fp(value: float) -> int:
@@ -134,6 +170,10 @@ async def inject_touch(
     pointer_id: int | None = None,
 ) -> None:
     await control.send(serialize_touch(action, x, y, screen_w, screen_h, pointer_id=pointer_id))
+
+
+async def inject_hover(control: ControlWriter, x: int, y: int, screen_w: int, screen_h: int) -> None:
+    await control.send(serialize_hover(x, y, screen_w, screen_h))
 
 
 class TouchTracker:
@@ -209,14 +249,17 @@ class TouchTracker:
         return sent_any
 
     def has_secondary_pointers(self) -> bool:
-        """True if any secondary pointer (pid != _POINTER_ID_VIRTUAL_FINGER) is still held."""
-        return any(pid != _POINTER_ID_VIRTUAL_FINGER for pid in self._pointers)
+        """True if the second finger of a two-finger gesture (pointer 1: pinch / wheel scroll) is still held.
+
+        Only that finger is meant: the keyboard mapper holds its own fingers (joystick, tap keys: pointers 2 and up) for as long
+        as a key is down, and a mouse press must not lift them."""
+        return _POINTER_ID_SECONDARY_FINGER in self._pointers
 
     async def release_secondary(self, control: ControlWriter | None, screen_w: int, screen_h: int) -> bool:
-        """Lift any secondary fingers that are still held down."""
+        """Lift the second finger if it is still held down."""
         if control is None or self._control is not control:
             return False
-        secondary = [(pid, pos) for pid, pos in list(self._pointers.items()) if pid != _POINTER_ID_VIRTUAL_FINGER]
+        secondary = [(pid, pos) for pid, pos in list(self._pointers.items()) if pid == _POINTER_ID_SECONDARY_FINGER]
         if not secondary:
             return False
         sent_any = False

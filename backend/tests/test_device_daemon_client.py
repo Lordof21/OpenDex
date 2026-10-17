@@ -128,6 +128,25 @@ async def test_move_task_wct_writes_command_and_resolves_status():
 
 
 @pytest.mark.asyncio
+async def test_reorder_task_writes_command_and_resolves_status():
+    client = _connected_client()
+    client.daemon_capabilities = {"task_reorder"}
+    task = asyncio.create_task(client.reorder_task("task-205", front=True))
+    await asyncio.sleep(0)
+    assert bytes(client._writer.written) == b"#1 task_reorder 205 front\n"
+    await client._dispatch_event({"type": "task_reorder_result", "ok": True, "task_id": 205, "front": True, "req_id": "1"})
+    assert await task is True
+
+
+@pytest.mark.asyncio
+async def test_reorder_task_is_false_without_the_capability_and_sends_nothing():
+    client = _connected_client()
+    client.daemon_capabilities = {"move_task_wct"}      # an older jar
+    assert await client.reorder_task(205, front=False) is False
+    assert bytes(client._writer.written) == b""
+
+
+@pytest.mark.asyncio
 async def test_dispatch_event_drops_response_with_unknown_req_id_without_raising():
     client = _connected_client()
     # No RPC in flight — a response referencing a req_id we never registered

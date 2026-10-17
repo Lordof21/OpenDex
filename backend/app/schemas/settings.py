@@ -48,10 +48,11 @@ class ProjectSettings(BaseModel):
     # dönüş) uygulama arayüzünü yeni yoğunlukta yeniden kurmaya zorlanır — YouTube gibi arayüzünü doğum yoğunluğunda
     # dondurabilen uygulamalar için. Kapatılırsa hiçbir şey yenilenmez/öldürülmez (bkz. windows/density_reconciler.py).
     density_refresh_enabled: bool = True
-    # Yenileme yöntemi. Kapalı (varsayılan, nazik): etkinlikler AYNI süreçte yeniden kurulur (`am update-appinfo`; süreç,
-    # arka plan servisleri ve bellekteki durum korunur) ve sistem olay günlüğünde kanıtlanır; kanıtlanamazsa süreç
-    # yeniden başlatılır. Açık: doğrudan süreç yeniden başlatılır — etkinlik yeniden kurma yetmeyen (yoğunluğu süreç
-    # düzeyinde tutan) bir uygulama için.
+    # Yenileme yöntemi. Kapalı (varsayılan): uygulama yoğunluk değişiminden sonra kendini yeniden kurduğunu (ya da Android'in
+    # onu yeniden kurduğunu) sistem olay günlüğünde kanıtlıyorsa ek bir şey yapılmaz; kanıtlayamayan uygulamanın süreci durum
+    # korunarak yeniden başlatılır. Açık: kanıt aranmaz, süreç her seferinde yeniden başlatılır — kendini yeniden kurup yine de
+    # yoğunluğu süreç düzeyinde tutan bir uygulama için. Medya oturumu olan (oynayan ya da duraklatılmış) uygulamanın süreci
+    # hiçbir durumda otomatik öldürülmez.
     density_refresh_hard: bool = False
     # PC'den "Telefona Aktar": yoğunluk değişimi telefonda değil, PC penceresinin perdesi arkasında sanal ekranda yaşanır
     # (ön-iniş: sanal ekran telefonun yoğunluğuna çekilir, uygulama orada uzlaştırılır, görev ondan sonra taşınır). Kapalı
@@ -68,6 +69,9 @@ class ProjectSettings(BaseModel):
     # Kapatmak SADECE bu listeyi etkiler — telefon tarafındaki Kablosuz Hata
     # Ayıklama güvenini SİLMEZ (paylaşılan bilgisayar senaryosu).
     remember_devices: bool = True
+    # Telefonun USB işlevini "veri yok"ta tutar. Kablo takılı değilken bile ekran kilidi aç/kapa USB işlevini değiştirir, bu da
+    # adbd'yi yeniden başlatır ve daemon + ekran akışlarını öldürür (bkz. device/usb_stability.py). Kapalıysa telefona dokunulmaz.
+    usb_stability_guard: bool = True
     # Uygulamayı telefona aktarırken görevin pencereleme kipi. "fullscreen" (varsayılan, önerilen):
     # telefonun ekranını tamamen kaplar. "freeform" (deneysel): ekranın ~%80'inde ortalı serbest pencere; üretici
     # freeform ölçeği telefonda da uygulanabildiğinden görev küçük görünebilir.

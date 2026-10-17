@@ -209,7 +209,7 @@ def test_every_message_type_the_socket_serves_is_declared():
     """The UI contract (frontend/tests/fixtures/backend-input-contract.json) is generated from this set."""
     from app.api.websockets import INPUT_MESSAGE_TYPES
 
-    assert INPUT_MESSAGE_TYPES == {"down", "move", "up", "scroll", "clipboard", "release_all"}
+    assert INPUT_MESSAGE_TYPES == {"down", "move", "up", "scroll", "hover", "clipboard", "release_all"}
 
 
 def test_single_finger_down_auto_releases_stale_secondary_pointer():
@@ -225,3 +225,67 @@ def test_single_finger_down_auto_releases_stale_secondary_pointer():
 
     actions = [_unpack_touch(p)[1] for p in control.sent]
     assert actions == [0, 0, 1, 0, 1]
+
+
+# --- hover: the mouse pointer over the screen, no finger down -----------------------------------------------------------
+
+POINTER_ID_MOUSE = 0xFFFFFFFFFFFFFFFF
+HOVER_MOVE = 7
+
+
+def test_hover_is_a_mouse_hover_move_without_buttons():
+    control = _CaptureControl()
+    app = _make_app({"win-1": _FakeSession(control)})
+    client = TestClient(app)
+    with client.websocket_connect("/ws/input/win-1") as ws:
+        ws.send_json({"type": "hover", "x": 30, "y": 40})
+        ws.close()
+
+    assert len(control.sent) == 1
+    msg_type, action, pointer, x, y, w, h, pressure, action_button, buttons = _unpack_touch(control.sent[0])
+    assert (msg_type, action, pointer, x, y, w, h) == (2, HOVER_MOVE, POINTER_ID_MOUSE, 30, 40, 1280, 720)
+    assert (pressure, action_button, buttons) == (0, 0, 0)
+
+
+def test_hover_is_ignored_while_a_finger_is_down_and_resumes_after_it_lifts():
+    control = _CaptureControl()
+    app = _make_app({"win-1": _FakeSession(control)})
+    client = TestClient(app)
+    with client.websocket_connect("/ws/input/win-1") as ws:
+        ws.send_json({"type": "down", "x": 10, "y": 10})
+        ws.send_json({"type": "hover", "x": 11, "y": 11})     # the gesture owns the glass
+        ws.send_json({"type": "up", "x": 10, "y": 10})
+        ws.send_json({"type": "hover", "x": 12, "y": 12})
+        ws.close()
+
+    assert _actions(control) == [0, 1, HOVER_MOVE]
+
+
+def test_a_flood_of_hover_messages_is_cut_at_the_gate_not_queued():
+    from app.input.touch_control import HOVER_BURST
+
+    control = _CaptureControl()
+    app = _make_app({"win-1": _FakeSession(control)})
+    client = TestClient(app)
+    with client.websocket_connect("/ws/input/win-1") as ws:
+        for i in range(500):
+            ws.send_json({"type": "hover", "x": i % 100, "y": 5})
+        ws.close()
+
+    delivered = _actions(control).count(HOVER_MOVE)
+    # 500 messages arrive within a few milliseconds: the bucket's burst passes, the rest is dropped (plus what refills meanwhile)
+    assert HOVER_BURST <= delivered < 100
+
+
+def test_hover_past_the_edge_is_pulled_onto_it_and_a_malformed_one_is_dropped():
+    control = _CaptureControl()
+    app = _make_app({"win-1": _FakeSession(control, display_w=100, display_h=100)})
+    client = TestClient(app)
+    with client.websocket_connect("/ws/input/win-1") as ws:
+        ws.send_json({"type": "hover", "x": 9999, "y": -5})
+        ws.send_json({"type": "hover"})                          # no coordinates: dropped, the socket lives on
+        ws.send_json({"type": "hover", "x": 1, "y": 1})
+        ws.close()
+
+    points = [(_unpack_touch(p)[3], _unpack_touch(p)[4]) for p in control.sent]
+    assert points == [(100, 0), (1, 1)]

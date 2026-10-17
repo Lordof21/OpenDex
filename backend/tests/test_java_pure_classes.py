@@ -118,7 +118,7 @@ COMMANDS = ["echo hi", "echo 'a b'; ls | wc -l", "line1\nline2", "çay ☕ \t ta
 
 
 @pytest.mark.parametrize("binary", [False, True])
-@pytest.mark.parametrize("command", COMMANDS)
+@pytest.mark.parametrize("command", COMMANDS, ids=["plain", "pipe", "newline", "unicode-tab", "quoted-wifi", "64k"])   # short ids: the 64 KB value would overflow the 32767-char PYTEST_CURRENT_TEST variable on Windows
 def test_a_request_the_backend_builds_is_what_the_daemon_parses(classes, command, binary):
     line = shell_request(command, 4.5, binary)
     assert line is not None

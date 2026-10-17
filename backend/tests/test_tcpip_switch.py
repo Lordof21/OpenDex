@@ -115,6 +115,39 @@ async def test_unverified_wireless_link_is_an_error_and_the_windows_come_back_on
 
 
 @pytest.mark.asyncio
+async def test_unverified_error_carries_a_code_the_ui_translates():
+    ctx = _ctx(verified=False)
+    with pytest.raises(TransportSwitchError) as info:
+        await ctx.switch_to_tcpip(5555)
+    assert info.value.code == "unverified"
+    assert TransportSwitchError("x").code == "failed"
+
+
+@pytest.mark.asyncio
+async def test_endpoint_answers_errors_with_detail_and_code():
+    import json
+
+    from app.api.v1.endpoints.devices import switch_device_tcpip
+
+    def body(response):
+        return json.loads(response.body)
+
+    ctx = _ctx(verified=False)
+    response = await switch_device_tcpip(ctx, 5555)
+    assert response.status_code == 502
+    assert body(response)["code"] == "unverified" and "ÇIKARMAYIN" in body(response)["detail"]
+
+    ctx.serial = None
+    response = await switch_device_tcpip(ctx, 5555)
+    assert response.status_code == 409 and body(response)["code"] == "no_device"
+
+    ctx = _ctx(verified=True)
+    ctx.switch_to_tcpip = AsyncMock(side_effect=RuntimeError("adb: boom"))
+    response = await switch_device_tcpip(ctx, 5555)
+    assert response.status_code == 502 and body(response)["code"] == "failed"
+
+
+@pytest.mark.asyncio
 async def test_a_different_phone_on_the_candidate_ip_is_never_adopted():
     ctx = _ctx(other_phone=True)
     with pytest.raises(TransportSwitchError):

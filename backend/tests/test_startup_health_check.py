@@ -148,6 +148,23 @@ async def test_nothing_asks_the_phone_before_the_daemon_is_proven_healthy(monkey
     assert not PHONE_POLLERS & set(order[:checked])
 
 
+async def test_the_usb_fix_runs_before_the_daemon_exists(monkeypatch):
+    # A fix that restarts adbd kills nothing if it comes first.
+    ctx, order, _ = _context(monkeypatch, healthy=True)
+    monkeypatch.setattr(ctx, "_stabilize_usb", AsyncMock(side_effect=lambda serial: order.append("usb_fix")))
+
+    await ctx.bind_device(SERIAL)
+    assert order.index("usb_fix") < order.index("daemon_start")
+
+
+async def test_a_failing_usb_fix_does_not_abort_the_session(monkeypatch):
+    ctx, order, _ = _context(monkeypatch, healthy=True)
+    monkeypatch.setattr(ctx, "_stabilize_usb", AsyncMock(side_effect=RuntimeError("settings unreadable")))
+
+    await ctx.bind_device(SERIAL)
+    assert "daemon_start" in order and "health_check" in order
+
+
 async def test_the_boot_screen_sees_each_step_as_it_happens(monkeypatch):
     ctx, _, published = _context(monkeypatch, healthy=True)
 

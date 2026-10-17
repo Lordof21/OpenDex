@@ -158,10 +158,16 @@ public class OpenDexDaemon {
             // 1.2 — what the backend used to fork `dumpsys` / `logcat` / `ps` / app_process for
             "notification_events", "notifications_list", "notif_invoke", "thermal_events", "thermal_get", "event_log",
             "load_sample", "proc_scan", "find_task", "task_info", "top_activities", "power_get", "dump",
+            // what an app says it is showing (AssistContent): YouTube's video id + second, for putting it back after a move
+            "assist_content",
             // the phone panel's density/size over Binder (PhoneDisplay); DisplayEvents pushes display-0 changes
             "display_get",
             // set_task_windowing takes l,t,r,b: mode and placement in one transaction
-            "set_task_windowing_bounds"
+            "set_task_windowing_bounds",
+            // a task raised / lowered by id (no activity start: works for tasks whose top activity is not exported)
+            "task_reorder",
+            // a task moved onto a display and lowered in the same call (never shows there)
+            "park_task"
     );
 
     // =========================================================================
@@ -1732,6 +1738,73 @@ public class OpenDexDaemon {
         return Json.put(Json.put(res, "ok", moveOk), "tier", "atm_binder");
     }
 
+    /**
+     * Raises ({@code front}) or lowers a task within its display by id, in one WindowContainerTransaction. Lowering parks a
+     * task that was just moved onto the phone screen UNDER whatever the user is using there (it is stopped, the user's app
+     * is resumed again) and raising puts a background task on top without starting an activity — which `am start -n` cannot
+     * do for a task whose top activity is not exported (a shell uid is refused: SecurityException "not exported").
+     */
+    private static JSONObject reorderTask(int taskId, boolean front) {
+        JSONObject res = Json.obj("type", "task_reorder_result", "task_id", taskId, "front", front);
+        boolean ok = applyTaskTransaction(taskId, "reorderTask", (wct, token, wctClass, tokenClass) -> {
+            if (front) {
+                try {
+                    wctClass.getMethod("setFocusable", tokenClass, boolean.class).invoke(wct, token, true);
+                } catch (Throwable ignored) {}
+            }
+            wctClass.getMethod("reorder", tokenClass, boolean.class).invoke(wct, token, front);
+            return true;
+        });
+        Log.info("Daemon", "reorderTask: taskId=" + taskId + " front=" + front + " ok=" + ok);
+        return Json.put(res, "ok", ok);
+    }
+
+    /**
+     * Parks a task on another display (the phone's own screen) so that it never shows there: the move and the lowering are
+     * ONE daemon call. {@code moveRootTaskToDisplay} always puts the task on top of the target display (this is the only
+     * move this device accepts: the token lookup of the atomic WCT reparent finds no display-area token), so a close that
+     * moved the task and lowered it with a second round trip from the PC left the closed window's frame on the phone for
+     * ~220 ms (field report 2026-10-17). Here the lowering follows the move inside the process, a few milliseconds later and
+     * in one transaction with the density reset and the fullscreen mode — before the activity has drawn there.
+     */
+    private static JSONObject parkTask(int taskId, int displayId) {
+        JSONObject res = Json.obj("type", "park_task_result", "task_id", taskId, "display_id", displayId);
+        if (taskId <= 0) {
+            return Json.put(Json.put(res, "ok", false), "error", "bad_args");
+        }
+        Object atm = Binders.activityTaskManager();
+        if (atm == null) {
+            return Json.put(Json.put(res, "ok", false), "error", "atm_null");
+        }
+        boolean moved = invokeVoid(atm, "moveRootTaskToDisplay", new Class[]{int.class, int.class}, taskId, displayId);
+        if (!moved) {
+            moved = execCommandOk("am display move-stack " + taskId + " " + displayId);
+        }
+        if (!moved) {
+            return Json.put(Json.put(res, "ok", false), "error", "move_refused");
+        }
+        WctStep lower = (wct, token, wctClass, tokenClass) -> {
+            try {
+                wctClass.getMethod("setWindowingMode", tokenClass, int.class).invoke(wct, token, 1);
+            } catch (Throwable ignored) {}
+            try {
+                wctClass.getMethod("setDensityDpi", tokenClass, int.class).invoke(wct, token, 0);
+            } catch (Throwable ignored) {}
+            wctClass.getMethod("reorder", tokenClass, boolean.class).invoke(wct, token, false);
+            return true;
+        };
+        boolean lowered = applyTaskTransaction(taskId, "parkTask", lower);
+        if (!lowered) {
+            // the move may not have landed in the stack yet: once more
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException ignored) {}
+            lowered = applyTaskTransaction(taskId, "parkTask", lower);
+        }
+        Log.info("Daemon", "parkTask: taskId=" + taskId + " -> display=" + displayId + " lowered=" + lowered);
+        return Json.put(Json.put(res, "ok", true), "lowered", lowered);
+    }
+
     private static boolean setTaskDensity(int taskId, int density) {
         boolean ok = applyTaskTransaction(taskId, "setTaskDensity", (wct, token, wctClass, tokenClass) -> {
             boolean applied = false;
@@ -2214,6 +2287,25 @@ public class OpenDexDaemon {
                     boolean clearBounds = place == null && "true".equalsIgnoreCase(boundsArg);
                     return moveTaskWct(taskId, displayId, mode, clearBounds, place);
                 }
+                case "park_task": {
+                    int taskId = -1;
+                    int displayId = 0;
+                    try {
+                        if (parts.length > 1) taskId = Integer.parseInt(parts[1]);
+                        if (parts.length > 2) displayId = Integer.parseInt(parts[2]);
+                    } catch (Throwable ignored) {}
+                    return parkTask(taskId, displayId);
+                }
+                case "task_reorder": {
+                    int taskId = -1;
+                    try {
+                        if (parts.length > 1) taskId = Integer.parseInt(parts[1]);
+                    } catch (Throwable ignored) {}
+                    if (taskId <= 0 || parts.length < 3) {
+                        return res.put("type", "task_reorder_result").put("ok", false).put("error", "bad_args");
+                    }
+                    return reorderTask(taskId, "front".equals(parts[2]));
+                }
                 case "move_task_to_display":
                 case "move_task": {
                     int taskId = -1;
@@ -2287,6 +2379,7 @@ public class OpenDexDaemon {
                     return findTaskJson(pkg, display);
                 }
                 case "task_info": return taskInfoJson(parts.length > 1 ? Integer.parseInt(parts[1]) : -1);
+                case "assist_content": return AssistReader.read(parts.length > 1 ? Integer.parseInt(parts[1]) : -1);
                 case "power_get": return powerStateJson();
                 case "top_activities": return topActivitiesJson();
                 case "dump": return dumpJson(parts);

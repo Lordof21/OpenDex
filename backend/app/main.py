@@ -48,6 +48,7 @@ from .schemas import AudioRoute, DeviceInfo, DeviceState, KnownDevice, ThermalLe
 from .startup_state import StartupState
 from .storage import settings_db
 from .device.phone_awake import PhoneAwakeLease
+from .device.usb_stability import UsbStabilityGuard
 from .streams.app_audio import AppAudioRouter
 from .device.battery_health import BatteryHealthService
 from .streams.app_audio_link import AppAudioLink
@@ -81,7 +82,14 @@ def _log_startup(**s) -> None:
 
 
 class TransportSwitchError(RuntimeError):
-    """The USB -> Wi-Fi switch could not prove a wireless link; the session stays on USB."""
+    """The USB -> Wi-Fi switch could not prove a wireless link; the session stays on USB.
+
+    `code` is the machine-readable reason the UI translates (the message is only a Turkish fallback):
+    `no_device` (nothing bound), `unverified` (no candidate address became THIS phone), `failed` (anything else)."""
+
+    def __init__(self, message: str = "", code: str = "failed") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class AppContext:
@@ -159,6 +167,8 @@ class AppContext:
         )
         self.notifications.set_window_manager(self.window_manager)
         self.daemon_client = DeviceDaemonClient(self.adb, self.event_bus, token=daemon_token)
+        self.usb_stability = UsbStabilityGuard(self.adb)
+        self.daemon_client.before_spawn = self._stabilize_usb
         # Every shell command the backend runs on the phone goes to the daemon first and to adb only when the daemon
         # cannot take it (device/adb.py). The daemon client is the transport; adb stays the fallback and the lifecycle.
         if settings.DAEMON_SHELL:
@@ -591,7 +601,7 @@ class AppContext:
            and the Android hotspot default (the PC on the phone's hotspot)."""
         usb = self.serial
         if usb is None:
-            raise TransportSwitchError("Bağlı cihaz yok.")
+            raise TransportSwitchError("Bağlı cihaz yok.", code="no_device")
         if ":" in usb:
             return usb  # already wireless
         ips = await self.device_manager.get_device_wifi_ips(usb, attempts=3)
@@ -613,7 +623,8 @@ class AppContext:
             if not wireless:
                 raise TransportSwitchError(
                     "Kablosuz bağlantı doğrulanamadı — USB kablosunu ÇIKARMAYIN. Telefon ile bilgisayarın aynı ağda "
-                    "olduğundan ve güvenlik duvarının 5555 portunu engellemediğinden emin olun."
+                    "olduğundan ve güvenlik duvarının 5555 portunu engellemediğinden emin olun.",
+                    code="unverified",
                 )
             await self.switch_transport(wireless)
             return wireless
@@ -753,12 +764,20 @@ class AppContext:
         with contextlib.suppress(Exception):
             await self.daemon_client.start(serial)
 
+    async def _stabilize_usb(self, serial: str) -> bool:
+        """Screen lock/unlock must not restart adbd (see device/usb_stability.py). True when the phone's setting changed."""
+        if not (await settings_db.get_project_settings()).usb_stability_guard:
+            return False
+        return await self.usb_stability.ensure(serial)
+
     async def _bring_up_daemon(self, serial: str) -> None:
         """Jar + daemon, then its health check (HEALTH_CHECK_ATTEMPTS tries × HEALTH_CHECK_INTERVAL_S, like a Docker
         healthcheck on a database). Healthy: everything that starts after this talks to the phone through the daemon.
         Unhealthy: the session still comes up — through adb — and the daemon client keeps reconnecting in the background;
         every subsystem moves over once it greets us (device_daemon_connected)."""
         await self.startup.update(daemon="checking", daemon_attempt=0, daemon_attempts=HEALTH_CHECK_ATTEMPTS)
+        # Before the daemon exists: a phone-side fix that restarts adbd then kills nothing.
+        await self._optional("USB kararlılığı", self._stabilize_usb(serial))
         await self._ensure_tools_jar_and_daemon(serial)
         rtt = await self.daemon_client.health_check(
             serial, on_attempt=lambda attempt: self.startup.update(daemon_attempt=attempt),

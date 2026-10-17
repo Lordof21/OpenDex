@@ -23,6 +23,7 @@ ADB_ONLY_ENTRY_POINTS = {
     "shell_direct": {
         "device/device_daemon_client.py": "the daemon's own lifecycle: pgrep / pkill / spawn — it is not there yet, or it is what is being killed",
         "main.py": "pkill of a stale daemon after a jar update — the daemon would be killing its own shell",
+        "device/usb_stability.py": "runs before the daemon exists and restarts adbd (`svc usb …`), which kills the daemon — a command through it would die with the reply",
         "telemetry/hub.py": "the fallback round-trip probe, which must time adb itself (not the daemon) when the daemon cannot be pinged",
     },
     "spawn_shell": {

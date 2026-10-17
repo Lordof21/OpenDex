@@ -24,7 +24,7 @@ ws_router = APIRouter()
 _TOUCH_ACTION_TYPES = {"down", "move", "up"}
 # Every message type /ws/input understands. Pinned in frontend/tests/fixtures/backend-input-contract.json so the UI
 # cannot send a type this list does not have (the way the D-pad's `kind: "dpad"` was silently refused for months).
-INPUT_MESSAGE_TYPES = frozenset({*_TOUCH_ACTION_TYPES, "scroll", "clipboard", "release_all"})
+INPUT_MESSAGE_TYPES = frozenset({*_TOUCH_ACTION_TYPES, "scroll", "hover", "clipboard", "release_all"})
 ws_log_limiter = BackoffLogLimiter(intervals=(1.0, 2.0, 4.0, 8.0), max_interval=8.0)
 
 
@@ -146,6 +146,7 @@ async def ws_input(ws: WebSocket, window_id: str) -> None:
     log.info("🖱️ [InputWS:CONNECT] Frontend dokunma/fare soketi bağlandı -> /ws/input/%s", window_id)
     window_manager = ws.app.state.ctx.window_manager
     finger = touch_control.TouchTracker()
+    hover_gate = touch_control.HoverGate()
     try:
         while True:
             msg = await ws.receive_json()
@@ -161,6 +162,11 @@ async def ws_input(ws: WebSocket, window_id: str) -> None:
                 if kind == "release_all":
                     # The page lost focus / was hidden / is closing: lift whatever this connection still holds down.
                     await finger.release(session.control, w, h)
+                elif kind == "hover":
+                    # The mouse pointer over the screen. A finger that is down owns the glass (a hover from another device in
+                    # the middle of its gesture would break it), and the gate drops whatever outruns HOVER_MAX_HZ.
+                    if not finger.pressed and hover_gate.allow():
+                        await touch_control.inject_hover(session.control, int(msg["x"]), int(msg["y"]), w, h)
                 elif kind in _TOUCH_ACTION_TYPES or kind == "scroll":
                     x = int(msg["x"])
                     y = int(msg["y"])

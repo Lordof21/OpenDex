@@ -195,3 +195,18 @@ def test_an_uncaught_adb_error_is_a_503_with_a_readable_sentence(client, stderr,
     r = client.get("/api/apps")
     assert r.status_code == 503
     assert r.json()["code"] == "adb_error" and expected in r.json()["detail"]
+
+
+# ------------------------------------------------------------------------------------- who knocked (rejection log)
+def test_the_rejection_log_names_the_page_and_the_program_but_never_the_token(anon, caplog):
+    secret = "not-the-token-but-looks-like-one-" + "x" * 20
+    with caplog.at_level("WARNING", logger="app.api.auth"):
+        res = anon.get(
+            "/api/notifications",
+            headers={"Origin": "http://localhost:5173", "Referer": "http://localhost:5173/dashboard", "User-Agent": "Mozilla/5.0 Chrome/131", "Authorization": f"Bearer {secret}"},
+        )
+    assert res.status_code == 401
+    line = next(r.getMessage() for r in caplog.records if "reddedildi" in r.getMessage())
+    assert "origin=http://localhost:5173" in line and "referer=http://localhost:5173/dashboard" in line
+    assert "ua=Mozilla/5.0 Chrome/131" in line and "peer=" in line
+    assert secret not in line
