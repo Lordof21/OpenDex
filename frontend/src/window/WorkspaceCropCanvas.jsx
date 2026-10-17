@@ -15,7 +15,7 @@ export default function WorkspaceCropCanvas({ win }) {
   const closeWindow = useWindowStore((s) => s.closeWindow);
   const setLocalGeometry = useWindowStore((s) => s.setLocalGeometry);
   const settings = useLiveSettings();
-  const onRequestClose = useCallback(() => closeWindow(win.id), [closeWindow, win.id]);
+  const onRequestClose = useCallback(() => closeWindow(win.id, 'crop'), [closeWindow, win.id]);
 
   // Kaplanmış / yapışık / tam ekran pencerenin kutusunu kip belirler; yalnız serbest pencere görevin kutusuna uyar.
   const onAdopt = useCallback((bounds, scale) => {

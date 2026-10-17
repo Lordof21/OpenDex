@@ -11,7 +11,9 @@ import {
   FRAME_CHROME_H_PX,
   TASKBAR_H,
   TITLEBAR_H_PX,
+  AUTO_DENSITY_DEFAULT,
   clampDragY,
+  normalizeAutoDensity,
   targetDisplaySizeForMode,
 } from './windowMath.js';
 import { isMirrorPackage } from './mirrorPackage.js';
@@ -57,15 +59,22 @@ export function canvasBoxFor(box, mode, headerHidden) {
 }
 
 // ───────────────────────────────────────────────────────────────── 3. DPI politikası
-// { mode: 'auto' } | { mode: 'custom', dpi } | { mode: 'target', dp } | { mode: 'phone' } — biri seçilince diğerleri
+// { mode: 'auto', density? } | { mode: 'custom', dpi } | { mode: 'target', dp } | { mode: 'phone' } — biri seçilince diğerleri
 // yoktur (tip düzeyinde). 'phone' = "Telefon ölçeği": uzun kenar = telefonun uzun kenarı (dp).
+// `density` ('close' | 'wide'; yoksa orta = varsayılan) yalnız Oto'nun eğilimidir (windowMath.AUTO_DENSITY_FACTOR).
 export const AUTO_POLICY = Object.freeze({ mode: 'auto' });
 
+// { mode: 'follow' } = "Genele uy": pencere kendi politikasını TUTMAZ, her hesapta genel ayardan (policyFromSettings) okur —
+// genel ayar değişince bu pencere de değişir. Diğer modlar pencerenin kendi sabit tercihidir (genel ayar yalnız yeni pencere varsayılanı).
+export const DPI_FOLLOW = Object.freeze({ mode: 'follow' });
+
 export function normalizeDpiPolicy(policy) {
+  if (policy?.mode === 'follow') return { mode: 'follow' };
   if (policy?.mode === 'custom' && Number(policy.dpi) > 0) return { mode: 'custom', dpi: Math.round(Number(policy.dpi)) };
   if (policy?.mode === 'target' && Number(policy.dp) > 0) return { mode: 'target', dp: Math.round(Number(policy.dp)) };
   if (policy?.mode === 'phone') return { mode: 'phone' };
-  return { mode: 'auto' };
+  const density = normalizeAutoDensity(policy?.density);
+  return density === AUTO_DENSITY_DEFAULT ? { mode: 'auto' } : { mode: 'auto', density };
 }
 
 /** Genel ayar YALNIZ yeni pencere varsayılanıdır: özel DPI > Target DP > otomatik. */
@@ -77,9 +86,37 @@ export function policyFromSettings(settings) {
 
 /** Pencerenin kendi politikası; yoksa (eski pencere) eski `dpLocked` bayrağından, o da yoksa genel ayardan türetilir. */
 export function dpiPolicyOf(win, settings) {
-  if (win?.dpiPolicy) return normalizeDpiPolicy(win.dpiPolicy);
+  if (win?.dpiPolicy) {
+    const own = normalizeDpiPolicy(win.dpiPolicy);
+    return own.mode === 'follow' ? policyFromSettings(settings) : own;
+  }
   if (win?.dpLocked && Number(win.dpi) > 0) return { mode: 'custom', dpi: Math.round(Number(win.dpi)) };
   return policyFromSettings(settings);
+}
+
+/** Hub "Dinamik DP" durumu: 'follow' (Genele uy) | 'on' (Açık: otomatik yoğunluk) | 'off' (Kapalı: yoğunluk sabit/özel DPI). */
+export function dynamicDpModeOf(win) {
+  if (win?.dpiPolicy && normalizeDpiPolicy(win.dpiPolicy).mode === 'follow') return 'follow';
+  return dpiPolicyOf(win, null).mode === 'custom' ? 'off' : 'on';
+}
+
+/**
+ * Hub "Dinamik DP" karosunun durumu. `active`: yoğunluk politikası bu pencerede GERÇEKTEN uygulanıyor mu. Genel
+ * "Gerçek çözünürlük" kapalıyken hiçbir pencereye uygulanmaz (geometrySlice isDynamic) — pencerenin kendi seçimi ne olursa
+ * olsun etkin değildir; seçim silinmez, genel ayar açılınca geri gelir. Ayar yok sayılırsa (undefined) açık kabul edilir.
+ */
+export function dynamicDpStatusOf(win, settings) {
+  const resolutionOff = settings?.dynamic_resolution_enabled === false;
+  return {
+    active: !resolutionOff && dpiPolicyOf(win, settings).mode !== 'custom',
+    mode: dynamicDpModeOf(win),
+    resolutionOff,
+  };
+}
+
+/** Hub karosunun döngüsü: Genele uy → Açık → Kapalı → Genele uy. */
+export function nextDynamicDpMode(mode) {
+  return mode === 'follow' ? 'on' : mode === 'on' ? 'off' : 'follow';
 }
 
 export function policyArgs(policy) {
@@ -88,6 +125,7 @@ export function policyArgs(policy) {
     customDpi: p.mode === 'custom' ? p.dpi : 0,
     targetDp: p.mode === 'target' ? p.dp : 0,
     phoneScale: p.mode === 'phone',
+    autoDensity: p.mode === 'auto' ? normalizeAutoDensity(p.density) : AUTO_DENSITY_DEFAULT,
   };
 }
 
@@ -143,11 +181,11 @@ export function targetDisplaySizeForWindow(win, globalSettings, box, { mode = 'n
   const settings = settingsForWindow(win, globalSettings);
   const resolutionMode = settings?.resolution_mode || 'dynamic';
   const pol = policy ? normalizeDpiPolicy(policy) : dpiPolicyOf(win, settings);
-  const { customDpi, targetDp, phoneScale } = policyArgs(pol);
+  const { customDpi, targetDp, phoneScale, autoDensity } = policyArgs(pol);
   const hidden = headerHidden ?? isHeaderHidden({ ...win, maximized: mode === 'maximized', fullscreen: mode === 'fullscreen' }, settings);
   const canvas = canvasBoxFor(box, mode, hidden);
   const res = targetDisplaySizeForMode(
-    resolutionMode, customDpi, targetDp, box.w, box.h, canvas.w, canvas.h, mode === 'fullscreen', hidden, phoneScale,
+    resolutionMode, customDpi, targetDp, box.w, box.h, canvas.w, canvas.h, mode === 'fullscreen', hidden, phoneScale, autoDensity,
   );
   // "DP kilidi" yoğunluğu BOYUTLANDIRMADA sabit tutar: özel DPI seçilmemişse pencerenin mevcut yoğunluğu korunur.
   // `ignoreDpLock`: kullanıcı yoğunluğu AÇIKÇA değiştirdi (DeX Ayarları / Hub); kilit yeni değeri tutar, isteği engellemez.

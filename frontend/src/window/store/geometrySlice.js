@@ -29,9 +29,12 @@ import {
   setLastResizeBucket,
 } from '../windowMath.js';
 import {
+  DPI_FOLLOW,
   dpiPolicyOf,
+  dynamicDpModeOf,
   isHeaderHidden,
   modeOf,
+  nextDynamicDpMode,
   normalizeDpiPolicy,
   normalizeHeaderMode,
   normalizeWindowOverrides,
@@ -185,8 +188,11 @@ export function createGeometrySlice(set, get) {
         if (plan.mode === 'maximized' && !isFixedMode(settings?.resolution_mode)) {
           maybeWarnSmallAppWindow(target.w, target.h);
         }
+        // Akış boyutu AYNI kalsa da yoğunluk değişebilir (otomatik DPI pencere genişliğinin dp sınıfına bakar: aynı kovada
+        // küçük pencere ⟷ kaplanmış pencere farklı DPI ister). Yalnız boyuta bakmak büyütünce eski DPI'da bırakıyordu.
         const resDiffers = target.w !== win.deviceW || target.h !== win.deviceH;
-        if (resDiffers) {
+        const dpiDiffers = target.dpi != null && target.dpi !== win.dpi;
+        if (resDiffers || dpiDiffers) {
           logger.trace(`[OpenDeX:MODE 🪟] win=${win.package} (${id}) → ${plan.mode}${plan.zone ? `:${plan.zone}` : ''} target=${target.w}x${target.h}@${target.dpi}DPI`);
           get().setPendingResizeTransition(id, fromGeo, toGeo, {
             ...flags,
@@ -318,14 +324,17 @@ export function createGeometrySlice(set, get) {
       await get().applyDynamicResolutionToOpenWindows({ onlyId: id, explicitDpi: true });
     },
 
-    /** Hub "Dinamik DP": özel DPI → otomatik; aksi halde mevcut yoğunluğa SABİTLE. */
-    async toggleCustomDpi(id) {
+    /**
+     * Hub "Dinamik DP": Genele uy → Açık (otomatik yoğunluk) → Kapalı (mevcut yoğunluğa SABİTLE) → Genele uy.
+     * "Genele uy" pencereyi genel ayara geri bağlar (policy { mode: 'follow' }); yoğunluk bilinmiyorsa Kapalı atlanır.
+     */
+    async cycleDynamicDp(id) {
       const win = get().windows.find((w) => w.id === id);
       if (!win) return;
-      const settings = await settingsOrNull();
-      const current = dpiPolicyOf(win, settings);
-      if (current.mode === 'custom') return get().setWindowDpiPolicy(id, { mode: 'auto' });
-      if (Number(win.dpi) > 0) return get().setWindowDpiPolicy(id, { mode: 'custom', dpi: Number(win.dpi) });
+      const next = nextDynamicDpMode(dynamicDpModeOf(win));
+      if (next === 'on') return get().setWindowDpiPolicy(id, { mode: 'auto' });
+      if (next === 'off' && Number(win.dpi) > 0) return get().setWindowDpiPolicy(id, { mode: 'custom', dpi: Math.round(Number(win.dpi)) });
+      return get().setWindowDpiPolicy(id, DPI_FOLLOW);
     },
 
     // ---------------------------------------------------------------- başlık
@@ -574,11 +583,11 @@ export function createGeometrySlice(set, get) {
         // Plain 'dynamic': the same bucket table + hysteresis anchor a manual
         // ResizeHandle drag on this window would use.
         const policy = dpiPolicyOf(win, settings);
-        const { customDpi, targetDp, phoneScale } = policyArgs(policy);
+        const { customDpi, targetDp, phoneScale, autoDensity } = policyArgs(policy);
         const anchor = getLastResizeBucket(win.id);
         const bucket = classifyResizeBucket(anchor, boxW, boxH);
         const dpi = dpiForMode(
-          settings?.resolution_mode || 'dynamic', customDpi, targetDp, bucket.w, bucket.h, boxW, phoneScale,
+          settings?.resolution_mode || 'dynamic', customDpi, targetDp, bucket.w, bucket.h, boxW, phoneScale, autoDensity,
         );
         return { w: bucket.w, h: bucket.h, dpi, bucket };
       };

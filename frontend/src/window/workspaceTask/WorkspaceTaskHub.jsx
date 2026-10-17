@@ -9,6 +9,7 @@
 // Panel kabuğu ui/FloatingPanel (konum, Esc, dışarı basış). Bu bileşen yalnız içeriktir: görevi bilmez, `actions` çağırır.
 
 import React, { useState } from 'react';
+import { Switch } from '../../ui/Switch.jsx';
 import {
   AppWindow,
   ArrowDownToLine,
@@ -16,6 +17,7 @@ import {
   Check,
   ChevronLeft,
   Copy,
+  Keyboard,
   Maximize2,
   PictureInPicture2,
   Smartphone,
@@ -111,7 +113,7 @@ function Tile({ icon: Icon, label, active = false, compact = false, onClick, tes
  * `boundary`: () => dikdörtgen — hub'ın kalacağı kutu (Workspace tuvali); panel onun içinde konumlanır ve daralır.
  * `compact`: küçük Workspace penceresi — açıklamasız satırlar, tek satırlık döşemeler (içerik yine de kaydırılabilir).
  */
-export function WorkspaceTaskHub({ anchor, boundary, compact = false, task, parked = false, pipOpen = false, maximized = false, defaultWindowing = 'fullscreen', onClose, actions }) {
+export function WorkspaceTaskHub({ anchor, boundary, compact = false, task, parked = false, keymapCount = 0, keymapEnabled = true, pipOpen = false, maximized = false, defaultWindowing = 'fullscreen', onClose, actions }) {
   const metrics = taskMetrics(task);
   const [sliderDpi, setSliderDpi] = useState(typeof task.density === 'number' ? task.density : metrics.dpi);
   const auto = task.densityMode !== 'manual';
@@ -189,6 +191,30 @@ export function WorkspaceTaskHub({ anchor, boundary, compact = false, task, park
         {!parked && <Tile icon={AppWindow} label={t('window.dex_te_pencere')} compact={compact} onClick={run(actions.openCrop)} testId="hub-crop" />}
         {!parked && <Tile icon={ArrowUpRight} label={t('window.masaustune_cikar')} compact={compact} onClick={run(actions.popOut)} testId="hub-popout" />}
       </div>
+      {!parked && actions.openKeymap && (
+        // Satırın kendisi düzenleyiciyi açar; sağdaki anahtar düzeni geçici aç/kapar (sohbet yazarken gibi — düzen silinmez).
+        <div className="flex items-center gap-1">
+          <div className="min-w-0 flex-1">
+            <Row
+              icon={Keyboard}
+              label={t('window.tus_duzeni')}
+              detail={keymapCount === 0
+                ? t('window.klavye_tuslarini_dokunmaya_esle')
+                : keymapEnabled
+                  ? t('window.keymapcount_tus_tanimli', { keymapCount })
+                  : t('window.tus_duzeni_kapali_keymapcount_tus', { keymapCount })}
+              compact={compact}
+              onClick={run(actions.openKeymap)}
+              testId="hub-keymap"
+            />
+          </div>
+          {keymapCount > 0 && actions.toggleKeymap && (
+            <span data-testid="hub-keymap-toggle" className="shrink-0 pr-1">
+              <Switch checked={keymapEnabled} label={t('window.tus_duzeni')} size="sm" onChange={(event) => { event?.stopPropagation?.(); actions.toggleKeymap(); }} />
+            </span>
+          )}
+        </div>
+      )}
 
       {!parked && (
         <>

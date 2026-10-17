@@ -8,7 +8,7 @@ vi.mock('../src/lib/api.js', () => ({
 }));
 
 import { api } from '../src/lib/api.js';
-import { getSavedAppGeometry, useWindowStore } from '../src/window/windowStore.js';
+import { dpiPolicyOf, getSavedAppGeometry, useWindowStore } from '../src/window/windowStore.js';
 import { useSystemStore } from '../src/state/systemStore.js';
 
 const APP = { package: 'com.app.a', display_name: 'A' };
@@ -255,13 +255,36 @@ describe('DPI politikası pencere başına, kalıcı ve dışlaşmalı', () => {
     expect(resizeCalls()).toEqual([]);
   });
 
-  it('Hub "Dinamik DP": özel DPI ⟷ otomatik geçişi', async () => {
+  it('Hub "Dinamik DP": Açık → Kapalı (mevcut DPI\'a sabit) → Genele uy → Açık döngüsü', async () => {
     const id = await openWindowed();
     const store = useWindowStore.getState();
-    await store.toggleCustomDpi(id);                            // otomatik → mevcut DPI'a sabitle
-    expect(winOf(id).dpiPolicy).toEqual({ mode: 'custom', dpi: 200 });
-    await store.toggleCustomDpi(id);                            // özel → otomatik
     expect(winOf(id).dpiPolicy).toEqual({ mode: 'auto' });
+    await store.cycleDynamicDp(id);                             // Açık → Kapalı: mevcut DPI'a sabitle
+    expect(winOf(id).dpiPolicy).toEqual({ mode: 'custom', dpi: 200 });
+    await store.cycleDynamicDp(id);                             // Kapalı → Genele uy
+    expect(winOf(id).dpiPolicy).toEqual({ mode: 'follow' });
+    await store.cycleDynamicDp(id);                             // Genele uy → Açık
+    expect(winOf(id).dpiPolicy).toEqual({ mode: 'auto' });
+  });
+
+  it('"Genele uy": genel ayar değişince bu pencere de değişir, kendi politikası olanlar değişmez', async () => {
+    const follower = await openWindowed();
+    const pinned = await openWindowed({ package: 'com.app.b', display_name: 'B' });
+    await useWindowStore.getState().setWindowDpiPolicy(follower, { mode: 'follow' });
+    await useWindowStore.getState().setWindowDpiPolicy(pinned, { mode: 'custom', dpi: 300 });
+
+    settings.custom_dpi = 260;                                  // genel ayar: özel DPI
+
+    expect(dpiPolicyOf(winOf(follower), settings)).toEqual({ mode: 'custom', dpi: 260 });
+    expect(dpiPolicyOf(winOf(pinned), settings)).toEqual({ mode: 'custom', dpi: 300 });
+    settings.custom_dpi = 0;
+    expect(dpiPolicyOf(winOf(follower), settings)).toEqual({ mode: 'auto' });
+  });
+
+  it('"Genele uy" seçimi kalıcıdır: pencere yeniden açılınca da genel ayarı izler', async () => {
+    const id = await openWindowed();
+    await useWindowStore.getState().setWindowDpiPolicy(id, { mode: 'follow' });
+    expect(getSavedAppGeometry(winOf(id).package)?.dpiPolicy).toEqual({ mode: 'follow' });
   });
 });
 

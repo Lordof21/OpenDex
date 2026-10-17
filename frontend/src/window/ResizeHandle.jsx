@@ -67,8 +67,8 @@ const FIT_COMMIT_MIN_INTERVAL_MS = 300;
 // politikası olmayan pencerenin varsayılanıdır (dpiPolicyOf içinde). Formül TEK: windowMath.dpiForMode —
 // açılış, Hub, snap ve bu sürükleme aynı yoğunluğu hesaplar ("ilk açılan pencerenin DPI'siyle aynı değil" hatası).
 const resolveDpi = (policy, resolutionMode, targetW, targetH, windowW = 0) => {
-  const { customDpi, targetDp, phoneScale } = policyArgs(policy);
-  return dpiForMode(resolutionMode || 'dynamic', customDpi, targetDp, targetW, targetH, windowW, phoneScale);
+  const { customDpi, targetDp, phoneScale, autoDensity } = policyArgs(policy);
+  return dpiForMode(resolutionMode || 'dynamic', customDpi, targetDp, targetW, targetH, windowW, phoneScale, autoDensity);
 };
 
 /**
@@ -83,7 +83,7 @@ const resolveDpi = (policy, resolutionMode, targetW, targetH, windowW = 0) => {
  * synchronous, where reading win.canvasW/H per move would lag a frame behind
  * the pointer.
  */
-function chromeFor(win) {
+export function chromeFor(win) {
   if (win.canvasW > 0 && win.canvasH > 0 && win.w > 0 && win.h > 0) {
     const dw = win.w - win.canvasW;
     const dh = win.h - win.canvasH;

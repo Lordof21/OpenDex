@@ -80,7 +80,6 @@ export function createWorkspaceSlice(set, get) {
         package: packageName,
         title,
         bounds: handle.task_bounds || [120, 60, 1560, 960],
-        renderScale: handle.render_scale || [1.0, 1.0],
         density: handle.task_density || null,
         densityMode: handle.task_density_mode || 'auto',
       };
@@ -395,7 +394,6 @@ export function createWorkspaceSlice(set, get) {
                 return {
                   ...t,
                   bounds: payload.bounds,
-                  renderScale: payload.render_scale || t.renderScale || [1.0, 1.0],
                 };
               }),
             };
@@ -427,7 +425,6 @@ export function createWorkspaceSlice(set, get) {
           package: payload.package,
           title: payload.title || payload.package,
           bounds,
-          renderScale: payload.render_scale || [1.0, 1.0],
           density: payload.density || null,
           densityMode: payload.density_mode || 'auto',
         };
@@ -442,7 +439,6 @@ export function createWorkspaceSlice(set, get) {
                           ? {
                               ...t,
                               bounds,
-                              renderScale: payload.render_scale || t.renderScale || [1.0, 1.0],
                               density: payload.density ?? t.density,
                               densityMode: payload.density_mode ?? t.densityMode,
                             }
@@ -466,7 +462,6 @@ export function createWorkspaceSlice(set, get) {
             package: payload.package,
             title,
             bounds: payload.bounds || [80, 80, 880, 680],
-            renderScale: payload.render_scale || [1.0, 1.0],
           };
           const existingWorkspace = withoutIndependent.find((w) => w.isEcoWorkspace);
           if (existingWorkspace) {
@@ -518,7 +513,6 @@ export function createWorkspaceSlice(set, get) {
                       ? {
                           ...t,
                           bounds: payload.bounds || t.bounds,
-                          renderScale: payload.render_scale || t.renderScale,
                           density: payload.density ?? t.density,
                           handoffToPhone: false,
                           handoffMessage: '',

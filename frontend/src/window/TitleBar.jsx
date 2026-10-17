@@ -102,9 +102,14 @@ export default function TitleBar({
       // Başlığın görünür/gizli olduğuna WindowFrame karar verir (isHeaderHidden — tek karar fonksiyonu); gizliyse bu
       // çubuk zaten üst-şerit hover kabuğunun İÇİNDE render edilir. Burada ayrıca opacity oynatmak "başlık görünmez
       // ama 44 px yer kaplıyor" hatasını doğuruyordu.
-      className="relative z-30 flex h-11 shrink-0 items-center justify-between border-b border-frame-border bg-frame pl-3 pr-1.5 select-none cursor-default"
+      // PiP'in başlığı ince (32 px, 24 px düğmeler): küçük pencerede görüntüye daha çok yer kalır. Boyutlar CSS'ten gelir, düğmeler aynı bileşenlerdir.
+      className={cn(
+        'relative z-30 flex shrink-0 items-center justify-between border-b border-frame-border bg-frame pl-3 pr-1.5 select-none cursor-default',
+        isPip ? 'h-8 [&_button]:size-6 [&_svg]:size-3.5' : 'h-11',
+      )}
       // Kaplanmış / snap'li pencere de başlıktan taşınır (eski boyuta döner); mutlak tam ekran taşınmaz.
-      onPointerDown={isPip || win.fullscreen ? undefined : onDragStart}
+      // PiP'te (çerçevesiz işletim sistemi penceresi) sürüklemeyi PipApp'in onDragStart'ı işletim sistemine devreder.
+      onPointerDown={win.fullscreen && !isPip ? undefined : onDragStart}
       onDoubleClick={isPip ? undefined : () => toggleMaximize(win.id)}
       onContextMenu={(event) => {
         if (event.defaultPrevented) return;   // düğmenin kendi sağ tık menüsü zaten açıldı
@@ -117,7 +122,7 @@ export default function TitleBar({
       <div className="flex min-w-0 items-center gap-2.5 pointer-events-none">
         {/* Pencerenin kendi uygulama ikonu (baş harf değil): VD → uygulamanın ikonu, Dosyalar/Telefon/Çalışma Alanı → özel ikon; ikon alınamazsa
             AppIcon kendi harf yedeğine düşer. */}
-        <AppIcon pkg={iconPackageOf(win)} displayName={win.title} size={24} />
+        <AppIcon pkg={iconPackageOf(win)} displayName={win.title} size={isPip ? 16 : 24} />
         <span className="truncate font-mono text-[11px] text-frame-muted" title={win.title || win.package}>
           {win.title || win.package || 'lovable.motion'}
         </span>
@@ -180,6 +185,7 @@ export default function TitleBar({
           className="relative z-40"
           onPointerDown={(e) => e.stopPropagation()}
           onMouseEnter={() => {
+            if (isPip) return; // PiP işletim sistemi penceresidir: uygulama içi kenara yapıştırma düzeni anlamsız
             if (snapMenuTimeoutRef.current) clearTimeout(snapMenuTimeoutRef.current);
             setSnapMenuOpen(true);
           }}

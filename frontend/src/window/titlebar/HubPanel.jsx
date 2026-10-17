@@ -8,7 +8,6 @@ import {
   Keyboard,
   LockKeyhole,
   Maximize,
-  Move,
   PanelTop,
   PictureInPicture2,
   Pin,
@@ -43,15 +42,20 @@ export const HubPanel = forwardRef(function HubPanel(
     // diğer sekmeler korunur). Verilmezse (pencerenin web sayfası yok) satır hiç gösterilmez. Hiçbir zaman kendiliğinden çalışmaz.
     onReloadPage,
     reloadingPage = false,
+    // "Dinamik DP": `dynamicDp` = şu an geçerli olan (otomatik yoğunluk mu), `dynamicDpMode` = pencerenin kendi seçimi
+    // ('follow' Genele uy | 'on' Açık | 'off' Kapalı). Karo üçlü döner.
     dynamicDp = true,
+    dynamicDpMode = 'on',
+    // Genel "Gerçek çözünürlük" kapalıyken yoğunluk politikası hiçbir pencereye uygulanmaz: karo kapalı görünür ve bunu söyler.
+    dynamicResolutionOff = false,
     onDynamicDp,
-    // "Yön tuşları": ekranda Android D-pad kaplaması (TV tarzı gezinme). Oyun kolu değildir; eski adı "Kontroller" idi.
-    visualControls = false,
-    onVisualControls,
-    // "Tuş düzeni": klavye tuşlarını telefon ekranındaki noktalara eşleyen editör. Verilmezse (Dosyalar, Workspace, kırpma
-    // penceresi: canvas'ında editör yok) satır hiç gösterilmez. `keymapCount` = bu uygulama için tanımlı tuş sayısı.
+    // "Tuş düzeni": klavye/fare tuşlarını telefon ekranındaki noktalara eşleyen düzen. Verilmezse (Dosyalar, Workspace, kırpma
+    // penceresi: canvas'ında editör yok) satır ve döşeme hiç gösterilmez. `keymapCount` = bu uygulama için tanımlı düğüm sayısı;
+    // `keymapEnabled` / `onToggleKeymap` = düzeni geçici aç/kapa (sohbet yazarken gibi — düzen silinmez).
     onKeymap,
     keymapCount = 0,
+    keymapEnabled = true,
+    onToggleKeymap,
     headerModeLabel = t('window.genele_uy'),
     headerModeActive = false,
     onCycleHeader,
@@ -64,6 +68,13 @@ export const HubPanel = forwardRef(function HubPanel(
   ref
 ) {
   const effectiveRef = panelRef || ref;
+  // Pencerenin KENDİ seçimi her zaman yazılır ("Genele uy" dendiyse "Genele uy" görünür); yanında o an geçerli sonuç ya da neden etkisiz olduğu.
+  const dynamicDpChoice = dynamicDpMode === 'follow' ? t('window.genele_uy') : dynamicDpMode === 'off' ? t('common.kapali_2') : t('common.acik_2');
+  const dynamicDpHint = dynamicResolutionOff
+    ? `${dynamicDpChoice} · ${t('settings.gercek_cozunurluk_kapali')}`
+    : dynamicDpMode === 'follow'
+      ? `${dynamicDpChoice} · ${dynamicDp ? t('common.acik_2') : t('common.kapali_2')}`
+      : dynamicDpChoice;
   const isCrop = variant === 'workspace-crop';
   return (
     <motion.div
@@ -107,21 +118,32 @@ export const HubPanel = forwardRef(function HubPanel(
               <HubTile
                 icon={<Gauge className="size-4" />}
                 label={t('window.dinamik_dp')}
+                hint={dynamicDpHint}
                 active={dynamicDp}
                 onClick={onDynamicDp}
+                className={onToggleKeymap ? undefined : 'col-span-2'}
               />
-              <HubTile
-                icon={<Move className="size-4" />}
-                label={t('window.yon_tuslari')}
-                active={visualControls}
-                onClick={onVisualControls}
-              />
+              {onToggleKeymap && (
+                // Düzen yokken döşeme düzenleyiciyi açar (kapatılacak bir şey yok); varken aç/kapa anahtarıdır.
+                <HubTile
+                  icon={<Keyboard className="size-4" />}
+                  label={t('window.tus_duzeni')}
+                  active={keymapEnabled && keymapCount > 0}
+                  badge={keymapCount > 0 ? keymapCount : undefined}
+                  onClick={keymapCount > 0 ? onToggleKeymap : onKeymap}
+                  testId="hub-keymap-toggle"
+                />
+              )}
             </div>
             {onKeymap && (
               <HubAction
                 icon={<Keyboard className="size-4" />}
                 label={t('window.tus_duzeni')}
-                detail={keymapCount > 0 ? t('window.keymapcount_tus_tanimli', { keymapCount }) : t('window.klavye_tuslarini_dokunmaya_esle')}
+                detail={keymapCount === 0
+                  ? t('window.klavye_tuslarini_dokunmaya_esle')
+                  : keymapEnabled
+                    ? t('window.keymapcount_tus_tanimli', { keymapCount })
+                    : t('window.tus_duzeni_kapali_keymapcount_tus', { keymapCount })}
                 onClick={onKeymap}
                 trailing={<span className="font-mono text-[10px]">{t('window.duzenle')}</span>}
               />
@@ -248,15 +270,17 @@ function HubAction({ icon, label, detail, onClick, trailing, emphasized = false,
   );
 }
 
-function HubTile({ icon, label, active, onClick }) {
+function HubTile({ icon, label, hint, active, onClick, className, badge, testId }) {
   return (
     <button
       type="button"
+      data-testid={testId}
       className={cn(
         'relative flex min-h-[74px] min-w-0 flex-col items-center justify-center gap-1.5 overflow-hidden rounded-md px-2 py-2 text-center transition-all cursor-pointer',
         active
           ? 'bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:text-primary-foreground'
-          : 'bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+          : 'bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+        className
       )}
       onPointerDown={(e) => e.stopPropagation()}
       onClick={(e) => {
@@ -272,6 +296,12 @@ function HubTile({ icon, label, active, onClick }) {
       <span className="line-clamp-2 w-full whitespace-normal text-[10px] font-semibold leading-[13px]">
         {label}
       </span>
+      {hint && <span className="-mt-1 line-clamp-2 w-full whitespace-normal text-[9px] leading-[11px] opacity-80">{hint}</span>}
+      {badge != null && (
+        <span className="absolute left-1.5 top-1.5 min-w-4 rounded-full bg-background/30 px-1 text-center font-mono text-[9px] font-bold leading-4" aria-hidden="true">
+          {badge}
+        </span>
+      )}
       {active && (
         <span
           className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-status-active ring-2 ring-primary-foreground/70"

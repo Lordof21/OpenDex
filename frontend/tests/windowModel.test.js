@@ -13,9 +13,12 @@ import {
   canvasBoxFor,
   chromeForMode,
   dpiPolicyOf,
+  dynamicDpModeOf,
+  dynamicDpStatusOf,
   fixedOrientationFlip,
   isHeaderHidden,
   modeOf,
+  nextDynamicDpMode,
   nextHeaderMode,
   normalizeDpiPolicy,
   planDragRestore,
@@ -253,11 +256,11 @@ describe('DPI politikası: dışlaşma tasarımla garanti', () => {
   });
 
   it('policyArgs: özel DPI seçiliyken Target DP etkisiz (0), Target DP seçiliyken özel DPI etkisiz', () => {
-    expect(policyArgs({ mode: 'custom', dpi: 200 })).toEqual({ customDpi: 200, targetDp: 0, phoneScale: false });
-    expect(policyArgs({ mode: 'target', dp: 720 })).toEqual({ customDpi: 0, targetDp: 720, phoneScale: false });
-    expect(policyArgs({ mode: 'auto' })).toEqual({ customDpi: 0, targetDp: 0, phoneScale: false });
+    expect(policyArgs({ mode: 'custom', dpi: 200 })).toEqual({ customDpi: 200, targetDp: 0, phoneScale: false, autoDensity: 'medium' });
+    expect(policyArgs({ mode: 'target', dp: 720 })).toEqual({ customDpi: 0, targetDp: 720, phoneScale: false, autoDensity: 'medium' });
+    expect(policyArgs({ mode: 'auto' })).toEqual({ customDpi: 0, targetDp: 0, phoneScale: false, autoDensity: 'medium' });
     // "Telefon ölçeği" is a fourth, equally exclusive policy.
-    expect(policyArgs({ mode: 'phone' })).toEqual({ customDpi: 0, targetDp: 0, phoneScale: true });
+    expect(policyArgs({ mode: 'phone' })).toEqual({ customDpi: 0, targetDp: 0, phoneScale: true, autoDensity: 'medium' });
   });
 
   it('genel ayar yalnız yeni pencere varsayılanı: özel DPI > Target DP > otomatik', () => {
@@ -330,5 +333,67 @@ describe('sabit çözünürlükte yön (portre ⟷ yatay)', () => {
   it('ölçülmemiş kutu/akış için karar vermez', () => {
     expect(flip(0, 0, 1920, 1080)).toBeNull();
     expect(flip(600, 900, 0, 0)).toBeNull();
+  });
+});
+
+
+describe('Dinamik DP üçlüsü: Genele uy / Açık / Kapalı', () => {
+  const settings = { custom_dpi: 0, target_dp: 0 };
+
+  it('"Genele uy" pencereyi her hesapta genel ayara bağlar; diğer modlar pencerenin kendi tercihidir', () => {
+    const follow = { dpiPolicy: { mode: 'follow' } };
+    expect(dpiPolicyOf(follow, { ...settings, custom_dpi: 240 })).toEqual({ mode: 'custom', dpi: 240 });
+    expect(dpiPolicyOf(follow, { ...settings, target_dp: 720 })).toEqual({ mode: 'target', dp: 720 });
+    expect(dpiPolicyOf(follow, settings)).toEqual({ mode: 'auto' });
+    expect(dpiPolicyOf({ dpiPolicy: { mode: 'auto' } }, { ...settings, custom_dpi: 240 })).toEqual({ mode: 'auto' });
+  });
+
+  it('durum: follow / on (otomatik, hedef, telefon ölçeği) / off (özel DPI)', () => {
+    expect(dynamicDpModeOf({ dpiPolicy: { mode: 'follow' } })).toBe('follow');
+    expect(dynamicDpModeOf({ dpiPolicy: { mode: 'auto' } })).toBe('on');
+    expect(dynamicDpModeOf({ dpiPolicy: { mode: 'target', dp: 720 } })).toBe('on');
+    expect(dynamicDpModeOf({ dpiPolicy: { mode: 'custom', dpi: 200 } })).toBe('off');
+    expect(dynamicDpModeOf({})).toBe('on');
+  });
+
+  it('döngü: Genele uy → Açık → Kapalı → Genele uy', () => {
+    expect(nextDynamicDpMode('follow')).toBe('on');
+    expect(nextDynamicDpMode('on')).toBe('off');
+    expect(nextDynamicDpMode('off')).toBe('follow');
+  });
+
+  it('"follow" normalleştirmeden geçer (kalıcı kayıt ve pencere açılışı onu korur)', () => {
+    expect(normalizeDpiPolicy({ mode: 'follow' })).toEqual({ mode: 'follow' });
+  });
+});
+
+describe('dynamicDpStatusOf: karo gerçekte etkin mi', () => {
+  const auto = { dpiPolicy: { mode: 'auto' } };
+  const follow = { dpiPolicy: { mode: 'follow' } };
+  const custom = { dpiPolicy: { mode: 'custom', dpi: 200 } };
+
+  it('genel "Gerçek çözünürlük" kapalıyken her pencere etkisiz: seçim ne olursa olsun', () => {
+    for (const win of [auto, follow, custom, {}]) {
+      expect(dynamicDpStatusOf(win, { dynamic_resolution_enabled: false })).toMatchObject({ active: false, resolutionOff: true });
+    }
+  });
+
+  it('genel açıkken: "Genele uy" ve "Açık" etkin, "Kapalı" (özel DPI) etkin değil', () => {
+    expect(dynamicDpStatusOf(follow, { dynamic_resolution_enabled: true, custom_dpi: 0 })).toMatchObject({ active: true, mode: 'follow', resolutionOff: false });
+    expect(dynamicDpStatusOf(auto, { dynamic_resolution_enabled: true })).toMatchObject({ active: true, mode: 'on' });
+    expect(dynamicDpStatusOf(custom, { dynamic_resolution_enabled: true })).toMatchObject({ active: false, mode: 'off' });
+  });
+
+  it('ayar yok sayılırsa (undefined) açık kabul edilir — DeX Ayarları ile aynı kural', () => {
+    expect(dynamicDpStatusOf(auto, {})).toMatchObject({ active: true, resolutionOff: false });
+    expect(dynamicDpStatusOf(auto, null)).toMatchObject({ active: true, resolutionOff: false });
+  });
+
+  it('genel kapalıyken seçim silinmez; genel açılınca aynı pencere yeniden etkin olur', () => {
+    const win = { dpiPolicy: { mode: 'custom', dpi: 200 } };
+    expect(dynamicDpStatusOf(win, { dynamic_resolution_enabled: false }).active).toBe(false);
+    expect(win.dpiPolicy).toEqual({ mode: 'custom', dpi: 200 });
+    expect(dynamicDpStatusOf(win, { dynamic_resolution_enabled: true }).active).toBe(false);
+    expect(dynamicDpStatusOf({ dpiPolicy: { mode: 'auto' } }, { dynamic_resolution_enabled: true }).active).toBe(true);
   });
 });

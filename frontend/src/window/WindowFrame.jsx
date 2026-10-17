@@ -17,29 +17,23 @@ import WorkspaceCanvas from './WorkspaceCanvas.jsx';
 import WorkspaceCropCanvas from './WorkspaceCropCanvas.jsx';
 import { isCropWindow } from './cropWindow.js';
 import { isFilesWindow } from './filesWindow.js';
-import { isFrontendOnlyWindow } from './frontendOnly.js';
-import { isMirrorPackage } from './mirrorPackage.js';
-import { restartDoneToast, restartFailedToast } from './appRestart.js';
-import { reloadPageWithToast, useWebReloadAvailable } from './webReload.js';
-import ResizeHandle from './ResizeHandle.jsx';
-import VisualControls from './VisualControls.jsx';
+import ResizeHandle, { chromeFor } from './ResizeHandle.jsx';
 import HubPanel from './titlebar/HubPanel.jsx';
 import { useOsWindowController } from './titlebar/useOsWindowController.js';
-import { sendDpad } from '../input/keyboardInject.js';
-import { useKeymapStore } from '../keymapper/keymapStore.js';
+import { useWindowHub } from './titlebar/useWindowHub.js';
+import { usePipHost } from './pip/usePipHost.js';
+import { useFastEdgeIntent } from './pip/useFastEdgeReveal.js';
 import {
-  HEADER_MODE_LABELS,
   TASKBAR_H,
   awaitingFrameBox,
   clampDragY,
+  devicePixelRatioSafe,
   dpiPolicyOf,
+  exactFitDisplaySize,
+  isDynamicFitMode,
   settingsForWindow,
-  fitLabel,
   isHeaderHidden,
   modeOf,
-  nextFitMode,
-  nextHeaderMode,
-  normalizeHeaderMode,
   policyArgs,
   targetDisplaySizeForMode,
   targetDisplaySizeForWindow,
@@ -49,7 +43,6 @@ import { getSettings } from '../settings/settingsApi.js';
 import { useLiveSettings } from '../settings/liveSettings.js';
 import { windowVariants } from '../ui/motion.js';
 import { Z_INDEX } from '../ui/zIndex.js';
-import { useSystemStore } from '../state/systemStore.js';
 import { logger } from '../lib/logger.js';
 import { t } from '../i18n/index.js';
 
@@ -70,9 +63,6 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
     dragWindow,
     toggleFullscreen,
     togglePinWindow,
-    toggleCustomDpi,
-    setWindowFitMode,
-    setHeaderMode,
     dragRestoreWindow,
   } = useWindowStore();
 
@@ -81,18 +71,20 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
   const dragRef = useRef(null);
   const previewRef = useRef(null);
   const previewLabelRef = useRef(null);
-  const hubButtonRef = useRef(null);
-  const hubPanelRef = useRef(null);
+  const previewCtxRef = useRef({ win, settings: null });
 
   const [pipWindow, setPipWindow] = useState(null);
   const osWindowController = useOsWindowController({ win, pipWindow, setPipWindow });
+  // PiP'ten gelen "aktar / Workspace'e gönder / kapat" komutları bu penceredeki tıklamayla aynı yoldan çalışır (pip/usePipHost.js).
+  // Komut pencereyi masaüstüne döndürmüyorsa, PiP kapanırken "masaüstüne dönüş" yeniden boyutlaması atlanır.
+  const pipLeavingRef = useRef(false);
+  const markPipLeaving = useCallback(() => { pipLeavingRef.current = true; }, []);
+  usePipHost({ win, pipWindow, onLeaving: markPipLeaving });
   const liveSettings = useLiveSettings();
   const [isTargetHighlighted, setIsTargetHighlighted] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [isSettling, setIsSettling] = useState(false);
-  const [hubOpen, setHubOpen] = useState(false);
-  const [workspaceSent, setWorkspaceSent] = useState(false);
 
   const [viewportSize, setViewportSize] = useState(() => ({
     w: typeof window !== 'undefined' ? window.innerWidth : 1920,
@@ -153,27 +145,6 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
     return () => window.removeEventListener('opendex:highlight-window', handleHighlight);
   }, [win.id]);
 
-  // Close Hub on outside click / Escape
-  useEffect(() => {
-    if (!hubOpen) return;
-    const handleClickOutside = (e) => {
-      const target = e.target;
-      if (!(target instanceof Node)) return;
-      if (!hubPanelRef.current?.contains(target) && !hubButtonRef.current?.contains(target)) {
-        setHubOpen(false);
-      }
-    };
-    const handleKeyDown = (e) => {
-      if (e.key === 'Escape') setHubOpen(false);
-    };
-    document.addEventListener('pointerdown', handleClickOutside);
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', handleClickOutside);
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [hubOpen]);
-
   // PiP lifecycle
   useEffect(() => {
     if (!pipWindow) return;
@@ -189,7 +160,7 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
         try { s = await getSettings(); } catch {}
       }
       const mode = settingsForWindow(currentWin, s)?.resolution_mode || 'dynamic_fit';
-      const { customDpi, targetDp, phoneScale } = policyArgs(dpiPolicyOf(currentWin, s));
+      const { customDpi, targetDp, phoneScale, autoDensity } = policyArgs(dpiPolicyOf(currentWin, s));
       const target = targetDisplaySizeForMode(
         mode,
         customDpi,
@@ -198,6 +169,7 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
         pipWindow.innerHeight,
         0, 0, false, false,
         phoneScale,
+        autoDensity,
       );
       if (target) {
         logger.trace(`[OpenDeX:PiP 🪟] win=${win.id} size=${pipWindow.innerWidth}x${pipWindow.innerHeight} -> target=${target.w}x${target.h}@${target.dpi}DPI`);
@@ -217,6 +189,10 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
       isClosing = true;
       logger.trace(`[OpenDeX:PiP 🪟] PiP window closing for win=${win.id}`);
       setPipWindow(null);
+      if (pipLeavingRef.current) {
+        pipLeavingRef.current = false;
+        return;
+      }
       const store = useWindowStore.getState();
       const currentWin = store.windows.find((w) => w.id === win.id);
       if (!currentWin || currentWin.resolutionLocked) return;
@@ -226,7 +202,7 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
         try { s = await getSettings(); } catch {}
       }
       const mode = settingsForWindow(currentWin, s)?.resolution_mode || 'dynamic_fit';
-      const { customDpi, targetDp, phoneScale } = policyArgs(dpiPolicyOf(currentWin, s));
+      const { customDpi, targetDp, phoneScale, autoDensity } = policyArgs(dpiPolicyOf(currentWin, s));
       const target = targetDisplaySizeForMode(
         mode,
         customDpi,
@@ -235,6 +211,7 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
         win.h,
         0, 0, false, false,
         phoneScale,
+        autoDensity,
       );
       if (target) {
         store.commitResize(win.id, target.w, target.h, target.dpi, { settings: s }).catch(() => {});
@@ -484,6 +461,20 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
     targetWindow.addEventListener('pointercancel', onUp);
   };
 
+  // Hayalet kutudaki rozet CSS pikseli DEĞİL, gerçek pikseli gösterir: dinamik sığdırmada telefonun çizeceği akış çözünürlüğü (video
+  // kutusu × ekran ölçeği, 8'e hizalı — sürükleme bırakılınca istenen değer), diğer kiplerde pencerenin fiziksel boyutu. 125% Windows
+  // ölçeğinde 1920 px'lik ekranda CSS genişliği 1536'dır; rozet eskiden bunu gösterip "tam genişlikte neden 1920 değil" dedirtiyordu.
+  const previewText = useCallback((geo) => {
+    const { win: current, settings: live } = previewCtxRef.current;
+    const pixelRatio = devicePixelRatioSafe(live?.pixel_perfect_dpr ?? true);
+    if (isDynamicFitMode(settingsForWindow(current, live)?.resolution_mode)) {
+      const chrome = chromeFor(current);
+      const fit = exactFitDisplaySize(geo.w - chrome.dw, geo.h - chrome.dh, { pixelRatio });
+      if (fit) return `${fit.w} × ${fit.h}`;
+    }
+    return `${Math.round(geo.w * pixelRatio)} × ${Math.round(geo.h * pixelRatio)}`;
+  }, []);
+
   // Resize callbacks for Smooth-style dashed preview tracking
   const handleResizeStart = useCallback((startGeo) => {
     setIsResizing(true);
@@ -495,7 +486,7 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
       previewRef.current.style.transform = 'translate3d(0, 0, 0)';
     }
     if (previewLabelRef.current) {
-      const labelText = `${Math.round(startGeo.w)} × ${Math.round(startGeo.h)}`;
+      const labelText = previewText(startGeo);
       previewLabelRef.current.querySelector('.preview-dim-text')
         ? (previewLabelRef.current.querySelector('.preview-dim-text').textContent = labelText)
         : (previewLabelRef.current.textContent = labelText);
@@ -513,7 +504,7 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
       previewRef.current.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
     }
     if (previewLabelRef.current) {
-      const labelText = `${Math.round(nextGeo.w)} × ${Math.round(nextGeo.h)}`;
+      const labelText = previewText(nextGeo);
       const textSpan = previewLabelRef.current.querySelector('.preview-dim-text');
       if (textSpan) {
         textSpan.textContent = labelText;
@@ -521,92 +512,12 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
         previewLabelRef.current.textContent = labelText;
       }
     }
-  }, [win.x, win.y]);
+  }, [win.x, win.y, previewText]);
 
   const handleResizeEnd = useCallback((_finalGeo) => {
     setIsResizing(false);
     // isSettling will trigger as soon as the first frame lands via onNewResolutionFrameArrived
   }, []);
-
-  // Hub actions
-  const cycleImageMode = useCallback(() => {
-    setWindowFitMode(win.id, nextFitMode(win.videoFitMode));
-  }, [win.id, win.videoFitMode, setWindowFitMode]);
-
-  // Hub "Ekran kilidi": akışın (sanal ekranın) px + DPI'ını sabitler. React penceresi serbest kalır — istenen boyuta
-  // getirilir, görüntü pencereye "Görüntü ölçeği"ne göre sığdırılır. (Eskiden bu düğme pencerenin en-boy oranını kilitliyordu.)
-  const toggleDisplayLock = useCallback(() => {
-    useWindowStore.getState().toggleResolutionLock(win.id);
-  }, [win.id]);
-  // Pencerenin arkasında gerçek bir Android uygulaması + kendi akışı var (Workspace kabı, Dosyalar/kırpma ve ayna değil).
-  const hasAppSession = !win.isEcoWorkspace && !isFrontendOnlyWindow(win) && !isMirrorPackage(win.package);
-  const hasDisplayLock = hasAppSession;
-
-  // Hub "Uygulamayı yeniden başlat": takılan / siyah kalan uygulamayı AYNI pencerede yeniler (süreç yeniden başlatma;
-  // olmazsa onDestroy→onCreate; uygulama hiç çalışmıyorsa başlatma). Sonuç arka uçta doğrulanır — toast gerçeği söyler.
-  const [restartingApp, setRestartingApp] = useState(false);
-  const restartApp = useCallback(async () => {
-    if (restartingApp) return;
-    setRestartingApp(true);
-    try {
-      const result = await useWindowStore.getState().restartWindowApp(win.id);
-      useSystemStore.getState().pushToast?.(restartDoneToast(result));
-    } catch (err) {
-      useSystemStore.getState().pushToast?.(restartFailedToast(err));
-    } finally {
-      setRestartingApp(false);
-      setHubOpen(false);
-    }
-  }, [win.id, restartingApp]);
-
-  // Hub "Sayfayı yenile": Chromium tabanlı tarayıcıda açık sekmeyi normal yenileme ile yeniden yükler (kullanıcı isteğiyle; boyut
-  // değişince kendiliğinden yenilenmez — okunan sayfayı bozar, telefona her seferinde yük bindirir). Satır yalnız Hub açıkken
-  // telefona sorulur ve yalnız web sayfası olan pencerede görünür.
-  const webReloadAvailable = useWebReloadAvailable(win.id, hubOpen && hasAppSession);
-  const [reloadingPage, setReloadingPage] = useState(false);
-  const reloadPage = useCallback(async () => {
-    if (reloadingPage) return;
-    setReloadingPage(true);
-    await reloadPageWithToast(win.id);
-    setReloadingPage(false);
-    setHubOpen(false);
-  }, [win.id, reloadingPage]);
-
-  const toggleVisualControls = useCallback(() => {
-    useWindowStore.setState((s) => ({
-      windows: s.windows.map((w) =>
-        w.id === win.id ? { ...w, visualControls: !w.visualControls } : w
-      ),
-    }));
-  }, [win.id]);
-
-  // "Tuş düzeni": the key editor lives in VideoCanvas, so only a window that renders one offers it (not the Workspace
-  // container, a DeX crop window or Files). Opening it closes the Hub — the editor is drawn over the video.
-  const hasKeymapEditor = !win.isEcoWorkspace && !isCropWindow(win) && !isFilesWindow(win);
-  const keymapCount = useKeymapStore((s) => s.presets[win.package]?.length || 0);
-  const openKeymapEditor = useCallback(() => {
-    useKeymapStore.getState().setEditWindowId(win.id);
-    setHubOpen(false);
-  }, [win.id]);
-
-  const cycleHeaderMode = useCallback(() => {
-    setHeaderMode(win.id, nextHeaderMode(win.headerMode));
-  }, [win.id, win.headerMode, setHeaderMode]);
-
-  const handleSendToWorkspace = useCallback(async () => {
-    setWorkspaceSent(true);
-    logger.trace(`[OpenDeX:HUB 🏠] handleSendToWorkspace tetiklendi -> winId=${win.id} pkg=${win.package}`);
-    try {
-      await useWindowStore.getState().dockToWorkspace(win.id);
-      useSystemStore.getState().pushToast?.(t('window.pencere_calisma_alanina_aktarildi'));
-    } catch (err) {
-      console.error('[OpenDeX:HUB ❌] dockToWorkspace başarısız:', err);
-      useSystemStore.getState().pushToast?.(t('window.calisma_alanina_aktarma_basarisiz'));
-    } finally {
-      setTimeout(() => setWorkspaceSent(false), 1800);
-      setHubOpen(false);
-    }
-  }, [win.id, win.package]);
 
   const isPip = !!pipWindow;
   const effectiveZIndex = win.fullscreen
@@ -721,6 +632,17 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
   };
 
   const effectiveSettings = liveSettings || settings;
+  previewCtxRef.current = { win, settings: effectiveSettings };
+  // Hub: durum + eylemler tek yerde (titlebar/useWindowHub.js); Tauri PiP penceresi de aynı kancayı kullanır.
+  const hub = useWindowHub({
+    win,
+    effectiveSettings,
+    pipOpen: Boolean(pipWindow),
+    onPip: osWindowController.togglePip,
+    onFullscreen: () => toggleFullscreen(win.id),
+    onAlwaysOnTop: () => togglePinWindow(win.id),
+  });
+  const hubOpen = hub.hubOpen;
   // Başlık gizli mi? TEK karar fonksiyonu (windowModel.isHeaderHidden): geometri hesapları da aynısını kullanır.
   const shouldAutoHideHeader = isHeaderHidden(win, effectiveSettings);
   const [isHeaderHovered, setIsHeaderHovered] = useState(false);
@@ -743,6 +665,20 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
       setIsHeaderHovered(false);
     }, 280);
   };
+
+  // Üst kenardan açılan başlık NİYETE bağlıdır: imleç üst kenara HIZLICA çıkınca açılır; yavaşça yaklaşılırsa açılmaz (orada uygulamanın
+  // kendi çubuğu olabilir). Açılınca imleç başlığa girmezse kısa bir süre sonra kapanır.
+  useFastEdgeIntent({
+    enabled: shouldAutoHideHeader && !isHeaderHovered && !isResizing && !isDragging,
+    containerRef: frameRef,
+    onIntent: () => {
+      handleHeaderMouseEnter();
+      headerTimerRef.current = setTimeout(() => {
+        headerTimerRef.current = null;
+        setIsHeaderHovered(false);
+      }, 700);
+    },
+  });
 
   // Pencere içeriği (TEK seçim noktası): paylaşımlı Workspace / DeX-içi kırpma penceresi / gerçek video akışı.
   const renderCanvas = (isHeaderOpen) => {
@@ -805,7 +741,7 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
           >
             {isAwaitingFrame && <span className="size-1.5 rounded-full bg-status-active animate-ping" />}
             <span className="preview-dim-text">
-              {isAwaitingFrame && pendingTo ? `${pendingTo.w} × ${pendingTo.h}` : `${win.w || 480} × ${win.h || 780}`}
+              {previewText(isAwaitingFrame && pendingTo ? pendingTo : { w: win.w || 480, h: win.h || 780 })}
             </span>
           </div>
         </div>
@@ -833,8 +769,8 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
                   setPipWindow={setPipWindow}
                   isPip={true}
                   hubOpen={hubOpen}
-                  onToggleHub={() => setHubOpen((o) => !o)}
-                  hubButtonRef={hubButtonRef}
+                  onToggleHub={hub.toggleHub}
+                  hubButtonRef={hub.hubButtonRef}
                 />
                 {renderCanvas(false)}
               </div>,
@@ -856,13 +792,6 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
           </>
         ) : shouldAutoHideHeader ? (
           <div className="relative flex h-full w-full flex-col overflow-hidden">
-            {/* Top Hover Trigger Zone */}
-            <div
-              className="pointer-events-auto absolute -top-1 left-3 right-3 h-3 z-[85] opacity-0"
-              style={{ touchAction: 'none' }}
-              onPointerEnter={handleHeaderMouseEnter}
-              onPointerLeave={handleHeaderMouseLeave}
-            />
             {/* Slide-down Header on Hover */}
             <div
               className={`absolute top-0 left-0 right-0 z-[90] transition-all duration-240 ease-out bg-frame/95 backdrop-blur-2xl border-b border-frame-border shadow-2xl ${
@@ -881,8 +810,8 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
                 setPipWindow={setPipWindow}
                 isPip={isPip}
                 hubOpen={hubOpen}
-                onToggleHub={() => setHubOpen((o) => !o)}
-                hubButtonRef={hubButtonRef}
+                onToggleHub={hub.toggleHub}
+                hubButtonRef={hub.hubButtonRef}
               />
             </div>
             {renderCanvas(isHeaderHovered)}
@@ -897,55 +826,17 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
               setPipWindow={setPipWindow}
               isPip={isPip}
               hubOpen={hubOpen}
-              onToggleHub={() => setHubOpen((o) => !o)}
-              hubButtonRef={hubButtonRef}
+              onToggleHub={hub.toggleHub}
+              hubButtonRef={hub.hubButtonRef}
             />
             {renderCanvas(false)}
           </div>
-        )}
-
-        {win.visualControls && (
-          <VisualControls
-            onDirection={(dir) => sendDpad(win.id, dir)}
-            onSelect={() => sendDpad(win.id, 'select')}
-          />
         )}
       </motion.div>
 
       {/* Hub Panel Flyout - Mounted at Window Level (overlaying content cleanly) */}
       <AnimatePresence>
-        {hubOpen && (
-          <HubPanel
-            panelRef={hubPanelRef}
-            compact={(win.w || 480) < 380}
-            imageLabel={fitLabel(win.videoFitMode, effectiveSettings?.video_fit_mode)}
-            onCycleImage={cycleImageMode}
-            absoluteFullscreen={Boolean(win.fullscreen)}
-            onFullscreen={() => toggleFullscreen(win.id)}
-            pipOpen={Boolean(pipWindow)}
-            onPip={osWindowController.togglePip}
-            alwaysOnTop={Boolean(win.pinned)}
-            onAlwaysOnTop={() => togglePinWindow(win.id)}
-            displayLocked={Boolean(win.resolutionLocked)}
-            onDisplayLock={hasDisplayLock ? toggleDisplayLock : undefined}
-            onRestartApp={hasAppSession ? restartApp : undefined}
-            restartingApp={restartingApp}
-            onReloadPage={hasAppSession && webReloadAvailable ? reloadPage : undefined}
-            reloadingPage={reloadingPage}
-            dynamicDp={dpiPolicyOf(win, effectiveSettings).mode !== 'custom'}
-            onDynamicDp={() => toggleCustomDpi(win.id)}
-            visualControls={Boolean(win.visualControls)}
-            onVisualControls={toggleVisualControls}
-            onKeymap={hasKeymapEditor ? openKeymapEditor : undefined}
-            keymapCount={keymapCount}
-            headerModeLabel={HEADER_MODE_LABELS[normalizeHeaderMode(win.headerMode)]}
-            headerModeActive={normalizeHeaderMode(win.headerMode) !== 'follow'}
-            onCycleHeader={cycleHeaderMode}
-            workspaceSent={workspaceSent}
-            onSend={handleSendToWorkspace}
-            variant={isFrontendOnlyWindow(win) ? 'workspace-crop' : 'video'}
-          />
-        )}
+        {hubOpen && <HubPanel {...hub.panelProps} />}
       </AnimatePresence>
 
       {/* Edge & Corner Resize Grips */}

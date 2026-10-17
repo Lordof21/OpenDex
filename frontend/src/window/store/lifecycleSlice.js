@@ -251,6 +251,8 @@ export function createLifecycleSlice(set, get) {
                 videoFitMode: normalizeFitMode(savedGeom?.videoFitMode),
                 appLockPending: Boolean(s.appLockMap[app.package]?.isPending),
                 appLockMessage: s.appLockMap[app.package]?.message || '',
+                appLockPhase: s.appLockMap[app.package]?.phase || 'waiting',
+                appLockSince: s.appLockMap[app.package]?.since || 0,
                 handoffToPhone: Boolean(s.handoffMap[app.package]?.isHandoff || s.handoffMap[handle.window_id]?.isHandoff),
                 handoffMessage: s.handoffMap[app.package]?.message || s.handoffMap[handle.window_id]?.message || '',
                 stealthPhase: Boolean(handle.stealth_phase),
@@ -386,7 +388,6 @@ export function createLifecycleSlice(set, get) {
                 package: bw.package,
                 title: bw.package.split('.').pop() || bw.package,
                 bounds,
-                renderScale: bw.render_scale || [1.0, 1.0],
                 density: bw.task_density ?? null,
                 densityMode: bw.task_density_mode || 'auto',
                 handoffToPhone: Boolean(bw.handoff_to_phone),
@@ -459,6 +460,8 @@ export function createLifecycleSlice(set, get) {
               videoFitMode: normalizeFitMode(savedGeom?.videoFitMode),
               appLockPending: Boolean(s.appLockMap[bw.package]?.isPending || s.appLockMap[bw.window_id]?.isPending),
               appLockMessage: s.appLockMap[bw.package]?.message || s.appLockMap[bw.window_id]?.message || '',
+              appLockPhase: s.appLockMap[bw.package]?.phase || s.appLockMap[bw.window_id]?.phase || 'waiting',
+              appLockSince: s.appLockMap[bw.package]?.since || s.appLockMap[bw.window_id]?.since || 0,
               handoffToPhone: Boolean(bw.handoff_to_phone),
               handoffMessage: '',
               stealthPhase: Boolean(bw.stealth_phase),
@@ -493,8 +496,10 @@ export function createLifecycleSlice(set, get) {
       return win;
     },
 
-    async closeWindow(id) {
+    /** `source`: kapatmayı kim istedi. Günlükte 'close' kategorisiyle backend'e gider: "oyundan attı" olaylarında nedeni kesin gösterir. */
+    async closeWindow(id, source = 'unknown') {
       const win = get().forgetWindow(id);
+      logger.info('close', 'window_close_requested', { windowId: id, package: win?.package, source });
       if (isFrontendOnlyWindow(win)) return; // kırpma / Dosyalar penceresi yalnızca ön yüzdedir (kaynak görev ETKİLENMEZ)
       // Kullanıcı kararı: pencere hemen gider, kapatma arka uçta ONAYLANANA dek yeniden denenir (closeTracker.js). İstek
       // başarısız olursa eski kod hatayı yutuyordu — eşitleme pencereyi "arka uçta var" diye geri getirirdi.

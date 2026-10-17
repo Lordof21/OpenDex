@@ -31,6 +31,9 @@ import {
   FRAME_CHROME_H_PX,
 } from '../src/window/windowStore.js';
 import { useSystemStore } from '../src/state/systemStore.js';
+import { useKeymapStore } from '../src/keymapper/keymapStore.js';
+import { logger, SHIPPED_CATEGORIES } from '../src/lib/logger.js';
+import { WM_ACTIONS, matchWmShortcut } from '../src/window/wmShortcuts.js';
 import { Z_INDEX } from '../src/ui/zIndex.js';
 
 const APP_A = { package: 'com.app.a', display_name: 'Uygulama A' };
@@ -332,6 +335,49 @@ describe('toggleMaximize + real resolution requests', () => {
     expect(resizeCall[1]).toEqual({
       window_id: id, w: 1920, h: 1080 - TASKBAR_H, dpi: densityForTabletTarget(1920, 1080 - TASKBAR_H),
     });
+  });
+
+  it('Oto DPI: akış boyutu aynı kalsa bile büyütünce yoğunluk yeniden hesaplanır (yalnız boyuta bakılmaz)', async () => {
+    mockSettings(true);
+    Object.defineProperty(window, 'innerWidth', { value: 1920, configurable: true });
+    Object.defineProperty(window, 'innerHeight', { value: 1080, configurable: true });
+    api.post.mockResolvedValueOnce(mockOpenResponse('w1'));
+    const store = useWindowStore.getState();
+    const id = await store.openWindow(APP_A);
+    // Pencere kaplanmamış; akışı ZATEN kaplanmış kutunun boyutunda ama küçük pencerenin yoğunluğunda.
+    useWindowStore.setState((s) => ({
+      windows: s.windows.map((w) => (w.id === id ? { ...w, maximized: false, deviceW: 1920, deviceH: 1080 - TASKBAR_H, dpi: 100 } : w)),
+    }));
+    api.post.mockClear();
+    api.post.mockResolvedValueOnce({ window_id: id, ws_url: `/ws/video/${id}`, display_w: 1920, display_h: 1080 - TASKBAR_H });
+
+    await store.toggleMaximize(id);
+
+    const resizeCall = api.post.mock.calls.find(([p]) => p === '/api/windows/resize');
+    expect(resizeCall).toBeTruthy();
+    expect(resizeCall[1]).toEqual({
+      window_id: id, w: 1920, h: 1080 - TASKBAR_H, dpi: densityForTabletTarget(1920, 1080 - TASKBAR_H),
+    });
+    expect(useWindowStore.getState().windows.find((w) => w.id === id).dpi).toBe(densityForTabletTarget(1920, 1080 - TASKBAR_H));
+  });
+
+  it('boyut da yoğunluk da zaten hedefteyse büyütünce arka uca istek gitmez', async () => {
+    mockSettings(true);
+    Object.defineProperty(window, 'innerWidth', { value: 1920, configurable: true });
+    Object.defineProperty(window, 'innerHeight', { value: 1080, configurable: true });
+    api.post.mockResolvedValueOnce(mockOpenResponse('w1'));
+    const store = useWindowStore.getState();
+    const id = await store.openWindow(APP_A);
+    useWindowStore.setState((s) => ({
+      windows: s.windows.map((w) => (w.id === id
+        ? { ...w, maximized: false, deviceW: 1920, deviceH: 1080 - TASKBAR_H, dpi: densityForTabletTarget(1920, 1080 - TASKBAR_H) }
+        : w)),
+    }));
+    api.post.mockClear();
+
+    await store.toggleMaximize(id);
+
+    expect(api.post.mock.calls.filter(([p]) => p === '/api/windows/resize')).toHaveLength(0);
   });
 
   it('requests the phone-like size when restoring from maximized', async () => {
@@ -661,6 +707,55 @@ describe('applyDynamicResolutionToOpenWindows (retroactive apply)', () => {
 // the height under the threshold no matter how wide the request was, so
 // tablet mode never engaged. The density must be derived from whichever
 // dimension is smaller.
+describe('telefondan dönen pencere kendi güncel kutusuna göre uzlaştırılır', () => {
+  afterEach(() => vi.useRealTimers());
+
+  async function openHandedOff() {
+    api.post.mockResolvedValueOnce(mockOpenResponse('w1'));
+    const id = await useWindowStore.getState().openWindow(APP_A);
+    useWindowStore.getState().setHandoff(id, true, 'telefonda');
+    return id;
+  }
+
+  it('geri dönüşte (handoff kalkınca) o pencere için TEK uzlaştırma çalışır; akış pencereye tam otursun', async () => {
+    const id = await openHandedOff();
+    vi.useFakeTimers();
+    const apply = vi.spyOn(useWindowStore.getState(), 'applyDynamicResolutionToOpenWindows').mockResolvedValue(undefined);
+
+    useWindowStore.getState().setHandoff(id, false);
+    expect(apply).not.toHaveBeenCalled();            // backend'in geri yüklediği akışın yerleşmesi beklenir
+    await vi.advanceTimersByTimeAsync(800);
+
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(apply).toHaveBeenCalledWith({ onlyId: id });
+  });
+
+  it('aynı dönüş iki kanaldan bildirilse de (HTTP yanıtı + olay) uzlaştırma bir kez çalışır', async () => {
+    const id = await openHandedOff();
+    vi.useFakeTimers();
+    const apply = vi.spyOn(useWindowStore.getState(), 'applyDynamicResolutionToOpenWindows').mockResolvedValue(undefined);
+
+    useWindowStore.getState().setHandoff(id, false);
+    useWindowStore.getState().setHandoff(id, false);
+    await vi.advanceTimersByTimeAsync(800);
+
+    expect(apply).toHaveBeenCalledTimes(1);
+  });
+
+  it('telefona giderken ya da zaten telefonda olmayan pencere için uzlaştırma yapılmaz', async () => {
+    api.post.mockResolvedValueOnce(mockOpenResponse('w1'));
+    const id = await useWindowStore.getState().openWindow(APP_A);
+    vi.useFakeTimers();
+    const apply = vi.spyOn(useWindowStore.getState(), 'applyDynamicResolutionToOpenWindows').mockResolvedValue(undefined);
+
+    useWindowStore.getState().setHandoff(id, false);   // hiç telefona gitmemişti
+    useWindowStore.getState().setHandoff(id, true, 'telefonda');
+    await vi.advanceTimersByTimeAsync(1500);
+
+    expect(apply).not.toHaveBeenCalled();
+  });
+});
+
 describe('densityForTabletTarget (tablet trigger)', () => {
   const TARGET_DP = 720;
 
@@ -1444,3 +1539,82 @@ describe('backend reconciliation and continuity (Bug #2 & #3 smoke tests)', () =
   });
 });
 
+
+// ── Oyun kipi: fareyi serbest bırakmak için basılı Ctrl + W ile ilerlemek oyunu KAPATMASIN (2026-10-16 00:23 olayı) ──────────────────────
+describe('oyun kipinde Ctrl+W / Ctrl+M kapalıdır, normal pencerede çalışır', () => {
+  const LAYOUT = [{ id: 'j', type: 'dpad', rx: 0.2, ry: 0.7 }, { id: 'f', type: 'tap', key: 'f', rx: 0.8, ry: 0.5 }];
+
+  beforeEach(() => {
+    useKeymapStore.setState({ presets: {}, layoutOff: {}, windowOwned: {} });
+    logger.clear();
+  });
+
+  async function openGame() {
+    api.post.mockResolvedValueOnce(mockOpenResponse('w1'));
+    await useWindowStore.getState().openWindow(APP_A);
+    api.post.mockClear();
+  }
+
+  it('matchWmShortcut: game=true yalnız Ctrl+W ve Ctrl+M\'yi kapatır; Alt+Tab, Ctrl+Shift+F, Ctrl+K gibi diğerleri aynen çalışır', () => {
+    const ev = (init) => ({ ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...init });
+    expect(matchWmShortcut(ev({ ctrlKey: true, key: 'w' }))).toBe(WM_ACTIONS.closeWindow);
+    expect(matchWmShortcut(ev({ ctrlKey: true, key: 'w' }), { game: true })).toBeNull();
+    expect(matchWmShortcut(ev({ ctrlKey: true, key: 'W' }), { game: true })).toBeNull();
+    expect(matchWmShortcut(ev({ ctrlKey: true, key: 'm' }))).toBe(WM_ACTIONS.minimizeWindow);
+    expect(matchWmShortcut(ev({ ctrlKey: true, key: 'm' }), { game: true })).toBeNull();
+    expect(matchWmShortcut(ev({ altKey: true, key: 'Tab' }), { game: true })).toBe(WM_ACTIONS.altTab);
+    expect(matchWmShortcut(ev({ ctrlKey: true, shiftKey: true, key: 'f' }), { game: true })).toBe(WM_ACTIONS.fullscreen);
+    expect(matchWmShortcut(ev({ ctrlKey: true, altKey: true, key: 'd' }), { game: true })).toBe(WM_ACTIONS.dexQuickPanel);
+  });
+
+  it('aktif tuş düzeni olan odaktaki pencerede Ctrl+W tüketilmez ve pencere KAPANMAZ (tuş oyuna gider)', async () => {
+    useKeymapStore.setState({ presets: { 'com.app.a': LAYOUT } });
+    await openGame();
+    const ev = keyEvent({ ctrlKey: true, key: 'w' });
+    expect(useWindowStore.getState().handleWindowManagerShortcut(ev)).toBe(false);
+    expect(ev.preventDefault).not.toHaveBeenCalled();
+    expect(useWindowStore.getState().windows).toHaveLength(1);
+    expect(api.post.mock.calls.filter(([path]) => path === '/api/windows/close')).toEqual([]);
+
+    const minimize = keyEvent({ ctrlKey: true, key: 'm' });
+    expect(useWindowStore.getState().handleWindowManagerShortcut(minimize)).toBe(false);
+    expect(useWindowStore.getState().windows[0].minimized).toBeFalsy();
+  });
+
+  it('tuş düzeni yok / kapalı / tüm düğümler devre dışı ise normal pencere gibi davranır: Ctrl+W kapatır', async () => {
+    for (const setup of [
+      { presets: {} },
+      { presets: { 'com.app.a': LAYOUT }, layoutOff: { 'com.app.a': true } },
+      { presets: { 'com.app.a': LAYOUT.map((n) => ({ ...n, enabled: false })) } },
+    ]) {
+      useKeymapStore.setState({ presets: {}, layoutOff: {}, ...setup });
+      await openGame();
+      const consumed = useWindowStore.getState().handleWindowManagerShortcut(keyEvent({ ctrlKey: true, key: 'w' }));
+      expect(consumed).toBe(true);
+      expect(useWindowStore.getState().windows).toHaveLength(0);
+    }
+  });
+
+  it('oyun kipi PENCEREYE özeldir: pencerenin kendi düzeni varsa o belirler (uygulama düzeni boş olsa bile)', async () => {
+    useKeymapStore.setState({ presets: { 'win:w1': LAYOUT }, windowOwned: { w1: true } });
+    await openGame();
+    expect(useWindowStore.getState().handleWindowManagerShortcut(keyEvent({ ctrlKey: true, key: 'w' }))).toBe(false);
+    expect(useWindowStore.getState().windows).toHaveLength(1);
+  });
+
+  it('kapatma KAYNAĞI günlüğe yazılır ("close" kategorisi backend\'e gider): kısayol / başlık / görev çubuğu ayırt edilir', async () => {
+    await openGame();
+    useWindowStore.getState().handleWindowManagerShortcut(keyEvent({ ctrlKey: true, key: 'w' }));
+    const lines = logger.dump(10).join('\n');
+    expect(lines).toMatch(/window_close_requested/);
+    expect(lines).toMatch(/shortcut:ctrl\+w/);
+    expect(lines).toMatch(/com\.app\.a/);
+
+    logger.clear();
+    api.post.mockResolvedValueOnce(mockOpenResponse('w1'));
+    await useWindowStore.getState().openWindow(APP_A);
+    await useWindowStore.getState().closeWindow('w1', 'titlebar');
+    expect(logger.dump(10).join('\n')).toMatch(/titlebar/);
+    expect(SHIPPED_CATEGORIES.has('close')).toBe(true);
+  });
+});

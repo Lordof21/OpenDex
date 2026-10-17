@@ -7,9 +7,14 @@
 
 import { useWindowStore } from '../windowStore.js';
 import { logger } from '../../lib/logger.js';
+import { isTauriHost, sendPipCommand } from '../pip/pipBridge.js';
 
-const isTauriHost = () =>
-  typeof window !== 'undefined' && !!(window.__TAURI__ || window.__TAURI_INTERNALS__ || window.__TAURI_IPC__);
+/** Tauri PiP penceresinin kendisini kapatır (PiP'in içinden çağrılır). */
+export function closeThisTauriWindow() {
+  return import('@tauri-apps/api/webviewWindow')
+    .then((m) => m.getCurrentWebviewWindow().close())
+    .catch(() => window.close());
+}
 
 export function useOsWindowController({ win, pipWindow, setPipWindow }) {
   const { minimizeWindow, toggleMaximize, toggleFullscreen, closeWindow, togglePinWindow } = useWindowStore();
@@ -34,12 +39,17 @@ export function useOsWindowController({ win, pipWindow, setPipWindow }) {
         try {
           const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
           newPip = new WebviewWindow(`os-window-${win.id}`, {
-            url: `/?pip=${win.id}`,
+            url: `/?pip=${encodeURIComponent(win.id)}&pin=${isPinned ? 1 : 0}`,
             title: win.title || 'OpenDex Window',
             width: win.w || 480,
             height: win.h || 780,
+            minWidth: 280,
+            minHeight: 200,
             alwaysOnTop: isPinned,
-            decorations: true,
+            // Çerçeve bizim: işletim sisteminin başlık çubuğu yok; küçült/büyüt/kapat, sürükleme ve kenardan boyutlandırma
+            // PipApp'in kendi başlığı + tutamaçlarıyla (window/pip/) gelir. Gölge ve Windows'un kenara yapıştırması korunur.
+            decorations: false,
+            shadow: true,
             center: true,
           });
 
@@ -177,32 +187,45 @@ export function useOsWindowController({ win, pipWindow, setPipWindow }) {
     }
   };
 
+  // PiP penceresinin İÇİNDEN: eylemi ana pencereye yollar (DeX'teki tıklamayla aynı yoldan çalışsın), sonra PiP'i kapatır. Ana pencereye
+  // ulaşılamazsa (köprü yok) eski yerel yola düşer.
+  const runFromPipWebview = async (command, localFallback) => {
+    const delivered = await sendPipCommand({ winId: win.id, ...command });
+    if (!delivered) localFallback();
+    await closeThisTauriWindow();
+  };
+
   const handleClose = () => {
+    if (pipWindow === window && isTauriHost()) {
+      runFromPipWebview({ name: 'close' }, () => closeWindow(win.id, 'titlebar:pip'));
+      return;
+    }
     if (pipWindow) {
-      if (pipWindow === window && isTauriHost()) {
-        import('@tauri-apps/api/webviewWindow').then((m) => m.getCurrentWebviewWindow().close()).catch(logger.swallow('oswindow', 'Tauri pencere işlemi'));
-      } else {
-        try { pipWindow.close(); } catch {}
-      }
+      try { pipWindow.close(); } catch {}
       setPipWindow(null);
     }
-    closeWindow(win.id);
+    closeWindow(win.id, 'titlebar');
   };
 
   /** `windowing` ('fullscreen' | 'freeform'): bu aktarımın kipi (başlık menüsü); düğme tıklaması olay nesnesi verir → varsayılan. */
   const handleHandoffToPhone = (windowing) => {
-    if (pipWindow) {
-      if (pipWindow === window && isTauriHost()) {
-        import('@tauri-apps/api/webviewWindow').then((m) => m.getCurrentWebviewWindow().close()).catch(logger.swallow('oswindow', 'Tauri pencere işlemi'));
-      } else {
-        try { pipWindow.close(); } catch {}
-      }
-      setPipWindow(null);
-    }
     // DeX-içi kırpma penceresinde aktarılan şey kaynak Workspace görevidir.
     const target = win.sourceTaskId || win.id;
-    if (windowing === 'fullscreen' || windowing === 'freeform') useWindowStore.getState().handoffWindowToPhone(target, windowing);
-    else useWindowStore.getState().handoffWindowToPhone(target);
+    const mode = windowing === 'fullscreen' || windowing === 'freeform' ? windowing : undefined;
+    const handoffHere = () => {
+      if (mode) useWindowStore.getState().handoffWindowToPhone(target, mode);
+      else useWindowStore.getState().handoffWindowToPhone(target);
+    };
+    if (pipWindow === window && isTauriHost()) {
+      // PiP kendi (ayrı) store'unda aktarsaydı pencere kapanırken yarıda kalır, ana pencere hiçbir şey görmezdi.
+      runFromPipWebview({ name: 'handoff', windowing: mode }, handoffHere);
+      return;
+    }
+    if (pipWindow) {
+      try { pipWindow.close(); } catch {}
+      setPipWindow(null);
+    }
+    handoffHere();
   };
 
   return {

@@ -58,6 +58,41 @@ export const LAYOUT_BREAKPOINTS_DP = [600, 720, 840];
  */
 export const DPI_REEVAL_RATIO = 0.03;
 
+// ── "Oto" yoğunluğun üç eğilimi: yakın | orta (varsayılan) | geniş ────────────────────────────────────────────────────
+// Oto, pencere boyutuna göre ergonomik yoğunluğu seçer (yukarıdaki eğriler: yazı ≈ 20 yay-dakikası). Eğilim, o "orta" değeri
+// kullanıcının tercihine doğru kaydırır; çarpan DPI'a uygulanır (DPI ↑ = arayüz büyür, mantıksal alan [dp] küçülür).
+//
+//   Çarpanlar ergonomi aralığının UÇLARINDAN türetildi (calculateDynamicFitDpi başlığı: 14 sp gövde yazısı 18–24 yay-dakikası,
+//   nominal 20 — ISO 9241-303 okuma ergonomisi): yakın = 24/20 = ×1,20 (arayüz %20 büyük, dp ×0,83: içerik %17 az),
+//   geniş = 18/20 = ×0,90 (arayüz %10 küçük, dp ×1,11: içerik %11 fazla). Orta = bugünkü Oto (×1). Her ayar komşusundan en az
+//   bir fark eşiği (görsel boyutta ~%5–8) kadar uzaktır, ama hiçbiri okunabilirlik aralığının dışına çıkmaz. Bu aralığın
+//   dışını isteyen (≈ uçtaki az sayıda kullanıcı) "Özel DPI" ya da "Target DP" kullanır.
+export const AUTO_DENSITY_LEVELS = Object.freeze(['close', 'medium', 'wide']);
+export const AUTO_DENSITY_DEFAULT = 'medium';
+export const AUTO_DENSITY_FACTOR = Object.freeze({ close: 1.2, medium: 1, wide: 0.9 });
+
+export function normalizeAutoDensity(level) {
+  return AUTO_DENSITY_LEVELS.includes(level) ? level : AUTO_DENSITY_DEFAULT;
+}
+
+/**
+ * Oto yoğunluğa eğilimi uygular. "Yakın" mantıksal alanı küçültür; bu, pencereyi bir yerleşim eşiğinin (600 / 720 / 840 dp)
+ * ALTINA düşürüp uygulamayı tablet düzeninden telefon düzenine atmasın diye DPI, mevcut yerleşim sınıfını koruyacak en yüksek
+ * değerle sınırlanır. "Geniş" dp'yi büyütür: sınıf yukarı çıkabilir (daha çok yer — istenen budur). Sonuç MIN_DPI–MAX_DPI içinde kalır.
+ */
+export function applyAutoDensity(dpi, level, w, h) {
+  const factor = AUTO_DENSITY_FACTOR[normalizeAutoDensity(level)];
+  if (!(dpi > 0) || factor === 1) return dpi;
+  let out = Math.round(dpi * factor);
+  if (factor > 1 && w > 0 && h > 0) {
+    for (const side of [Math.min(w, h), Math.max(w, h)]) {
+      const reached = LAYOUT_BREAKPOINTS_DP.filter((bp) => (side * 160) / dpi >= bp).length;
+      if (reached > 0) out = Math.min(out, Math.floor((side * 160) / LAYOUT_BREAKPOINTS_DP[reached - 1]));
+    }
+  }
+  return Math.max(MIN_DPI, Math.min(MAX_DPI, out));
+}
+
 /** Bir akış kutusunun `dpi`'daki yerleşim sınıfı: en küçük kenarın ve en uzun kenarın dp eşiklerine göre dilimi ("1/2"). */
 export function layoutClassOf(w, h, dpi) {
   if (!(dpi > 0) || !(w > 0) || !(h > 0)) return null;
@@ -428,6 +463,7 @@ export function targetDisplaySizeForMode(
   isFullscreen = false,
   isHeaderAutoHidden = false,
   phoneScale = false,
+  autoDensity = AUTO_DENSITY_DEFAULT,
 ) {
   let target;
   const isPortrait = windowH > 0 && windowW > 0 && windowH > windowW;
@@ -461,7 +497,7 @@ export function targetDisplaySizeForMode(
     target = { w, h };
   }
 
-  target.dpi = dpiForMode(resolutionMode, customDpi, targetDp, target.w, target.h, windowW, phoneScale);
+  target.dpi = dpiForMode(resolutionMode, customDpi, targetDp, target.w, target.h, windowW, phoneScale, autoDensity);
   return target;
 }
 
@@ -471,19 +507,25 @@ export function targetDisplaySizeForMode(
  * sessizce normal kurala düşer. `targetDisplaySizeForMode` VE sürükleme-bırakma (ResizeHandle) aynı formülü kullanır:
  * iki yerin ayrı formülü "ilk açılan pencerenin DPI'sı ile aynı değil" hatasını doğurmuştu.
  */
-export function dpiForMode(resolutionMode, customDpi, targetDp, targetW, targetH, windowW = 0, phoneScale = false) {
+export function dpiForMode(resolutionMode, customDpi, targetDp, targetW, targetH, windowW = 0, phoneScale = false, autoDensity = AUTO_DENSITY_DEFAULT) {
   if (customDpi && Number(customDpi) > 0) return Number(customDpi);
   if (phoneScale || (isPhoneScaleMode(resolutionMode) && !(Number(targetDp) > 0))) {
     const dpi = phoneScaleDpi(targetW, targetH);
     if (dpi) return dpi;
   }
+  const explicitTarget = Number(targetDp) > 0;
+  let base;
   if (isFixedMode(resolutionMode)) {
-    return targetDp && Number(targetDp) > 0
+    base = explicitTarget
       ? densityForTabletTarget(targetW, targetH, targetDp, targetW)
       : (FIXED_MODE_DEFAULT_DPI[resolutionMode] ?? densityForTabletTarget(targetW, targetH, 0, targetW));
+  } else if (isDynamicFitMode(resolutionMode)) {
+    base = calculateDynamicFitDpi(targetW, targetH, targetDp, windowW);
+  } else {
+    base = densityForTabletTarget(targetW, targetH, targetDp, windowW);
   }
-  if (isDynamicFitMode(resolutionMode)) return calculateDynamicFitDpi(targetW, targetH, targetDp, windowW);
-  return densityForTabletTarget(targetW, targetH, targetDp, windowW);
+  // Kullanıcı yoğunluğu dp olarak AÇIKÇA söylediyse (Target DP) eğilim uygulanmaz: o zaten onun seçimi.
+  return explicitTarget ? base : applyAutoDensity(base, autoDensity, targetW, targetH);
 }
 
 export function maximizedTargetSize() {
