@@ -37,3 +37,15 @@ frontend/harness.html
 frontend/harness.jsx
 frontend/vite.harness.config.mjs
 frontend/harness-fixtures/
+
+# Tam derleme loglari (derle_tam.bat)
+build_logs/
+
+# i18n:todo çıktısı (üretilir)
+frontend/i18n-todo.json
+
+# Vite dev sunucusunun gecici yapilandirma kopyalari
+frontend/vite.config.js.timestamp-*.mjs
+
+# Nuitka coker ise yazdigi rapor (buyuk, uretilen)
+backend/nuitka-crash-report.xml

@@ -67,7 +67,7 @@ The release pipeline makes reverse engineering of the shipped binaries harder:
 | Layer | What is done |
 |---|---|
 | Phone helper (Java) | R8: shrinking, package flattening, debug-info stripping; only entry points are kept (`backend/java/proguard.pro`) |
-| UI bundle (JS) | `javascript-obfuscator`: control-flow flattening, string-array encryption, no source maps (`frontend/vite.config.js`). The options that fight an inspector (`debugProtection`, `selfDefending`, `disableConsoleOutput`) are off |
+| UI bundle (JS) | `javascript-obfuscator`: identifier renaming, compaction and no source maps (`frontend/vite.config.js`). Control-flow flattening, dead-code injection and string-array/split-string encryption are **off**: measured on a hot loop they made the bundle 6–7× slower, which showed up as stutter in the packaged app. The options that fight an inspector (`debugProtection`, `selfDefending`, `disableConsoleOutput`) are off too |
 | Backend (Python) | Nuitka native compilation, docstrings stripped, a leak check on the result |
 | Shell (Tauri) | `panic = "abort"`; the `devtools` Cargo feature is **on**, so right-click → *Inspect* and F12 work in release builds |
 

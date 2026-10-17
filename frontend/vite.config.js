@@ -55,23 +55,20 @@ export default defineConfig(({ command, mode }) => {
       obfuscate && obfuscator({
         apply: 'build',
         options: {
+          // Yalnız ucuz dönüşümler: derleme-zamanı isim gizleme ve sıkıştırma. Kaynak zaten herkese açık; korumanın asıl
+          // maliyeti (kontrol akışı, ölü kod, string dizisi/RC4, string bölme) sıcak yolda kasılma yapıyordu: aynı döngüde
+          // plain ≈ 1×, bu seçeneklerle ≈ 6–7× (2026-10-17 ölçümü). Bu yüzden onlar kapalı.
           compact: true,
-          controlFlowFlattening: true,
-          controlFlowFlatteningThreshold: 0.75,
-          deadCodeInjection: true,
-          deadCodeInjectionThreshold: 0.3,
-          stringArray: true,
-          stringArrayEncoding: ['base64', 'rc4'],
-          stringArrayThreshold: 0.8,
-          // Modül yolları ŞİFRELENMEZ: dinamik `import('@tauri-apps/api/core')` / `import('../files/FilesApp.jsx')` yolu şifrelenince
-          // Rollup parçayı hiç üretemiyor ve çalışma anında import() başarısız oluyordu — paketli uygulamada token IPC'si
-          // (apiToken.fromTauri) sessizce null dönüp TÜM istekler 401 alıyor, Dosyalar/PDF/Tauri pencere API'leri çalışmıyordu.
-          reservedStrings: ['^@tauri-apps/', '^read-excel-file/', '^pdfjs-dist/', '^mammoth/', '^fflate$', '^\\.{1,2}/'],
-          splitStrings: true,
-          splitStringsChunkLength: 5,
+          controlFlowFlattening: false,
+          deadCodeInjection: false,
+          stringArray: false,
+          splitStrings: false,
           identifierNamesGenerator: 'hexadecimal',
           renameGlobals: false,
-          transformObjectKeys: true,
+          // KAPALI: bu seçenek nesne değişmezlerinin alanlarını ifadenin DIŞINA çıkarır; `cond ? <X pkg={win.package}/> : …` gibi
+          // koşullu JSX'te `win.package` koşul bakılmadan çalışıyor ve `win` yokken "Cannot read properties of undefined" ile
+          // ekranı çökertiyordu (DexSettings: tüm pencereler küçükken). Üretim paketinde, geliştirmede görünmeyen hatalardı.
+          transformObjectKeys: false,
           unicodeEscapeSequence: false,
           // The Tauri "devtools" Cargo feature is on (src-tauri/Cargo.toml), so the inspector works in the shipped app. The
           // options that fight an inspector are therefore left OFF: debugProtection (near-continuous `debugger;` breaks),

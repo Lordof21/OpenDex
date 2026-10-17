@@ -125,6 +125,14 @@ def main():
     else:
         step_4_tauri_build()
 
+    # download/ gets this build's installer and portable zip (scripts/publish_download.py). Not for the quick PyInstaller
+    # sidecar (a build for testing, not for shipping), and never when the installer was skipped.
+    if skip_installer or USE_PYINSTALLER or "--no-download" in sys.argv:
+        print("\n[INFO] download/ not updated (installer skipped, --pyinstaller build, or --no-download).")
+    else:
+        import publish_download
+        publish_download.publish(since=t0)
+
     dt = time.time() - t0
     banner(f"Release build finished in {dt:.1f}s")
 
