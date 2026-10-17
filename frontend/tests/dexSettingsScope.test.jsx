@@ -341,3 +341,91 @@ describe('DexSettings — Yoğunluk okuma şeridi', () => {
     expect(shown).toBeLessThan(480 * 1.03);
   });
 });
+
+describe('DexSettings — Oto yoğunluk: sağ tık ile yakın | orta | geniş', () => {
+  beforeEach(() => useWindowStore.setState({ windows: [WIN_A, WIN_B] }));
+  afterEach(cleanup);
+
+  const dpiOto = (getByText) => within(getByText('Özel DPI Yoğunluğu').closest('section')).getByRole('button', { name: /Oto/ });
+  const openMenu = (getByText) => fireEvent.contextMenu(dpiOto(getByText), { clientX: 200, clientY: 200 });
+
+  it('Oto\'ya sağ tık üç seçenekli kartı açar; orta (varsayılan) işaretlidir', () => {
+    const { getByText, getByRole, getAllByRole } = renderPanel();
+    openMenu(getByText);
+
+    expect(getByRole('menu', { name: 'Oto yoğunluk' })).toBeInTheDocument();
+    const items = getAllByRole('menuitemradio');
+    expect(items.map((i) => i.textContent)).toEqual([
+      expect.stringContaining('Yakın'), expect.stringContaining('Orta (varsayılan)'), expect.stringContaining('Geniş'),
+    ]);
+    expect(items.map((i) => i.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false']);
+  });
+
+  it('her seçenek odaktaki pencere için gerçek en küçük genişliği (dp) gösterir: yakın < orta < geniş', () => {
+    const { getByText, getAllByRole } = renderPanel();
+    openMenu(getByText);
+    const dp = getAllByRole('menuitemradio').map((i) => Number(i.textContent.match(/(\d+) dp/)[1]));
+    expect(dp[0]).toBeLessThan(dp[1]);
+    expect(dp[1]).toBeLessThan(dp[2]);
+  });
+
+  it('seçim YALNIZ odaktaki pencerenin politikasına Oto + eğilim olarak yazılır', () => {
+    const { getByText, getByRole } = renderPanel();
+    const spy = vi.spyOn(useWindowStore.getState(), 'setWindowDpiPolicy').mockResolvedValue(undefined);
+    openMenu(getByText);
+    fireEvent.click(getByRole('menuitemradio', { name: /Yakın/ }));
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith('wa', { mode: 'auto', density: 'close' });
+  });
+
+  it('Özel DPI seçiliyken de menüden eğilim seçmek Oto\'ya döndürür', () => {
+    setWindows([{ ...WIN_A, dpiPolicy: { mode: 'custom', dpi: 200 } }, WIN_B]);
+    const { getByText, getByRole, getAllByRole } = renderPanel();
+    const spy = vi.spyOn(useWindowStore.getState(), 'setWindowDpiPolicy').mockResolvedValue(undefined);
+    openMenu(getByText);
+    expect(getAllByRole('menuitemradio').every((i) => i.getAttribute('aria-checked') === 'false')).toBe(true);   // Oto seçili değil
+    fireEvent.click(getByRole('menuitemradio', { name: /Geniş/ }));
+    expect(spy).toHaveBeenCalledWith('wa', { mode: 'auto', density: 'wide' });
+  });
+
+  it('eğilim seçiliyken Oto düğmesine tıklamak eğilimi KORUR; rozet ve okuma şeridi eğilimi söyler', () => {
+    setWindows([{ ...WIN_A, dpiPolicy: { mode: 'auto', density: 'close' } }, WIN_B]);
+    const { getByText } = renderPanel();
+    const spy = vi.spyOn(useWindowStore.getState(), 'setWindowDpiPolicy').mockResolvedValue(undefined);
+
+    const button = dpiOto(getByText);
+    expect(button).toHaveTextContent('Yakın');
+    expect(getByText('Yoğunluk kipi').parentElement).toHaveTextContent('Oto · Yakın');
+    fireEvent.click(button);
+    expect(spy).toHaveBeenCalledWith('wa', { mode: 'auto', density: 'close' });
+  });
+
+  it('Oto düğmesinin ipucu üç kipi anlatır: seçiliyken mevcut kipi, değilken Oto\'nun ne yaptığını söyler', () => {
+    const { getByText } = renderPanel();
+    expect(dpiOto(getByText).getAttribute('data-tooltip')).toMatch(/Sağ tık: Yakın \/ Orta \/ Geniş/);
+    expect(dpiOto(getByText).getAttribute('data-tooltip')).toMatch(/Oto · Orta \(varsayılan\)/);
+
+    setWindows([{ ...WIN_A, dpiPolicy: { mode: 'custom', dpi: 200 } }, WIN_B]);
+    const tip = dpiOto(getByText).getAttribute('data-tooltip');
+    expect(tip).toMatch(/Pencereye göre otomatik/);
+    expect(tip).toMatch(/Sağ tık/);
+  });
+
+  it('«Gerçek Çözünürlük» kapalıyken yoğunluk uygulanmayacağı için menü açılmaz', async () => {
+    const { getSettings } = await import('../src/settings/settingsApi.js');
+    getSettings.mockResolvedValueOnce({ dynamic_resolution_enabled: false });
+    const { queryByRole, getByText } = renderPanel();
+    await act(async () => {});
+    fireEvent.contextMenu(dpiOto(getByText), { clientX: 10, clientY: 10 });
+    expect(queryByRole('menu')).toBeNull();
+  });
+
+  it('Esc menüyü kapatır; Target DP\'nin "Oto"su bu menüyü AÇMAZ (o başka bir şey: Target\'ı özel DPI\'a çevirir)', () => {
+    const { getByText, queryByRole } = renderPanel();
+    openMenu(getByText);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    const targetOto = within(getByText('Mantıksal Alan (Target DP)').closest('section')).getByRole('button', { name: /Oto/ });
+    fireEvent.contextMenu(targetOto);
+    expect(queryByRole('menu')).toBeNull();
+  });
+});

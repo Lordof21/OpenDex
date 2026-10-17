@@ -11,6 +11,7 @@ import {
   Maximize2,
   Monitor,
   Moon,
+  MousePointer2,
   Palette,
   RefreshCw,
   ShieldCheck,
@@ -19,7 +20,8 @@ import {
   Sun,
   Zap,
 } from 'lucide-react';
-import { Callout, ChoiceGroup, Group, Page, ToggleRow } from '../controls.jsx';
+import { Callout, ChoiceGroup, Group, Page, PrecisionSlider, SliderField, ToggleRow } from '../controls.jsx';
+import { MOUSE_SENSITIVITY_RANGE, useKeymapStore } from '../../keymapper/keymapStore.js';
 import {
   APP_CLOSED_OPTIONS,
   HANDOFF_OPTIONS,
@@ -32,6 +34,38 @@ import { t } from '../../i18n/index.js';
 const WINDOWING_ICONS = { eco: Zap, independent: Monitor, hybrid: Sparkles };
 const HANDOFF_ICONS = { fullscreen: Maximize2, freeform: AppWindow };
 const THEME_ICONS = { light: Sun, dark: Moon };
+
+/** Klavye + fare (oyun düzeni): fareyle bakış. Ayar bu bilgisayardadır (tuş düzenleri gibi); telefon/backend ayarı değildir. */
+function MouseLookGroup() {
+  const prefs = useKeymapStore((s) => s.prefs);
+  const setMousePrefs = useKeymapStore((s) => s.setMousePrefs);
+  return (
+    <div className="space-y-3">
+      <Group title={t('settings.klavye_ve_fare_oyun')}>
+        <ToggleRow
+          item="mouseLook"
+          icon={MousePointer2}
+          checked={prefs.mouseLook}
+          onToggle={() => setMousePrefs({ mouseLook: !prefs.mouseLook })}
+        />
+      </Group>
+      {prefs.mouseLook && (
+        <SliderField item="mouseSensitivity" title={t('settings.fare_duyarliligi')} readout={`${prefs.mouseSensitivity.toFixed(1)}×`}>
+          <PrecisionSlider
+            value={prefs.mouseSensitivity}
+            min={MOUSE_SENSITIVITY_RANGE.min}
+            max={MOUSE_SENSITIVITY_RANGE.max}
+            step={0.1}
+            onCommit={(value) => setMousePrefs({ mouseSensitivity: Math.round(value * 10) / 10 })}
+            label={t('settings.fare_duyarliligi')}
+            unit="×"
+            ticks={[0.5, 1, 1.5, 2, 3]}
+          />
+        </SliderField>
+      )}
+    </div>
+  );
+}
 
 export function WindowsSection({ ctl }) {
   const { values: v, actions: a } = ctl;
@@ -52,6 +86,8 @@ export function WindowsSection({ ctl }) {
         <ToggleRow item="headerHover" icon={GripHorizontal} checked={v.headerHover} onToggle={() => a.toggle('header_hover_mode', v.headerHover)} />
         <ToggleRow item="dpLock" icon={Lock} checked={v.dpLock} onToggle={() => a.toggle('dp_lock_enabled', v.dpLock)} />
       </Group>
+
+      <MouseLookGroup />
 
       <div className="space-y-3">
         <ChoiceGroup
@@ -129,6 +165,9 @@ export function PowerSection({ ctl }) {
     <Page icon={BatteryCharging} title={SECTIONS.power.label} subtitle={SECTIONS.power.subtitle}>
       <Group title={t('settings.pil_isi')}>
         <ToggleRow item="dimPhone" icon={Monitor} checked={v.dimPhone} onToggle={() => a.toggle('screen_off_while_mirroring', v.dimPhone)} />
+      </Group>
+      <Group title={t('settings.baglanti_kararliligi')}>
+        <ToggleRow item="usbStability" icon={ShieldCheck} checked={v.usbStability} onToggle={() => a.toggle('usb_stability_guard', v.usbStability)} />
       </Group>
       <Group title={t('settings.cihaz_hafizasi')}>
         <ToggleRow

@@ -29,6 +29,13 @@ const DISCONNECTED_PLACEHOLDER = {
   tablet: false,
 };
 
+/** `POST /api/device/tcpip` hata kodu → çevrilmiş metin (kodu olmayan / bilinmeyen hata: genel "geçiş başarısız"). */
+export function wirelessErrorText(code, port) {
+  if (code === 'unverified') return t('taskbar.kablosuz_dogrulanamadi_usb_cikarmayin', { port });
+  if (code === 'no_device') return t('taskbar.bagli_cihaz_yok');
+  return t('taskbar.kablosuz_gecis_basarisiz_oldu');
+}
+
 export function useDeviceHub() {
   const rawDevices = useSystemStore((s) => s.devices);
   const batteryInfo = useSystemStore((s) => s.batteryInfo);
@@ -108,10 +115,12 @@ export function useDeviceHub() {
     if (targetLink === 'wifi') {
       notify(t('taskbar.model_wi_fi_hattina_geciliyor_port', { model: dev.model, port }));
       try {
-        const res = await api.post(`/api/device/tcpip?port=${encodeURIComponent(port)}`);
-        notify(res?.message || t('taskbar.kablosuz_baglanti_etkin_usb_kablosunu'));
+        await api.post(`/api/device/tcpip?port=${encodeURIComponent(port)}`);
+        // Backend'in `message` alanı Türkçe sabit metindir; arayüz dili için kendi çevirimizi kullanırız (başarı yalnız bağlantı DOĞRULANINCA döner).
+        notify(t('taskbar.kablosuz_baglanti_etkin_usb_kablosunu'));
       } catch (err) {
-        notify(err?.detail || t('taskbar.kablosuz_gecis_basarisiz_oldu'));
+        // Hata `code` ile gelir (backend metni Türkçe sabit olduğu için arayüz kendi çevirisini gösterir); bilinmeyen kod genel mesaja düşer.
+        notify(wirelessErrorText(err?.code, port));
       }
       await useSystemStore.getState().fetchDevices();
       return;

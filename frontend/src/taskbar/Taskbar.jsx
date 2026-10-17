@@ -466,7 +466,7 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
   const closeTaskbarApp = (id) => {
     closePreview();
     const targetWin = windows.find((w) => w.id === id || w.appId === id || w.package === id);
-    if (targetWin) closeWindow(targetWin.id);
+    if (targetWin) closeWindow(targetWin.id, 'taskbar');
   };
 
   const clearHoverOpen = () => {
@@ -623,7 +623,7 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
 
   const closeAllOfApp = (w) => {
     closePreview();
-    windows.filter((x) => x.package && x.package === w.package).forEach((x) => closeWindow(x.id));
+    windows.filter((x) => x.package && x.package === w.package).forEach((x) => closeWindow(x.id, 'taskbar:close-all-of-app'));
   };
 
   // ← → Home End: çubuktaki düğmeler arasında gezinme (roving odak yerine basit ve tahmin edilebilir: odak zaten düğmelerde).

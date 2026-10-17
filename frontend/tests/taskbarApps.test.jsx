@@ -121,7 +121,7 @@ describe('tıklama ve bağlam menüsü', () => {
 
     fireEvent.contextMenu(appButton('a'));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Kapat' }));
-    expect(closeWindow).toHaveBeenCalledWith('a');
+    expect(closeWindow).toHaveBeenCalledWith('a', 'taskbar');
   });
 
   it('aynı uygulamanın birden çok penceresi varsa "Tüm pencereleri kapat" sunulur ve hepsini kapatır', async () => {

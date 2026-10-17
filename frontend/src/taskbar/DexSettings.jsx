@@ -15,12 +15,15 @@ import {
   MonitorCog,
   MonitorOff,
   Palette,
+  Equal,
   Ruler,
   ScanSearch,
   SlidersHorizontal,
   Smartphone,
   Sparkles,
   Zap,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 import { PanelShell } from './PanelShell.jsx';
 import Button from '../ui/Button.jsx';
@@ -33,6 +36,8 @@ import { cn } from '../lib/utils.js';
 import { useTheme } from '../state/ThemeContext.jsx';
 import { useSystemStore } from '../state/systemStore.js';
 import {
+  AUTO_DENSITY_DEFAULT,
+  AUTO_DENSITY_LEVELS,
   BACKEND_FIT,
   FIT_CYCLE,
   FIT_MODES,
@@ -42,6 +47,7 @@ import {
   dpiPolicyOf,
   globalFitFromBackend,
   modeOf,
+  normalizeAutoDensity,
   normalizeFitMode,
   normalizeHeaderMode,
   normalizeWindowOverrides,
@@ -51,6 +57,7 @@ import {
 import { updateSettings, useLiveSettings } from '../settings/liveSettings.js';
 import { openOpenDexSettings } from '../settings/SettingsPanel.jsx';
 import { PrecisionSlider } from '../ui/PrecisionSlider.jsx';
+import { ChoiceMenu } from '../ui/ChoiceMenu.jsx';
 import AppIcon from '../ui/AppIcon.jsx';
 import { isMirrorPackage } from '../window/mirrorPackage.js';
 import { t as tt } from '../i18n/index.js';
@@ -181,13 +188,16 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
 
   // DPI politikası ODAKTAKİ PENCEREDEN türetilir (yerel state yok): odak değişince panel o pencerenin değerini
   // gösterir; özel DPI ve Target DP aynı anda var olamaz.
-  const policy = dpiPolicyOf(activeWindow, null);
+  const policy = dpiPolicyOf(activeWindow, live);
   const dpiAuto = policy.mode !== 'custom';
   const dpAuto = policy.mode !== 'target';
+  // Oto'nun eğilimi (yakın | orta | geniş): yalnız Oto politikasında anlamlı; orta varsayılandır.
+  const autoDensity = policy.mode === 'auto' ? normalizeAutoDensity(policy.density) : AUTO_DENSITY_DEFAULT;
+  const [autoMenu, setAutoMenu] = useState(null);
   const dpValue = policy.mode === 'target' ? policy.dp : DP_AUTO;
 
   // Otomatik (özel DPI olmadan) hesaplanan canlı DPI: pencerenin kendi kipi, başlık durumu ve Target DP'si dahil.
-  const liveGeometry = activeWindow
+  const geometryFor = (forPolicy) => (activeWindow
     ? targetDisplaySizeForWindow(
         activeWindow,
         { resolution_mode: resolution || 'dynamic_fit', header_hover_mode: dragTitle },
@@ -195,9 +205,10 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
           w: activeWindow.w || (typeof window !== 'undefined' ? window.innerWidth : 1920),
           h: activeWindow.h || (typeof window !== 'undefined' ? window.innerHeight - 50 : 1030),
         },
-        { mode: modeOf(activeWindow), policy: policy.mode === 'target' || policy.mode === 'phone' ? policy : { mode: 'auto' } },
+        { mode: modeOf(activeWindow), policy: forPolicy },
       )
-    : null;
+    : null);
+  const liveGeometry = geometryFor(['target', 'phone', 'auto'].includes(policy.mode) ? policy : { mode: 'auto' });
   const liveCalculatedDpi = liveGeometry?.dpi || DPI_AUTO;
 
   const dpiValue = policy.mode === 'custom' ? policy.dpi : (activeWindow?.dpi || liveCalculatedDpi || DPI_AUTO);
@@ -207,6 +218,29 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
   const liveSwDp = liveGeometry?.w > 0 && liveGeometry?.h > 0 && effectiveDpi > 0
     ? Math.round((Math.min(liveGeometry.w, liveGeometry.h) * 160) / effectiveDpi)
     : null;
+
+  // Oto'nun üç eğilimi: seçenekte, ODAKTAKİ pencere için o eğilimin gerçekten üreteceği en küçük genişlik (dp) gösterilir —
+  // "yakın / orta / geniş" soyut bir söz değil, bu pencerede kaç dp'lik alan demek olduğu görülür.
+  const autoSwDp = (level) => {
+    const g = geometryFor({ mode: 'auto', density: level });
+    return g?.dpi > 0 ? Math.round((Math.min(g.w, g.h) * 160) / g.dpi) : '—';
+  };
+  const AUTO_DENSITY_UI = {
+    close: { icon: ZoomIn, label: tt('taskbar.oto_yakin'), detail: (dp) => tt('taskbar.oto_yakin_detay', { dp }) },
+    medium: { icon: Equal, label: tt('taskbar.oto_orta_varsayilan'), detail: (dp) => tt('taskbar.oto_orta_detay', { dp }) },
+    wide: { icon: ZoomOut, label: tt('taskbar.oto_genis'), detail: (dp) => tt('taskbar.oto_genis_detay', { dp }) },
+  };
+  const autoOptions = AUTO_DENSITY_LEVELS.map((level) => ({
+    value: level,
+    label: AUTO_DENSITY_UI[level].label,
+    icon: AUTO_DENSITY_UI[level].icon,
+    detail: AUTO_DENSITY_UI[level].detail(autoSwDp(level)),
+  }));
+  const autoLevelName = AUTO_DENSITY_UI[autoDensity].label;
+  // Oto seçiliyken ipucu üç kipi anlatır (sağ tıkla açılır); seçili değilken Oto'nun ne yaptığını söyler.
+  const autoHint = dpiAuto
+    ? tt('taskbar.oto_ipucu_secili', { kip: autoLevelName })
+    : tt('taskbar.oto_ipucu');
 
   // Kapsam: "Bu pencere" bölümü odaktaki pencereye, "Tüm pencereler" genel varsayılanlara aittir.
   const windowName = activeWindow ? activeWindow.title || activeWindow.package || tt('common.pencere_2') : null;
@@ -269,7 +303,17 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
   // "Telefon ölçeği": bu pencere telefondaki düzeniyle açılır; tekrar basınca otomatiğe döner.
   const phoneScaleActive = policy.mode === 'phone';
   const togglePhoneScale = () => applyPolicy(phoneScaleActive ? { mode: 'auto' } : { mode: 'phone' });
-  const handleDpiAuto = () => applyPolicy({ mode: 'auto' });
+  const handleDpiAuto = () => applyPolicy({ mode: 'auto', density: autoDensity });
+  // Oto'ya sağ tık: yakın | orta | geniş. Seçmek Oto'yu da seçer (eğilim yalnız Oto'nun içindir).
+  const openAutoMenu = (event) => {
+    event.preventDefault();
+    if (!smartResize || !activeWindow || activeWindow.isEcoWorkspace) return;
+    setAutoMenu({ x: event.clientX, y: event.clientY });
+  };
+  const pickAutoDensity = (level) => {
+    setAutoMenu(null);
+    applyPolicy({ mode: 'auto', density: level });
+  };
   const setDp = (value) => applyPolicy({ mode: 'target', dp: Number(value) });
   // Target DP "Oto": Target DP'nin O AN ürettiği DPI (DPI kaydırıcısında görünen değer) özel DPI olarak korunur —
   // görüntü yoğunluğu sıçramaz, DPI bundan sonra bu değeri dinler. Target seçili değilse hiçbir şey değişmez.
@@ -340,7 +384,7 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
         onChange={selectTab}
         windowIcon={
           canTuneWindow ? (
-            <AppIcon pkg={activeWindow.package} displayName={windowName} size={14} />
+            <AppIcon pkg={activeWindow?.package} displayName={windowName} size={14} />
           ) : (
             <Monitor className="size-3.5 shrink-0 text-muted-foreground" />
           )
@@ -362,7 +406,12 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
                 items={[
                   { label: tt('taskbar.etkin_dpi'), value: String(Math.round(effectiveDpi)), unit: 'DPI' },
                   { label: tt('taskbar.en_kucuk_genislik'), value: liveSwDp ? String(liveSwDp) : '—', unit: 'dp' },
-                  { label: tt('taskbar.yogunluk_kipi'), value: DENSITY_MODE_LABEL[policy.mode] || 'Oto' },
+                  {
+                    label: tt('taskbar.yogunluk_kipi'),
+                    value: policy.mode === 'auto' && autoDensity !== AUTO_DENSITY_DEFAULT
+                      ? `${DENSITY_MODE_LABEL.auto} · ${autoLevelName}`
+                      : (DENSITY_MODE_LABEL[policy.mode] || 'Oto'),
+                  },
                 ]}
               />
 
@@ -382,11 +431,25 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
                   auto={dpiAuto}
                   onCommit={setDpi}
                   onAuto={handleDpiAuto}
+                  onAutoContextMenu={openAutoMenu}
+                  autoHint={autoHint}
+                  autoSuffix={dpiAuto && autoDensity !== AUTO_DENSITY_DEFAULT ? autoLevelName : undefined}
                   label={tt('common.ozel_dpi_yogunlugu')}
                   unit="DPI"
                   ticks={[130, 160, 180, 200, 220, 240, 280, 320, 340]}
                   className="mt-1.5"
                 />
+                {autoMenu && (
+                  <ChoiceMenu
+                    anchor={autoMenu}
+                    title={tt('taskbar.oto_yogunluk')}
+                    options={autoOptions}
+                    current={dpiAuto ? autoDensity : null}
+                    notice={tt('taskbar.oto_yogunluk_notu')}
+                    onPick={pickAutoDensity}
+                    onClose={() => setAutoMenu(null)}
+                  />
+                )}
               </SettingsGroup>
 
               <SettingsGroup dense icon={Ruler} title={tt('taskbar.mantiksal_alan_target_dp')} value={targetLabel} mono>

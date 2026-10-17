@@ -12,7 +12,7 @@ vi.mock('../src/lib/api.js', () => ({
 }));
 
 import { api } from '../src/lib/api.js';
-import { useDeviceHub } from '../src/taskbar/useDeviceHub.js';
+import { useDeviceHub, wirelessErrorText } from '../src/taskbar/useDeviceHub.js';
 import { useSystemStore } from '../src/state/systemStore.js';
 
 const USB_DEVICE = { serial: 'USB123', model: 'Pixel 8', state: 'device', transport: 'usb', is_active: true };
@@ -131,6 +131,36 @@ describe('useDeviceHub', () => {
     });
 
     expect(api.post).toHaveBeenCalledWith('/api/device/tcpip?port=5555');
+  });
+
+  it("switchLink(id, 'wifi') success toast is OUR translated text, not the backend's Turkish `message`", async () => {
+    mockDevicesResponse([USB_DEVICE]);
+    api.post.mockResolvedValue({ ok: true, message: '🎉 Kablosuz bağlantı doğrulandı (10.0.0.5:5555) — USB kablosunu artık güvenle çıkarabilirsiniz.' });
+    const { result } = renderHook(() => useDeviceHub());
+    await waitFor(() => expect(result.current.devices).toHaveLength(1));
+
+    await act(async () => {
+      await result.current.switchLink(USB_DEVICE.serial, 'wifi');
+    });
+
+    expect(result.current.toast).toBeTruthy();
+    expect(result.current.toast).not.toContain('doğrulandı');
+  });
+
+  it('wifi geçiş hatası: backend hata KODU çevrilmiş metne dönüşür (Türkçe detail gösterilmez)', async () => {
+    mockDevicesResponse([USB_DEVICE]);
+    api.post.mockRejectedValue(Object.assign(new Error('Kablosuz bağlantı doğrulanamadı — USB kablosunu ÇIKARMAYIN.'), {
+      detail: 'Kablosuz bağlantı doğrulanamadı — USB kablosunu ÇIKARMAYIN.', code: 'unverified',
+    }));
+    const { result } = renderHook(() => useDeviceHub());
+    await waitFor(() => expect(result.current.devices).toHaveLength(1));
+    await act(async () => {
+      await result.current.switchLink(USB_DEVICE.serial, 'wifi');
+    });
+    expect(result.current.toast).toBe(wirelessErrorText('unverified', 5555));
+    expect(wirelessErrorText('unverified', 5555)).toContain('5555');
+    expect(wirelessErrorText('weird', 5555)).toBe(wirelessErrorText(undefined, 5555));
+    expect(wirelessErrorText('no_device', 5555)).not.toBe(wirelessErrorText('weird', 5555));
   });
 
   it('connectKnown() calls the known-device connect endpoint', async () => {

@@ -35,6 +35,7 @@ import Button from '../ui/Button.jsx';
 import { Dialog } from '../ui/Dialog.jsx';
 import { MenuItem, MenuLabel, MenuSeparator, MenuSurface } from '../ui/Menu.jsx';
 import DesktopLoadingSkeleton from './DesktopLoadingSkeleton.jsx';
+import { useIconDrag } from './useIconDrag.js';
 import ManageIconsDialog from './ManageIconsDialog.jsx';
 import WallpaperDialog from './wallpaper/WallpaperDialog.jsx';
 import { useWallpaper } from './wallpaper/useWallpaper.js';
@@ -58,13 +59,20 @@ const SCALE_LABEL = {
   small: t('desktop.kucuk'),
   medium: t('common.orta'),
   large: t('desktop.buyuk'),
+  xlarge: t('desktop.ekstra_buyuk'),
 };
 
 const SCALE_VALUE = {
   small: 0.82,
   medium: 1.0,
   large: 1.2,
+  xlarge: 1.45,
 };
+
+/** Simge kutusu (48 px) `transform: scale` ile büyür ama yerleşimde yer tutmaz: büyütülen yarım fark kadar dikey boşluk ayrılır, yoksa
+ *  ikon altındaki etiketin üstüne biner. Küçültmede ek boşluk gerekmez. */
+const ICON_BOX_PX = 48;
+export const scaleMargin = (factor) => Math.max(0, ((factor || 1) - 1) * (ICON_BOX_PX / 2));
 
 const CURATED_ESSENTIAL_CATEGORIES = [
   // 1. OpenDeX System Tools
@@ -147,6 +155,14 @@ function buildDefaultSlots(apps) {
   return layout;
 }
 
+/**
+ * Masaüstü ızgarası. AnimatePresence'in DOĞRUDAN çocuğu olan bir <div ref> React 18.3'te "`ref` is not a prop" uyarısı verir
+ * (AnimatePresence çocuğun props'unu okur): ref bu yüzden `boxRef` adıyla geçirilip kutuya burada bağlanır.
+ */
+function GridBox({ boxRef, ...props }) {
+  return <div ref={boxRef} {...props} />;
+}
+
 export default function Desktop() {
   const [apps, setApps] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -181,7 +197,8 @@ export default function Desktop() {
   // Display modes & settings
   const [scale, setScale] = useState(() => {
     try {
-      return window.localStorage.getItem('opendex_desktop_scale') || 'medium';
+      const stored = window.localStorage.getItem('opendex_desktop_scale');
+      return Object.prototype.hasOwnProperty.call(SCALE_VALUE, stored) ? stored : 'medium';   // bilinmeyen/eski değer güvenli ölçeğe döner
     } catch {
       return 'medium';
     }
@@ -192,8 +209,17 @@ export default function Desktop() {
   const showGrid = useWallpaperStore((s) => s.prefs.mode === 'builtin' && s.prefs.id === 'plain'); // ızgara yalnız "Düz" kapakta
 
   // Interaction states
-  const [dragging, setDragging] = useState(null);
-  const [target, setTarget] = useState(null);
+  const gridRef = useRef(null);
+  // Simge taşıma işaretçi olaylarıyla (useIconDrag.js): HTML5 sürükle-bırak Tauri'de (Windows) çalışmaz.
+  const iconDrag = useIconDrag({
+    gridRef,
+    columns: COLUMNS,
+    rows: ROWS,
+    onDrop: (from, to) => move(from, to),
+    onStart: () => setMenu(null),
+  });
+  const dragging = iconDrag.draggingCell;
+  const target = iconDrag.overCell;
   const [selected, setSelected] = useState(null);
   const [menu, setMenu] = useState(null); // { x, y, cell, itemId }
   const [submenu, setSubmenu] = useState(null); // { type, top, left }
@@ -699,8 +725,9 @@ export default function Desktop() {
         {loading ? (
           <DesktopLoadingSkeleton key="loading-skeleton" deviceLabel={deviceLabel || t('common.android_cihazi')} />
         ) : (
-          <div
+          <GridBox
             key={spin}
+            boxRef={gridRef}
             className="relative grid h-full w-full min-h-0 flex-1 gap-1"
             style={{
               gridTemplateColumns: `repeat(${COLUMNS}, minmax(0, 1fr))`,
@@ -716,25 +743,7 @@ export default function Desktop() {
               return (
                 <div
                   key={cell}
-                  onDragOver={(event) => {
-                    if (dragging === null || occupied) return;
-                    event.preventDefault();
-                    event.dataTransfer.dropEffect = 'move';
-                    setTarget(cell);
-                  }}
-                  onDragEnter={() => {
-                    if (!occupied) setTarget(cell);
-                  }}
-                  onDragLeave={() => {
-                    setTarget((current) => (current === cell ? null : current));
-                  }}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    if (dragging === null || occupied) return;
-                    move(dragging, cell);
-                    setDragging(null);
-                    setTarget(null);
-                  }}
+                  data-desktop-cell={cell}
                   onContextMenu={(event) => openMenu(event, cell, id ?? null)}
                   className={cn(
                     'relative grid min-h-0 min-w-0 place-items-center rounded-[8px] transition-colors',
@@ -744,29 +753,21 @@ export default function Desktop() {
                   {entry && id && (
                     <button
                       type="button"
-                      draggable
-                      onDragStart={(event) => {
-                        event.dataTransfer.effectAllowed = 'move';
-                        event.dataTransfer.setData('text/plain', id);
-                        setDragging(cell);
-                      }}
-                      onDragEnd={() => {
-                        setDragging(null);
-                        setTarget(null);
-                      }}
+                      {...iconDrag.bind(cell)}
+                      style={iconDrag.styleFor(cell)}
                       onClick={(event) => handleItemClick(event, id, entry)}
                       onDoubleClick={(event) => handleItemDoubleClick(event, id, entry)}
                       aria-label={entry.name}
                       title={entry.name}
                       className={cn(
-                        'flex size-full min-w-0 cursor-default flex-col items-center justify-center gap-1 rounded-[8px] px-0.5 py-1 text-center transition-all duration-150 hover:bg-accent/35',
+                        'relative flex size-full min-w-0 touch-none cursor-default flex-col items-center justify-center gap-1 rounded-[8px] px-0.5 py-1 text-center transition-all duration-150 hover:bg-accent/35',
                         selected === id && 'bg-accent/60 ring-1 ring-primary/45 shadow-sm',
-                        dragging === cell && 'opacity-40'
+                        dragging === cell && 'opacity-90 shadow-lg'
                       )}
                     >
                       <span
                         className="origin-center transition-transform duration-150"
-                        style={{ transform: `scale(${SCALE_VALUE[scale]})` }}
+                        style={{ transform: `scale(${SCALE_VALUE[scale] || 1})`, marginBlock: scaleMargin(SCALE_VALUE[scale]) }}
                       >
                         {entry.kind === 'app' ? (
                           <div className="relative flex size-12 items-center justify-center shrink-0 pointer-events-none">
@@ -825,7 +826,7 @@ export default function Desktop() {
                 </div>
               );
             })}
-          </div>
+          </GridBox>
         )}
       </AnimatePresence>
 

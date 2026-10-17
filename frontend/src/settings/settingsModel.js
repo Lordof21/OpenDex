@@ -148,6 +148,18 @@ export const SETTING_ITEMS = {
     description: t('settings.telefondan_kapatilan_uygulamanin_2'),
     keywords: [t('settings.son_kullanilanlar'), 'kapat', t('settings.yeniden_ac'), 'rozet'],
   },
+  mouseLook: {
+    section: 'windows',
+    title: t('settings.fare_ile_nisan_al_oyun_duzeni'),
+    description: t('settings.fare_imleci_yakalanir_hareketi_kamerayi'),
+    keywords: ['fare', 'mouse', 'nisan', 'bakis', 'kamera', 'oyun', 'ctrl', 'pubg', 'fps', 'aim', 'look'],
+  },
+  mouseSensitivity: {
+    section: 'windows',
+    title: t('settings.fare_duyarliligi'),
+    description: t('settings.fareyle_bakis_hizi_1_imlecle'),
+    keywords: ['fare', 'mouse', 'hassasiyet', 'duyarlilik', 'sensitivity', 'nisan', 'bakis'],
+  },
   headerHover: {
     section: 'windows',
     title: t('common.surukleyici_baslik_varsayilan'),
@@ -207,6 +219,12 @@ export const SETTING_ITEMS = {
     title: t('settings.bu_bilgisayarda_cihazlari_hatirla'),
     description: t('settings.baglanan_cihazlar_kayitli_cihazlar'),
     keywords: [t('settings.kayitli_cihaz'), t('settings.paylasilan_bilgisayar'), 'gizlilik', t('settings.tek_tik'), t('settings.baglan')],
+  },
+  usbStability: {
+    section: 'power',
+    title: t('settings.ekran_kilidi_baglantiyi_kesmesin'),
+    description: t('settings.kablo_takili_degilken_bile_kilidi'),
+    keywords: ['usb', 'kilit', 'adbd', 'daemon', 'kopma', 'baglanti', 'connection'],
   },
   inspector: {
     section: 'advanced',

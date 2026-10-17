@@ -34,7 +34,6 @@ export const SEVERITY = Object.freeze({
 
 export const MARKER_KINDS = Object.freeze({
   app_restart: { short: tt('telemetry.yeniden_baslatma'), glyph: '↻' },
-  app_relaunch: { short: tt('telemetry.yerinde_yeniden_kurma'), glyph: '↺' },
   dpi_change: { short: tt('telemetry.dpi_degisimi'), glyph: '◐' },
   window_open: { short: tt('telemetry.pencere_acildi'), glyph: '+' },
   window_close: { short: tt('telemetry.pencere_kapandi'), glyph: '×' },
