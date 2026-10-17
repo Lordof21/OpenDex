@@ -164,10 +164,14 @@ describe('notification center', () => {
     expect(screen.getByText('Daha eski')).toBeInTheDocument();
   });
 
-  it('an action pill never opens the card', async () => {
+  it('phone-side action buttons (Okundu olarak işaretle, Yanıtla …) are not shown; marking read stays local', () => {
     render(<ClockCalendar now={new Date()} />);
+    // The phone-side buttons need the helper app (RemoteInput) — the card shows none of them.
+    expect(screen.queryByText('Okundu olarak işaretle')).toBeNull();
+    // The card's own "mark as read" (hover) only flips the local unread state: no request goes to the backend.
     fireEvent.click(screen.getAllByRole('button', { name: 'Okundu olarak işaretle' })[0]);
-    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/notifications/action', { id: 'n1', action_id: 0 }));
+    expect(useNotificationStore.getState().notifications.find((n) => n.id === 'n1').read).toBe(true);
+    expect(api.post).not.toHaveBeenCalledWith('/api/notifications/action', expect.anything());
     expect(api.post).not.toHaveBeenCalledWith('/api/notifications/open', expect.anything());
   });
 

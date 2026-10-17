@@ -29,7 +29,8 @@ import NotificationCenterList from '../notifications/NotificationCenterList.jsx'
 import NotificationToolbar from '../notifications/NotificationToolbar.jsx';
 import UndoSnack from '../notifications/UndoSnack.jsx';
 import { useUndoableDismiss } from '../notifications/useUndoableDismiss.js';
-import { appFacets, applyFilter } from '../notifications/notificationModel.js';
+import { PANEL_HEIGHT } from '../notifications/listWindow.js';
+import { appFacets, applyFilter, sortNewestFirst } from '../notifications/notificationModel.js';
 import { toCardModel } from '../notifications/notificationVisuals.js';
 import { cardSpring } from '../ui/motion.js';
 import { Z_INDEX } from '../ui/zIndex.js';
@@ -50,7 +51,6 @@ export const INITIAL_NOTIFICATIONS = [
   { id: 'gallery-memory', appId: 'gallery', appName: t('common.galeri'), headline: t('taskbar.gecen_yildan_anilar'), detail: t('taskbar.bugun_cekilen_12_fotograf_sizin_icin'), time: t('taskbar.dun'), icon: Image },
 ];
 
-const READ_ACTION = /\b(read|okundu)/i;
 const HEADER_BUTTON = 'grid size-8 place-items-center rounded-lg text-notification-foreground/60 outline-none transition-colors hover:bg-notification-hover hover:text-notification-foreground focus-visible:ring-2 focus-visible:ring-ring cursor-pointer disabled:opacity-35 disabled:pointer-events-none';
 
 export const ClockCalendar = forwardRef(function ClockCalendar({
@@ -73,7 +73,6 @@ export const ClockCalendar = forwardRef(function ClockCalendar({
   const storeFetch = useNotificationStore((s) => s.fetchNotifications);
   const storeRefresh = useNotificationStore((s) => s.refreshNotifications);
   const storeMarkRead = useNotificationStore((s) => s.markRead);
-  const storeInvokeAction = useNotificationStore((s) => s.invokeAction);
   const privacy = useNotificationStore((s) => s.privacyMode);
   const storeTogglePrivacy = useNotificationStore((s) => s.togglePrivacyMode);
   const openWindowForNotification = useNotificationWindowRouting();
@@ -89,7 +88,7 @@ export const ClockCalendar = forwardRef(function ClockCalendar({
     : notifications && notifications !== INITIAL_NOTIFICATIONS
       ? notifications
       : [];
-  const allModels = useMemo(() => source.map(toCardModel).filter(Boolean), [source, now]); // eslint-disable-line react-hooks/exhaustive-deps
+  const allModels = useMemo(() => sortNewestFirst(source.map(toCardModel).filter(Boolean)), [source, now]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // One owner per action: the taskbar's handler when it passed one (it calls the store itself), else the store.
   const dismissOne = (id) => (onDismiss ? onDismiss(id) : storeRemove(id));
@@ -133,12 +132,6 @@ export const ClockCalendar = forwardRef(function ClockCalendar({
 
   const handleMarkRead = (model) => {
     storeMarkRead([model.id]);
-    const readAction = model.actions.find((a) => READ_ACTION.test(a.title || ''));
-    if (readAction && model.raw) storeInvokeAction(model.id, readAction.action_id).catch(() => {});
-  };
-
-  const handleAction = (model, action) => {
-    if (model.raw) storeInvokeAction(model.id, action.action_id).catch(() => {});
   };
 
   const handleRefresh = () => {
@@ -163,8 +156,8 @@ export const ClockCalendar = forwardRef(function ClockCalendar({
           ? { duration: 0.12 }
           : { type: 'spring', stiffness: 420, damping: 40, mass: 0.8 }
       }
-      style={{ zIndex: Z_INDEX.flyout }}
-      className="absolute bottom-[calc(100%+16px)] right-4 z-flyout flex h-[min(720px,calc(100vh-82px))] w-[min(400px,calc(100vw-32px))] flex-col gap-2 text-notification-foreground"
+      style={{ zIndex: Z_INDEX.flyout, height: PANEL_HEIGHT }}
+      className="absolute bottom-[calc(100%+16px)] right-4 z-flyout flex w-[min(400px,calc(100vw-32px))] flex-col gap-2 text-notification-foreground"
     >
       {/* Üst: bildirim merkezi */}
       <section
@@ -210,7 +203,7 @@ export const ClockCalendar = forwardRef(function ClockCalendar({
               >
                 {privacy ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
               </button>
-              <button type="button" className={HEADER_BUTTON} onClick={handleRefresh} aria-label={t('taskbar.bildirimleri_yenile')} data-tooltip={t('taskbar.bildirimleri_yenile')}>
+              <button type="button" className={HEADER_BUTTON} onClick={handleRefresh} aria-label={t('taskbar.bildirimleri_yenile')} data-tooltip={t('taskbar.bildirimleri_yenile')} data-tooltip-align="end">
                 <RotateCw className="size-4" />
               </button>
               <button
@@ -220,6 +213,7 @@ export const ClockCalendar = forwardRef(function ClockCalendar({
                 disabled={models.length === 0}
                 aria-label={filtered ? t('notifications.gorunenleri_temizle') : t('taskbar.tumunu_temizle')}
                 data-tooltip={filtered ? t('notifications.gorunenleri_temizle') : t('taskbar.tumunu_temizle')}
+                data-tooltip-align="end"
               >
                 <Trash2 className="size-4" />
               </button>
@@ -248,7 +242,6 @@ export const ClockCalendar = forwardRef(function ClockCalendar({
             onDismiss={(model) => undoable.hide([model.id])}
             onDismissMany={(items) => undoable.hide(items.map((m) => m.id))}
             onMarkRead={handleMarkRead}
-            onAction={handleAction}
           />
         </div>
 

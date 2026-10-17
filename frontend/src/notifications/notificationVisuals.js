@@ -55,7 +55,6 @@ export function toCardModel(n) {
     time: typeof n.time === 'string' && isDemo ? n.time : formatRelativeTime(n.timestamp || n),
     ts: timestampMs(n),
     category: n.category || 'generic',
-    actions: Array.isArray(n.actions) ? n.actions.filter((a) => a && a.action_type !== 'reply') : [],
     unread: n.read === false,
     ongoing: Boolean(n.is_ongoing),
     raw: isDemo ? null : n,

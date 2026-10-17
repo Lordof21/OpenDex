@@ -25,8 +25,10 @@ const DISMISS_OFFSET = 96;
 const DISMISS_VELOCITY = 520;
 
 // Gövde metni: 13/18 px (Fluent/Material body–caption arası). Kapalıyken en fazla 2 satır (36 px) + "…"; açıkken tam metin (+ satır listesi).
-const BODY_LINE_PX = 18;
-const BODY = 'whitespace-pre-line text-[13px] leading-[18px] text-notification-foreground/75';
+// Gövde yazısı: toast 13/18; merkez listesi 12,5/16 — kartlar sıkı durur ki liste penceresinde 3,5–4,5 kart görünsün (listWindow.js).
+const BODY_LINE_PX = 16; // BODY_CENTER'ın satır yüksekliği (ExpandableText yalnız merkezde kullanılır)
+const BODY_TOAST = 'whitespace-pre-line text-[13px] leading-[18px] text-notification-foreground/75';
+const BODY_CENTER = 'whitespace-pre-line text-[12.5px] leading-4 text-notification-foreground/75';
 const TEXT_EASE = 'cubic-bezier(0.3, 0, 0.15, 1)'; // notificationMotion EASE_SLIDE (büyük alan kayması)
 const TEXT_EASE_CLOSE = 'cubic-bezier(0.4, 0, 0.2, 1)';
 
@@ -142,7 +144,6 @@ function NotificationCard({
   onOpen,
   onDismiss,
   onMarkRead,
-  onAction,
   footer = null,
   animate,
   className,
@@ -162,6 +163,7 @@ function NotificationCard({
   const meta = categoryMeta(model.category);
   const Badge = meta.Icon;
   const body = model.text;
+  const bodyClass = isToast ? BODY_TOAST : BODY_CENTER;
   const expandable = !isToast && Boolean(model.bigText || model.lines.length > 1 || (model.text && model.text.length > 90));
   const label = [model.appName, privacy ? 'gizli bildirim' : model.title, model.time].filter(Boolean).join(', ');
 
@@ -226,7 +228,7 @@ function NotificationCard({
       }}
       className={cn(
         'notif-card group/card relative cursor-pointer select-none overflow-hidden text-notification-foreground outline-none',
-        isToast ? 'notif-card--toast rounded-2xl p-3.5' : 'rounded-[14px] p-3',
+        isToast ? 'notif-card--toast rounded-2xl p-3.5' : 'rounded-[14px] px-3 py-2.5',
       )}
     >
       {/* Content fades out when the card is only a plate of a stack (its surface stays) */}
@@ -255,17 +257,18 @@ function NotificationCard({
 
         <div className="min-w-0 flex-1">
           {/* App · unread · time  ⇄  hover actions */}
-          <motion.div variants={cardLineVariants} className="flex h-4 items-center gap-1.5">
-            <span className="truncate text-[12px] font-semibold leading-4 text-notification-foreground/60">
+          <motion.div variants={cardLineVariants} className={cn('flex items-center gap-1.5', isToast ? 'h-4' : 'h-3.5')}>
+            <span className={cn('truncate font-semibold text-notification-foreground/60', isToast ? 'text-[12px] leading-4' : 'text-[11.5px] leading-[14px]')}>
               {model.appName}
             </span>
             {model.unread && (
               <span className="size-1.5 shrink-0 rounded-full bg-notification-accent" aria-label={t('notifications.okunmadi')} />
             )}
-            <span className="relative ml-auto flex h-4 shrink-0 items-center">
+            <span className={cn('relative ml-auto flex shrink-0 items-center', isToast ? 'h-4' : 'h-3.5')}>
               <span
                 className={cn(
-                  'text-[12px] font-medium tabular-nums text-notification-foreground/55 transition-all duration-200',
+                  isToast ? 'text-[12px]' : 'text-[11.5px]',
+                  'font-medium tabular-nums text-notification-foreground/55 transition-all duration-200',
                   interactive && 'group-hover/card:translate-x-1 group-hover/card:opacity-0 group-focus-within/card:opacity-0',
                 )}
               >
@@ -302,7 +305,8 @@ function NotificationCard({
             <motion.h4
               variants={cardLineVariants}
               className={cn(
-                'mt-0.5 truncate text-[14px] font-semibold leading-5 text-notification-foreground',
+                'truncate text-[14px] font-semibold text-notification-foreground',
+                isToast ? 'mt-0.5 leading-5' : 'mt-px leading-[18px]',
                 privacy && 'select-none blur-[4px]',
               )}
             >
@@ -313,14 +317,14 @@ function NotificationCard({
           {(body || !model.title) && (
             <motion.div variants={cardLineVariants}>
               {privacy ? (
-                <p className={cn('mt-0.5 line-clamp-2 select-none blur-[5px]', BODY)}>{t('notifications.icerik_gizli_gostermek_icin_gizliligi')}</p>
+                <p className={cn('mt-0.5 line-clamp-2 select-none blur-[5px]', bodyClass)}>{t('notifications.icerik_gizli_gostermek_icin_gizliligi')}</p>
               ) : expandable ? (
                 <ExpandableText
                   expanded={expanded}
-                  collapsed={<p className={cn('line-clamp-2', BODY)}>{model.text || t('notifications.acmak_icin_dokunun')}</p>}
+                  collapsed={<p className={cn('line-clamp-2', bodyClass)}>{model.text || t('notifications.acmak_icin_dokunun')}</p>}
                   full={
                     <>
-                      <p className={BODY}>{model.bigText || model.text}</p>
+                      <p className={bodyClass}>{model.bigText || model.text}</p>
                       {!model.bigText && model.lines.length > 1 && (
                         <ul className="mt-1.5 space-y-1 border-l-2 border-notification-border/60 pl-2 text-[12px] leading-[17px] text-notification-foreground/70">
                           {model.lines.map((line, i) => <li key={i}>{line}</li>)}
@@ -330,25 +334,11 @@ function NotificationCard({
                   }
                 />
               ) : (
-                <p className={cn('mt-0.5 line-clamp-2', BODY)}>{body || t('notifications.acmak_icin_dokunun')}</p>
+                <p className={cn('mt-0.5 line-clamp-2', bodyClass)}>{body || t('notifications.acmak_icin_dokunun')}</p>
               )}
             </motion.div>
           )}
 
-          {model.actions.length > 0 && interactive && (
-            <motion.div variants={cardLineVariants} className="mt-2.5 flex flex-wrap gap-1.5">
-              {model.actions.slice(0, 3).map((act) => (
-                <button
-                  key={act.action_id}
-                  type="button"
-                  onClick={stop(() => onAction?.(model, act))}
-                  className="notif-pill rounded-full px-3 py-1 text-[12px] font-semibold text-notification-foreground/85 active:scale-95"
-                >
-                  {act.title}
-                </button>
-              ))}
-            </motion.div>
-          )}
         </div>
 
         {expandable && interactive && (

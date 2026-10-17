@@ -79,7 +79,7 @@ function onListKeyDown(event) {
   card?.scrollIntoView?.({ block: 'nearest' });
 }
 
-export default function NotificationCenterList({ models, now, filtered = false, onResetFilter, privacy, onOpen, onDismiss, onDismissMany, onMarkRead, onAction }) {
+export default function NotificationCenterList({ models, now, filtered = false, onResetFilter, privacy, onOpen, onDismiss, onDismissMany, onMarkRead }) {
   const sections = useMemo(() => bucketModels(models, now ? now.getTime() : Date.now()), [models, now]);
   const [openGroups, setOpenGroups] = useState(() => new Set());
   const [openTexts, setOpenTexts] = useState(() => new Set());
@@ -93,7 +93,6 @@ export default function NotificationCenterList({ models, now, filtered = false, 
     onOpen,
     onDismiss,
     onMarkRead,
-    onAction,
   });
 
   if (models.length === 0) return <EmptyState filtered={filtered} onResetFilter={onResetFilter} />;

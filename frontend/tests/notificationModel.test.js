@@ -3,7 +3,7 @@ import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { timestampMs } from '../src/desktop/notifications/timeUtils.js';
-import { appFacets, applyFilter, bucketModels, bucketOf } from '../src/notifications/notificationModel.js';
+import { appFacets, applyFilter, bucketModels, bucketOf, sortNewestFirst } from '../src/notifications/notificationModel.js';
 import { wheelScrollDelta } from '../src/notifications/useHorizontalWheel.js';
 import { UNDO_MS, useUndoableDismiss } from '../src/notifications/useUndoableDismiss.js';
 import { clockSeconds, focusProgress, monthCells, sameDay, weekOf, weekStartIndex, weekdayNames } from '../src/taskbar/calendarModel.js';
@@ -11,6 +11,27 @@ import { clockSeconds, focusProgress, monthCells, sameDay, weekOf, weekStartInde
 const NOW = new Date(2026, 9, 14, 15, 30).getTime(); // 14 Ekim 2026 (Çarşamba) 15:30
 const ago = (ms) => NOW - ms;
 const H = 3_600_000;
+
+describe('sıra: zamana göre en yeni en üstte', () => {
+  const m = (id, ts, pkg = 'a') => ({ id, ts, pkg, appName: pkg });
+
+  it('en yeni en üste; aynı anda gelenler ve zamanı olmayanlar kendi sırasını korur (kararlı)', () => {
+    const list = [m('old', ago(5 * H)), m('new', ago(60_000)), m('mid', ago(2 * H)), m('tieA', ago(30 * 60_000)), m('tieB', ago(30 * 60_000))];
+    expect(sortNewestFirst(list).map((x) => x.id)).toEqual(['new', 'tieA', 'tieB', 'mid', 'old']);
+    const undated = [m('u1', 0), m('u2', 0), m('dated', ago(H))];
+    expect(sortNewestFirst(undated).map((x) => x.id)).toEqual(['dated', 'u1', 'u2']);
+  });
+
+  it('girdiyi değiştirmez; her bölümde ve her yığında en yeni öndedir', () => {
+    const list = [m('a-old', ago(3 * H), 'a'), m('b-new', ago(60_000), 'b'), m('a-new', ago(5 * 60_000), 'a')];
+    const before = list.map((x) => x.id);
+    const sorted = sortNewestFirst(list);
+    expect(list.map((x) => x.id)).toEqual(before);
+    const [recent, today] = bucketModels(sorted, NOW);
+    expect(recent.models.map((x) => x.id)).toEqual(['b-new', 'a-new']);
+    expect(today.models.map((x) => x.id)).toEqual(['a-old']);
+  });
+});
 
 describe('zaman bölümleri', () => {
   it('son saat / bugün / dün / daha eski', () => {

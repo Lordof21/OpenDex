@@ -14,13 +14,11 @@ const STACK_Y = 8;
 const STACK_SCALE = 0.05;
 const STACK_OPACITY = [1, 0.85, 0.6];
 
-const READ_ACTION = /\b(read|okundu)/i;
 
 const HeadsUpToast = React.forwardRef(function HeadsUpToast({ toast, index = 0, stacked = false, paused = false }, ref) {
   const dismissToast = useNotificationStore((s) => s.dismissToast);
   const markRead = useNotificationStore((s) => s.markRead);
   const privacyMode = useNotificationStore((s) => s.privacyMode);
-  const invokeAction = useNotificationStore((s) => s.invokeAction);
   const openWindowForNotification = useNotificationWindowRouting();
 
   // Remaining-time timer: pausing keeps what is left instead of restarting the full duration.
@@ -47,17 +45,7 @@ const HeadsUpToast = React.forwardRef(function HeadsUpToast({ toast, index = 0, 
 
   const handleMarkRead = () => {
     markRead([toast.id]);
-    const readAction = toast.actions?.find((a) => READ_ACTION.test(a.title || ''));
-    if (readAction) invokeAction(toast.id, readAction.action_id).catch(() => {});
     dismissToast(toast.id);
-  };
-
-  const handleAction = async (_, action) => {
-    try {
-      await invokeAction(toast.id, action.action_id);
-    } finally {
-      dismissToast(toast.id);
-    }
   };
 
   const depth = Math.min(index, STACK_OPACITY.length - 1);
@@ -78,7 +66,6 @@ const HeadsUpToast = React.forwardRef(function HeadsUpToast({ toast, index = 0, 
         onOpen={handleOpen}
         onDismiss={() => dismissToast(toast.id)}
         onMarkRead={handleMarkRead}
-        onAction={handleAction}
         footer={
           !stacked && (
             <span className="absolute inset-x-0 bottom-0 h-[2px] overflow-hidden bg-notification-hover/60" aria-hidden="true">

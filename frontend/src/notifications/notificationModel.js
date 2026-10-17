@@ -20,6 +20,17 @@ export function bucketOf(ts, now = Date.now()) {
   return 'earlier';
 }
 
+/**
+ * Zamana göre EN YENİ EN ÜSTE. Kararlı: zamanı olmayanlar (`ts` 0) ve aynı anda gelenler kendi sırasını korur. Bir uygulamanın yığını,
+ * en yeni bildirimiyle (yığının ön kartı) listedeki yerini alır.
+ */
+export function sortNewestFirst(models) {
+  return models
+    .map((model, index) => [model, index])
+    .sort((a, b) => (b[0].ts || 0) - (a[0].ts || 0) || a[1] - b[1])
+    .map(([model]) => model);
+}
+
 /** Modelleri bölümlere ayırır (sıra korunur, boş bölümler atılır): [{ bucket, models }]. */
 export function bucketModels(models, now = Date.now()) {
   const by = new Map(BUCKETS.map((b) => [b, []]));
