@@ -61,6 +61,17 @@ describe('audioMixerStore', () => {
     expect(store().apps).toEqual({});
   });
 
+  it('holds no channel for an app the phone plays itself, so the laptop lets go of the output (and the headset)', () => {
+    store().onAppAudioState(app());
+    expect(engine.windowIds()).toEqual(['w1']);
+
+    store().onAppAudioState(app({ live_route: 'phone', stream_id: null, on_phone: true }));   // handed to the phone
+    expect(engine.windowIds()).toEqual([]);
+
+    store().onAppAudioState(app());                                                        // reclaimed into the window
+    expect(engine.windowIds()).toEqual(['w1']);
+  });
+
   it('leaving per-app mode (legacy / unbound) closes every channel', () => {
     store().onAppAudioState(app());
     store().onAudioMode({ mode: 'legacy', supported: false });

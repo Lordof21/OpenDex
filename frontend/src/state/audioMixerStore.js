@@ -107,6 +107,9 @@ export const useAudioMixerStore = create((set, get) => ({
     const wanted = new Map();
     if (supported) {
       for (const app of Object.values(apps)) {
+        // The phone plays this app itself (no capture is running): there is nothing to receive, and the channel — kept open —
+        // would hold the PC's output stream, so a dual-device headset would stay on the laptop instead of going to the phone.
+        if (app.live_route === 'phone') continue;
         for (const windowId of app.windows || []) wanted.set(windowId, app);
       }
     }

@@ -475,7 +475,9 @@
   --media-ink-soft: color-mix(in oklab, var(--media-ink) 28%, transparent);
   --media-ink-faint: color-mix(in oklab, var(--media-ink) 12%, transparent);
 }
-.media-scope { transition: --media-accent 600ms ease; }
+/* Vurgu hep tanımlıdır (kapak rengi gelene dek sistemin --primary'si): kayıtlı özelliğin ilk değeri `transparent` olduğundan,
+   renk kapaktan SONRA gelince oynat düğmesinin dairesi saydamdan doğup 600 ms'de yerine oturuyordu. Şimdi primary → kapak rengi. */
+.media-scope { --media-accent: var(--primary); transition: --media-accent 360ms ease; }
 .media-scope[data-accent='on'] {
   --media-ink: var(--media-accent);
   --media-glow: color-mix(in oklab, var(--media-accent) 55%, transparent);
@@ -617,6 +619,27 @@
   transform: translateX(-50%) translateY(0);
 }
 
+/* Sağa açılan ipucu: sol kenardaki dikey araç çubukları (tuş düzeni paleti) için — ortalanmış ipucu ekranın dışına taşardı. */
+[data-tooltip-position="right"]::after {
+  left: calc(100% + 8px);
+  top: 50%;
+  bottom: auto;
+  transform: translateY(-50%) translateX(-4px);
+}
+[data-tooltip-position="right"]::before {
+  left: calc(100% + 3px);
+  top: 50%;
+  bottom: auto;
+  border-color: transparent var(--border) transparent transparent;
+  transform: translateY(-50%) translateX(-4px);
+}
+[data-tooltip-position="right"]:hover::after,
+[data-tooltip-position="right"]:focus-visible::after,
+[data-tooltip-position="right"]:hover::before,
+[data-tooltip-position="right"]:focus-visible::before {
+  transform: translateY(-50%) translateX(0);
+}
+
 /* Görev çubuğunda ipucu niyet gecikmesiyle açılır: fare çubuğun üstünden geçerken her düğmede yanıp sönmesin. Gecikme yalnız AÇILIŞTA
    uygulanır (hedef durumun geçişi); kapanış anında, klavye odağı (focus-visible) gecikmesiz kalır. */
 .taskbar-surface [data-tooltip]:hover::after,
@@ -651,6 +674,70 @@
 }
 [data-tooltip-align="end"]::before {
   right: 10px;
+}
+/* Sol kenardaki düğmeler (Medya merkezi kapak rozeti): ipucu düğmenin sol kenarına hizalanır, panelin kırpmasına girmez. */
+[data-tooltip-align="start"]::after,
+[data-tooltip-align="start"]::before {
+  left: 0;
+  right: auto;
+  transform: translateY(4px);
+}
+[data-tooltip-position="bottom"][data-tooltip-align="start"]::after,
+[data-tooltip-position="bottom"][data-tooltip-align="start"]::before {
+  transform: translateY(-4px);
+}
+[data-tooltip-align="start"]:hover::after,
+[data-tooltip-align="start"]:focus-visible::after,
+[data-tooltip-align="start"]:hover::before,
+[data-tooltip-align="start"]:focus-visible::before {
+  transform: translateY(0);
+}
+[data-tooltip-align="start"]::after {
+  left: -2px;
+}
+[data-tooltip-align="start"]::before {
+  left: 10px;
+}
+/* Üstte-sonda hizalı (bottom + end): giriş yönü aşağı doğrudur. */
+[data-tooltip-position="bottom"][data-tooltip-align="end"]::after,
+[data-tooltip-position="bottom"][data-tooltip-align="end"]::before {
+  transform: translateY(-4px);
+}
+[data-tooltip-position="bottom"][data-tooltip-align="end"]:hover::after,
+[data-tooltip-position="bottom"][data-tooltip-align="end"]:focus-visible::after,
+[data-tooltip-position="bottom"][data-tooltip-align="end"]:hover::before,
+[data-tooltip-position="bottom"][data-tooltip-align="end"]:focus-visible::before {
+  transform: translateY(0);
+}
+/* Bildirim merkezi: panel ekranın üstüne 16 px kala biter ve overflow-hidden'dır — yukarı açılan ipucu kırpılır. Bu yüzden panelin İÇİNDEKİ
+   tüm ipuçları aşağı açılır (görev çubuğu ve diğer yüzeyler yukarıda kalır). Seçici özgüllüğü [data-tooltip-*] kurallarının üstündedir. */
+.notification-panel [data-tooltip]::after {
+  top: calc(100% + 6px);
+  bottom: auto;
+  transform: translateX(-50%) translateY(-4px);
+}
+.notification-panel [data-tooltip]::before {
+  top: calc(100% + 1px);
+  bottom: auto;
+  border-color: transparent transparent var(--border) transparent;
+  transform: translateX(-50%) translateY(-4px);
+}
+.notification-panel [data-tooltip]:hover::after,
+.notification-panel [data-tooltip]:focus-visible::after,
+.notification-panel [data-tooltip]:hover::before,
+.notification-panel [data-tooltip]:focus-visible::before {
+  transform: translateX(-50%) translateY(0);
+}
+/* Sağ kenardaki düğmeler: ipucu düğmenin sağ kenarına hizalanır (panelin kırpmasına girmesin). */
+.notification-panel [data-tooltip-align="end"]::after,
+.notification-panel [data-tooltip-align="end"]::before {
+  transform: translateY(-4px);
+}
+.notification-panel [data-tooltip-align="end"]:hover::after,
+.notification-panel [data-tooltip-align="end"]:focus-visible::after,
+.notification-panel [data-tooltip-align="end"]:hover::before,
+.notification-panel [data-tooltip-align="end"]:focus-visible::before {
+  transform: translateY(0);
 }
 
 /* ── Shimmer & Scanline Animations for Skeleton States ──────────────────────── */
@@ -695,4 +782,34 @@
 .settings-flash { animation: settings-flash 1.5s ease-out; }
 @media (prefers-reduced-motion: reduce) {
   .settings-flash { animation: none; background-color: color-mix(in oklab, var(--primary) 12%, transparent); }
+}
+
+/* Tuval katmanları (window/canvas-overlays): yalnız transform/opacity/stroke-dashoffset animasyonları — video yüzeyinin altındaki
+   pahalı blur'lar yok. Hareket azaltma açıksa hepsi durur; durumu anlatan ögeler (halka, adım) sabit kalarak yine okunur. */
+@keyframes ov-countdown {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: var(--ov-ring-length); }
+}
+@keyframes ov-flow {
+  0% { transform: translateX(-120%); opacity: 0; }
+  20%, 80% { opacity: 1; }
+  100% { transform: translateX(520%); opacity: 0; }
+}
+@keyframes ov-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(260%); }
+}
+@keyframes ov-breathe {
+  0%, 100% { transform: scale(1); opacity: 0.5; }
+  50% { transform: scale(1.14); opacity: 0.15; }
+}
+.ov-countdown-ring { animation: ov-countdown var(--ov-ring-duration, 15s) linear forwards; }
+.ov-flow-dot { animation: ov-flow 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+.ov-sweep-bar { animation: ov-sweep 1.15s ease-in-out infinite; }
+.ov-breathe { animation: ov-breathe 2.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .ov-countdown-ring { animation: none; }
+  .ov-flow-dot, .ov-sweep-bar, .ov-breathe { animation: none; }
+  .ov-flow-dot { opacity: 1; transform: translateX(160%); }
+  .ov-sweep-bar { transform: translateX(80%); }
 }

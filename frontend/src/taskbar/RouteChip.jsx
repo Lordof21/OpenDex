@@ -19,7 +19,7 @@ import { t } from '../i18n/index.js';
 
 const CHIP = 'inline-flex h-6 items-center gap-1.5 rounded-full bg-foreground/[0.08] px-2.5 text-[11px] font-semibold transition-colors';
 
-export default function RouteChip({ pkg, className }) {
+export default function RouteChip({ pkg, className, tooltipPosition, tooltipAlign }) {
   const app = useAudioMixerStore((s) => (pkg ? s.apps[pkg] : null));
   const supported = useAudioMixerStore((s) => s.supported);
   const setRoute = useAudioMixerStore((s) => s.setRoute);
@@ -75,7 +75,9 @@ export default function RouteChip({ pkg, className }) {
         disabled={disabled}
         {...press}
         className={cn(CHIP, disabled ? 'cursor-default opacity-70' : 'cursor-pointer hover:bg-foreground/[0.14]', menuAnchor && 'bg-foreground/[0.14]', className)}
-        title={title}
+        data-tooltip={title}
+        data-tooltip-position={tooltipPosition}
+        data-tooltip-align={tooltipAlign}
         aria-label={t('taskbar.ses_label', { label })}
         aria-haspopup="menu"
         aria-expanded={Boolean(menuAnchor)}

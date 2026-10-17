@@ -3,7 +3,7 @@
 //   glif     üçgen ortadan ikiye ayrılıp iki çubuğa dönüşür (CSS `d` geçişi, 220 ms); basışta düğme 0.94'e iner
 //   yön      önceki/sonraki basılınca simge kendi yönüne 2 px kayar — eylemin yönünü parmak altında hissettirir
 //   arabellek telefon BUFFERING bildirirse düğmenin çevresinde ince bir yay döner
-// Kısayollar (K, J/L, N/P) panelde dinlenir; burada yalnız ipucu olarak `title`'da yazar.
+// Kısayollar (K, J/L, N/P) panelde dinlenir; burada yalnız ipucu olarak `data-tooltip`'te (uygulamanın kendi ipucu) yazar.
 
 import React from 'react';
 import { RotateCcw, RotateCw, SkipBack, SkipForward } from 'lucide-react';
@@ -40,7 +40,7 @@ function SkipButton({ dir, onClick }) {
       className={cn(ROUND, 'size-9 text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground active:scale-[0.92]')}
       onClick={onClick}
       aria-label={label}
-      title={`${label} (${dir < 0 ? 'J' : 'L'})`}
+      data-tooltip={`${label} (${dir < 0 ? 'J' : 'L'})`}
     >
       <span className="relative grid place-items-center">
         <Icon className="size-5" strokeWidth={1.75} />
@@ -63,7 +63,7 @@ function StepButton({ dir, onClick }) {
       )}
       onClick={onClick}
       aria-label={label}
-      title={`${label} (${dir < 0 ? 'P' : 'N'})`}
+      data-tooltip={`${label} (${dir < 0 ? 'P' : 'N'})`}
     >
       <Icon className="size-[22px] fill-current" strokeWidth={1.75} />
     </button>
@@ -89,7 +89,7 @@ export function Transport({ playing, buffering = false, onToggle, onStep, onSkip
           type="button"
           onClick={onToggle}
           aria-label={label}
-          title={t('taskbar.label_k', { label })}
+          data-tooltip={t('taskbar.label_k', { label })}
           data-playing={playing ? 'true' : 'false'}
           className={cn(
             ROUND,

@@ -43,7 +43,7 @@ function SessionRow({ session, onSelect, onToggle, onSeek }) {
         onClick={() => onSelect?.(session.id)}
         className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
         aria-label={t('taskbar.title_artist_ana_oynaticiya_tasi', { title, artist })}
-        title={t('taskbar.ana_oynaticiya_tasi')}
+        data-tooltip={t('taskbar.ana_oynaticiya_tasi')}
       >
         <MediaArt
           src={session.art}
@@ -88,7 +88,8 @@ function SessionRow({ session, onSelect, onToggle, onSeek }) {
         type="button"
         onClick={() => onToggle?.(session)}
         aria-label={label}
-        title={label}
+        data-tooltip={label}
+        data-tooltip-align="end"
         className="relative grid size-9 shrink-0 cursor-pointer place-items-center rounded-full outline-none transition-transform duration-150 ease-out hover:scale-105 active:scale-[0.92] focus-visible:ring-2 focus-visible:ring-ring"
       >
         <svg viewBox="0 0 36 36" className="absolute inset-0 size-full -rotate-90" aria-hidden="true">

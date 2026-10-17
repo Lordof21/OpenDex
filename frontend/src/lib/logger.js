@@ -18,7 +18,7 @@ export const TRACE_STORAGE_KEY = 'opendexTrace';
 
 // Backend'e giden akış kategorileri (info ve üstü). Gürültülü kategoriler (hizalama, resize…) yalnızca halka tamponda kalır.
 export const SHIPPED_CATEGORIES = new Set([
-  'handoff', 'reclaim', 'applock', 'teleport', 'power', 'workspace', 'fullscreen', 'transfer',
+  'handoff', 'reclaim', 'applock', 'teleport', 'power', 'workspace', 'fullscreen', 'transfer', 'close', 'audio',
 ]);
 
 const FLUSH_DELAY_MS = 1000;

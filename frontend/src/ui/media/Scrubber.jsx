@@ -133,7 +133,8 @@ export function Scrubber({
         'rounded transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         inline ? 'w-10 shrink-0 text-left' : 'px-1',
       )}
-      title={remaining ? t('ui.toplam_sureyi_goster') : t('ui.kalan_sureyi_goster')}
+      data-tooltip={remaining ? t('ui.toplam_sureyi_goster') : t('ui.kalan_sureyi_goster')}
+      data-tooltip-align="end"
       aria-label={remaining ? t('ui.toplam_sureyi_goster') : t('ui.kalan_sureyi_goster')}
     >
       {totalText}

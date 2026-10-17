@@ -44,6 +44,24 @@ export const GAP_NOISE_FACTOR = 4;           // the trigger follows the measured
 export const HARD_REPLACE_S = 0.06;
 export const DUCK_FACTOR = 0.35;
 
+// An AudioContext that is running holds the OS output stream open — also while every sample it plays is zero. On a laptop whose
+// headphones pair with two devices (phone + PC) that open stream makes the PC look like an ACTIVE source: the headset keeps
+// the laptop's link busy for sound that does not exist, e.g. an app whose audio goes to the phone or one that is just silent.
+// So the context is SUSPENDED (the stream is released) while there is nothing to play, and resumed by the first audible chunk.
+export const SILENCE_PEAK = 8;                 // int16 units (~ -72 dBFS): at or under this a chunk is digital silence
+export const SILENCE_SUSPEND_MS = 4000;        // no audible chunk for this long (channels attached) → release the output
+export const NO_CHANNEL_SUSPEND_MS = 500;      // no channel at all (every app's sound is on the phone) → release the output: the headset moves to the phone once the laptop lets go
+const IDLE_CHECK_MS = 500;
+
+function peakOf(pcm) {
+  let peak = 0;
+  for (let i = 0; i < pcm.length; i += 1) {
+    const v = pcm[i] < 0 ? -pcm[i] : pcm[i];
+    if (v > peak) peak = v;
+  }
+  return peak;
+}
+
 function defaultCreateContext() {
   const Ctx = typeof window !== 'undefined' ? window.AudioContext || window.webkitAudioContext : null;
   return Ctx ? new Ctx({ sampleRate: SAMPLE_RATE, latencyHint: 'interactive' }) : null;
@@ -136,17 +154,19 @@ class Channel {
   _onChunk(data) {
     const { ctx } = this.engine;
     if (!(data instanceof ArrayBuffer) || data.byteLength <= HEADER_SIZE) return;
+    const view = new DataView(data);
+    const head = view.getBigUint64(0);
+    if (head & CONFIG_FLAG) return;
+    const frames = Math.floor((data.byteLength - HEADER_SIZE) / (2 * CHANNELS));
+    if (!frames) return;
+    const pcm = new Int16Array(data, HEADER_SIZE, frames * CHANNELS);
+    // Asleep (output released) and this chunk is silent: nothing to play, and nothing may wake the output for it.
+    if (!this.engine.noteChunk(peakOf(pcm))) return;
     if (ctx.state !== 'running') {
       this.engine.resume();          // autoplay: resumes on the next user gesture at the latest
       return;
     }
-    const view = new DataView(data);
-    const head = view.getBigUint64(0);
-    if (head & CONFIG_FLAG) return;
     const ptsUs = Number(head & PTS_MASK);
-    const frames = Math.floor((data.byteLength - HEADER_SIZE) / (2 * CHANNELS));
-    if (!frames) return;
-    const pcm = new Int16Array(data, HEADER_SIZE, frames * CHANNELS);
     const buffer = ctx.createBuffer(CHANNELS, frames, SAMPLE_RATE);
     for (let ch = 0; ch < CHANNELS; ch += 1) {
       const out = buffer.getChannelData(ch);
@@ -294,6 +314,52 @@ export class AppAudioMixer {
     this.masterVolume = 1;
     this.masterMuted = false;
     this._unlockCleanup = null;
+    this._idle = false;              // the output is released because nothing audible plays (see SILENCE_PEAK)
+    this._lastAudibleAt = 0;
+    this._emptySince = null;         // when the last channel went away (performance.now()), null while one exists
+    this._idleTimer = null;
+  }
+
+  /**
+   * Called for every arriving chunk with its peak. True: the chunk is to be played. False: the output is released and the chunk
+   * is silent — dropped. An audible chunk wakes a released output (the chunk that wakes it is lost, ~20 ms: the context is
+   * not running yet).
+   */
+  noteChunk(peak) {
+    if (peak > SILENCE_PEAK) {
+      this._lastAudibleAt = performance.now();
+      if (this._idle) {
+        this._idle = false;
+        logger.info('audio', 'pc_output_resumed', { via: 'audible_chunk' });
+        this.resume();
+      }
+      return true;
+    }
+    return !this._idle;
+  }
+
+  _armIdleWatch() {
+    if (this._idleTimer || typeof setInterval !== 'function') return;
+    this._idleTimer = setInterval(() => this._checkIdle(), IDLE_CHECK_MS);
+    this._idleTimer.unref?.();
+  }
+
+  _disarmIdleWatch() {
+    clearInterval(this._idleTimer);
+    this._idleTimer = null;
+  }
+
+  _checkIdle() {
+    const { ctx } = this;
+    if (!ctx || ctx.state !== 'running' || this._idle) return;
+    const now = performance.now();
+    const silent = this.channels.size === 0
+      ? this._emptySince !== null && now - this._emptySince >= NO_CHANNEL_SUSPEND_MS
+      : now - this._lastAudibleAt >= SILENCE_SUSPEND_MS;
+    if (!silent) return;
+    this._idle = true;
+    logger.info('audio', 'pc_output_released', { channels: this.channels.size });
+    Promise.resolve(ctx.suspend?.()).catch(() => {});
   }
 
   _ensureCtx() {
@@ -311,6 +377,7 @@ export class AppAudioMixer {
   /** Browsers start an AudioContext suspended until a user gesture: resume now, and on the next gesture if needed. */
   resume() {
     const { ctx } = this;
+    this._idle = false;
     if (!ctx || ctx.state === 'running' || ctx.state === 'closed') return;
     ctx.resume?.().catch(() => {});
     if (this._unlockCleanup || typeof window === 'undefined') return;
@@ -333,6 +400,13 @@ export class AppAudioMixer {
     let ch = this.channels.get(windowId);
     if (!ch) {
       if (!this._ensureCtx()) return null;
+      if (this._idle) {                                         // a new channel: the output comes back (silence timer restarts)
+        logger.info('audio', 'pc_output_resumed', { via: 'new_channel' });
+        this.resume();
+      }
+      this._lastAudibleAt = performance.now();
+      this._emptySince = null;
+      this._armIdleWatch();
       ch = new Channel(this, windowId);
       this.channels.set(windowId, ch);
       logger.trace('[AppAudio] kanal açıldı %s', windowId);
@@ -354,6 +428,7 @@ export class AppAudioMixer {
     if (!ch) return;
     ch.close();
     this.channels.delete(windowId);
+    if (this.channels.size === 0) this._emptySince = performance.now();
     logger.trace('[AppAudio] kanal kapandı %s', windowId);
   }
 
@@ -396,6 +471,8 @@ export class AppAudioMixer {
   /** The running AudioContext (created and resumed on demand — call from a user gesture's flow), or null when audio is unavailable. */
   async ensureRunning() {
     if (!this._ensureCtx()) return null;
+    this._idle = false;
+    this._lastAudibleAt = performance.now();
     try {
       await this.ctx.resume?.();
     } catch { /* stays suspended */ }
@@ -439,6 +516,11 @@ export class AppAudioMixer {
 
   reset() {
     for (const id of this.windowIds()) this.detach(id);
+    this._disarmIdleWatch();
+    // A torn-down instance (page unload, Vite HMR replacing the module) must not leave its context running: an orphaned
+    // running context holds the OS output — and with it the headset — for as long as the page lives.
+    this._idle = true;
+    Promise.resolve(this.ctx?.suspend?.()).catch(() => {});
   }
 
   setVolume(windowId, v) {

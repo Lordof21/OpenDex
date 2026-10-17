@@ -30,6 +30,9 @@ export function PrecisionSlider({
   className,
   showButtons = true,
   autoLabel = tt('common.oto'),
+  autoSuffix,
+  autoHint,
+  onAutoContextMenu,
   holdoffMs = 0,
 }) {
   const [isHovered, setIsHovered] = useState(false);
@@ -85,7 +88,10 @@ export function PrecisionSlider({
           <button
             type="button"
             onClick={onAuto}
+            onContextMenu={onAutoContextMenu}
             aria-pressed={auto}
+            aria-haspopup={onAutoContextMenu ? 'menu' : undefined}
+            {...(autoHint ? { 'data-tooltip': autoHint } : null)}
             className={cn(
               'flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-semibold transition-all cursor-pointer shadow-sm active:scale-95',
               auto
@@ -95,6 +101,7 @@ export function PrecisionSlider({
           >
             {auto ? <Check className="size-3.5" strokeWidth={2.5} /> : <Sparkles className="size-3.5" strokeWidth={2} />}
             {autoLabel}
+            {autoSuffix && <span className="text-[10px] font-medium opacity-80">· {autoSuffix}</span>}
           </button>
         )}
 

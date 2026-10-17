@@ -92,7 +92,7 @@ class SessionAudioPlayer {
         this.gain.connect(this.ctx.destination);
 
         this.ctx.onstatechange = () => {
-          if (this.ctx?.state === 'suspended') {
+          if (this.active && this.ctx?.state === 'suspended') {     // stopped on purpose (see stop()) is not an autoplay block
             this._setupGestureUnlock();
           }
         };
@@ -170,8 +170,10 @@ class SessionAudioPlayer {
       } catch {}
       this.ws = null;
     }
-    // Retain this.ctx alive: re-creating AudioContext triggers browser autoplay restrictions.
-    // We only reset timing pointers and scheduled sources.
+    // Retain this.ctx (re-creating an AudioContext triggers browser autoplay restrictions) but SUSPEND it: a running context
+    // holds the OS output stream open even while it plays nothing — with a dual-device headset that keeps the laptop "active"
+    // and the headset away from the phone. start() resumes it. Only the timing pointers and scheduled sources are reset.
+    if (this.ctx && this.ctx.state === 'running') this.ctx.suspend().catch(() => {});
     this.nextStartTime = 0;
     this.basePtsUs = null;
     this.baseCtxTime = null;

@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../src/lib/api.js', () => ({ wsUrl: (p) => `ws://test${p}` }));
 
 import {
-  AppAudioMixer, DUCK_FACTOR, MAX_LATENCY_S, PRESENT_TOLERANCE_S, START_CUSHION_S, planPresentedChunk,
+  AppAudioMixer, DUCK_FACTOR, MAX_LATENCY_S, NO_CHANNEL_SUSPEND_MS, PRESENT_TOLERANCE_S, SILENCE_SUSPEND_MS, START_CUSHION_S,
+  planPresentedChunk,
 } from '../src/media/appAudioMixer.js';
 import { deviceClock } from '../src/media/deviceClock.js';
 
@@ -59,6 +60,10 @@ class Ctx {
     this.state = 'running';
     return Promise.resolve();
   });
+  suspend = vi.fn(() => {
+    this.state = 'suspended';
+    return Promise.resolve();
+  });
   createGain() {
     return new Gain();
   }
@@ -74,12 +79,13 @@ class Ctx {
   }
 }
 
-/** 20 ms of s16le stereo 48 kHz behind the 12-byte header. */
-function chunk(ptsUs, { config = false } = {}) {
+/** 20 ms of s16le stereo 48 kHz behind the 12-byte header (`amp`: the sample value — 0 is digital silence). */
+function chunk(ptsUs, { config = false, amp = 0 } = {}) {
   const buf = new ArrayBuffer(12 + 3840);
   const view = new DataView(buf);
   view.setBigUint64(0, BigInt(ptsUs) | (config ? 1n << 62n : 0n));
   view.setUint32(8, 3840);
+  if (amp) new Int16Array(buf, 12).fill(amp);
   return buf;
 }
 
@@ -517,5 +523,72 @@ describe('appAudioMixer — ctxTimeAtPerf', () => {
 
   it('is null before the context exists', () => {
     expect(mixer.ctxTimeAtPerf(1000)).toBeNull();
+  });
+});
+
+describe('appAudioMixer: the output is released while nothing audible plays', () => {
+  // A running AudioContext holds the OS output stream open even for zeros: with headphones paired to two devices the laptop then
+  // looks like an active source and keeps the headset busy for sound that does not exist.
+  beforeEach(() => vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'performance'] }));
+
+  it('suspends the context after a silent stretch and keeps it while audible chunks arrive', () => {
+    mixer.attach('w1');
+    for (let t = 0; t < SILENCE_SUSPEND_MS - 500; t += 500) {            // audible: never idle
+      sockets[0].onmessage({ data: chunk(t * 1000, { amp: 3000 }) });
+      vi.advanceTimersByTime(500);
+    }
+    expect(ctx.suspend).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(SILENCE_SUSPEND_MS + 1000);                    // then silence
+    expect(ctx.suspend).toHaveBeenCalledTimes(1);
+    expect(ctx.state).toBe('suspended');
+  });
+
+  it('does not wake the output for silent chunks, and an audible chunk wakes it', () => {
+    mixer.attach('w1');
+    vi.advanceTimersByTime(SILENCE_SUSPEND_MS + 1000);
+    expect(ctx.state).toBe('suspended');
+    ctx.resume.mockClear();
+
+    sockets[0].onmessage({ data: chunk(1_000_000) });                     // silence: dropped, nothing resumes
+    expect(ctx.resume).not.toHaveBeenCalled();
+    expect(ctx.started).toHaveLength(0);
+
+    sockets[0].onmessage({ data: chunk(1_020_000, { amp: 2000 }) });      // sound: the output comes back
+    expect(ctx.resume).toHaveBeenCalled();
+    expect(ctx.state).toBe('running');
+    sockets[0].onmessage({ data: chunk(1_040_000, { amp: 2000 }) });
+    expect(ctx.started.length).toBeGreaterThan(0);                        // the sound plays (a real context resumes a tick later)
+  });
+
+  it('releases the output when no app plays through the PC at all, and a new channel brings it back', () => {
+    mixer.attach('w1');
+    mixer.detach('w1');                                                   // every app's sound is on the phone
+    vi.advanceTimersByTime(NO_CHANNEL_SUSPEND_MS + 1000);
+    expect(ctx.suspend).toHaveBeenCalledTimes(1);
+
+    mixer.attach('w2');
+    expect(ctx.state).toBe('running');
+  });
+
+  it('reset() (page unload, Vite HMR replacing the module) releases the output instead of orphaning a running context', () => {
+    mixer.attach('w1');
+    expect(ctx.state).toBe('running');
+
+    mixer.reset();
+    expect(ctx.suspend).toHaveBeenCalled();
+    expect(ctx.state).toBe('suspended');
+
+    mixer.attach('w2');                                                   // reused after a reset: the output comes back
+    expect(ctx.state).toBe('running');
+  });
+
+  it('a barely audible noise floor above the silence threshold counts as sound', () => {
+    mixer.attach('w1');
+    for (let t = 0; t < 6000; t += 500) {
+      sockets[0].onmessage({ data: chunk(t * 1000, { amp: 20 }) });
+      vi.advanceTimersByTime(500);
+    }
+    expect(ctx.suspend).not.toHaveBeenCalled();
   });
 });

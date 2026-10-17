@@ -40,7 +40,9 @@ function AppChip({ session, onOpenApp }) {
       disabled={!session.package}
       onClick={() => onOpenApp?.(session.package)}
       className={`group/app inline-flex min-w-0 max-w-[60%] cursor-pointer items-center gap-1.5 rounded-full pl-1 pr-2.5 text-[11.5px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default ${ART_CHIP}`}
-      title={t('taskbar.source_uygulamasina_git', { source: session.source })}
+      data-tooltip={t('taskbar.source_uygulamasina_git', { source: session.source })}
+      data-tooltip-position="bottom"
+      data-tooltip-align="start"
       aria-label={t('taskbar.source_uygulamasini_ac', { source: session.source })}
     >
       {session.package ? <AppIcon pkg={session.package} size={20} className="shrink-0 rounded-full" /> : null}
@@ -77,7 +79,7 @@ function NowPlaying({ session, playing, apiRef, onToggle, onStep, onSeek, onOpen
           oran kapak geçişiyle aynı anda yumuşakça değişir (PosterArt). Tek esnek öğe odur: panel sığmazsa 200 px'e kadar kısalır. */}
       <PosterArt session={session} playing={playing} directionRef={directionRef}>
         <AppChip session={session} onOpenApp={onOpenApp} />
-        <RouteChip pkg={session.package} className={`shrink-0 px-2.5 ${ART_CHIP}`} />
+        <RouteChip pkg={session.package} className={`shrink-0 px-2.5 ${ART_CHIP}`} tooltipPosition="bottom" tooltipAlign="end" />
       </PosterArt>
 
       <div className="relative z-[4] -mt-12 shrink-0 px-5">
