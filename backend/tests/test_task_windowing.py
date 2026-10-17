@@ -318,7 +318,7 @@ async def test_freeform_hedefi_kip_wct_ile_kutu_kabukla_verilir():
     dev = _Device(mode="fullscreen", bounds=(0, 0, *PHONE))
     daemon = _Daemon(dev)
 
-    report = await _settle(dev, target="freeform", daemon=daemon)
+    report = await _settle(dev, target="freeform", daemon=daemon, native_freeform=True)
 
     assert report.verdict == "ok" and report.after.windowing_mode == FREEFORM
     # Kip WCT ile; kutu ATMS.resizeTask ile (HyperOS serbest pencere kaydını yalnız o yolla günceller — WCT kutusu geri çekiliyor).
@@ -419,7 +419,7 @@ async def test_kabuktan_gelen_kucuk_serbest_kutu_skip_if_ok_olsa_da_yerel_boyuta
     dev = _Device(mode="freeform", bounds=(316, 785, 904, 2005), display=(1220, 2712))
     daemon = _Daemon(dev)
 
-    report = await _settle(dev, target="freeform", skip_if_ok=True, daemon=daemon)
+    report = await _settle(dev, target="freeform", skip_if_ok=True, daemon=daemon, native_freeform=True)
 
     assert report.verdict == "ok" and report.attempts == 1
     assert daemon.calls == []  # kip zaten serbest: WCT'ye gerek yok, yalnız kutu
@@ -432,7 +432,7 @@ async def test_yerel_boyuttaki_serbest_pencereye_dokunulmaz():
     dev = _Device(mode="freeform", bounds=(183, 673, 1403, 2625), display=(1220, 2712))
     daemon = _Daemon(dev)
 
-    report = await _settle(dev, target="freeform", skip_if_ok=True, daemon=daemon)
+    report = await _settle(dev, target="freeform", skip_if_ok=True, daemon=daemon, native_freeform=True)
 
     assert (report.verdict, report.attempts) == ("ok", 0)
     assert daemon.calls == []
@@ -463,7 +463,7 @@ async def test_sistem_kutuyu_geri_yazarsa_dogrulama_yakalar_ve_yeniden_verir_am_
     dev = _RevertingDevice(mode="freeform", bounds=(316, 785, 904, 2005), display=(1220, 2712))
     daemon = _Daemon(dev)
 
-    report = await _settle(dev, target="freeform", skip_if_ok=True, daemon=daemon)
+    report = await _settle(dev, target="freeform", skip_if_ok=True, daemon=daemon, native_freeform=True)
 
     assert report.verdict == "ok" and report.attempts == 2
     assert dev.calls.count("cmd activity task resize 12 183 673 1403 2625") == 2

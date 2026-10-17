@@ -69,6 +69,18 @@ def applock_alive_probe(sessions: dict[str, "WindowSession"], win_id: str) -> Ca
     return _alive
 
 
+def applock_display_probe(sessions: dict[str, "WindowSession"], win_id: str) -> Callable[[], str | None]:
+    """The window's CURRENT virtual display id. A lock is answered on the phone, and unlocking restarts the phone's adbd: the
+    supervisor then rebuilds the window on a NEW display (field log 2026-10-16: 76 → 77) — the display the waiter was started
+    with no longer exists by the time the lock is open."""
+    def current() -> str | None:
+        session = sessions.get(win_id)
+        disp = getattr(getattr(session, "state", None), "display_id", None) if session is not None else None
+        return str(disp) if disp else None
+
+    return current
+
+
 async def wait_for_app_lock_unlock(
     *,
     adb: Adb,
@@ -84,6 +96,7 @@ async def wait_for_app_lock_unlock(
     timeout_s: float = 15.0,
     is_alive: Callable[[], bool] | None = None,
     fresh: bool = False,
+    display_of: Callable[[], str | None] | None = None,
 ) -> bool:
     """Wakes the phone, launches the app on Display 0 so AppLock owns the screen, then watches
     (up to ``timeout_s``) what the user does on the physical phone. Sonuç bir DURUM MAKİNESİdir:
@@ -157,7 +170,15 @@ async def wait_for_app_lock_unlock(
         if not alive():
             return False
 
-        curr_focus = await device_queries.focus_text(adb, serial, timeout_s=1.5)
+        try:
+            curr_focus = await device_queries.focus_text(adb, serial, timeout_s=1.5)
+        except Exception as exc:  # noqa: BLE001 — a lost shell is not a verdict
+            # Unlocking (and locking) restarts the phone's adbd: the shell is offline for a moment and the supervisor
+            # reconnects and rebuilds the window. The old waiter died here ("device offline"), nothing ever closed the overlay and
+            # the user had to press "Kilidi açtım" by hand. Keep watching; the timeout still decides if the phone never answers.
+            wlog.debug("[KİLİT: YOKLAMA] %s odak okunamadı (%s) — izlemeye devam", pkg_name, exc)
+            await asyncio.sleep(0.5)
+            continue
         if not (curr_focus or "").strip():
             continue  # okuma başarısız/boş: karar verme
         state = classify_focus(curr_focus, pkg_name)
@@ -187,25 +208,54 @@ async def wait_for_app_lock_unlock(
         return False
 
     if outcome == "unlocked":
-        target_task_id = await find_task_id_for_package(adb, pkg_name, display_id="0", serial=serial)
-        if not target_task_id:
-            target_task_id = await find_task_id_for_package(adb, pkg_name, serial=serial)
-        if target_task_id:
-            wlog.info("🔓 [KİLİT AÇILDI!] %s için Task %s Display 0'dan Display %s'ye taşınıyor (@ %d DPI)", pkg_name, target_task_id, disp_id, p1_dpi)
-            with contextlib.suppress(Exception):
-                await move_task_to_display(adb, target_task_id, disp_id, serial=serial, daemon=daemon)
-            # It may arrive with the mode it requested on the phone (freeform): fullscreen on a VD window's display.
-            await land_fullscreen(adb, serial, pkg_name, disp_id, task_id=target_task_id, daemon=daemon, wlog=wlog)
-            with contextlib.suppress(Exception):
-                await android_shell.bring_to_front(adb, serial, pkg_name, disp_id)
-        else:
-            wlog.info("🔓 [KİLİT AÇILDI!] %s kilit ekranı aşıldı, Display %s üzerinde öne çıkarılıyor", pkg_name, disp_id)
-            with contextlib.suppress(Exception):
-                await android_shell.bring_to_front(adb, serial, pkg_name, disp_id)
+        # After a successful unlock the OEM AppLock hands the ORIGINAL intent back to the app by itself — the conversation of
+        # the notification that was tapped, a deep link — so the task already stands where the user wanted. Starting the
+        # app's launcher entry again (`am start -n .Main`, scrcpy START_APP) would reset that task to its home page (field
+        # log 2026-10-16, WhatsApp: Conversation → HomeActivity). A task that exists is therefore only MOVED / RAISED by
+        # id; the launcher start remains for the case where the app has no task at all.
+        # The window may stand on ANOTHER display than the one this waiter started with: unlocking restarts the phone's adbd and
+        # the supervisor rebuilds the window on a new virtual display (field log 2026-10-16: 76 → 77).
+        disp_id = (display_of() if display_of is not None else None) or disp_id
+        try:
+            target_display = str(disp_id)
+            target_task_id = await find_task_id_for_package(adb, pkg_name, display_id=target_display, serial=serial)
+            on_target = bool(target_task_id)
+            if not target_task_id:
+                target_task_id = await find_task_id_for_package(adb, pkg_name, display_id="0", serial=serial)
+            if not target_task_id:
+                target_task_id = await find_task_id_for_package(adb, pkg_name, serial=serial)
 
-        if sockets and sockets.control:
-            with contextlib.suppress(Exception):
-                await sockets.control.send(serialize_start_app(pkg_name))
+            raised = False
+            if target_task_id:
+                if on_target:
+                    wlog.info("🔓 [KİLİT AÇILDI!] %s (task %s) zaten Display %s üzerinde — yeniden başlatılmadan öne alınıyor", pkg_name, target_task_id, disp_id)
+                else:
+                    wlog.info("🔓 [KİLİT AÇILDI!] %s için Task %s Display 0'dan Display %s'ye taşınıyor (@ %d DPI)", pkg_name, target_task_id, disp_id, p1_dpi)
+                    with contextlib.suppress(Exception):
+                        await move_task_to_display(adb, target_task_id, disp_id, serial=serial, daemon=daemon)
+                    # It may arrive with the mode it requested on the phone (freeform): fullscreen on a VD window's display.
+                    await land_fullscreen(adb, serial, pkg_name, disp_id, task_id=target_task_id, daemon=daemon, wlog=wlog)
+                with contextlib.suppress(Exception):
+                    raised = bool(daemon is not None and await daemon.reorder_task(target_task_id, front=True))
+            else:
+                wlog.info("🔓 [KİLİT AÇILDI!] %s kilit ekranı aşıldı, görevi bulunamadı; Display %s üzerinde başlatılıyor", pkg_name, disp_id)
+
+            if not raised:
+                # An older jar (no `task_reorder`) or no task at all: the launcher start is the only way left to bring it up.
+                with contextlib.suppress(Exception):
+                    await android_shell.bring_to_front(adb, serial, pkg_name, disp_id)
+                if sockets and sockets.control:
+                    with contextlib.suppress(Exception):
+                        await sockets.control.send(serialize_start_app(pkg_name))
+
+        except Exception as exc:  # noqa: BLE001 — the overlay must never be left waiting on a verdict that will not come
+            wlog.warning("⚠️ [KİLİT: AÇILDI AMA DEVİR BAŞARISIZ] %s: %s", pkg_name, exc)
+            if alive():
+                await events.emit(
+                    "app_lock_cancelled", package=pkg_name, window_id=win_id, display_id=str(disp_id),
+                    message='Kilit açıldı ama uygulama pencereye alınamadı. "Tekrar Dene"ye basın.',
+                )
+            return False
 
         if not alive():
             return False
@@ -226,6 +276,39 @@ async def wait_for_app_lock_unlock(
     return False
 
 
+async def _start_in_window(sockets: ScrcpySockets, pkg_name: str, wlog: logging.LoggerAdapter) -> None:
+    """Asks the scrcpy server to start the app on the window's display (the cold-start path)."""
+    if sockets.control is None:
+        return
+    wlog.info("🚀 [PENCERE AÇILIŞI] %s taşınacak görev bulunamadı — pencerede başlatılıyor", pkg_name)
+    with contextlib.suppress(Exception):
+        await sockets.control.send(serialize_start_app(pkg_name))
+
+
+async def _launch_if_not_moved(
+    adb: Adb, sockets: ScrcpySockets, serial: str, pkg_name: str, disp_id: str, wlog: logging.LoggerAdapter,
+) -> None:
+    """After a task move the app's task must be on the window's display. If it is not (the phone refused the move) the app is
+    started there, so a window never opens onto a blank display."""
+    from app.device.deep_navigator import find_task_id_for_package
+    with contextlib.suppress(Exception):
+        if await find_task_id_for_package(adb, pkg_name, display_id=disp_id, serial=serial):
+            return
+    await _start_in_window(sockets, pkg_name, wlog)
+
+
+async def _watch_browser_tabs(adb: Adb, serial: str, pkg_name: str, wlog: logging.LoggerAdapter) -> None:
+    """Starts the window-mode tab watcher when ``pkg_name`` is a DevTools browser. Never raises, never holds the window up."""
+    try:
+        from .cdp_refresher import start_browser_auto_attach_watcher
+        from .web_inspector import inspect_app_runtime
+        profile = await asyncio.wait_for(inspect_app_runtime(adb, serial, pkg_name), timeout=3.0)
+        if profile.is_browser_cdp and profile.cdp_socket:
+            start_browser_auto_attach_watcher(adb, serial, profile.cdp_socket, pkg_name, None, mode="desktop")
+    except Exception as exc:  # noqa: BLE001 — a nicety: the window works without it
+        wlog.debug("[CDP_WATCHER] pencere kipi izleyicisi başlatılamadı: %s", exc)
+
+
 async def coordinate_window_lifecycle(
     *,
     adb: Adb,
@@ -241,11 +324,17 @@ async def coordinate_window_lifecycle(
     p2_dpi: int,
     stealth_active: bool,
     auto_start: bool,
+    server_launched_app: bool = True,
     daemon: Any = None,
     lock: asyncio.Lock | None = None,
     density: Any = None,
     density_before: Any = None,
+    continuity: Any = None,
 ) -> None:
+    """``server_launched_app``: the scrcpy server was told to start the app (nothing to move). False: the app already ran on
+    the phone and THIS function moves its task onto the window — and starts it itself if that move did not take place."""
+    page: Any = None   # the watch page the app was on when it was moved off the phone (playback_continuity.capture_page)
+    playing: Any = None   # the app's PLAYING video when it was moved (playback_continuity.capture): resumed if the move paused it
     try:
         # The server reports its display id in its own log ("New display: …(id=N)"); the daemon's display_added event
         # is the second source for a late line (single candidate only). Never a guess from `dumpsys display`.
@@ -271,6 +360,7 @@ async def coordinate_window_lifecycle(
         changed_at: float | None = None
 
         task_id: str | None = None
+        is_app_lock_flow = False
         # 1. Check if Android OEM AppLock intercepted the launch
         if auto_start:
             is_app_lock = False
@@ -282,6 +372,7 @@ async def coordinate_window_lifecycle(
                 await asyncio.sleep(0.15)
 
             if is_app_lock:
+                is_app_lock_flow = True
                 wlog.info("🔒 [UYGULAMA KİLİDİ DEVREDE] %s için AppLock algılandı. PC ekranı ve telefon uyarılıyor...", pkg_name)
                 if warm:
                     changed_at = await density.mark()  # the move onto the window happens inside, after the unlock
@@ -297,15 +388,23 @@ async def coordinate_window_lifecycle(
                     p1_dpi=p1_dpi,
                     daemon=daemon,
                     is_alive=applock_alive_probe(sessions, win_id),
+                    display_of=applock_display_probe(sessions, win_id),
                 )
             else:
                 task_id = await find_task_id_for_package(adb, pkg_name, display_id="0", serial=serial)
                 if task_id:
                     wlog.info("🚚 [PENCERE GÖREV IŞINLAMA] %s için Task %s Display 0'dan Display %s'ye taşınıyor (@ %d DPI)", pkg_name, task_id, disp_id, p1_dpi)
+                    if continuity is not None:   # paused or playing: the rebuild after the move is what loses a watch page
+                        with contextlib.suppress(Exception):
+                            page = await continuity.capture_page(pkg_name)
+                        with contextlib.suppress(Exception):
+                            playing = await continuity.capture(pkg_name)
                     if warm:
                         changed_at = await density.mark()
                     with contextlib.suppress(Exception):
                         await move_task_to_display(adb, task_id, disp_id, serial=serial, daemon=daemon)
+                    if not server_launched_app:
+                        await _launch_if_not_moved(adb, sockets, serial, pkg_name, str(disp_id), wlog)
                     # Telefonda serbest pencere olarak açılmış görev aynı kipi taşır: VD penceresinde tam ekran olmalı.
                     await land_fullscreen(adb, serial, pkg_name, disp_id, task_id=task_id, daemon=daemon, wlog=wlog)
                     # Sanal display üzerinde görevi öne çıkar ve resume ettir
@@ -314,6 +413,8 @@ async def coordinate_window_lifecycle(
                     # Display 0 ve sanal display aynı DPI'da (520 DPI) olduğundan Chrome reflow ve scroll kaybı yaşamaz
                     await asyncio.sleep(0.4)
                 else:
+                    if not server_launched_app:        # the task vanished between the open and here: nothing was started
+                        await _start_in_window(sockets, pkg_name, wlog)
                     # Cold start: uygulamanın ayağa kalkması için kısa bir süre
                     await asyncio.sleep(0.3)
         else:
@@ -370,6 +471,23 @@ async def coordinate_window_lifecycle(
                 final_dpi=p2_dpi,
                 physical_dpi=p1_dpi,
             )
+
+        # 4b. A browser in a window: its tabs follow the WINDOW's mode (desktop site) for as long as the window lives — a tab the phone
+        #     loaded as the mobile site is switched (video and scroll kept), new tabs start as desktop (cdp_refresher watcher).
+        if auto_start and not is_app_lock_flow:
+            await _watch_browser_tabs(adb, serial, pkg_name, wlog)
+
+        # 5. The app was rebuilt by the move (and maybe restarted by the density settle): if it is no longer on the watch page it
+        #    was on, that page is reopened where it was — paused when it was paused. After 'live': the window is already usable.
+        outcome = "skipped"
+        if page is not None and continuity is not None:
+            outcome = await continuity.repair_page(page, disp_id)
+            wlog.info("▶ [SÜREKLİLİK] %s sayfa onarımı: %s", pkg_name, outcome)
+        # 6. The page is right but the rebuild stopped the video that was playing: it goes on from where it stopped (a page that was
+        #    reopened is already playing; a video that kept playing is left alone).
+        if playing is not None and continuity is not None and outcome != "reopened":
+            result = await continuity.restore(playing, disp_id)
+            wlog.info("▶ [SÜREKLİLİK] %s oynatma devamı: %s", pkg_name, result)
     except Exception as exc:
         wlog.error("❌ [STEALTH COORDINATION KRİTİK HATA] %s: %s", pkg_name, exc, exc_info=True)
         if stealth_active:

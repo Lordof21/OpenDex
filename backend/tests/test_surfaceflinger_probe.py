@@ -110,3 +110,115 @@ async def test_probe_reports_the_window_chrome_the_system_drew_and_the_vendors_m
     chrome = await shell_with(DUMP_WITH_DECOR)
     assert len(chrome.decor_layers) == 2 and "caption" in chrome.decor_layers[0]
     assert chrome.render_bounds == (80, 80, 1246, 685)  # the chrome never becomes the content's box
+
+
+# ---------------------------------------------------------------- window chrome of a task whose content box cannot be measured
+# Layer blocks as a HyperOS 3.0 (Android 16) dump prints them for a freeform task on a virtual display (device-captured 2026-10-16).
+CHROME_DUMP = """\
+Displays (2 entries)
+  Layer [3130] Miui Caption of Task=309#3130
+    visible reason= buffer=12386685683113 frame=8
+    bounds={230,53,65,290} toDisplayTransform={ tx=230.0000 ty=53.0000 }
+      geomBufferSize=[0 0 60 12] geomContentCrop=[0 0 60 12] geomCrop=[0.000000 0.000000 -1.000000 -1.000000]
+      blend=PREMULTIPLIED (2) alpha=1.000000 backgroundBlurRadius=0 miVisibleStateForDisplay=32
+
+  Layer [3132] Miui Bottom Caption of Task=309#3132
+    visible reason= buffer=12386685683118 frame=8
+      geomBufferSize=[0 0 130 12] geomContentCrop=[0 0 130 12]
+      blend=PREMULTIPLIED (2) alpha=0.500000 backgroundBlurRadius=0
+
+  Layer [3140] Miui Caption of Task=310#3140
+    visible reason= buffer=1 frame=2
+      geomBufferSize=[0 0 60 12]
+      blend=PREMULTIPLIED (2) alpha=1.000000
+
+  Layer [3150] Miui Shadow of Task=309#3150
+      geomBufferSize=[0 0 400 300]
+      blend=PREMULTIPLIED (2) alpha=1.000000
+
+Input list
+  Layer [3130] Miui Caption of Task=309#3130
+    visible reason= buffer=1 frame=1
+"""
+
+
+def test_parse_task_chrome_reads_each_layer_of_the_task_once_with_what_the_dump_says_about_it():
+    from app.windows.surfaceflinger_probe import ChromeLayer, parse_task_chrome
+
+    layers = parse_task_chrome(CHROME_DUMP, "309")
+    assert layers == (
+        ChromeLayer("Miui Caption of Task=309", visible=True, alpha=1.0, size=(60, 12)),
+        ChromeLayer("Miui Bottom Caption of Task=309", visible=True, alpha=0.5, size=(130, 12)),
+        ChromeLayer("Miui Shadow of Task=309", visible=False, alpha=1.0, size=(400, 300)),   # no `visible reason=` line: not on screen
+    )                                                  # task 310's caption is not 309's; the input-list repeat is not a 2nd layer
+
+
+def test_a_task_without_chrome_has_none():
+    from app.windows.surfaceflinger_probe import format_task_chrome, parse_task_chrome
+
+    assert parse_task_chrome(CHROME_DUMP, "311") == ()
+    assert isinstance(parse_task_chrome(REAL_XIAOMI_SF_DUMP, "4464"), tuple)      # a real dump parses without raising
+    assert format_task_chrome(()) == "chrome=yok"
+
+
+def test_format_task_chrome_is_one_readable_log_field():
+    from app.windows.surfaceflinger_probe import format_task_chrome, parse_task_chrome
+
+    text = format_task_chrome(parse_task_chrome(CHROME_DUMP, "309"))
+    assert text.startswith("chrome=[Miui Caption of Task=309 60x12 görünür α1.00; Miui Bottom Caption of Task=309 130x12 görünür α0.50")
+    assert "Miui Shadow of Task=309 400x300 gizli α1.00" in text
+
+
+@pytest.mark.asyncio
+async def test_the_transfer_log_reports_chrome_even_when_the_content_box_cannot_be_measured(monkeypatch):
+    """A Workspace task prints `render=?` (no measurable box). The chrome field still comes through — it is what separates a
+    window that has HyperOS' header from one that has none."""
+    from app.windows import surfaceflinger_probe, task_windowing
+
+    async def surface(adb, serial, task_id):
+        return None, surfaceflinger_probe.parse_task_chrome(CHROME_DUMP, task_id)
+
+    monkeypatch.setattr(surfaceflinger_probe, "probe_task_surface", surface)
+    summary = await task_windowing._sf_summary(None, "S", "309")
+    assert summary.startswith("render=? scale=? chrome=[Miui Caption of Task=309 60x12 görünür")
+
+
+@pytest.mark.asyncio
+async def test_the_transfer_log_keeps_its_old_shape_when_the_dump_cannot_be_read(monkeypatch):
+    from app.windows import surfaceflinger_probe, task_windowing
+
+    async def unreadable(adb, serial, task_id):
+        return None, ()
+
+    monkeypatch.setattr(surfaceflinger_probe, "probe_task_surface", unreadable)
+    assert await task_windowing._sf_summary(None, "S", "309") == "render=? scale=? chrome=yok"
+
+
+@pytest.mark.asyncio
+async def test_a_workspace_task_reports_its_window_chrome_once_the_system_had_time_to_draw_it(monkeypatch, caplog):
+    """HyperOS draws the caption a moment after the freeform transition: the report waits (CHROME_REPORT_DELAYS_S, two readings: a caption that comes late vs one that never comes) and says how the
+    task entered the Workspace (open / dock / guard) — the one fact that separates a window with a header from one without."""
+    import logging
+    from types import SimpleNamespace
+
+    from app.windows import surfaceflinger_probe
+    from app.windows.eco_workspace import EcoWorkspaceManager
+
+    waited: list[float] = []
+
+    async def fake_sleep(seconds):
+        waited.append(seconds)
+
+    async def surface(adb, serial, task_id):
+        return None, surfaceflinger_probe.parse_task_chrome(CHROME_DUMP, task_id)
+
+    monkeypatch.setattr("app.windows.eco_workspace.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr(surfaceflinger_probe, "probe_task_surface", surface)
+    wlog = logging.getLogger("test.chrome")
+    stub = SimpleNamespace(CHROME_REPORT_DELAYS_S=(1.5, 5.0), _adb=None)
+    with caplog.at_level(logging.INFO, logger="test.chrome"):
+        await EcoWorkspaceManager._report_chrome_later(stub, "S", 309, "com.android.vending", "dock", wlog)
+
+    assert waited == [1.5, 3.5]                      # sleeps are relative: readings at +1.5 s and +5.0 s
+    assert "[ECO WORKSPACE:CHROME] com.android.vending (task=309, dock) +1.5s chrome=[Miui Caption of Task=309 60x12 görünür" in caplog.text
+    assert "(task=309, dock) +5.0s chrome=" in caplog.text

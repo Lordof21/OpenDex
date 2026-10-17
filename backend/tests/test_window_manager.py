@@ -13,6 +13,7 @@ from app.storage import settings_db
 from app.windows import encoder_stress_test as stress_test_module
 from app.windows import session_reconfigure as reconfigure_module
 from app.windows import window_manager as wm_module
+from app.windows.dpi_policy import negotiate_dpi
 from app.windows.scrcpy_launcher import ScrcpySockets, VideoMeta
 from app.windows.window_manager import (
     EncoderLimitError,
@@ -45,6 +46,9 @@ class _FakeScrcpyServer:
 
     def supports(self, feature):
         return feature in self.features
+
+    async def wait_for_display_id(self, *args, **kwargs):
+        return self.display_id  # the real server learns it from scrcpy's "New display" line; the fake has none unless a test set it
 
     async def push_server(self, server_path=None): ...
 
@@ -237,6 +241,52 @@ async def test_open_close_lifecycle(manager):
     assert manager._test_audio.stopped == 0  # closing windows does NOT stop device-wide session audio
 
 
+async def test_focus_never_pulls_an_app_that_stands_on_the_phone_back_into_its_window(manager, monkeypatch):
+    """Touching the header / resizing a window whose app is on the phone focuses it: START_APP into the window's display would pull the
+    app back to DeX without "PC'ye geri al" being pressed."""
+    sent = []
+
+    async def _record(self, payload):
+        sent.append(payload)
+
+    monkeypatch.setattr(_FakeControl, "send", _record)
+    await manager.bind_device("SER", "android-1")
+    handle = await manager.open_window("com.app.a")
+    session = manager.get_session(handle.window_id)
+    sent.clear()
+
+    session.state.handoff_to_phone = True
+    await manager.focus_window(handle.window_id)
+    assert sent == []
+
+    session.state.handoff_to_phone = False                       # back in the window: focus launches as before
+    monkeypatch.setattr(manager, "_launch_if_absent", lambda s: _noop(sent))
+    await manager.focus_window(handle.window_id)
+    assert sent == ["launched"]
+
+
+async def _noop(sent):
+    sent.append("launched")
+
+
+async def test_closing_the_window_of_an_app_on_the_phone_keeps_the_browser_watcher(manager, monkeypatch):
+    """The app stays on the phone: the watcher that holds its tabs at the phone's scale and site must outlive the window."""
+    stopped = []
+    monkeypatch.setattr(wm_module, "stop_browser_auto_attach_watcher", stopped.append)
+    await manager.bind_device("SER", "android-1")
+    handle = await manager.open_window("com.android.chrome")
+    stopped.clear()
+    manager.get_session(handle.window_id).state.handoff_to_phone = True
+
+    await manager.close_window(handle.window_id)
+    assert stopped == []
+
+    handle = await manager.open_window("com.android.chrome")      # a window whose app is still in it: its watcher ends with it
+    stopped.clear()
+    await manager.close_window(handle.window_id)
+    assert stopped == ["com.android.chrome"]
+
+
 async def test_close_signals_clients_before_teardown(manager):
     """Spec: 'önce WS client'lara kapanış sinyali, sonra kaynak sökümü'."""
     await manager.bind_device("SER", "android-1")
@@ -324,11 +374,13 @@ async def test_unfreeze_waits_the_configured_grace_delay(monkeypatch, tmp_db):
     assert elapsed >= 0.045
 
 
-async def test_open_window_uses_settings_default_dpi(manager):
+async def test_open_window_derives_its_default_dpi_from_the_phone_target_dp(manager):
+    """No dpi asked for: the density that puts the window's short side at the phone's 360 dp (dpi_policy.negotiate_dpi) —
+    720 px * 160 / 360 = 320. VIRTUAL_DISPLAY_DPI is only the fallback when nothing can be derived."""
     await manager.bind_device("SER", "android-1")
     handle = await manager.open_window("com.app.a")
     session = manager.get_session(handle.window_id)
-    assert session.server.spawn_kwargs["dpi"] == manager._settings.VIRTUAL_DISPLAY_DPI
+    assert session.server.spawn_kwargs["dpi"] == 320 == negotiate_dpi(1280, 720, None, None, manager._settings.VIRTUAL_DISPLAY_DPI)
 
 
 async def test_resize_sets_sticky_session_dpi(manager):
@@ -440,7 +492,7 @@ async def test_resize_failure_pauses_the_window_instead_of_closing_it(manager):
     assert session_a.state.frozen is True
     # Reverted to the size/dpi it had BEFORE the failed attempt, not the
     # failing request — a retry should use values known to have worked.
-    assert (session_a.display_w, session_a.display_h, session_a.dpi) == (1280, 720, 420)
+    assert (session_a.display_w, session_a.display_h, session_a.dpi) == (1280, 720, 320)   # 320 = the derived default for 1280x720
 
     # A frozen window doesn't count against the budget (same as minimize),
     # so a third window still fits even though "a" was never closed.
@@ -1388,11 +1440,12 @@ async def test_a_deferred_resize_keeps_the_asked_density_for_the_next_encoder_st
         flex_manager, handle.window_id, lambda w, h: asyncio.get_running_loop().call_soon(server.video_reader.feed_eof),
     )
 
-    result = await flex_manager.resize_window(handle.window_id, 1600, 900, dpi=440)   # 420 -> 440: applied live
+    asked = flex_manager.get_session(handle.window_id).dpi + 20   # within the 40 dpi a flex resize applies live without a display id
+    result = await flex_manager.resize_window(handle.window_id, 1600, 900, dpi=asked)
 
     session = flex_manager.get_session(handle.window_id)
     assert result.deferred is True
-    assert (session.target_display_w, session.target_display_h, session.dpi) == (1600, 900, 440)
+    assert (session.target_display_w, session.target_display_h, session.dpi) == (1600, 900, asked)
 
 
 # ---------------------------------------------------------------------------

@@ -37,6 +37,7 @@ from .cdp_refresher import (
 )
 from .display_ids import is_virtual_display_id, known_display_id
 from .mirror_packages import is_internal_package, is_launcher_package, is_mirror_package
+from .playback_continuity import PlaybackContinuity
 from .task_movement import move_task_to_display
 from .task_windowing import land_fullscreen, read_task_windowing, settle_task_windowing
 from .web_inspector import inspect_app_runtime
@@ -134,6 +135,12 @@ class HandoffManager:
         self._serial_getter = serial_getter
         self._unfreeze_locked = unfreeze_locked
         self._daemon_client_getter = daemon_client_getter or (lambda: None)
+        # A video that was playing when the app crossed displays is resumed where it stopped (playback_continuity.py).
+        self._playback = PlaybackContinuity(
+            lambda: self._daemon_client_getter() if callable(self._daemon_client_getter) else None,
+            enabled=settings.PLAYBACK_CONTINUITY,
+            deep_link=settings.PLAYBACK_DEEP_LINK,
+        )
         # Eco Workspace üyeleri bu sınıfın handoff↔reclaim döngüsüne GİRMEZ: task'ları
         # paylaşımlı VD'de yaşar, defter kaydı EcoWorkspaceManager'dadır. Telefonda
         # göründüklerinde (Display 0 odak olayı / watchdog) yapılacak tek şey WindowManager'ın
@@ -200,6 +207,11 @@ class HandoffManager:
         except Exception as exc:
             log.error("❌ [VD DENSITY HATASI] disp=%s dpi=%d: %s", disp_id, density, exc, exc_info=True)
             return False
+
+    @property
+    def playback(self) -> PlaybackContinuity:
+        """The playback continuity this manager resumes a crossed app with (shared: the window open uses it too)."""
+        return self._playback
 
     async def _density_bracket_open(
         self, pkg: str, from_dpi: int | None, to_dpi: int | None, *, lookback_s: float = 0.0,
@@ -373,12 +385,12 @@ class HandoffManager:
         landing, session.landing = session.landing, None
         if landing is None:
             return False
-        if Geometry(session.target_display_w, session.target_display_h, session.dpi) != landing.landed:
+        window = self._geometry_to_restore(session, landing)
+        if window is None:
             wlog.info("[HANDOFF: GERİ ALMA] pencere telefondayken yeniden boyutlandırılmış — geometrisi olduğu gibi bırakıldı")
             return False
         if self._resize_display is None:
             return False
-        window = landing.window
         try:
             ok = await self._resize_display(session.state.window_id, window.width, window.height, window.dpi, in_place_only=False)
         except Exception as exc:  # noqa: BLE001 — the move still carries the app to whatever the display is
@@ -389,15 +401,29 @@ class HandoffManager:
         return ok
 
     @staticmethod
+    def _geometry_to_restore(session: "WindowSession", landing: "Landing") -> Geometry | None:
+        """What the display must be before the app returns to it. None: leave it as it is.
+
+        A window the user resized while its app was on the phone keeps the SIZE it asked for — but a plain drag carries no density,
+        so the display still has the phone's (the pre-landing's): that density goes back to the window's, or the app would come
+        back drawn at the phone's scale inside a window-sized display. A density the user chose themselves (the DP setting) stays."""
+        current = Geometry(session.target_display_w, session.target_display_h, session.dpi)
+        if current == landing.landed:
+            return landing.window
+        if current.dpi == landing.landed.dpi and landing.window.dpi != current.dpi:
+            return Geometry(current.width, current.height, landing.window.dpi)
+        return None
+
+    @staticmethod
     def _adopt_window_geometry(session: "WindowSession") -> None:
         """No live display to resize (frozen / its server gone): the window's geometry goes back into the session, so the
         display the unfreeze builds is the window's, not the phone's."""
         landing, session.landing = session.landing, None
         if landing is None:
             return
-        if Geometry(session.target_display_w, session.target_display_h, session.dpi) != landing.landed:
+        window = HandoffManager._geometry_to_restore(session, landing)
+        if window is None:
             return  # resized in the meantime: that is what the window asked for
-        window = landing.window
         session.target_display_w, session.target_display_h, session.dpi = window.width, window.height, window.dpi
         session.state.width, session.state.height = window.width, window.height
 
@@ -479,6 +505,31 @@ class HandoffManager:
     # predate our mark by this much.
     _ALREADY_MOVED_LOOKBACK_S = 3.0
 
+    async def _phone_foreground_task(self, pkg: str, task_id: str | int | None) -> int | None:
+        """Telefonun (Display 0) şu an ön planda gördüğü kullanıcı görevi — aktarımdan ÖNCE okunur. Aktarım bu görevi Home'a
+        itmek yerine hedefin arkasında tutar (bkz. `android_shell.unlock_display0_gesture_navigation`). None: okunamadı, en üstteki
+        görünür görev Home/başlatıcı, kendi/OpenDeX görevi ya da hedefin kendisi → Home ara görevi olarak kalır."""
+        daemon = self._daemon_client_getter() if callable(self._daemon_client_getter) else None
+        if daemon is None:
+            return None
+        try:
+            tasks = await daemon.tasks()
+        except Exception:  # noqa: BLE001 — okunamazsa Home ara görevi (eski davranış)
+            return None
+        for item in tasks or []:
+            if not isinstance(item, dict) or item.get("display") != 0 or not item.get("visible"):
+                continue
+            package = item.get("package")
+            if str(item.get("id")) == str(task_id) or package == pkg:
+                continue
+            # Görünür görevlerin en üstteki ilki ön plandır; o bir başlatıcı/dahili pencere ya da paketsiz ise Home yeterli.
+            if not package or is_launcher_package(package) or is_internal_package(package):
+                return None
+            with contextlib.suppress(TypeError, ValueError):
+                return int(item["id"])
+            return None
+        return None
+
     async def _execute_to_phone(
         self,
         session: "WindowSession",
@@ -533,13 +584,15 @@ class HandoffManager:
                 "x".join(map(str, phone_size)) if phone_size else "boyut okunamadı", phys_dpi if phys_dpi else "okunamadı",
             )
 
-            # Telefon ekranını aktarımın başında erkenden uyandır (panel açılış gecikmesini ve siyah ekranı önle)
-            with contextlib.suppress(Exception):
-                await android_shell.wake_and_unlock(self._adb, serial)
+            # Telefon ekranını aktarımın başında erkenden uyandır (panel açılış gecikmesini ve siyah ekranı önle) — uygulamanın
+            # çalışma profili okunurken: ikisi birbirine bağlı değil, sırayla yapmak (özellikle `dumpsys meminfo` ~0,4 sn) boşa bekletiyordu.
+            async def wake() -> None:
+                with contextlib.suppress(Exception):
+                    await android_shell.wake_and_unlock(self._adb, serial)
 
             # Geçiş öncesi runtime profili ve tarayıcı scroll çıpası (0,0) tespiti
             saved_scroll = None
-            runtime_profile = await inspect_app_runtime(self._adb, serial, pkg)
+            _, runtime_profile = await asyncio.gather(wake(), inspect_app_runtime(self._adb, serial, pkg))
             if runtime_profile.is_browser_cdp and runtime_profile.cdp_socket:
                 saved_scroll = await capture_browser_scroll_state(
                     self._adb, serial, runtime_profile.cdp_socket,
@@ -568,6 +621,8 @@ class HandoffManager:
             # 1. Görevi telefon ekranına (Display 0) TAM EKRAN taşı. Serbest kip burada (WCT ile) verilmez: HyperOS
             # SystemUI'ı kipi yalnız kendi Shell geçişinden (FULLSCREEN_TO_FREEFORM) tanır; geçişsiz WCT ile freeform'a
             # alınan görevde çerçeve çizilir ama miuiFreeformTaskInfo oluşmaz (sürükleme ölü, içerik beyaz).
+            # Telefonun şu an ön planındaki uygulama (taşıma onu örter): hedefin arkasında görünür kalsın diye ŞİMDİ okunur.
+            behind_task = await self._phone_foreground_task(pkg, task_id) if task_id else None
             if task_id:
                 log.info("🚚 [HANDOFF: GÖREV TAŞIMA] Task %s Display %s'den Display 0'a taşınıyor", task_id, disp_id)
                 try:
@@ -615,6 +670,7 @@ class HandoffManager:
                     try:
                         out_start = await android_shell.unlock_display0_gesture_navigation(
                             self._adb, serial, pkg, windowing_mode=launch_mode,
+                            behind_task_id=behind_task, daemon=daemon,
                         )
                     except Exception as exc:  # noqa: BLE001 — düz öne getirmeye düşülür
                         log.warning("⚠️ [HANDOFF: HYPEROS JEST KİLİDİ] Home → %s geçişi başarısız: %s", pkg, exc)
@@ -623,10 +679,17 @@ class HandoffManager:
                     elif out_start:
                         log.info("🧭 [HANDOFF: HYPEROS JEST KİLİDİ] Home → %s geçişi yapıldı (onForegroundChanged → GestureStub)", pkg)
                 if not out_start:
-                    out_start = await android_shell.bring_to_front(
-                        self._adb, serial, pkg, "0", reorder_only=bool(task_id), component=top_component,
-                        windowing_mode=launch_mode,
-                    )
+                    try:
+                        out_start = await android_shell.bring_to_front(
+                            self._adb, serial, pkg, "0", reorder_only=bool(task_id), component=top_component,
+                            windowing_mode=launch_mode,
+                        )
+                    except Exception as exc:
+                        # A task whose top activity is not exported (Udemy's course player) cannot be named by the shell
+                        # (SecurityException): the daemon raises it by id instead, so it does not stay behind the launcher.
+                        if not (task_id and daemon and await daemon.reorder_task(task_id, front=True)):
+                            raise
+                        out_start = f"görev {task_id} kimliğiyle öne alındı ({exc.__class__.__name__})"
                 log.info("🎯 [HANDOFF] am start --display 0 tamamlandı (comp=%s mode=%s): '%s'", top_component or "auto", launch_mode, out_start.strip() if out_start else "OK")
             except Exception as exc:
                 log.warning("⚠️ [HANDOFF] am start --display 0 uyarısı: %s", exc)
@@ -649,7 +712,15 @@ class HandoffManager:
 
             if runtime_profile.is_browser_cdp and runtime_profile.cdp_socket:
                 # ── KADEME 1: CDP Destekli Tarayıcı (Chrome, Chromium, Brave, Edge vb.) ──
-                # Süreci ÖLDÜRME! Web sayfasına canlı layout/font re-evaluation ve (0,0) scroll çıpalama dürtmesi gönder:
+                # Süreci ÖLDÜRME! Önce sekme izleyicisi: tüm sekmeler (açık olanlar ve sonradan açılacaklar) telefonun yerel ölçeğine
+                # oturur — Chrome'un tablet kipi sürece bağlı, telefonda ×1,2 ölçek ve masaüstü sitesi taşır (cdp_refresher.py). Sonra
+                # web sayfasına canlı layout re-evaluation ve (0,0) scroll çıpalama dürtmesi: ölçek zaten yerinde olduğundan çıpa tutar.
+                with contextlib.suppress(Exception):
+                    watcher = start_browser_auto_attach_watcher(
+                        self._adb, serial, runtime_profile.cdp_socket, pkg, phys_dpi / 160 if phys_dpi else None,
+                    )
+                    await watcher.wait_ready()
+                    await watcher.wait_settled()   # the tab in front is reloaded as the other site first; the scroll anchor comes after
                 if saved_scroll is not None:
                     cdp_ok = await refresh_browser_layout_inplace(
                         self._adb, serial, runtime_profile.cdp_socket, saved_scroll=saved_scroll,
@@ -663,10 +734,6 @@ class HandoffManager:
                         "✨ [HANDOFF: CANLI DÜRTME] %s web sitesi layout'u CDP ile canlı tazelendi — süreç ve sekmeler korundu",
                         pkg,
                     )
-                    with contextlib.suppress(Exception):
-                        start_browser_auto_attach_watcher(
-                            self._adb, serial, runtime_profile.cdp_socket, session.state.window_id,
-                        )
                 if not cdp_ok:
                     # CDP dürtmesi yanıt vermezse ve ön-iniş yapılmadıysa güvenli geri çekilme (restart fallback)
                     if not prelanded and task_id and self._daemon_client_getter:
@@ -685,7 +752,12 @@ class HandoffManager:
 
             else:
                 # ── KADEME 3: Ön-İnişsiz Geçişler veya CDP'siz Web Tarayıcıları ──
-                should_reinflate = not prelanded or is_web_rendered_app(pkg)
+                # Android MOVED the task itself (the user tapped the app's icon on the phone, or a watchdog saw it there): the
+                # system already re-applied the phone display's configuration and recreated the activity (the reconciler's
+                # "adapted [system: ...]" evidence), so a forced process kill is not needed — and it is what left the app with
+                # no process and a BLACK screen (field report 2026-10-17). The evidence-based settle at the end of this
+                # method decides, and restarts only an app that provably did not adapt.
+                should_reinflate = (not prelanded or is_web_rendered_app(pkg)) and not moved_by_android
                 if should_reinflate and task_id and self._daemon_client_getter:
                     try:
                         restarted = await self._reinflate(pkg, task_id)
@@ -737,9 +809,11 @@ class HandoffManager:
             wlog = window_logger(__name__, window_id)
             wlog.info("📱 [HANDOFF TO PHONE] %s telefona aktarılıyor (disp_id=%s)...", pkg, disp_id)
 
+            playing = await self._playback.capture(pkg)
             await self._execute_to_phone(session, pkg, disp_id, serial, source="pc", windowing=windowing)
             session.state.handoff_to_phone = True
             load_markers.record("handoff", package=pkg)
+            self._resume_playback(playing, "0")
 
             await self._events.emit(
                 "app_handoff_to_phone",
@@ -807,6 +881,7 @@ class HandoffManager:
             wlog.info("📲 [RECLAIM WINDOW] %s PC penceresine geri alınıyor (disp_id=%s)...", pkg, disp_id)
 
             started = time.monotonic()
+            playing = await self._playback.capture(pkg)
             from app.device.deep_navigator import find_task_id_for_package
             task_id = await find_task_id_for_package(self._adb, pkg, display_id="0", serial=serial)
             task_source = "display0"
@@ -895,12 +970,20 @@ class HandoffManager:
                 with contextlib.suppress(Exception):
                     await android_shell.bring_to_front(self._adb, serial, pkg, disp_id, reorder_only=bool(task_id))
 
-                # Telefon tarafındaki otomatik popup/tab dinleyicisini durdur
+                # Telefon tarafındaki sekme izleyicisini durdur (telefon kipi biter)
                 with contextlib.suppress(Exception):
-                    stop_browser_auto_attach_watcher(window_id)
+                    stop_browser_auto_attach_watcher(pkg)
 
                 # Tarayıcı layout'u ve (0,0) çıpasını PC penceresinde canlı olarak tazele
                 if runtime_profile.is_browser_cdp and runtime_profile.cdp_socket:
+                    # Pencere kipi: telefonda MOBİL siteyle yüklenmiş sekmeler pencerede MASAÜSTÜ siteye geçer (video ve kaydırma korunur),
+                    # sonradan açılanlar da masaüstü kimliğiyle başlar; pencere yaşadıkça kalır (cdp_refresher.BrowserTabAutoAttachWatcher).
+                    with contextlib.suppress(Exception):
+                        desktop_watcher = start_browser_auto_attach_watcher(
+                            self._adb, serial, runtime_profile.cdp_socket, pkg, None, mode="desktop",
+                        )
+                        await desktop_watcher.wait_ready()
+                        await desktop_watcher.wait_settled()
                     if saved_scroll is not None:
                         cdp_ok = await refresh_browser_layout_inplace(
                             self._adb, serial, runtime_profile.cdp_socket, saved_scroll=saved_scroll,
@@ -926,21 +1009,70 @@ class HandoffManager:
             await self._events.emit("app_handoff_resolved", window_id=window_id, package=pkg)
             await self._events.emit("app_reclaim_result", window_id=window_id, package=pkg, outcome=outcome)
             wlog.info("✅ [RECLAIM: TAMAM] %s -> %s (süre=%dms)", pkg, outcome, (time.monotonic() - started) * 1000)
+            self._resume_playback(playing, disp_id)
             return True
         finally:
             self._active_transitions.discard(window_id)
 
+    def _resume_playback(self, snapshot, display_id=None) -> None:
+        """The move is done: a video that was playing and is now stopped by the activity rebuild goes on from where it stopped.
+        In the background — the caller's HTTP reply and the lifecycle lock are not held up by it."""
+        if snapshot is not None:
+            spawn_background(self._playback.restore(snapshot, display_id), f"resume-playback-{snapshot.package}")
+
     async def _reinflate(self, pkg: str, task_id: str | int) -> bool:
         """Rebuilds the app's view tree on the phone display: a state-preserving PROCESS restart (daemon) — except for an app
-        that is playing media, whose process must not die (the music would go with it): that one is recreated in place
-        (density_reconciler, "Playback is never cut"). True: the app was rebuilt."""
-        if self._density is not None and await self._density.is_playing(pkg):
-            log.info("🎵 [HANDOFF: REINFLATE] %s müzik çalıyor — süreç öldürülmeden yerinde yeniden kuruluyor", pkg)
-            return await self._density.relaunch_in_place(pkg)
+        that holds a media session (playing or paused), whose process must not die (the music or video would go with it,
+        density_reconciler "Media is never cut"): that one is left as it is. True: the app was rebuilt."""
+        if self._density is not None and await self._density.holds_media(pkg):
+            log.info("🎵 [HANDOFF: REINFLATE] %s medya oturumu var — süreç yeniden başlatılmadı", pkg)
+            return False
         daemon = self._daemon_client_getter() if callable(self._daemon_client_getter) else None
         if daemon and hasattr(daemon, "restart_task_activity"):
-            return bool(await daemon.restart_task_activity(task_id))
+            before = await self._density.snapshot(pkg) if self._density is not None else None
+            restarted = bool(await daemon.restart_task_activity(task_id))
+            if restarted and before is not None:
+                await self._ensure_relaunched(pkg, task_id, before, daemon)
+            return restarted
         return False
+
+    # How long a killed app gets to come back by itself before the task is relaunched by hand.
+    _REBIRTH_WAIT_S = 3.0
+    _REBIRTH_POLL_S = 0.3
+
+    async def _ensure_relaunched(self, pkg: str, task_id: str | int, before: Any, daemon: Any) -> None:
+        """`restart_task_activity` kills the app's process and only relaunches its activity when the task is VISIBLE at that
+        moment. Right after a Home -> app transition (the HyperOS gesture unlock, or Android's own move of the task onto the
+        phone) it is not yet: the process is killed and nothing relaunches it — the task stays on the phone screen with no
+        process (`app=null`, visibleRequested=false) and the user sees a BLACK screen (field report 2026-10-17: YouTube tapped on
+        the phone while open in a DeX window). So the rebirth is checked, and a task that did not come back is started again
+        on the phone's screen. Never raises."""
+        serial = self._serial_getter()
+        if not serial:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + self._REBIRTH_WAIT_S
+            while True:
+                now = await self._density.snapshot(pkg)
+                if now.identity is not None and now.identity != before.identity:
+                    return                                   # a new process: it relaunched itself
+                if loop.time() >= deadline:
+                    break
+                await asyncio.sleep(self._REBIRTH_POLL_S)
+            if before.identity is not None and now.identity == before.identity:
+                return                                       # the same process is still there: nothing was killed
+            component = None
+            with contextlib.suppress(Exception):
+                info = await daemon.task_info(task_id) if hasattr(daemon, "task_info") else None
+                if isinstance(info, dict) and isinstance(info.get("top"), str):
+                    component = info["top"]
+            log.warning("⚠️ [HANDOFF: REINFLATE] %s süreci öldürüldü ama geri gelmedi (siyah ekran riski) — telefonda yeniden başlatılıyor", pkg)
+            await android_shell.bring_to_front(self._adb, serial, pkg, "0", reorder_only=False, component=component)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — a handoff must not fail over its safety net
+            log.warning("[HANDOFF: REINFLATE] %s yeniden başlatılamadı: %s", pkg, exc)
 
     def _watched_sessions(self) -> list["WindowSession"]:
         """Windows whose app can wander to the phone: real apps (not our pseudo-windows, not a launcher), streaming.
@@ -1007,9 +1139,13 @@ class HandoffManager:
             if s.state.window_id in self._active_transitions or self.is_package_held(s.state.package):
                 log.debug("🛡️ [_to_phone_locked IGNORED] %s için geçiş aktif veya paket kilitli", s.state.package)
                 return
+            # The user's own launch (or Android's) already started moving the app, but it still plays at this instant: what the
+            # rebuild on the phone then stops goes on from where it stopped, exactly as for a handoff from the PC.
+            playing = await self._playback.capture(s.state.package)
             await self._execute_to_phone(
                 s, s.state.package, self._resolve_display_id(s), serial, task_id=task_id, source=source,
             )
+            self._resume_playback(playing, "0")
 
     async def on_pump_ended(self, s: "WindowSession") -> None:
         """A dedicated window's video pump ended (SessionReconfigurer reports it). Pumps also end on every

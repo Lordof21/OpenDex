@@ -241,3 +241,130 @@ async def test_stealth_phase2_never_overwrites_a_density_a_resize_already_set(mo
     )
     assert calls == applied
     assert session.dpi == (resized_dpi or 240) and session.state.stealth_phase is False
+
+
+# ---------------------------------------------------------------- unlock: do not restart what the AppLock restored
+class _Daemon:
+    def __init__(self, raises=True):
+        self.reorder_calls: list[tuple] = []
+        self._raises = raises
+
+    async def reorder_task(self, task_id, *, front):
+        self.reorder_calls.append((task_id, front))
+        return self._raises
+
+
+def _task_on_display(monkeypatch, where):
+    """`where`: display ids that hold the app's task (task id 42)."""
+    from app.device import deep_navigator
+
+    async def _find(_adb, pkg, display_id=None, serial=None):
+        return "42" if where and (display_id is None or str(display_id) in where) else None
+
+    monkeypatch.setattr(deep_navigator, "find_task_id_for_package", _find)
+
+
+def _starts(adb):
+    return [c for c in adb.calls if c.startswith("am start")]
+
+
+@pytest.mark.asyncio
+async def test_unlock_leaves_the_task_the_applock_restored_alone(monkeypatch):
+    """Field log 2026-10-16 (WhatsApp notification): the AppLock re-delivered the tapped conversation after the unlock, and the
+    launcher start that followed (`am start -n .Main`, START_APP) reset the task to its home page."""
+    _task_on_display(monkeypatch, {"7"})
+    adb, ev, daemon = _Adb([LOCK_FOCUS, APP_FOCUS]), _Events(), _Daemon()
+    sent = []
+    sockets = SimpleNamespace(control=SimpleNamespace(send=lambda data: sent.append(data) or asyncio.sleep(0)))
+
+    assert await wait_for_app_lock_unlock(
+        adb=adb, events=ev, serial="S", sockets=sockets, wlog=_wlog(),
+        pkg_name=PKG, win_id="w1", disp_id="7", p1_dpi=420, daemon=daemon, timeout_s=5.0,
+    ) is True
+
+    assert daemon.reorder_calls == [("42", True)]       # raised by id, nothing started
+    assert _starts(adb) == [] and sent == []
+    assert ev.kinds() == ["app_lock_pending", "app_lock_resolved"]
+
+
+@pytest.mark.asyncio
+async def test_unlock_without_the_daemon_falls_back_to_the_launcher_start(monkeypatch):
+    _task_on_display(monkeypatch, {"7"})
+    adb, ev = _Adb([LOCK_FOCUS, APP_FOCUS]), _Events()
+
+    assert await _run(adb, ev, timeout_s=5.0) is True      # no daemon: the old way is the only way left
+
+    assert any("am start --display 7" in c for c in _starts(adb))
+
+
+@pytest.mark.asyncio
+async def test_unlock_of_an_app_that_has_no_task_still_launches_it(monkeypatch):
+    _task_on_display(monkeypatch, set())
+    adb, ev = _Adb([LOCK_FOCUS, APP_FOCUS]), _Events()
+    daemon = _Daemon()
+
+    assert await _run(adb, ev, timeout_s=5.0, daemon=daemon) is True
+
+    assert daemon.reorder_calls == []
+    assert any("am start --display 7" in c for c in _starts(adb))
+
+
+# ---------------------------------------------------------------- unlocking restarts the phone's adbd
+class _FlakyAdb(_Adb):
+    """The shell is offline for the first `offline` focus reads (adbd restarting), then answers from the script."""
+
+    def __init__(self, focus_script, offline):
+        super().__init__(focus_script)
+        self._offline = offline
+
+    async def shell(self, cmd, *, serial=None, timeout_s=3.0):
+        if "mCurrentFocus" in cmd and self._offline > 0:
+            self._offline -= 1
+            raise RuntimeError("adb.exe: device offline")
+        return await super().shell(cmd, serial=serial, timeout_s=timeout_s)
+
+
+@pytest.mark.asyncio
+async def test_the_waiter_survives_the_adbd_restart_an_unlock_causes(monkeypatch):
+    """Field log 2026-10-16: the unlock restarted adbd, the focus read raised `device offline`, the waiter died and nothing ever
+    closed the overlay — the user had to press "Kilidi açtım" by hand. A lost shell is not a verdict: it keeps watching."""
+    _task_on_display(monkeypatch, {"7"})
+    adb, ev = _FlakyAdb([LOCK_FOCUS, APP_FOCUS], offline=3), _Events()
+
+    assert await _run(adb, ev, timeout_s=10.0) is True
+    assert ev.kinds() == ["app_lock_pending", "app_lock_resolved"]
+
+
+@pytest.mark.asyncio
+async def test_a_phone_that_never_comes_back_ends_in_a_timeout_event_not_in_silence():
+    adb, ev = _FlakyAdb([LOCK_FOCUS], offline=10_000), _Events()
+
+    assert await _run(adb, ev, timeout_s=1.2) is False
+    assert ev.kinds() == ["app_lock_pending", "app_lock_timeout"]
+
+
+@pytest.mark.asyncio
+async def test_the_unlock_is_answered_on_the_display_the_window_has_NOW(monkeypatch):
+    """The supervisor rebuilt the window on a new display (7 → 9) while the lock was open: the task goes there, and the event says so."""
+    _task_on_display(monkeypatch, {"9"})
+    adb, ev = _Adb([LOCK_FOCUS, APP_FOCUS]), _Events()
+
+    assert await _run(adb, ev, timeout_s=5.0, display_of=lambda: "9") is True
+
+    assert dict(ev.emitted)["app_lock_resolved"]["display_id"] == "9"
+    assert all("--display 7" not in c for c in _starts(adb))
+
+
+@pytest.mark.asyncio
+async def test_an_unlock_whose_hand_over_fails_closes_the_overlay_with_a_retry_message(monkeypatch):
+    from app.device import deep_navigator
+
+    async def _boom(_adb, pkg, display_id=None, serial=None):
+        raise RuntimeError("adb.exe: device offline")
+
+    monkeypatch.setattr(deep_navigator, "find_task_id_for_package", _boom)
+    adb, ev = _Adb([LOCK_FOCUS, APP_FOCUS]), _Events()
+
+    assert await _run(adb, ev, timeout_s=5.0) is False
+    assert ev.kinds() == ["app_lock_pending", "app_lock_cancelled"]
+    assert "Tekrar Dene" in dict(ev.emitted)["app_lock_cancelled"]["message"]

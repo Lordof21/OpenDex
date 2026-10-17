@@ -101,15 +101,16 @@ async def test_reclaim_restarts_the_process_that_moved_from_phone_density_to_the
 
     # Resolved on the window's display (555), not the phone task id remembered from before the move (111).
     assert daemon.info_calls == ["555"]
-    assert len(phone.relaunch_cmds) == 1 and daemon.restarts == []  # activities recreated in place, no process kill
-    assert phone.pid == 4000
+    assert daemon.restarts == ["555"]  # resolved on the window's display, verified by the identity change
+    assert phone.pid == 4001
 
 
-async def test_reclaim_escalates_to_a_process_restart_when_the_in_place_relaunch_cannot_be_proven(tasks):
-    phone = Phone("com.example.stubborn", relaunch_works=False)
-    daemon = FakeDaemon(phone)
+async def test_reclaim_does_not_kill_an_app_that_holds_a_media_session(tasks):
+    """Field report: a paused video was gone after the window came back — the process restart took its page with it."""
+    phone = Phone("com.google.android.youtube")
+    daemon = FakeDaemon(phone, media=True)
     rec, cfg = _reconciler(phone, daemon)
-    handoff = _handoff(phone, daemon, rec, cfg, _session("com.example.stubborn"))
+    handoff = _handoff(phone, daemon, rec, cfg, _session(phone.package))
 
     with (
         patch("app.windows.handoff_manager.move_task_to_display", AsyncMock()),
@@ -118,8 +119,7 @@ async def test_reclaim_escalates_to_a_process_restart_when_the_in_place_relaunch
         await handoff.reclaim("win-test")
     await rec.wait_idle()
 
-    assert daemon.restarts == ["555"]  # resolved on the window's display, verified by the identity change
-    assert phone.pid == 4001
+    assert daemon.restarts == [] and phone.pid == 4000
 
 
 async def test_reclaim_leaves_an_app_that_lets_android_rebuild_it_alone(tasks):
@@ -135,7 +135,7 @@ async def test_reclaim_leaves_an_app_that_lets_android_rebuild_it_alone(tasks):
         await handoff.reclaim("win-test")
     await rec.wait_idle()
 
-    assert daemon.restarts == [] and phone.relaunch_cmds == []  # neither tier ran
+    assert daemon.restarts == []
 
 
 async def test_reclaim_does_not_restart_a_process_that_was_replaced_by_the_transfer_itself(tasks):
@@ -154,7 +154,7 @@ async def test_reclaim_does_not_restart_a_process_that_was_replaced_by_the_trans
         await handoff.reclaim("win-test")
     await rec.wait_idle()
 
-    assert daemon.restarts == [] and phone.relaunch_cmds == []  # neither tier ran
+    assert daemon.restarts == []
 
 
 async def test_reclaim_without_density_difference_touches_nothing(tasks):
@@ -170,7 +170,7 @@ async def test_reclaim_without_density_difference_touches_nothing(tasks):
         await handoff.reclaim("win-test")
     await rec.wait_idle()
 
-    assert daemon.restarts == [] and phone.relaunch_cmds == []  # neither tier ran
+    assert daemon.restarts == []
     assert all("pidof" not in c for c in phone.commands)  # not even a probe
 
 
@@ -192,7 +192,7 @@ async def test_handoff_to_phone_settles_the_process_on_the_window_display_before
     await rec.wait_idle()
 
     assert daemon.info_calls == ["555"]  # the task still on the window's display when the density landed
-    assert len(phone.relaunch_cmds) == 1
+    assert daemon.restarts == ["555"]
     assert _density_writes(daemon) == [("10", 520)]
 
 
@@ -249,7 +249,7 @@ async def test_handoff_without_prelanding_never_pulls_the_window_display_to_the_
 @pytest.mark.parametrize("direction", ["to_phone", "reclaim"])
 async def test_an_app_that_rebuilt_itself_on_the_move_gets_no_second_refresh(tasks, direction):
     """Chrome recreates itself on the density change the move carries (YouTube is relaunched by Android for the size
-    change): one rebuild, done. The old flow added update-appinfo and then a process restart — 'two refreshes'."""
+    change): one rebuild, done. The old flow added a second refresh on top — 'two refreshes'."""
     phone = Phone("com.android.chrome")
     daemon = FakeDaemon(phone, handles_density=True)
     rec, cfg = _reconciler(phone, daemon)
@@ -275,7 +275,7 @@ async def test_an_app_that_rebuilt_itself_on_the_move_gets_no_second_refresh(tas
             await handoff.handoff_to_phone("win-test")
     await rec.wait_idle()
 
-    assert phone.relaunch_cmds == [] and daemon.restarts == [] and phone.pid == 4000
+    assert daemon.restarts == [] and phone.pid == 4000
 
 
 # ---------------------------------------------------------------- open-time coordinator
@@ -289,6 +289,13 @@ def _coordinate_kwargs(phone, daemon, rec, *, stealth_active, p1=520, p2=200, be
     events = MagicMock()
     order = []
     events.emit = AsyncMock(side_effect=lambda name, **kw: order.append((name, kw.get("phase"))))
+    original_restart = daemon.restart_task_activity
+
+    async def recording_restart(tid):
+        order.append(("restart", phone.package))
+        return await original_restart(tid)
+
+    daemon.restart_task_activity = recording_restart
     return dict(
         adb=phone, events=events, sessions={"win-test": session}, serial="SER", sockets=MagicMock(), wlog=MagicMock(),
         pkg_name=phone.package, target_server=server, win_id="win-test", p1_dpi=p1, p2_dpi=p2,
@@ -305,15 +312,6 @@ async def test_warm_open_keeps_the_overlay_until_the_restart_is_verified(tasks):
     before = await rec.snapshot(phone.package)
     kwargs, order = _coordinate_kwargs(phone, daemon, rec, stealth_active=True, before=before)
 
-    original_shell = phone.shell
-
-    async def recording_shell(command, serial=None, timeout_s=None):
-        if "am update-appinfo" in command:
-            order.append(("relaunch", phone.package))
-        return await original_shell(command, serial=serial, timeout_s=timeout_s)
-
-    phone.shell = recording_shell
-
     with (
         patch("app.windows.window_lifecycle_coordinator.move_task_to_display", AsyncMock()),
         patch("app.device.android_shell.bring_to_front", AsyncMock()),
@@ -322,9 +320,52 @@ async def test_warm_open_keeps_the_overlay_until_the_restart_is_verified(tasks):
         await coordinate_window_lifecycle(**kwargs)
 
     assert daemon.info_calls == ["888"]  # resolved on the NEW display (12 → 888), not the phone id (777)
-    assert ("relaunch", phone.package) in order
-    assert order.index(("relaunch", phone.package)) < order.index(("vd_phase", "live"))  # overlay stays until done
-    assert daemon.restarts == [] and phone.pid == 4000  # activities recreated in place; the process survived
+    assert ("restart", phone.package) in order
+    assert order.index(("restart", phone.package)) < order.index(("vd_phase", "live"))  # overlay stays until done
+    assert daemon.restarts == ["888"] and phone.pid == 4001
+
+
+async def test_warm_open_without_a_server_launch_starts_the_app_when_the_move_did_not_take_place(tasks):
+    """The app was MOVED, not launched (a launch intent stops a playing video): if the phone refused the move and no task
+    reached the window's display, the app is started there — a window never opens onto a blank display."""
+    tasks["0"] = "777"                                   # the task is on the phone; nothing ever appears on display 12
+    phone = Phone()
+    daemon = FakeDaemon(phone)
+    rec, _ = _reconciler(phone, daemon)
+    before = await rec.snapshot(phone.package)
+    kwargs, _order = _coordinate_kwargs(phone, daemon, rec, stealth_active=False, p1=200, p2=200, before=before)
+    kwargs["sockets"].control.send = AsyncMock()
+
+    with (
+        patch("app.windows.window_lifecycle_coordinator.move_task_to_display", AsyncMock()),
+        patch("app.windows.window_lifecycle_coordinator.land_fullscreen", AsyncMock()),
+        patch("app.device.android_shell.bring_to_front", AsyncMock()),
+    ):
+        await coordinate_window_lifecycle(server_launched_app=False, **kwargs)
+
+    kwargs["sockets"].control.send.assert_awaited_once()
+
+
+async def test_warm_open_that_moved_the_task_does_not_start_the_app_again(tasks):
+    tasks["0"] = "777"
+    phone = Phone()
+    daemon = FakeDaemon(phone)
+    rec, _ = _reconciler(phone, daemon)
+    before = await rec.snapshot(phone.package)
+    kwargs, _order = _coordinate_kwargs(phone, daemon, rec, stealth_active=False, p1=200, p2=200, before=before)
+    kwargs["sockets"].control.send = AsyncMock()
+
+    async def move(adb, task_id, disp, **kw):
+        tasks["12"] = task_id                            # the task arrived on the window's display
+
+    with (
+        patch("app.windows.window_lifecycle_coordinator.move_task_to_display", move),
+        patch("app.windows.window_lifecycle_coordinator.land_fullscreen", AsyncMock()),
+        patch("app.device.android_shell.bring_to_front", AsyncMock()),
+    ):
+        await coordinate_window_lifecycle(server_launched_app=False, **kwargs)
+
+    kwargs["sockets"].control.send.assert_not_awaited()
 
 
 async def test_warm_open_with_stealth_switched_off_still_settles(tasks):
@@ -343,7 +384,80 @@ async def test_warm_open_with_stealth_switched_off_still_settles(tasks):
     ):
         await coordinate_window_lifecycle(**kwargs)
 
-    assert daemon.info_calls == ["888"] and len(phone.relaunch_cmds) == 1
+    assert daemon.info_calls == ["888"] and daemon.restarts == ["888"]
+
+
+async def test_warm_open_reads_the_page_before_the_move_and_repairs_it_after_the_overlay_is_gone(tasks):
+    """An app left on the phone (paused watch page) is opened in a window: the page is read BEFORE the move and checked AFTER the
+    density settle — and only after the 'live' overlay lifted, so the window is usable while it is repaired."""
+    tasks["0"] = "777"
+    tasks["12"] = "888"
+    phone = Phone()
+    daemon = FakeDaemon(phone)
+    rec, _ = _reconciler(phone, daemon)
+    before = await rec.snapshot(phone.package)
+    kwargs, order = _coordinate_kwargs(phone, daemon, rec, stealth_active=True, before=before)
+    page = object()
+    continuity = MagicMock()
+    continuity.capture_page = AsyncMock(side_effect=lambda pkg: order.append(("captured", pkg)) or page)
+    continuity.repair_page = AsyncMock(side_effect=lambda snap, disp: order.append(("repaired", disp)) or "reopened")
+    moved = AsyncMock(side_effect=lambda *a, **k: order.append(("moved", None)))
+
+    with (
+        patch("app.windows.window_lifecycle_coordinator.move_task_to_display", moved),
+        patch("app.device.android_shell.bring_to_front", AsyncMock()),
+        patch("app.device.android_shell.set_display_density", AsyncMock(return_value="daemon")),
+    ):
+        await coordinate_window_lifecycle(continuity=continuity, **kwargs)
+
+    continuity.repair_page.assert_awaited_once_with(page, "12")
+    names = [n for n, _ in order]
+    assert names.index("captured") < names.index("moved") < names.index("vd_phase") < names.index("repaired")
+
+
+@pytest.mark.parametrize("repair, resumed", [("kept", True), ("skipped", True), ("reopened", False)])
+async def test_a_video_the_open_stopped_is_resumed_unless_the_reopened_page_already_plays(tasks, repair, resumed):
+    """The window open moves a PLAYING app's task; the rebuild stops its video. The page may be right ('kept') and the video still
+    paused: it goes on from where it stopped. A page that was reopened is already playing."""
+    phone = Phone()
+    daemon = FakeDaemon(phone)
+    rec, _ = _reconciler(phone, daemon)
+    before = await rec.snapshot(phone.package)
+    kwargs, _order = _coordinate_kwargs(phone, daemon, rec, stealth_active=False, p1=200, p2=200, before=before)
+    snapshot = object()
+    continuity = MagicMock()
+    continuity.capture_page = AsyncMock(return_value=object())
+    continuity.capture = AsyncMock(return_value=snapshot)
+    continuity.repair_page = AsyncMock(return_value=repair)
+    continuity.restore = AsyncMock(return_value="resumed")
+
+    with (
+        patch("app.windows.window_lifecycle_coordinator.move_task_to_display", AsyncMock()),
+        patch("app.device.android_shell.bring_to_front", AsyncMock()),
+    ):
+        await coordinate_window_lifecycle(continuity=continuity, **kwargs)
+
+    if resumed:
+        continuity.restore.assert_awaited_once_with(snapshot, "12")
+    else:
+        continuity.restore.assert_not_called()
+
+
+async def test_cold_open_reads_and_repairs_no_page(tasks):
+    tasks.pop("0")                                    # no task of the app on the phone: a cold start
+    phone = Phone(alive=False)
+    daemon = FakeDaemon(phone)
+    rec, _ = _reconciler(phone, daemon)
+    before = await rec.snapshot(phone.package)
+    phone.reborn()
+    kwargs, _order = _coordinate_kwargs(phone, daemon, rec, stealth_active=False, p1=200, p2=200, before=before)
+    continuity = MagicMock(capture_page=AsyncMock(), repair_page=AsyncMock())
+
+    with patch("app.windows.window_lifecycle_coordinator.move_task_to_display", AsyncMock()):
+        await coordinate_window_lifecycle(continuity=continuity, **kwargs)
+
+    continuity.capture_page.assert_not_called()      # no task on the phone: nothing to read, nothing to repair
+    continuity.repair_page.assert_not_called()
 
 
 async def test_cold_open_never_restarts(tasks):
@@ -358,7 +472,7 @@ async def test_cold_open_never_restarts(tasks):
     with patch("app.windows.window_lifecycle_coordinator.move_task_to_display", AsyncMock()):
         await coordinate_window_lifecycle(**kwargs)
 
-    assert daemon.restarts == [] and phone.relaunch_cmds == []  # neither tier ran
+    assert daemon.restarts == []
 
 
 async def test_open_where_phone_and_window_density_match_touches_nothing(tasks):
@@ -374,7 +488,7 @@ async def test_open_where_phone_and_window_density_match_touches_nothing(tasks):
     ):
         await coordinate_window_lifecycle(**kwargs)
 
-    assert daemon.restarts == [] and phone.relaunch_cmds == []  # neither tier ran
+    assert daemon.restarts == []
 
 
 async def test_reclaim_of_a_frozen_window_settles_the_app_that_was_handed_to_the_phone(tasks):
@@ -391,7 +505,7 @@ async def test_reclaim_of_a_frozen_window_settles_the_app_that_was_handed_to_the
     assert await handoff.reclaim("win-test") is True
     await rec.wait_idle()
 
-    assert daemon.info_calls == ["555"] and len(phone.relaunch_cmds) == 1
+    assert daemon.info_calls == ["555"] and daemon.restarts == ["555"]
 
 
 async def test_reclaim_of_a_frozen_window_that_never_left_the_window_density_is_left_alone(tasks):
@@ -406,4 +520,4 @@ async def test_reclaim_of_a_frozen_window_that_never_left_the_window_density_is_
     await handoff.reclaim("win-test")
     await rec.wait_idle()
 
-    assert daemon.restarts == [] and phone.relaunch_cmds == []  # neither tier ran
+    assert daemon.restarts == []

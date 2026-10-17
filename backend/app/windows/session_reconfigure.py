@@ -132,8 +132,12 @@ class SessionReconfigurer:
         on_window_pump_ended=None,
         link_dropped=None,
         density=None,
+        transition_gate=None,
     ) -> None:
         self._adb = adb
+        # windows/transition_gate.TransitionGate (None in tests that don't care): keeps the phone's own screen free of the
+        # one-frame snapshot a resize otherwise leaks onto it.
+        self._transition_gate = transition_gate
         self._settings = settings
         self._events = events
         # density_reconciler.DensityReconciler (None in tests that don't care): a live DPI change reaches the app's
@@ -580,6 +584,19 @@ class SessionReconfigurer:
         await android_shell.apply_display_density(display_id, dpi, write, carries_more=True)
 
     async def resize(
+        self, window_id: str, width: int, height: int, dpi: int | None,
+        *, project: ProjectSettings | None = None, settle: bool = True,
+    ) -> WindowHandle:
+        """A user-driven resize (``settle=True``) runs with the phone's transition animations held off, so the display-change
+        snapshot never reaches the phone's own screen (transition_gate.py). The handoff's pre-landing (``settle=False``) is on
+        its way to that screen anyway and keeps the system's animations."""
+        gate = self._transition_gate if settle else None
+        if gate is None:
+            return await self._resize(window_id, width, height, dpi, project=project, settle=settle)
+        async with gate.hold():
+            return await self._resize(window_id, width, height, dpi, project=project, settle=settle)
+
+    async def _resize(
         self, window_id: str, width: int, height: int, dpi: int | None,
         *, project: ProjectSettings | None = None, settle: bool = True,
     ) -> WindowHandle:

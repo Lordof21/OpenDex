@@ -155,7 +155,8 @@ def verify_windowing(
     return "ok"
 
 
-# HyperOS'un KENDİ serbest penceresi (cihazda ölçüldü, POCO 2412DPC0AG / HyperOS Android 16): görevin mantıksal kutusu
+# Yalnız HyperOS'un KENDİ serbest penceresi için (settle_task_windowing `native_freeform`; diğer üreticilerde bu sayılar
+# varsayılmaz). Cihazda ölçüldü, POCO 2412DPC0AG / HyperOS Android 16: görevin mantıksal kutusu
 # ekran genişliğinde ve onun 1,6 katı yüksekliktedir (1220×1952 → sw381dp: uygulama telefonun tam düzenini çizer); sistem
 # onu 0,7 ölçekle, kutunun sol üst köşesinden küçülterek gösterir. Kabuktan (`am start --windowingMode 5`) gelen görev bu
 # boyutu ALMAZ, AOSP'nin küçük varsayılan kutusunu (588×1220 → sw183dp) alır; 0,7 ölçek yine uygulandığından pencere hem
@@ -255,13 +256,18 @@ async def _relayout(
 
 
 async def _sf_summary(adb: Any, serial: str, task_id: str) -> str:
+    """One log field group for a task's surface: its drawn box and scale, and — always, even when the box could not be measured
+    (a Workspace task: "render=?") — the window chrome the system drew for it. `chrome` is what tells a freeform window that has
+    HyperOS' caption/handle from one that has none (field report 2026-10-16: the same Play Store task had a header in one
+    Workspace session and none in another, and the log could not say why because it printed nothing for such tasks).
+    `decor`/`oem`: the chrome layers and the vendor marks found in the task's own layer block (only with a measured box)."""
     with contextlib.suppress(Exception):
-        geom = await surfaceflinger_probe.probe_omni_geometry(adb, serial, task_id)
+        geom, chrome = await surfaceflinger_probe.probe_task_surface(adb, serial, task_id)
+        chrome_field = " " + surfaceflinger_probe.format_task_chrome(chrome)
         if geom:
-            # `decor`: window chrome the system drew for this task — a phone-side freeform window with none has nothing to be
-            # moved/resized by (the handle is the phone's SystemUI, not ours); `oem`: the vendor's own freeform layer.
             decor = f" decor={list(geom.decor_layers) or 'yok'} oem={list(geom.oem_marks) or 'yok'}"
-            return f"render={geom.render_bounds} scale=({geom.scale_x:.2f},{geom.scale_y:.2f}){decor}"
+            return f"render={geom.render_bounds} scale=({geom.scale_x:.2f},{geom.scale_y:.2f}){decor}{chrome_field}"
+        return f"render=? scale=?{chrome_field}"
     return "render=? scale=?"
 
 
@@ -368,6 +374,7 @@ async def settle_task_windowing(
     attempts: int = 3,
     skip_if_ok: bool = False,
     freeform_bounds: Rect | None = None,
+    native_freeform: bool | None = None,
     sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep,
 ) -> WindowingReport:
     """Görevi TAŞIDIKTAN SONRA hedef kipe oturtur ve doğrular (en çok `attempts` deneme). 2. denemeden itibaren
@@ -375,7 +382,9 @@ async def settle_task_windowing(
     `skip_if_ok`: görev ZATEN hedefteyse (pozitif okundu) hiçbir komut gönderilmez — Workspace'e hiç girmemiş normal
     pencerelerin aktarımı gereksiz komut/gecikme almasın.
     `freeform_bounds`: serbest kipte görevin yeri (Android px; Workspace'e dönüşte pencerenin kutusu). Verilmezse
-    HyperOS'un yerel serbest pencere boyutu (`freeform_box_for`: ekran genişliği × 1,6 katı, 0,7 ölçekle ortalı)."""
+    HyperOS'un yerel serbest pencere boyutu (`freeform_box_for`: ekran genişliği × 1,6 katı, 0,7 ölçekle ortalı).
+    `native_freeform`: bu cihazın serbest penceresi HyperOS'unki mi (None: cihazdan okunur). Değilse (AOSP, Samsung…) o boyut ve
+    ölçek varsayılmaz: yalnız KİP uygulanır ve doğrulanır, kutuyu sistem seçer."""
     if target not in TARGET_MODES:
         raise ValueError(f"bilinmeyen hedef pencereleme kipi: {target!r}")
     wlog = wlog or log
@@ -387,7 +396,11 @@ async def settle_task_windowing(
 
     # Telefon tarafı varsayılan serbest penceresinde boyut da doğrulanır (kabuktan gelen küçük kutu "ok" sayılmaz);
     # çağıranın verdiği kutuda (Workspace) yalnız kip.
-    want_size = freeform_size_for(display_size) if target == "freeform" and freeform_bounds is None else None
+    own_box = target == "freeform" and freeform_bounds is None  # the phone's default freeform window: sized by the vendor's rules
+    if own_box and native_freeform is None:
+        native_freeform = await android_shell.is_miui_or_hyperos(adb, serial)
+    own_box = own_box and bool(native_freeform)
+    want_size = freeform_size_for(display_size) if own_box else None
 
     if skip_if_ok and verify_windowing(before, target, display_size, want_size) == "ok":
         report_line(wlog, package, task_id, "after", before, f"target={target} verdict=ok attempts=0 method=none (zaten hedefte)")
@@ -396,7 +409,7 @@ async def settle_task_windowing(
             before=before, after=before,
         )
 
-    box = (freeform_bounds or freeform_box_for(display_size)) if target == "freeform" else None
+    box = (freeform_bounds or (freeform_box_for(display_size) if own_box else None)) if target == "freeform" else None
     method, relayout, verdict, after = "none", False, "unknown", before
     used = 0
     for attempt in range(1, max(1, attempts) + 1):

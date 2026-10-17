@@ -155,27 +155,45 @@ async def test_a_broadcast_pending_intent_that_also_opened_on_the_phone_is_flagg
     assert "broadcast" in caplog.text
 
 
-@pytest.mark.asyncio
-async def test_app_lock_is_handed_to_the_shared_waiter_then_the_pending_intent_is_fired_again(phone, monkeypatch):
-    """AppLock (Xiaomi/Samsung) took the launch: the SAME waiter a window uses (window_lifecycle_coordinator.wait_for_app_lock_unlock —
-    its state machine is covered by test_applock_state_machine.py) waits for the unlock; the intent is then fired once more."""
+async def _locked_navigation(phone, monkeypatch, on_display):
     from app.windows import window_lifecycle_coordinator as coordinator
 
     ctx = MockContext()
     session = _lock_session()
     ctx.window_manager.get_session_by_package.return_value = session
     ctx.window_manager.get_session.return_value = session
-    phone.on_display.side_effect = [False] * 12 + [True]       # not there after the first fire, there after the unlock
+    phone.on_display.side_effect = on_display
     monkeypatch.setattr(deep_navigator.asyncio, "sleep", AsyncMock())
     monkeypatch.setattr(device_queries, "app_lock_visible", AsyncMock(return_value=True))
     waiter = AsyncMock(return_value=True)
     monkeypatch.setattr(coordinator, "wait_for_app_lock_unlock", waiter)
+    started = AsyncMock(return_value=True)
+    ctx.window_manager.start_app_in_window = started
+    return ctx, waiter, started
+
+
+@pytest.mark.asyncio
+async def test_app_lock_is_handed_to_the_shared_waiter_and_the_target_it_restores_is_left_alone(phone, monkeypatch):
+    """AppLock (Xiaomi/Samsung) took the launch: the SAME waiter a window uses (window_lifecycle_coordinator.wait_for_app_lock_unlock —
+    its state machine is covered by test_applock_state_machine.py) waits for the unlock. The AppLock hands the original intent back
+    itself, so the tapped notification's target is already open: nothing is fired or launched again (field log 2026-10-16: a second
+    launch / the safe launch reset WhatsApp from the conversation to its home page)."""
+    ctx, waiter, started = await _locked_navigation(phone, monkeypatch, [False] * 8 + [True] * 20)
 
     assert await _execute_deep_navigation(ctx, PKG, DISP, KEY) is True
 
     kwargs = waiter.await_args.kwargs
     assert (kwargs["pkg_name"], kwargs["win_id"], kwargs["disp_id"]) == (PKG, "win-ig", DISP)
     assert kwargs["is_alive"]() is True
+    phone.launch.assert_awaited_once()      # the first fire only
+    started.assert_not_awaited()            # no "safe launch" over the opened target
+
+
+@pytest.mark.asyncio
+async def test_after_the_unlock_the_pending_intent_is_fired_again_only_when_the_target_did_not_open(phone, monkeypatch):
+    ctx, _waiter, _started = await _locked_navigation(phone, monkeypatch, [False] * 16 + [True] * 20)
+
+    assert await _execute_deep_navigation(ctx, PKG, DISP, KEY) is True
     assert phone.launch.await_count == 2
 
 

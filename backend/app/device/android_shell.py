@@ -425,6 +425,8 @@ async def unlock_display0_gesture_navigation(
     timeout_s: float = 4.0,
     component: str | None = None,
     windowing_mode: int | None = None,
+    behind_task_id: int | str | None = None,
+    daemon: Any = None,
 ) -> str:
     """HyperOS / MIUI üzerinde kenar geri jestlerini (GestureStubLeft/Right) dokunuşa açar; `am start` çıktısını döndürür.
 
@@ -435,11 +437,20 @@ async def unlock_display0_gesture_navigation(
     ATMS yeni bir ön-plan geçişi üretmez; zaten öndeki göreve `reorder-to-front` vermek de üretmez (cihaz günlüğü,
     2026-10-14: `am start … --activity-reorder-to-front` yalnız uygulamaya pause/resume yaptırdı, Home'a olay gitmedi).
 
-    Gerçek geçiş: Display 0'da önce Home, 150 ms sonra hedef uygulama öne alınır — tek kabuk komutu, uygulama sonunda
-    önde kalır (kullanıcı Home'da bırakılmaz). Süreç, DOM ve kaydırma konumu korunur; dokunma enjeksiyonu yoktur.
-    `windowing_mode`: serbest kip aktarımında görevin kipi (5) değişmesin diye ikinci `am start`a verilir.
+    Gerçek geçiş: Display 0'da önce BAŞKA bir görev öne gelir, 150 ms sonra hedef uygulama öne alınır — uygulama sonunda
+    önde kalır (kullanıcı ara görevde bırakılmaz). Süreç, DOM ve kaydırma konumu korunur; dokunma enjeksiyonu yoktur.
+
+    Ara görev: `behind_task_id` (aktarımdan ÖNCE telefonun ön planındaki görev) daemon ile öne alınırsa kullanıcının açık
+    uygulaması hedefin ARKASINDA görünür kalır (serbest pencerede arka plan o uygulamadır; geri alınınca telefon oraya döner).
+    Verilmezse ya da öne alınamazsa Home kullanılır — telefon ana ekrana düşer ve açık uygulama arka plana atılır.
+    `windowing_mode`: serbest kip aktarımında görevin kipi (5) değişmesin diye hedef `am start`a verilir.
     """
     target = bring_to_front_command(package, "0", windowing_mode, reorder_only=False, component=component)
+    if behind_task_id is not None and daemon is not None:
+        with contextlib.suppress(Exception):
+            if await daemon.reorder_task(behind_task_id, front=True):
+                await asyncio.sleep(0.15)
+                return await adb.shell(target, serial=serial, timeout_s=timeout_s)
     home = "am start --display 0 -a android.intent.action.MAIN -c android.intent.category.HOME"
     return await adb.shell(f"{home}; sleep 0.15; {target}", serial=serial, timeout_s=timeout_s)
 

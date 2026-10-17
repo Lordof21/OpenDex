@@ -113,7 +113,7 @@ async def test_only_the_size_differs_the_display_is_resized_and_no_density_work_
 
     assert order == ["move"] and handoff.resize_calls == [("win-test", 1080, 2400, 520, True)]
     assert session.landing == Landing(window=Geometry(1920, 1080, 520), landed=Geometry(1080, 2400, 520))
-    assert _density_writes(daemon) == [] and phone.relaunch_cmds == [] and daemon.restarts == []
+    assert _density_writes(daemon) == [] and daemon.restarts == []
     assert all("pidof" not in c for c in phone.commands)  # a density that did not change is never probed
 
 
@@ -346,5 +346,5 @@ async def test_the_window_manager_hook_settles_nothing_itself(monkeypatch, tmp_d
 
     assert (session.target_display_w, session.target_display_h, session.dpi) == (1080, 2400, 520)
     assert manager._reconfigure._flex_resize.await_args.kwargs["dpi"] == 520  # still ONE atomic step
-    assert daemon.restarts == [] and phone.relaunch_cmds == []
+    assert daemon.restarts == []
     assert all("pidof" not in c for c in phone.commands)  # no snapshot, no scheduled settle

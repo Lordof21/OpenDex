@@ -1,4 +1,5 @@
 import asyncio
+from app.windows.playback_continuity import PlaybackSnapshot
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -279,8 +280,7 @@ def _prelanding_rig(mock_adb, events, settings, *, outcome_ok=True, density_writ
     density = MagicMock()
     density.snapshot = AsyncMock(return_value="BEFORE")
     density.mark = AsyncMock(return_value=123.0)
-    density.is_playing = AsyncMock(return_value=False)
-    density.relaunch_in_place = AsyncMock(return_value=True)
+    density.holds_media = AsyncMock(return_value=False)
     density.settle = AsyncMock(return_value=RefreshOutcome(ADAPTED if outcome_ok else UNCONFIRMED, session.state.package))
     mock_daemon = AsyncMock()
     mock_daemon.is_connected = True
@@ -397,10 +397,10 @@ async def test_reinflate_on_display_0_triggers_view_reinflation_without_redundan
 
 
 @pytest.mark.asyncio
-async def test_a_playing_app_is_recreated_in_place_never_process_restarted(mock_adb, events, settings):
-    """Çalan uygulamanın reinflate'i süreci öldürmez (öldürmek müziği keserdi): etkinlikler yerinde yeniden kurulur."""
+async def test_an_app_with_a_media_session_is_never_process_restarted(mock_adb, events, settings):
+    """Medya oturumu olan (oynayan ya da duraklatılmış) uygulamanın reinflate'i süreci öldürmez (müzik/video giderdi)."""
     handoff, _session, density, _log, _phases, patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=False)
-    density.is_playing = AsyncMock(return_value=True)
+    density.holds_media = AsyncMock(return_value=True)
     daemon_client = handoff._daemon_client_getter()
     daemon_client.restart_task_activity = AsyncMock(return_value=True)
 
@@ -408,7 +408,7 @@ async def test_a_playing_app_is_recreated_in_place_never_process_restarted(mock_
         assert await handoff.handoff_to_phone("win-3") is True
 
     daemon_client.restart_task_activity.assert_not_called()
-    density.relaunch_in_place.assert_awaited_once()
+    density.holds_media.assert_awaited()
 
 
 @pytest.mark.asyncio
@@ -443,24 +443,101 @@ async def test_web_rendered_app_with_prelanding_still_triggers_reinflate(mock_ad
 
 @pytest.mark.asyncio
 async def test_browser_with_cdp_triggers_live_nudge_without_restarting_process(mock_adb, events, settings):
-    """CDP soketi bulunan tarayıcıda canlı layout dürtmesi yapılır, süreç ASLA öldürülmez (sıfır state kaybı)."""
+    """CDP soketi bulunan tarayıcıda süreç ASLA öldürülmez (sıfır state kaybı): önce sekme izleyicisi (tüm sekmeler telefonun
+    yerel ölçeğine, anahtar = paket, ölçek = telefonun KENDİ yoğunluğu), sonra canlı layout dürtmesi."""
     handoff, session, density, _log, _phases, patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=True)
     session.state.package = "com.android.chrome"
     daemon_client = handoff._daemon_client_getter()
     daemon_client.restart_task_activity = AsyncMock(return_value=True)
+    order: list[str] = []
+
+    def start_watcher(adb, serial, socket, key, phone_dpr=None):
+        order.append("watcher")
+        start_watcher.args = (socket, key, phone_dpr)
+        return MagicMock(wait_ready=AsyncMock(return_value=True))
+
+    async def nudge(*args, **kwargs):
+        order.append("nudge")
+        return True
 
     with (
         patches[0], patches[1], patches[2],
         patch("app.windows.handoff_manager.inspect_app_runtime", AsyncMock(
             return_value=MagicMock(is_browser_cdp=True, cdp_socket="chrome_devtools_remote", is_pure_native=False, has_web_engine=True)
         )),
-        patch("app.windows.handoff_manager.refresh_browser_layout_inplace", AsyncMock(return_value=True)) as mock_nudge,
+        patch("app.windows.handoff_manager.start_browser_auto_attach_watcher", start_watcher),
+        patch("app.windows.handoff_manager.refresh_browser_layout_inplace", nudge),
     ):
         assert await handoff.handoff_to_phone("win-3") is True
 
-    mock_nudge.assert_awaited_once_with(mock_adb, "S", "chrome_devtools_remote")
+    assert order == ["watcher", "nudge"]        # the scale is in place when the nudge anchors the scroll
+    socket, key, phone_dpr = start_watcher.args
+    assert (socket, key) == ("chrome_devtools_remote", "com.android.chrome")
+    assert phone_dpr == pytest.approx(520 / 160)  # the phone's own density, not a constant
     daemon_client.restart_task_activity.assert_not_called()
     density.schedule_settle.assert_not_called()
+
+
+def _snapshot(pid):
+    from types import SimpleNamespace
+    return SimpleNamespace(identity=None if pid is None else (pid, 1))
+
+
+@pytest.mark.asyncio
+async def test_a_killed_app_that_does_not_come_back_is_started_again_on_the_phone(mock_adb, events, settings, monkeypatch):
+    """Field report 2026-10-17 (black screen): `restart_task_activity` kills the process but relaunches only a VISIBLE task. Right
+    after the Home -> app transition it is not yet, so the task sat on the phone with no process. The rebirth is checked and a
+    task that did not come back is launched by hand."""
+    handoff, _session, density, _log, _phases, _patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=True)
+    daemon = handoff._daemon_client_getter()
+    daemon.restart_task_activity = AsyncMock(return_value=True)
+    daemon.task_info = AsyncMock(return_value={"top": "com.google.android.youtube/.app.honeycomb.Shell$HomeActivity"})
+    density.holds_media = AsyncMock(return_value=False)
+    density.snapshot = AsyncMock(side_effect=[_snapshot(100)] + [_snapshot(None)] * 20)   # before: pid 100, then: no process
+    monkeypatch.setattr(handoff, "_REBIRTH_WAIT_S", 0.05)
+    monkeypatch.setattr(handoff, "_REBIRTH_POLL_S", 0.01)
+    launched = AsyncMock()
+    monkeypatch.setattr("app.windows.handoff_manager.android_shell.bring_to_front", launched)
+
+    assert await handoff._reinflate("com.google.android.youtube", 467) is True
+
+    launched.assert_awaited_once()
+    args, kwargs = launched.await_args
+    assert args[2:4] == ("com.google.android.youtube", "0")
+    assert kwargs["component"] == "com.google.android.youtube/.app.honeycomb.Shell$HomeActivity"
+    assert kwargs["reorder_only"] is False
+
+
+@pytest.mark.asyncio
+async def test_an_app_that_relaunched_itself_is_left_alone(mock_adb, events, settings, monkeypatch):
+    handoff, _session, density, _log, _phases, _patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=True)
+    daemon = handoff._daemon_client_getter()
+    daemon.restart_task_activity = AsyncMock(return_value=True)
+    density.holds_media = AsyncMock(return_value=False)
+    density.snapshot = AsyncMock(side_effect=[_snapshot(100), _snapshot(None), _snapshot(200)])   # killed, then reborn
+    monkeypatch.setattr(handoff, "_REBIRTH_WAIT_S", 1.0)
+    monkeypatch.setattr(handoff, "_REBIRTH_POLL_S", 0.01)
+    launched = AsyncMock()
+    monkeypatch.setattr("app.windows.handoff_manager.android_shell.bring_to_front", launched)
+
+    assert await handoff._reinflate("com.android.chrome", 5) is True
+    launched.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_restart_that_never_killed_the_process_launches_nothing(mock_adb, events, settings, monkeypatch):
+    handoff, _session, density, _log, _phases, _patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=True)
+    daemon = handoff._daemon_client_getter()
+    daemon.restart_task_activity = AsyncMock(return_value=True)
+    density.holds_media = AsyncMock(return_value=False)
+    density.snapshot = AsyncMock(return_value=_snapshot(100))      # same process the whole time
+    monkeypatch.setattr(handoff, "_REBIRTH_WAIT_S", 0.05)
+    monkeypatch.setattr(handoff, "_REBIRTH_POLL_S", 0.01)
+    launched = AsyncMock()
+    monkeypatch.setattr("app.windows.handoff_manager.android_shell.bring_to_front", launched)
+
+    assert await handoff._reinflate("com.android.chrome", 5) is True
+    launched.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -573,6 +650,27 @@ async def test_app_opened_on_the_phone_is_always_fullscreen_whatever_the_freefor
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("source, restarts", [("pc", True), ("display0", False), ("watchdog", False)])
+async def test_an_app_android_moved_itself_is_not_process_killed_by_the_handoff(mock_adb, events, settings, source, restarts):
+    """The user tapped the app's icon on the phone (display0) or a watchdog saw it there: Android already re-applied the phone
+    display's configuration and recreated the activity, and the forced process kill is what left the app without a process and
+    a BLACK screen (2026-10-17). Only the evidence-based settle may restart such an app. A PC-initiated handoff keeps the reinflate."""
+    handoff, session, density, _log, _phases, patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=False)
+    daemon_client = handoff._daemon_client_getter()
+    daemon_client.restart_task_activity = AsyncMock(return_value=True)
+    density.holds_media = AsyncMock(return_value=False)
+    with (
+        patches[0], patches[1], patches[2],
+        patch("app.device.android_shell.bring_to_front", AsyncMock(return_value="OK")),
+        patch.object(handoff, "_ensure_relaunched", AsyncMock()),
+        patch.object(handoff, "_settle_phone_windowing", AsyncMock()),
+    ):
+        await handoff._execute_to_phone(session, "com.example.notes", None, "S", task_id="888", source=source)
+
+    assert daemon_client.restart_task_activity.await_count == (1 if restarts else 0)
+
+
+@pytest.mark.asyncio
 async def test_hyperos_handoff_gives_home_a_real_foreground_transition(mock_adb, events, settings):
     """Kenar geri jesti: HyperOS'ta taşınan göreve Home → uygulama geçişi verilir (düz reorder-to-front jesti açmaz)."""
     handoff, session, density, _log, _phases, patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=False)
@@ -590,6 +688,42 @@ async def test_hyperos_handoff_gives_home_a_real_foreground_transition(mock_adb,
     unlock.assert_awaited_once()
     assert unlock.await_args.args[2] == "com.google.android.youtube"
     plain.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_hyperos_handoff_keeps_the_phones_open_app_behind_the_target(mock_adb, events, settings):
+    """Log 2026-10-16: freeform handoff put Home between the phone's open app (YouTube Music) and the target, hiding the app.
+    The foreground task read BEFORE the move is handed to the gesture unlock as the intermediate."""
+    handoff, session, density, _log, _phases, patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=False)
+    daemon_client = handoff._daemon_client_getter()
+    daemon_client.move_task_wct = AsyncMock(return_value=True)
+    daemon_client.tasks = AsyncMock(return_value=[
+        {"id": 371, "display": 0, "visible": True, "package": "com.google.android.apps.youtube.music"},
+        {"id": 2, "display": 0, "visible": False, "package": "com.mi.android.globallauncher"},
+    ])
+    with (
+        patches[0], patches[1], patches[2],
+        patch("app.device.android_shell.phone_size", AsyncMock(return_value=(1220, 2712))),
+        patch("app.device.android_shell.is_miui_or_hyperos", AsyncMock(return_value=True)),
+        patch("app.device.android_shell.unlock_display0_gesture_navigation", AsyncMock(return_value="Starting: Intent")) as unlock,
+    ):
+        assert await handoff.handoff_to_phone("win-3") is True
+
+    assert unlock.await_args.kwargs["behind_task_id"] == 371
+    assert unlock.await_args.kwargs["daemon"] is daemon_client
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("visible", [
+    [{"id": 2, "display": 0, "visible": True, "package": "com.mi.android.globallauncher"}],          # user is on Home
+    [{"id": 9, "display": 0, "visible": True}],                                                      # topmost has no package
+    [{"id": 9, "display": 101, "visible": True, "package": "com.android.chrome"}],                  # only virtual-display tasks
+    [],
+])
+async def test_phone_foreground_task_is_none_when_home_is_the_right_intermediate(mock_adb, events, settings, visible):
+    handoff, *_ = _prelanding_rig(mock_adb, events, settings, prelanding_setting=False)
+    handoff._daemon_client_getter().tasks = AsyncMock(return_value=visible)
+    assert await handoff._phone_foreground_task("com.android.vending", 382) is None
 
 
 @pytest.mark.asyncio
@@ -612,6 +746,28 @@ async def test_hyperos_unlock_that_fails_falls_back_to_plain_bring_to_front(mock
 
 
 @pytest.mark.asyncio
+async def test_a_task_the_shell_cannot_start_is_raised_by_id_instead_of_staying_behind_home(mock_adb, events, settings):
+    """Log 2026-10-16 (Udemy): the course player's top activity is not exported, so Home → LAUNCHER cannot resolve and
+    `am start -n` is refused (SecurityException) — the task stayed behind the launcher for ~5 s. The daemon raises it by id."""
+    handoff, session, density, _log, _phases, patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=False)
+    daemon_client = handoff._daemon_client_getter()
+    daemon_client.move_task_wct = AsyncMock(return_value=True)
+    daemon_client.reorder_task = AsyncMock(return_value=True)
+    refused = RuntimeError("java.lang.SecurityException: Permission Denial: not exported from uid 10322")
+    with (
+        patches[0], patches[1], patches[2],
+        patch("app.device.android_shell.phone_size", AsyncMock(return_value=(1220, 2712))),
+        patch("app.device.android_shell.is_miui_or_hyperos", AsyncMock(return_value=True)),
+        patch("app.device.android_shell.unlock_display0_gesture_navigation", AsyncMock(return_value="Error: unable to resolve Intent")),
+        patch("app.device.android_shell.bring_to_front", AsyncMock(side_effect=refused)),
+    ):
+        assert await handoff.handoff_to_phone("win-3") is True
+
+    daemon_client.reorder_task.assert_awaited_once()
+    assert daemon_client.reorder_task.await_args.kwargs == {"front": True}
+
+
+@pytest.mark.asyncio
 async def test_non_xiaomi_handoff_keeps_the_plain_reorder(mock_adb, events, settings):
     handoff, session, density, _log, _phases, patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=False)
     daemon_client = handoff._daemon_client_getter()
@@ -627,3 +783,94 @@ async def test_non_xiaomi_handoff_keeps_the_plain_reorder(mock_adb, events, sett
 
     unlock.assert_not_awaited()
     plain.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_the_phone_is_woken_while_the_apps_runtime_is_read_not_before_it(mock_adb, events, settings):
+    """`dumpsys meminfo` (the runtime probe) alone is ~0.4 s of a handoff; waking the screen first and probing after made them
+    add up. Each one must see that the other has already STARTED: run one after the other, the first never does."""
+    handoff, _session, _density, _log, _phases, patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=False)
+    woke, probing = asyncio.Event(), asyncio.Event()
+    seen = {}
+
+    async def wake(*_a, **_k):
+        woke.set()
+        seen["wake_saw_probe"] = await _became_set(probing)
+
+    async def probe(*_a, **_k):
+        probing.set()
+        seen["probe_saw_wake"] = await _became_set(woke)
+        return MagicMock(is_browser_cdp=False, cdp_socket=None)
+
+    async def _became_set(event):
+        try:
+            await asyncio.wait_for(event.wait(), timeout=0.5)
+            return True
+        except asyncio.TimeoutError:
+            return False
+
+    with (
+        patches[0], patches[1], patches[2],
+        patch("app.device.android_shell.wake_and_unlock", wake),
+        patch("app.windows.handoff_manager.inspect_app_runtime", probe),
+    ):
+        assert await handoff.handoff_to_phone("win-3") is True
+
+    assert seen == {"wake_saw_probe": True, "probe_saw_wake": True}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["display0", "watchdog"])
+async def test_a_video_playing_when_the_user_launches_the_app_on_the_phone_is_resumed_after_the_handoff(mock_adb, events, settings, source):
+    """The user's own tap on the phone (or Android) launches the app there: the rebuild stops the video. It was still playing when
+    the handoff started, so it goes on from where it stopped — exactly as for a handoff started from the PC."""
+    handoff, session, density, _log, _phases, patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=False)
+    snapshot = PlaybackSnapshot(package=session.state.package, position_ms=5000, taken_at=0.0)
+    handoff._playback.capture = AsyncMock(return_value=snapshot)
+    handoff._playback.restore = AsyncMock(return_value="resumed")
+    session.state.handoff_to_phone = True               # what _observe sets before it spawns the display work
+    with patch.object(handoff, "_execute_to_phone", AsyncMock()):
+        await handoff._to_phone_locked(session, "S", "888", source)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    handoff._playback.capture.assert_awaited_once_with(session.state.package)
+    handoff._playback.restore.assert_awaited_once_with(snapshot, "0")
+
+
+def _landed_session(*, size=(1220, 2712), dpi=513):
+    from types import SimpleNamespace
+    from app.windows.handoff_manager import Geometry, Landing
+
+    session = SimpleNamespace(target_display_w=size[0], target_display_h=size[1], dpi=dpi)
+    session.landing = Landing(window=Geometry(1472, 1016, 180), landed=Geometry(1220, 2712, 513))
+    return session
+
+
+def test_a_window_untouched_on_the_phone_gets_its_own_geometry_back():
+    from app.windows.handoff_manager import Geometry
+
+    session = _landed_session()
+    assert HandoffManager._geometry_to_restore(session, session.landing) == Geometry(1472, 1016, 180)
+
+
+def test_a_window_resized_on_the_phone_keeps_its_size_but_gets_the_windows_density_back():
+    """A plain resize drag carries no density: the empty display still had the phone's 513 — the app would return drawn at the phone's
+    scale inside the bigger window."""
+    from app.windows.handoff_manager import Geometry
+
+    session = _landed_session(size=(1656, 1016))
+    assert HandoffManager._geometry_to_restore(session, session.landing) == Geometry(1656, 1016, 180)
+
+
+def test_a_density_the_user_chose_on_the_phone_side_is_left_alone():
+    session = _landed_session(size=(1656, 1016), dpi=220)
+    assert HandoffManager._geometry_to_restore(session, session.landing) is None
+
+
+def test_adopting_the_window_geometry_of_a_frozen_display_keeps_a_resize_too():
+    session = _landed_session(size=(1656, 1016))
+    session.state = WindowState(window_id="w", package="p", width=1, height=1)
+    HandoffManager._adopt_window_geometry(session)
+    assert (session.target_display_w, session.target_display_h, session.dpi) == (1656, 1016, 180)
+    assert session.landing is None

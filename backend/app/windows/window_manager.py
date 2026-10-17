@@ -66,11 +66,13 @@ from .density_reconciler import DensityReconciler, RefreshOutcome, Snapshot
 from .display_ids import is_virtual_display_id, known_display_id
 from .dpi_policy import negotiate_dpi
 from .eco_workspace import ANCHOR_MARKER, EcoWorkspaceManager, MemberCheck
+from .transition_gate import TransitionGate
 from .encoder_stress_test import StressTestBusyError, run_encoder_stress_test  # noqa: F401 (StressTestBusyError re-exported: app/api/v1/endpoints/devices.py imports it from here)
 from .app_presence import AppPresenceMonitor
 from .app_restart import AppRestartOutcome, restart_app
 from .cdp_refresher import stop_browser_auto_attach_watcher
 from .handoff_manager import HandoffManager
+from .parked_apps import ParkedAppRefresher
 from .mirror_packages import is_internal_package, is_mirror_package
 from .resize_gate import ResizeGate
 from .session_table import SessionTable
@@ -84,6 +86,7 @@ from .task_movement import move_task_to_display
 from .task_teleporter import TaskTeleporter
 from .window_lifecycle_coordinator import (
     applock_alive_probe,
+    applock_display_probe,
     coordinate_window_lifecycle,
     wait_for_app_lock_unlock,
 )
@@ -237,8 +240,13 @@ class WindowManager:
             serial_getter=lambda: self._serial,
             daemon_getter=lambda: self._daemon_client,
             api_level_getter=lambda: self._profile.android_api if self._profile is not None else None,
-            inplace_getter=lambda: self._profile.density_inplace_relaunch if self._profile is not None else None,
-            inplace_setter=self._learn_inplace_relaunch,
+        )
+        # Keeps the phone's own screen free of the snapshot a resize leaks onto it (transition_gate.py).
+        self._transition_gate = TransitionGate(
+            adb,
+            serial_getter=lambda: self._serial,
+            enabled=settings.RESIZE_SUPPRESS_TRANSITION,
+            tail_s=settings.RESIZE_TRANSITION_TAIL_S,
         )
         self._reconfigure = SessionReconfigurer(
             adb, settings, events, broadcasters, self._sessions,
@@ -247,6 +255,7 @@ class WindowManager:
             android_id_getter=lambda: self._android_id,
             daemon_client_getter=lambda: self._daemon_client,
             density=self._density,
+            transition_gate=self._transition_gate,
             # Lazy lambda: self._eco_workspace is constructed BELOW this
             # point (it itself depends on self._reconfigure.start_video_pump),
             # so it cannot be referenced eagerly here — only by the time this
@@ -276,6 +285,12 @@ class WindowManager:
             lock=self._lock,
             density=self._density,
             resize_display=self._resize_display_for_handoff,
+        )
+        # Apps parked on the phone by an X on their window are refreshed when the user opens them there (parked_apps.py).
+        self._parked_apps = ParkedAppRefresher(
+            adb, events, self._density,
+            serial_getter=lambda: self._serial,
+            has_window=lambda pkg: any(s.state.package == pkg for s in self._sessions.values()),
         )
         self._eco_workspace = EcoWorkspaceManager(
             adb, settings, events, self._sessions,
@@ -706,11 +721,29 @@ class WindowManager:
         # ("no task on display 0" is not "no process"). With a phone task the process is warm — the coordinator
         # settles it after the move.
         density_before: Snapshot | None = None
+        self._parked_apps.forget(package)   # this open settles the app itself
+        stop_browser_auto_attach_watcher(package)   # the browser leaves the phone for a window: its tab overrides end here
         if not is_mirror:
             density_before = await self._density.snapshot(package)
             if density_before.identity is not None and not is_stealth_active:
                 if await self._density.discard_stale_cached_process(package) == "killed":
                     density_before = Snapshot(package, None)
+
+        # The server launches the app itself (START_APP = `am start --display N`) unless the app holds a live media session on the
+        # phone (playing or paused). THAT one is MOVED by the coordinator below instead: the launch intent makes it stop its
+        # player and recreate (a video playing on the phone was left STOPPED, its process then killed — field report
+        # 2026-10-17), the task move leaves a playing app playing (the same move reclaim uses). An app with nothing playing is
+        # launched: its task parked in the background (the window's X) can be a dead page — YouTube's watch page with an empty
+        # player that never loads — and a move would carry exactly that into the window.
+        server_launches_app = not is_mirror and auto_start_app
+        if server_launches_app and density_before is not None and density_before.identity is not None:
+            from app.device.deep_navigator import find_task_id_for_package
+            with contextlib.suppress(Exception):
+                if (
+                    await find_task_id_for_package(self._adb, package, display_id="0", serial=self._serial)
+                    and await self._density.holds_media(package)
+                ):
+                    server_launches_app = False
 
         server = ScrcpyServer(self._adb, self._settings, self._serial, daemon=self._daemon_client)
         try:
@@ -728,7 +761,7 @@ class WindowManager:
                     video_bit_rate=chosen_bitrate,
                     max_fps=project.max_fps,
                 ),
-                start_app=package if not is_mirror and auto_start_app else None,
+                start_app=package if server_launches_app else None,
             )
         except Exception:
             wlog.exception("failed to bring up %s; cleaning up", package)
@@ -804,10 +837,12 @@ class WindowManager:
                     p2_dpi=phase2_dpi,
                     stealth_active=is_stealth_active,
                     auto_start=auto_start_app,
+                    server_launched_app=server_launches_app,
                     daemon=self._daemon_client,
                     lock=self._lock,
                     density=self._density,
                     density_before=density_before,
+                    continuity=getattr(self._handoff, "playback", None),
                 ),
                 name=f"window-coord-{window_id}"
             )
@@ -915,14 +950,15 @@ class WindowManager:
             return
 
         self._sessions.pop(window_id, None)
-        with contextlib.suppress(Exception):
-            stop_browser_auto_attach_watcher(window_id)
+        # (The browser's tab watcher is keyed by package and belongs to the BROWSER on the phone, not to the window: it outlives
+        # this close and ends when the browser gets a window again.)
         window_logger(__name__, window_id).info("🚪 [WindowManager:CLOSE ❌] Window %s (%s) kapatılıyor", window_id, session.state.package)
         self._broadcasters.remove(window_id)  # WS endpoints observe and close
         await cancel_and_wait(session.pump_task)
         # Reverse Stealth DPI: Before destroying the virtual display,
         # equalize its density to phone physical DPI.
         # Dipnot: Çarpıya (X) basıldığında Stealth DPI eşitlemesi yapılır; bu sayede kullanıcı telefona geçtiğinde veya son uygulamalardan (Recents) girdiğinde DPI şoku ve reflow yaşanmadan sorunsuz bir deneyim sağlanır. Ancak Display 0'a taşıma (display move) yapılmaz; Display 0'a taşıma yalnızca kullanıcı 'Telefona Geç' (Handoff) yaptığında çalışır.
+        park_bracket: tuple[Snapshot | None, float | None] = (None, None)
         if self._adb and self._serial:
             with contextlib.suppress(Exception):
                 disp_id = known_display_id(session)
@@ -930,12 +966,26 @@ class WindowManager:
                 if disp_id and not is_internal_package(pkg):
                     phys_dpi = await android_shell.phone_density(self._adb, self._serial)
                     if phys_dpi:  # unread → the display closes as it is; a guessed density would be worse
+                        # The app is about to be parked on the phone: note its process BEFORE the density moves, so that
+                        # opening it there can tell whether it kept the window's layout (parked_apps.py).
+                        window_dpi = session.dpi or self._settings.VIRTUAL_DISPLAY_DPI
+                        if (
+                            self._settings.CLOSE_KEEPS_APP and self._closable_task_is_live(session)
+                            and window_dpi != phys_dpi
+                        ):
+                            park_bracket = (await self._density.snapshot(pkg), await self._density.mark())
                         await android_shell.set_display_density(
                             self._adb, self._serial, disp_id, phys_dpi, daemon=self._daemon_client, timeout_s=1.5,
                         )
                         await asyncio.sleep(0.2)
 
-        # Stop the session cleanly without moving task to Display 0 (evacuate=None)
+        # The app outlives its display: its task goes to the phone's background instead of dying with the display
+        # (see CLOSE_KEEPS_APP); the server below then stops with nothing left on the display to destroy.
+        kept = False
+        if self._serial and self._adb and self._settings.CLOSE_KEEPS_APP and self._closable_task_is_live(session):
+            kept = await self._keep_app_on_phone(session, park_bracket)
+
+        # Stop the session cleanly (the task, if kept, is on Display 0 already: evacuate=None)
         try:
             await asyncio.wait_for(session.server.stop(evacuate=None), self.TEARDOWN_STEP_TIMEOUT_S)
         except asyncio.TimeoutError:
@@ -949,7 +999,11 @@ class WindowManager:
         # window — would inherit that stale process (phone showing a 200 dpi UI: the "close it in Recents and reopen
         # it" ritual). `am kill` only ever removes processes that are safe to kill; skipped when any task remains.
         pkg = session.state.package
-        if not (is_internal_package(pkg) or is_mirror_package(pkg)) and self._serial:
+        # The window of an app that stands on the PHONE (handoff) closes with nothing to take down there: the browser's phone-mode tab
+        # watcher keeps the tabs at the phone's scale and site, or the page falls back to the half-desktop layout it had in the window.
+        if not kept and not session.state.handoff_to_phone:
+            stop_browser_auto_attach_watcher(pkg)   # a browser that goes with its window: its window-mode tab watcher ends too
+        if not kept and not (is_internal_package(pkg) or is_mirror_package(pkg)) and self._serial:
             spawn_background(self._discard_cached_process_later(pkg), name=f"density-discard-{window_id}")
         # Note: Do NOT execute 'wm density reset' on Display 0.
         # Virtual displays are destroyed via their own display id, leaving the physical phone's DPI 100% untouched.
@@ -966,6 +1020,7 @@ class WindowManager:
             await cancel_and_wait(self._orphan_reaper_task)
             self._orphan_reaper_task = None
             await self._density.shutdown()
+            await self._transition_gate.restore_now()   # the phone's animation setting must not outlive us at 0
             self._handoff.release("link_drop")  # must not outlive the windows it was for
 
     # ------------------------------------------------------------------ orphan server reaper
@@ -1121,6 +1176,7 @@ class WindowManager:
                 p1_dpi=session.dpi,
                 daemon=self._daemon_client,
                 is_alive=applock_alive_probe(self._sessions, window_id),
+                display_of=applock_display_probe(self._sessions, window_id),
                 fresh=True,
             ),
             name=f"window-applock-retry-{window_id}",
@@ -1288,16 +1344,6 @@ class WindowManager:
         in-place adapte olur; DensityReconciler'ın süreci öldürmesi engellenmiştir."""
         return
 
-    async def _learn_inplace_relaunch(self, works: bool) -> None:
-        """DensityReconciler learned whether `am update-appinfo` relaunches activities on this device: kept in the device
-        profile so the next backend start does not pay the failing attempt (and its extra refresh) again."""
-        profile = self._profile
-        if profile is None or profile.density_inplace_relaunch == works:
-            return
-        profile.density_inplace_relaunch = works
-        if self._android_id:
-            await settings_db.save_device_profile(self._android_id, profile)
-
     async def close_workspace_task(self, window_id: str) -> None:
         await self.close_window(window_id)  # _close_window_locked already branches on workspace_id
 
@@ -1355,9 +1401,9 @@ class WindowManager:
         return bool(outcome and outcome.refreshed)
 
     async def restart_window_app(self, window_id: str) -> AppRestartOutcome | None:
-        """Hub → "Uygulamayı yeniden başlat" (app_restart.py): rebuild the APP inside the same window — process restart,
-        else onDestroy→onCreate in place, else a cold start when nothing runs. None: no such window. Like the density
-        refresh it takes seconds, so the global window lock is held only to read the session, never for the restart."""
+        """Hub → "Uygulamayı yeniden başlat" (app_restart.py): rebuild the APP inside the same window — process restart, else a
+        cold start when nothing runs. None: no such window. Like the density refresh it takes seconds, so the global window lock
+        is held only to read the session, never for the restart."""
         async with self._lock:
             session = self._sessions.get(window_id)
             if session is None:
@@ -1414,11 +1460,12 @@ class WindowManager:
         async with self._lock:
             await self._budget.focus(window_id)
             session = self._sessions.get(window_id)
-            # Telefona park edilmiş Workspace üyesi: paylaşımlı sunucunun control soketine
-            # START_APP göndermek uygulamayı telefondan geri çekip (defter kaydı OLMADAN) VD'de
-            # yeniden başlatırdı — geri dönüş yalnızca phone_to_workspace ile yapılır.
-            parked_eco = bool(session and session.state.workspace_id == "eco" and session.state.handoff_to_phone)
-            launchable = bool(session and session.control and not parked_eco and not is_mirror_package(session.state.package))
+            # Telefonda duran uygulamanın penceresi (Workspace üyesi ya da kendi penceresi): başlığa dokunmak / yeniden
+            # boyutlamak odağı getirir, ama VD'nin control soketine START_APP göndermek uygulamayı telefondan geri çekerdi
+            # ("PC'ye geri al"a basılmadan DeX'e gelirdi; Workspace'te ayrıca defter kaydı OLMADAN). Geri dönüş yalnızca
+            # kullanıcının "geri al" eylemiyle (reclaim / phone_to_workspace) olur.
+            on_phone = bool(session and session.state.handoff_to_phone)
+            launchable = bool(session and session.control and not on_phone and not is_mirror_package(session.state.package))
         if launchable:
             await self._launch_if_absent(session)          # outside the lock: it asks the phone
 
@@ -1806,6 +1853,97 @@ class WindowManager:
             with contextlib.suppress(Exception):
                 await move_task_to_display(self._adb, task_id, "0", serial=self._serial, daemon=self._daemon_client)
         return task_id
+
+    async def _park_on_phone_quietly(self, session: WindowSession) -> tuple[str | None, bool]:
+        """`_park_on_phone` for a close: the move and the lowering are ONE daemon call (`park_task`), so the closed window's frame
+        never shows on the phone. (task id, lowered). A jar without `park_task` (or one that refuses it) takes the old path:
+        move, then lowering from here — the caller lowers when this says it is not."""
+        daemon = self._daemon_client
+        supports = getattr(daemon, "supports", None)
+        pkg, disp = session.state.package, known_display_id(session)
+        if not (callable(supports) and supports("park_task")) or is_mirror_package(pkg) or not disp or not self._serial:
+            return await self._park_on_phone(session), False
+        from ..device.deep_navigator import find_task_id_for_package
+
+        task_id = await find_task_id_for_package(self._adb, pkg, display_id=disp, serial=self._serial)
+        if not task_id:
+            return None, False
+        reply = await daemon.park_task(task_id, 0)
+        if isinstance(reply, dict) and reply.get("ok"):
+            return task_id, bool(reply.get("lowered"))
+        with contextlib.suppress(Exception):   # refused: the plain move, lowered by the caller
+            await move_task_to_display(self._adb, task_id, "0", serial=self._serial, daemon=daemon)
+        return task_id, False
+
+    @staticmethod
+    def _closable_task_is_live(session: WindowSession) -> bool:
+        """The window still has an app on its own virtual display that a close would destroy: not the phone mirror or an
+        internal window, not a window whose server is gone / frozen (its display and tasks are already gone) and not one whose
+        app was handed to the phone (it is there already)."""
+        state = session.state
+        return bool(
+            not (is_internal_package(state.package) or is_mirror_package(state.package))
+            and session.server.is_alive and not state.frozen and not state.handoff_to_phone
+            and is_virtual_display_id(known_display_id(session))
+        )
+
+    async def _keep_app_on_phone(
+        self, session: WindowSession, bracket: tuple[Snapshot | None, float | None] = (None, None),
+    ) -> bool:
+        """X on a window: the app's task goes to the phone's background instead of being destroyed with the display, so the
+        next open finds it where an app left on the phone is (warm move, state intact) rather than starting it cold.
+
+        Moved onto display 0 (the density was equalised to the phone's just before: no density shock), then lowered below
+        the phone's other tasks so the app is BACKGROUNDED — stopped, its state saved, in Recents — and not left on top of the
+        phone screen, while the app the user is using there stays in front (field report 2026-10-16: Home closed it).
+        Playback is NOT touched: a video or music that goes on, goes on (the user closed the window, not the app — as with an app
+        left on the phone), and one that was paused stays paused with its page and position: pausing it here would also take
+        away its media-session protection from the density restart on the next open ("Media is never cut"). No density settle
+        is scheduled now: for a backgrounded app that would be a process kill. `bracket` (process snapshot + clock mark taken
+        before the density moved) is handed to ParkedAppRefresher, which refreshes the app when the user opens it on the phone
+        (a browser by a live CDP nudge, the rest by the density reconciler). True: the task is on the phone now.
+        Never raises (a failed park falls back to the old behaviour: the display takes the task with it)."""
+        pkg = session.state.package
+        wlog = window_logger(__name__, session.state.window_id)
+        try:
+            self.hold_handoff(pkg, seconds=8.0)   # the app showing up on display 0 is OUR move, not a handoff by the user
+            from ..device.deep_navigator import find_task_id_for_package
+
+            # The move puts the task on TOP of the phone screen, and every millisecond it stays there is a frame of the closed
+            # window flashing on the phone (field report 2026-10-17: ~220 ms when it was verified first and lowered after a
+            # settle sleep). The daemon's `park_task` moves and lowers in one call (nothing to draw in between); a jar without
+            # it lowers from here AT ONCE — straight after the move returns, before anything else is asked of the phone — and
+            # only then checks. Lowering puts back whatever the user was using there; Home (the fallback of a jar without
+            # `task_reorder`) would send that app to the background and show the launcher.
+            task_id, lowered = await self._park_on_phone_quietly(session)
+            if not task_id:
+                wlog.info("[WindowManager:CLOSE] %s için taşınacak görev bulunamadı — ekranıyla birlikte kapanıyor", pkg)
+                return False
+            daemon = self._daemon_client
+            if daemon is not None and not lowered:
+                for attempt in range(2):
+                    if await daemon.reorder_task(task_id, front=False):
+                        lowered = True
+                        break
+                    await asyncio.sleep(0.05)   # the move had not landed in the stack yet
+            # `_park_on_phone` does not raise on a refused move: only a task SEEN on display 0 counts as kept (otherwise the
+            # display takes it with it and the leftover process must still be discarded).
+            if str(await find_task_id_for_package(self._adb, pkg, display_id="0", serial=self._serial)) != str(task_id):
+                wlog.warning("[WindowManager:CLOSE] %s görevi %s display 0'da görünmüyor — taşıma olmadı, ekranıyla birlikte kapanıyor",
+                             pkg, task_id)
+                return False
+            if not lowered:
+                await self._adb.shell(
+                    "am start --display 0 -a android.intent.action.MAIN -c android.intent.category.HOME",
+                    serial=self._serial, timeout_s=3.0,
+                )
+            wlog.info("📥 [WindowManager:CLOSE] %s (görev %s) telefonun arka planına alındı — sonraki açılış kaldığı yerden devam eder",
+                      pkg, task_id)
+            self._parked_apps.park(pkg, task_id, *bracket)
+            return True
+        except Exception as exc:  # noqa: BLE001 — the close itself must go through
+            wlog.warning("[WindowManager:CLOSE] %s telefona alınamadı (%s) — ekranıyla birlikte kapanıyor", pkg, exc)
+            return False
 
     async def _park_workspace_on_phone(self) -> list[str]:
         """Every live Workspace member's task onto display 0 and parked (its slot kept); the last one releases the

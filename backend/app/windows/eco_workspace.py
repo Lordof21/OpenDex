@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable
 
 from ..config import Settings
-from ..device import android_shell, daemon_registry
+from ..device import android_shell
 from ..device.adb import Adb
 from ..device.device_manager import DeviceNotBoundError
 from ..events import EventBus, cancel_and_wait, spawn_background
@@ -107,6 +107,27 @@ def android_density(density: int, scale: float = 1.0) -> int:
     if density <= 0 or not (0.3 < scale < 0.98):
         return density
     return min(_MAX_ANDROID_DENSITY, round(density / scale))
+
+
+_SCALE_EPSILON = 0.02
+_MIN_SCALE = 0.3
+_MAX_SCALE = 1.05
+
+
+def next_freeform_scale(known: float | None, measured: float, pending: float | None) -> tuple[float | None, float | None]:
+    """The device's freeform scale after one MEASUREMENT of a task (SurfaceFlinger's toDisplayTransform) — `(scale, pending)`.
+
+    The device's value is the scale a task gets when it fits the display (HyperOS 0.70, AOSP 1.0). A task whose box is too big
+    for the display is shrunk further (measured: 0.57), so one lower reading must not become the device's value: a HIGHER
+    reading is taken at once (the old value was a shortfall — or the ROM changed), a LOWER one only when the next measurement
+    confirms it. `scale` None = keep the stored value."""
+    if not (_MIN_SCALE < measured <= _MAX_SCALE):
+        return None, pending
+    if known is None or measured >= known - _SCALE_EPSILON:
+        return (measured if known is None or abs(measured - known) > _SCALE_EPSILON else None), None
+    if pending is not None and abs(measured - pending) <= _SCALE_EPSILON:
+        return measured, None
+    return None, measured
 
 
 def freeform_start_command(display_id: str, component: str, launch_bounds: TaskBounds | None = None) -> str:
@@ -258,6 +279,7 @@ class EcoWorkspaceManager:
         self._tasks: dict[str, WorkspaceTask] = {}  # window_id -> WorkspaceTask
         self._vd_w: int | None = None
         self._vd_h: int | None = None
+        self._scale_pending: float | None = None  # a lower freeform-scale reading awaiting its confirmation (next_freeform_scale)
         # Where each app's Workspace window was the last time (see workspace_slots.py): an app that comes into the
         # Workspace — from its own VD window, from the phone, or in a later session — returns to ITS place here.
         self._slots = WorkspaceSlots(settings_db.get_workspace_slot, settings_db.save_workspace_slot)
@@ -464,31 +486,28 @@ class EcoWorkspaceManager:
     # ------------------------------------------------------------------ launch-bounds probe & freeform scale bridge
 
     async def _get_freeform_scale(self, serial: str) -> float:
-        """Cihazın freeform pencere görsel ölçeğini döner (Xiaomi HyperOS / MIUI = 0.70, AOSP = 1.0).
-        Önbellekte varsa doğrudan döner; yoksa dumpsys window üzerinden probe edip kaydeder."""
+        """The freeform scale the system applies to a task that fits the display (HyperOS 0.70, AOSP 1.0), as MEASURED on
+        this device (`_remember_measured_scale`); 1.0 until a first task has been measured.
+
+        There is no device-wide number to read beforehand: the window dump only carries `mFreeformScale` inside task
+        snapshots (fullscreen ones say 1.0 — a read of that was cached as the device's scale once). The first window on a new
+        device is therefore placed with 1.0 and corrected from its own measurement (`_finalize_task_registration`)."""
         profile = self._profile_getter()
-        scale_cached = profile.freeform_scale if profile else None
-        if scale_cached is not None:
-            return scale_cached
-        try:
-            # Once per device (cached in its profile). The daemon reads the window service's dump in-process.
-            daemon = daemon_registry.live("dump")
-            out = await daemon.dump("window") if daemon is not None else None
-            if out is None:
-                out = await self._adb.shell("dumpsys window | grep -m 1 mFreeformScale", serial=serial, timeout_s=1.5)
-            m = re.search(r"mFreeformScale=([0-9.]+)", out)
-            if m:
-                val = float(m.group(1))
-                if 0.1 <= val <= 2.0:
-                    if profile:
-                        profile.freeform_scale = val
-                        with contextlib.suppress(Exception):
-                            await settings_db.save_device_profile(profile.android_id, profile)
-                    log.info("🔍 [ECO WORKSPACE] freeform_scale tespit edildi: %.2f (serial=%s)", val, serial)
-                    return val
-        except Exception as exc:
-            log.warning("⚠️ [ECO WORKSPACE] freeform_scale probe hatası: %s", exc)
-        return 1.0
+        scale = profile.freeform_scale if profile else None
+        return scale if scale is not None else 1.0
+
+    async def _remember_measured_scale(self, measured: float) -> None:
+        """Feeds a task's MEASURED scale into the device's stored one (see `next_freeform_scale`)."""
+        profile = self._profile_getter()
+        if profile is None:
+            return
+        scale, self._scale_pending = next_freeform_scale(profile.freeform_scale, measured, self._scale_pending)
+        if scale is None:
+            return
+        log.info("🔍 [ECO WORKSPACE] freeform ölçeği ölçüldü: %.2f (önceki: %s)", scale, profile.freeform_scale)
+        profile.freeform_scale = scale
+        with contextlib.suppress(Exception):
+            await settings_db.save_device_profile(profile.android_id, profile)
 
     async def _probe_launch_bounds_support(self, serial: str, task_id: str, expected: TaskBounds, *, freeform_scale: float = 1.0) -> bool:
         """`--activity-launch-bounds` fiilen uygulandı mı? Görevin gerçek bounds'u (daemon, yoksa dumpsys —
@@ -608,14 +627,12 @@ class EcoWorkspaceManager:
         # Öncelik 1: SurfaceFlinger Omni-Adapter (GPU gerçeği, OEM leashing/scale'i çözen tek yer)
         geom = await surfaceflinger_probe.probe_omni_geometry(self._adb, serial, task_id)
         if geom and geom.render_bounds:
-            scale_x = geom.scale_x if geom.scale_x > 0.1 else freeform_scale
-            scale_y = geom.scale_y if geom.scale_y > 0.1 else freeform_scale
-            if scale_x > 0.1 and abs(scale_x - 1.0) > 0.02:
-                profile = self._profile_getter()
-                if profile and profile.freeform_scale != scale_x:
-                    profile.freeform_scale = scale_x
-                    with contextlib.suppress(Exception):
-                        await settings_db.save_device_profile(profile.android_id, profile)
+            # A scale not READ from a transform line is the parser's default, not evidence: the device's value stands in.
+            measured = geom.scale_measured and geom.scale_x > 0.1 and geom.scale_y > 0.1
+            scale_x = geom.scale_x if measured else freeform_scale
+            scale_y = geom.scale_y if measured else freeform_scale
+            if measured:
+                await self._remember_measured_scale(scale_x)
             if wlog:
                 wlog.info(
                     "🎯 [OMNI-ADAPTER] task=%s Render: %s, Scale: (%.2f, %.2f)",
@@ -673,15 +690,25 @@ class EcoWorkspaceManager:
         size in pixels, and Android grows the task to comply — after the readback nobody would hear of it), wait for
         the WM layout to settle, read back the real (Android-adjusted) bounds, register the task, and
         emit workspace_task_added."""
-        density_scale = 1.0
+        density_scale = launch_scale = await self._get_freeform_scale(serial)
+        profile = self._profile_getter()
+        placed_blind = profile is None or profile.freeform_scale is None or launch_scale >= 0.98  # no scaling was assumed
         if density:
-            density_scale = await self._get_freeform_scale(serial)
             await self._daemon_set_task_density(task_id, density, density_scale)
         effective_bounds, scale = await self._settled_effective_bounds(serial, task_id, target_bounds, wlog)
-        if density and abs(scale[0] - density_scale) > 0.02 and scale[0] > 0.1:
-            # The cached scale was not what the system actually applies to THIS task: write the density again with the measured one.
+        if scale[0] > 0.1 and abs(scale[0] - launch_scale) > _SCALE_EPSILON:
+            # The scale the task was placed with was not what the system actually applies to THIS task: the density is
+            # written again with the measured one.
             density_scale = scale[0]
-            await self._daemon_set_task_density(task_id, density, density_scale)
+            if density:
+                await self._daemon_set_task_density(task_id, density, density_scale)
+            if placed_blind and scale[0] < launch_scale:
+                # The first window on a device nobody has measured yet (or a stored 1.0 that was never true): its box was
+                # sized as if nothing shrinks it, so it came out `scale` too small — give the box again, once.
+                await self._resize_task_to(
+                    serial, task_id, visible_to_android_bounds(target_bounds, scale[0]), wlog, "SCALE_FIX",
+                )
+                effective_bounds, scale = await self._settled_effective_bounds(serial, task_id, target_bounds, wlog)
         wlog.info(
             "🔬 [ECO WORKSPACE:%s] %s (task=%s) -> effective=%s (hedef: %s, scale=%s)",
             settle_log_tag, package, task_id, effective_bounds, target_bounds, scale,
@@ -771,7 +798,7 @@ class EcoWorkspaceManager:
         with contextlib.suppress(Exception):
             await self._adb.shell(f"cmd activity task resizeable {task_id} 2", serial=serial)
         if moved:
-            await self._make_freeform(serial, task_id, package, android_target, wlog, skip_if_ok=True)
+            await self._make_freeform(serial, task_id, package, android_target, wlog, skip_if_ok=True, via="açılış")
 
         if try_bounds_flag and profile is not None and profile.supports_launch_bounds is None:
             supported = await self._probe_launch_bounds_support(serial, task_id, target_bounds, freeform_scale=freeform_scale)
@@ -843,7 +870,7 @@ class EcoWorkspaceManager:
         # The task arrives with the mode it requested where it was — FULLSCREEN when it comes back from the phone (pinned
         # there) or from its own window. `am start --windowingMode 5` above does not change an existing task's mode, so
         # it is set here, together with its box, and verified: the task returns as a freeform window, not fullscreen.
-        await self._make_freeform(serial, task_id, package, android_target, wlog, skip_if_ok=False)
+        await self._make_freeform(serial, task_id, package, android_target, wlog, skip_if_ok=False, via="dock")
 
         ws_url, stream_w, stream_h, effective_bounds = await self._finalize_task_registration(
             window_id, package, task_id, target_bounds, serial, wlog, server,
@@ -853,7 +880,7 @@ class EcoWorkspaceManager:
         return ws_url, stream_w, stream_h, effective_bounds
 
     async def _make_freeform(
-        self, serial: str, task_id: str, package: str, android_bounds: TaskBounds, wlog, *, skip_if_ok: bool,
+        self, serial: str, task_id: str, package: str, android_bounds: TaskBounds, wlog, *, skip_if_ok: bool, via: str = "",
     ) -> None:
         """The task's requested windowing mode → freeform, placed at ``android_bounds`` (Android px) and verified
         (task_windowing.settle_task_windowing: the daemon's WindowContainerTransaction applies mode and box together; the
@@ -866,6 +893,27 @@ class EcoWorkspaceManager:
             )
         except Exception as exc:  # noqa: BLE001 — a failed check must not abort the move; the frame shows what Android gave
             wlog.warning("⚠️ [ECO WORKSPACE:FREEFORM] task=%s serbest kipe alınamadı: %s", task_id, exc)
+        spawn_background(self._report_chrome_later(serial, task_id, package, via, wlog), name=f"ws-chrome-{task_id}")
+
+    # HyperOS draws a freeform window's caption/handle a moment AFTER the transition, so the report is taken late — right after
+    # the move the layers do not exist yet and "chrome=yok" would be a false reading. Two readings tell a caption that comes late
+    # from one that never comes.
+    CHROME_REPORT_DELAYS_S = (1.5, 5.0)
+
+    async def _report_chrome_later(self, serial: str, task_id: str, package: str, via: str, wlog) -> None:
+        """One log line: did the system draw window chrome (HyperOS caption / bottom handle) for this Workspace task, and is it
+        visible. Report-only. Field report 2026-10-16: the same app had a header in one Workspace session and none in another, and
+        the log could not say why (the transfer line prints `render=?` for Workspace tasks)."""
+        waited = 0.0
+        for delay in self.CHROME_REPORT_DELAYS_S:
+            await asyncio.sleep(delay - waited)
+            waited = delay
+            with contextlib.suppress(Exception):
+                _geom, chrome = await surfaceflinger_probe.probe_task_surface(self._adb, serial, str(task_id))
+                wlog.info(
+                    "🪟 [ECO WORKSPACE:CHROME] %s (task=%s%s) +%.1fs %s", package, task_id, f", {via}" if via else "", delay,
+                    surfaceflinger_probe.format_task_chrome(chrome),
+                )
 
     async def _launch_component(self, serial: str, package: str) -> str:
         """`pkg/.Activity` of the app's launcher entry, or the bare package when it can't be resolved."""
@@ -916,7 +964,7 @@ class EcoWorkspaceManager:
                 "🩹 [WS-GUARD] %s (task=%s) Workspace'te bozulmuş: %s — mod=%s bounds=%s display=%s görünür=%s; geri yerleştiriliyor",
                 task.package, task.task_id, reason, state.mode_name, state.bounds, state.display_id, state.visible,
             )
-            await self._make_freeform(serial, task.task_id, task.package, android_box, wlog, skip_if_ok=False)
+            await self._make_freeform(serial, task.task_id, task.package, android_box, wlog, skip_if_ok=False, via="koruma")
             with contextlib.suppress(Exception):
                 await android_shell.bring_to_front(self._adb, serial, task.package, self._display_id)
             effective, new_scale = await self._settled_effective_bounds(serial, task.task_id, task.bounds, wlog)

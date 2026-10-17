@@ -13,6 +13,7 @@ _MIRROR_PACKAGE_PREFIXES = ("com.opendex.screen_mirror", "com.opendex.phone", "p
 # Home-screen apps: one showing on the phone's display is "the user went home", never "this app moved to the phone".
 _LAUNCHER_PACKAGE_PREFIXES = (
     "com.miui.home",                          # Xiaomi / HyperOS
+    "com.mi.android.globallauncher",          # POCO / Xiaomi global ROM (the device's Home in the 2026-10-16 logs)
     "com.google.android.apps.nexuslauncher",  # Pixel
     "com.sec.android.app.launcher",           # Samsung One UI
     "net.oneplus.launcher",                   # OnePlus

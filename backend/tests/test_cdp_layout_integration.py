@@ -21,9 +21,9 @@ import pytest
 from app.config import Settings
 from app.schemas.settings import ProjectSettings
 from app.windows.cdp_refresher import (
-    _build_auto_nudge_script,
     _build_nudge_script,
     _find_active_page_target,
+    _mobile_site_url,
     _send_cdp,
     capture_browser_scroll_state,
     get_browser_auto_attach_watcher,
@@ -421,76 +421,311 @@ class FakeBrowserWatcherWebSocket:
         await self.close()
 
 
-@pytest.mark.asyncio
-async def test_build_auto_nudge_script_neutralizes_tablet_factor():
-    """Validates the auto-nudge script handles phone screen detection and 1.20x tablet zoom neutralization."""
-    script = _build_auto_nudge_script()
-    assert "3.20625 / window.devicePixelRatio" in script
-    assert "webkitTextSizeAdjust = '100%'" in script
-    assert "overflowAnchor = 'none'" in script
-    assert "normZoom.toFixed(6)" in script
+_VERSION = json.dumps({
+    "Browser": "Chrome/155.0.8059.39",
+    "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Mobile Safari/537.36",
+    "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/browser",
+})
+NATIVE = 513 / 160
 
 
-@pytest.mark.asyncio
-async def test_browser_tab_auto_attach_watcher_intercepts_popup_tabs():
-    """Validates that BrowserTabAutoAttachWatcher automatically intercepts new popup tabs via Target.setAutoAttach."""
-    fake_adb = FakeCdpAdb()
-    version_json = json.dumps({
-        "Browser": "Chrome/154.0.0.0",
-        "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/browser",
-    })
-
-    events = [
-        {"id": 1, "result": {}},
-        {
-            "method": "Target.attachedToTarget",
-            "params": {
-                "sessionId": "SES_POPUP_123",
-                "targetInfo": {
-                    "targetId": "TAB_99",
-                    "type": "page",
-                    "url": "https://mangaruhu.com/popup-ad",
-                    "title": "Ad Popup",
-                },
-            },
-        },
-    ]
-
+async def _run_watcher(events, *, phone_dpr=NATIVE, key="chrome-pkg", mode="mobile"):
+    """Starts a watcher against a fake browser that delivers `events`, returns (fake_ws, watcher) once they were consumed."""
     fake_ws = FakeBrowserWatcherWebSocket(events)
-
     with (
-        patch("urllib.request.urlopen", return_value=MagicMock(read=lambda: version_json.encode())),
+        patch("urllib.request.urlopen", return_value=MagicMock(read=lambda: _VERSION.encode())),
         patch("websockets.connect", return_value=fake_ws),
     ):
-        watcher = start_browser_auto_attach_watcher(fake_adb, "SERIAL_123", "chrome_devtools_remote", "win-chrome-1")
-        assert get_browser_auto_attach_watcher("win-chrome-1") is watcher
-
-        # Wait briefly for event loop to process the attached event
-        for _ in range(15):
-            sent_methods = [m.get("method") for m in fake_ws.sent_messages]
-            if "Page.addScriptToEvaluateOnNewDocument" in sent_methods:
+        watcher = start_browser_auto_attach_watcher(FakeCdpAdb(), "SERIAL_123", "chrome_devtools_remote", key, phone_dpr, mode)
+        assert await watcher.wait_ready()
+        for _ in range(50):
+            if not fake_ws.target_events:
                 break
-            await asyncio.sleep(0.04)
+            await asyncio.sleep(0.02)
+        await asyncio.sleep(0.05)
+    return fake_ws, watcher
 
-        # Verify initial setAutoAttach was sent with flatten: true
+
+def _session_methods(fake_ws, session_id):
+    return [m.get("method") for m in fake_ws.sent_messages if m.get("sessionId") == session_id]
+
+
+@pytest.mark.asyncio
+async def test_a_new_tab_is_paused_given_the_phones_identity_and_scale_and_only_then_resumed():
+    """A new tab is created paused: mobile user agent + native scale BEFORE it loads (so it never gets the desktop site or the
+    x1.2 scale), then it is let go. The overrides must come before the resume."""
+    events = [
+        {"id": 1, "result": {}},
+        {"id": 2, "result": {"targetInfos": []}},
+        {"method": "Target.attachedToTarget", "params": {
+            "sessionId": "S_NEW", "waitingForDebugger": True,
+            "targetInfo": {"targetId": "T1", "type": "page", "url": "", "title": ""}}},
+    ]
+    fake_ws, watcher = await _run_watcher(events)
+    try:
         assert fake_ws.sent_messages[0]["method"] == "Target.setAutoAttach"
-        assert fake_ws.sent_messages[0]["params"]["flatten"] is True
+        assert fake_ws.sent_messages[0]["params"] == {"autoAttach": True, "waitForDebuggerOnStart": True, "flatten": True}
+        methods = _session_methods(fake_ws, "S_NEW")
+        assert methods == ["Emulation.setUserAgentOverride", "Emulation.setDeviceMetricsOverride", "Runtime.runIfWaitingForDebugger"]
+        by_method = {m["method"]: m["params"] for m in fake_ws.sent_messages if m.get("sessionId") == "S_NEW"}
+        assert by_method["Emulation.setUserAgentOverride"]["userAgent"].endswith("Mobile Safari/537.36")
+        assert by_method["Emulation.setUserAgentOverride"]["userAgentMetadata"]["mobile"] is True
+        assert by_method["Emulation.setDeviceMetricsOverride"] == {
+            "width": 0, "height": 0, "deviceScaleFactor": NATIVE, "mobile": True,
+        }
+    finally:
+        stop_browser_auto_attach_watcher("chrome-pkg")
 
-        # Verify child session intercepted with Page.enable, addScriptToEvaluateOnNewDocument, and scale factors
-        sent_sessions = [m.get("sessionId") for m in fake_ws.sent_messages if "sessionId" in m]
-        assert "SES_POPUP_123" in sent_sessions
 
-        child_methods = [m.get("method") for m in fake_ws.sent_messages if m.get("sessionId") == "SES_POPUP_123"]
-        assert "Page.enable" in child_methods
-        assert "Page.addScriptToEvaluateOnNewDocument" in child_methods
-        assert "Emulation.setPageScaleFactor" in child_methods
-        assert "Emulation.resetPageScaleFactor" in child_methods
-        assert "Runtime.evaluate" in child_methods
+@pytest.mark.asyncio
+async def test_every_paused_target_is_resumed_not_only_pages():
+    """With waitForDebuggerOnStart every new target pauses (workers, iframes): one that is not resumed hangs for good."""
+    events = [
+        {"id": 1, "result": {}},
+        {"id": 2, "result": {"targetInfos": []}},
+        {"method": "Target.attachedToTarget", "params": {
+            "sessionId": "S_WORKER", "waitingForDebugger": True,
+            "targetInfo": {"targetId": "W1", "type": "service_worker", "url": "https://x.example/sw.js"}}},
+    ]
+    fake_ws, _ = await _run_watcher(events)
+    try:
+        assert _session_methods(fake_ws, "S_WORKER") == ["Runtime.runIfWaitingForDebugger"]
+    finally:
+        stop_browser_auto_attach_watcher("chrome-pkg")
 
-        # Stop watcher
-        stop_browser_auto_attach_watcher("win-chrome-1")
-        assert get_browser_auto_attach_watcher("win-chrome-1") is None
 
+def _tab_events(state: dict, *, then=()):
+    """A browser with one open tab (S_A) that answers the watcher's state question with `state`."""
+    return [
+        {"id": 1, "result": {}},
+        {"id": 2, "result": {"targetInfos": [
+            {"targetId": "TAB_A", "type": "page", "url": "https://a.example/"},
+            {"targetId": "TAB_NEW", "type": "page", "url": "chrome-native://newtab/"},
+        ]}},
+        {"method": "Target.attachedToTarget", "params": {
+            "sessionId": "S_A", "waitingForDebugger": False,
+            "targetInfo": {"targetId": "TAB_A", "type": "page", "url": "https://a.example/"}}},
+        {"id": 4, "result": {"result": {"value": json.dumps(state)}}},
+        *then,
+    ]
+
+
+_TAB = {"mobile": True, "visible": True, "t": 12.5, "playing": True, "y": 300, "url": "https://a.example/watch?v=1", "host": "a.example"}
+
+
+@pytest.mark.asyncio
+async def test_a_desktop_site_tab_in_front_is_reloaded_as_the_mobile_site_with_its_video_put_back():
+    """A tab carried onto the phone as the DESKTOP site cannot be fixed by layout alone (the site differs): the tab the user
+    looks at is reloaded under the phone's user agent, and once loaded its video and scroll are put back."""
+    fake_ws, _ = await _run_watcher(_tab_events(
+        {**_TAB, "mobile": False}, then=[{"method": "Page.loadEventFired", "sessionId": "S_A", "params": {}}],
+    ))
+    try:
+        attach = [m for m in fake_ws.sent_messages if m.get("method") == "Target.attachToTarget"]
+        assert [m["params"]["targetId"] for m in attach] == ["TAB_A"]          # only http(s) pages
+        assert "Runtime.runIfWaitingForDebugger" not in _session_methods(fake_ws, "S_A")   # it was not paused
+        methods = _session_methods(fake_ws, "S_A")
+        assert methods[:3] == ["Runtime.evaluate", "Emulation.setUserAgentOverride", "Emulation.setDeviceMetricsOverride"]
+        by_method = {m["method"]: m["params"] for m in fake_ws.sent_messages if m.get("sessionId") == "S_A"}
+        assert by_method["Emulation.setUserAgentOverride"]["userAgent"].endswith("Mobile Safari/537.36")
+        assert by_method["Emulation.setDeviceMetricsOverride"] == {"width": 0, "height": 0, "deviceScaleFactor": NATIVE, "mobile": True}
+        assert methods.index("Page.reload") > methods.index("Emulation.setUserAgentOverride")
+        restore = [m for m in fake_ws.sent_messages if m.get("sessionId") == "S_A" and m.get("method") == "Runtime.evaluate"][-1]
+        assert restore["params"]["userGesture"] is True
+        assert '"t": 12.5' in restore["params"]["expression"] and '"playing": true' in restore["params"]["expression"]
+    finally:
+        stop_browser_auto_attach_watcher("chrome-pkg")
+
+
+@pytest.mark.asyncio
+async def test_a_tab_the_browser_auto_attached_and_we_attached_is_handled_once():
+    """`Target.setAutoAttach` also attaches the tabs that are open; attaching them again from the target list gave one tab two sessions
+    — two reloads and two restores ran against each other (the half-desktop, half-phone page)."""
+    attached = {"method": "Target.attachedToTarget", "params": {
+        "waitingForDebugger": False, "targetInfo": {"targetId": "TAB_A", "type": "page", "url": "https://a.example/"}}}
+    events = [
+        {"id": 1, "result": {}},
+        {"id": 2, "result": {"targetInfos": [{"targetId": "TAB_A", "type": "page", "url": "https://a.example/"}]}},
+        {**attached, "params": {**attached["params"], "sessionId": "S_AUTO"}},
+        {**attached, "params": {**attached["params"], "sessionId": "S_MANUAL"}},
+        {"id": 4, "result": {"result": {"value": json.dumps({**_TAB, "mobile": False})}}},
+    ]
+    fake_ws, _ = await _run_watcher(events)
+    try:
+        assert _session_methods(fake_ws, "S_MANUAL") == []                       # the second session is left alone
+        assert _session_methods(fake_ws, "S_AUTO").count("Page.reload") == 1
+    finally:
+        stop_browser_auto_attach_watcher("chrome-pkg")
+
+
+@pytest.mark.asyncio
+async def test_the_watcher_settles_after_the_reload_of_the_tab_in_front_has_loaded_and_its_state_was_sent_back():
+    events = _tab_events({**_TAB, "mobile": False}, then=[{"method": "Page.loadEventFired", "sessionId": "S_A", "params": {}}])
+    fake_ws = FakeBrowserWatcherWebSocket(events)
+    with (
+        patch("urllib.request.urlopen", return_value=MagicMock(read=lambda: _VERSION.encode())),
+        patch("websockets.connect", return_value=fake_ws),
+    ):
+        watcher = start_browser_auto_attach_watcher(FakeCdpAdb(), "SERIAL_123", "chrome_devtools_remote", "chrome-pkg", NATIVE)
+        try:
+            assert await watcher.wait_ready()
+            assert await watcher.wait_settled(2.0)
+        finally:
+            stop_browser_auto_attach_watcher("chrome-pkg")
+    assert "Page.reload" in _session_methods(fake_ws, "S_A")
+
+
+@pytest.mark.asyncio
+async def test_with_no_open_tab_the_watcher_is_settled_at_once():
+    fake_ws = FakeBrowserWatcherWebSocket([{"id": 1, "result": {}}, {"id": 2, "result": {"targetInfos": []}}])
+    with (
+        patch("urllib.request.urlopen", return_value=MagicMock(read=lambda: _VERSION.encode())),
+        patch("websockets.connect", return_value=fake_ws),
+    ):
+        watcher = start_browser_auto_attach_watcher(FakeCdpAdb(), "SERIAL_123", "chrome_devtools_remote", "chrome-pkg", NATIVE)
+        try:
+            assert await watcher.wait_settled(1.0)
+        finally:
+            stop_browser_auto_attach_watcher("chrome-pkg")
+
+
+@pytest.mark.parametrize("url, expected", [
+    ("https://www.youtube.com/watch?app=desktop&v=abc&t=5s", "https://www.youtube.com/watch?v=abc&t=5s"),
+    ("https://www.youtube.com/watch?v=abc&app=desktop", "https://www.youtube.com/watch?v=abc"),
+    ("https://www.youtube.com/watch?v=abc", None),
+    ("https://a.example/page?app=mobile", None),
+])
+def test_the_desktop_flag_in_a_page_address_is_dropped_for_the_mobile_site(url, expected):
+    assert _mobile_site_url(url) == expected
+
+
+@pytest.mark.asyncio
+async def test_a_tab_whose_address_forces_the_desktop_site_is_navigated_without_the_flag_not_reloaded():
+    """YouTube's `app=desktop` wins over the user agent: a reload kept the desktop layout on the phone (half-desktop page)."""
+    url = "https://www.youtube.com/watch?app=desktop&v=1"
+    fake_ws, _ = await _run_watcher(_tab_events(
+        {**_TAB, "mobile": False, "url": url}, then=[{"method": "Page.loadEventFired", "sessionId": "S_A", "params": {}}],
+    ))
+    try:
+        methods = _session_methods(fake_ws, "S_A")
+        assert "Page.reload" not in methods
+        nav = [m for m in fake_ws.sent_messages if m.get("sessionId") == "S_A" and m.get("method") == "Page.navigate"]
+        assert [m["params"]["url"] for m in nav] == ["https://www.youtube.com/watch?v=1"]
+    finally:
+        stop_browser_auto_attach_watcher("chrome-pkg")
+
+
+@pytest.mark.asyncio
+async def test_a_desktop_site_tab_behind_is_not_reloaded_and_keeps_the_layout_it_runs_in():
+    fake_ws, _ = await _run_watcher(_tab_events({**_TAB, "mobile": False, "visible": False}))
+    try:
+        by_method = {m["method"]: m["params"] for m in fake_ws.sent_messages if m.get("sessionId") == "S_A"}
+        assert by_method["Emulation.setDeviceMetricsOverride"]["mobile"] is False
+        assert "Page.reload" not in _session_methods(fake_ws, "S_A")
+    finally:
+        stop_browser_auto_attach_watcher("chrome-pkg")
+
+
+@pytest.mark.asyncio
+async def test_a_mobile_tab_on_the_phone_only_gets_the_scale():
+    fake_ws, _ = await _run_watcher(_tab_events(_TAB))
+    try:
+        by_method = {m["method"]: m["params"] for m in fake_ws.sent_messages if m.get("sessionId") == "S_A"}
+        assert by_method["Emulation.setDeviceMetricsOverride"] == {"width": 0, "height": 0, "deviceScaleFactor": NATIVE, "mobile": True}
+        assert "Page.reload" not in _session_methods(fake_ws, "S_A")
+    finally:
+        stop_browser_auto_attach_watcher("chrome-pkg")
+
+
+@pytest.mark.asyncio
+async def test_an_m_site_under_a_desktop_agent_counts_as_the_mobile_site():
+    """A page carried out of a wide window can be the m. site while the browser already reports a desktop agent: it is the SITE that
+    decides, so in a window it is reloaded (and on the phone it is left alone)."""
+    fake_ws, _ = await _run_watcher(_tab_events({**_TAB, "mobile": False, "host": "m.youtube.com"}))
+    try:
+        assert "Page.reload" not in _session_methods(fake_ws, "S_A")        # phone mode: it is the mobile site already
+    finally:
+        stop_browser_auto_attach_watcher("chrome-pkg")
+
+    fake_ws, _ = await _run_watcher(
+        _tab_events({**_TAB, "mobile": False, "host": "m.youtube.com"}), phone_dpr=None, mode="desktop",
+    )
+    try:
+        assert "Page.reload" in _session_methods(fake_ws, "S_A")
+    finally:
+        stop_browser_auto_attach_watcher("chrome-pkg")
+
+
+@pytest.mark.asyncio
+async def test_in_a_window_a_mobile_tab_in_front_gets_the_desktop_agent_and_is_reloaded_without_a_scale():
+    fake_ws, watcher = await _run_watcher(_tab_events(_TAB), phone_dpr=None, mode="desktop")
+    try:
+        assert watcher.mode == "desktop"
+        by_method = {m["method"]: m["params"] for m in fake_ws.sent_messages if m.get("sessionId") == "S_A"}
+        assert "X11; Linux" in by_method["Emulation.setUserAgentOverride"]["userAgent"]
+        assert by_method["Emulation.setUserAgentOverride"]["userAgentMetadata"]["mobile"] is False
+        assert "Emulation.setDeviceMetricsOverride" not in by_method           # the window's own scale is the browser's
+        assert "Page.reload" in _session_methods(fake_ws, "S_A")
+    finally:
+        stop_browser_auto_attach_watcher("chrome-pkg")
+
+
+@pytest.mark.asyncio
+async def test_in_a_window_a_new_tab_starts_with_the_desktop_agent():
+    events = [
+        {"id": 1, "result": {}},
+        {"id": 2, "result": {"targetInfos": []}},
+        {"method": "Target.attachedToTarget", "params": {
+            "sessionId": "S_NEW", "waitingForDebugger": True, "targetInfo": {"targetId": "T1", "type": "page", "url": ""}}},
+    ]
+    fake_ws, _ = await _run_watcher(events, phone_dpr=None, mode="desktop")
+    try:
+        assert _session_methods(fake_ws, "S_NEW") == ["Emulation.setUserAgentOverride", "Runtime.runIfWaitingForDebugger"]
+    finally:
+        stop_browser_auto_attach_watcher("chrome-pkg")
+
+
+@pytest.mark.asyncio
+async def test_stopping_the_watcher_clears_the_scale_override_of_every_tab():
+    """Back in a DeX window the tabs must not keep the phone's scale: the override is cleared while the connection is open."""
+    events = [
+        {"id": 1, "result": {}},
+        {"id": 2, "result": {"targetInfos": []}},
+        {"method": "Target.attachedToTarget", "params": {
+            "sessionId": "S_NEW", "waitingForDebugger": True,
+            "targetInfo": {"targetId": "T1", "type": "page", "url": ""}}},
+    ]
+    fake_ws, watcher = await _run_watcher(events)
+    assert get_browser_auto_attach_watcher("chrome-pkg") is watcher
+    stop_browser_auto_attach_watcher("chrome-pkg")
+    assert get_browser_auto_attach_watcher("chrome-pkg") is None
+    for _ in range(40):
+        if "Emulation.clearDeviceMetricsOverride" in _session_methods(fake_ws, "S_NEW"):
+            break
+        await asyncio.sleep(0.02)
+    assert "Emulation.clearDeviceMetricsOverride" in _session_methods(fake_ws, "S_NEW")
+
+
+@pytest.mark.asyncio
+async def test_without_a_phone_density_only_the_identity_of_new_tabs_is_set():
+    events = [
+        {"id": 1, "result": {}},
+        {"id": 2, "result": {"targetInfos": []}},
+        {"method": "Target.attachedToTarget", "params": {
+            "sessionId": "S_NEW", "waitingForDebugger": True,
+            "targetInfo": {"targetId": "T1", "type": "page", "url": ""}}},
+    ]
+    fake_ws, _ = await _run_watcher(events, phone_dpr=None)
+    try:
+        assert _session_methods(fake_ws, "S_NEW") == ["Emulation.setUserAgentOverride", "Runtime.runIfWaitingForDebugger"]
+    finally:
+        stop_browser_auto_attach_watcher("chrome-pkg")
+
+
+def test_the_nudge_script_no_longer_writes_a_zoom_into_the_page():
+    script = _build_nudge_script(None)
+    assert "3.20625" not in script and "normZoom" not in script and "hasStaleTabletZoom" not in script
+    assert "if (root.style.zoom) root.style.zoom = '';" in script          # residue of the old compensation is cleared
 
 
 class _HangingConnect:

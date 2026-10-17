@@ -1029,9 +1029,10 @@ async def test_workspace_to_phone_does_not_relaunch_when_state_cannot_be_read(ma
     assert calls.count("WCT windowing task-com.app.a 1") == 1  # tek deneme
 
 
-async def test_phone_handoff_freeform_setting_applies_mode_5_with_the_native_hyperos_box(manager):
+async def test_phone_handoff_freeform_setting_applies_mode_5_with_the_native_hyperos_box(manager, monkeypatch):
     from app.storage import settings_db
 
+    monkeypatch.setattr("app.windows.task_windowing.android_shell.is_miui_or_hyperos", AsyncMock(return_value=True))
     project = await settings_db.get_project_settings()
     project.phone_handoff_windowing = "freeform"
     await settings_db.save_project_settings(project)

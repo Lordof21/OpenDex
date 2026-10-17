@@ -51,6 +51,9 @@ class TaskGeometry:
     logical_bounds: Rect          # [80, 80, 1745, 944] - Android WindowManager mantıksal kutusu
     scale_x: float = 1.0          # 0.7000
     scale_y: float = 1.0          # 0.7000
+    # The scale was READ from the task's toDisplayTransform. False: no transform line was found and 1.0 is only the default —
+    # not evidence that the system draws this task unscaled (never remembered as the device's scale).
+    scale_measured: bool = True
     # Window chrome the system itself drew for this task (caption / handle / resize / shadow layers) and the OEM's own marks
     # in its layers (e.g. HyperOS `drawMiuiShadows`): what a phone-side freeform window gets — or does not get — to be moved
     # and resized with. Report-only (see task_windowing._sf_summary); nothing decides on it.
@@ -58,9 +61,9 @@ class TaskGeometry:
     oem_marks: tuple[str, ...] = ()
 
 
-async def probe_omni_geometry(adb, serial: str, task_id: str) -> TaskGeometry | None:
-    """SurfaceFlinger ve WindowManager'ı sorgulayarak task'ın OEM-bağımsız tam geometri profilini üretir.
-    Döküm daemon içinden okunur (`dumpsys` süreci açılmaz); daemon yoksa kabuk komutu."""
+async def read_sf_dump(adb, serial: str) -> str | None:
+    """`dumpsys SurfaceFlinger` metni; döküm daemon içinden okunur (`dumpsys` süreci açılmaz), daemon yoksa kabuk komutu.
+    None: okunamadı."""
     daemon = daemon_registry.live("dump")
     sf_dump = await daemon.dump("SurfaceFlinger") if daemon is not None else None
     if sf_dump is None:
@@ -69,8 +72,18 @@ async def probe_omni_geometry(adb, serial: str, task_id: str) -> TaskGeometry | 
         except Exception as exc:
             log.warning("[Omni-Adapter] dumpsys SurfaceFlinger başarısız: %s", exc)
             return None
+    return sf_dump
 
+
+async def probe_omni_geometry(adb, serial: str, task_id: str) -> TaskGeometry | None:
+    """SurfaceFlinger ve WindowManager'ı sorgulayarak task'ın OEM-bağımsız tam geometri profilini üretir."""
+    sf_dump = await read_sf_dump(adb, serial)
+    return None if sf_dump is None else parse_task_geometry(sf_dump, task_id)
+
+
+def parse_task_geometry(sf_dump: str, task_id: str) -> TaskGeometry | None:
     scale_x, scale_y = 1.0, 1.0
+    scale_measured = False
     tx, ty = 0.0, 0.0
     render_bounds: Rect | None = None
     logical_w, logical_h = 0, 0
@@ -114,6 +127,7 @@ async def probe_omni_geometry(adb, serial: str, task_id: str) -> TaskGeometry | 
             if tr := _TRANSFORM_SCALE_RE.search(line):
                 scale_x = float(tr.group(1))
                 scale_y = float(tr.group(2))
+                scale_measured = True
                 tx = float(tr.group(3))
                 ty = float(tr.group(4))
 
@@ -173,9 +187,79 @@ async def probe_omni_geometry(adb, serial: str, task_id: str) -> TaskGeometry | 
         logical_bounds=logical_bounds,
         scale_x=scale_x,
         scale_y=scale_y,
+        scale_measured=scale_measured,
         decor_layers=tuple(decor_layers),
         oem_marks=tuple(oem_marks),
     )
+
+
+@dataclass(frozen=True)
+class ChromeLayer:
+    """One window-chrome layer the system drew for a task (a HyperOS freeform window's `Miui Caption` handle, its bottom
+    resize handle, shadows…) as SurfaceFlinger reports it."""
+
+    name: str                       # "Miui Caption of Task=309"
+    visible: bool                   # SurfaceFlinger prints a `visible reason=` line only for a layer that is on screen
+    alpha: float | None = None
+    size: tuple[int, int] | None = None   # its buffer, px
+
+
+_LAYER_HEADER_RE = re.compile(r"^  Layer \[(\d+)\] (.+?)(?:#\d+)?\s*$")
+_ALPHA_RE = re.compile(r"\balpha=([\d.]+)")
+_BUFFER_SIZE_RE = re.compile(r"geomBufferSize=\[\s*\d+\s+\d+\s+(\d+)\s+(\d+)\s*\]")
+
+
+def parse_task_chrome(sf_dump: str, task_id: str) -> tuple[ChromeLayer, ...]:
+    """The window-chrome layers of `task_id` in a SurfaceFlinger dump — independent of whether the task's content layer could
+    be measured (probe_omni_geometry gives up without a render box; a Workspace task's chrome is still worth reporting: whether
+    HyperOS drew its caption for the task is exactly what differs between a window that has a header and one that has none).
+    A layer is listed once (the dump repeats every layer further down, in its input list)."""
+    task_pattern = re.compile(rf"\bTask[ =#]+{re.escape(str(task_id))}\b", re.IGNORECASE)
+    lines = sf_dump.splitlines()
+    seen: set[str] = set()
+    found: list[ChromeLayer] = []
+    for i, line in enumerate(lines):
+        header = _LAYER_HEADER_RE.match(line)
+        if header is None or header.group(1) in seen:
+            continue
+        name = header.group(2)
+        lowered = name.lower()
+        if not task_pattern.search(name) or not any(h in lowered for h in _DECOR_NAME_HINTS):
+            continue
+        seen.add(header.group(1))
+        visible, alpha, size = False, None, None
+        for follow in lines[i + 1:]:
+            if follow.startswith("  Layer [") or follow.startswith("  - Output Layer") or (follow.strip() and not follow.startswith(" ")):
+                break
+            visible = visible or "visible reason=" in follow
+            if alpha is None and (m := _ALPHA_RE.search(follow)):
+                alpha = float(m.group(1))
+            if size is None and (m := _BUFFER_SIZE_RE.search(follow)):
+                size = (int(m.group(1)), int(m.group(2)))
+        found.append(ChromeLayer(name=name, visible=visible, alpha=alpha, size=size))
+        if len(found) >= _MAX_REPORTED_NAMES * 2:
+            break
+    return tuple(found)
+
+
+def format_task_chrome(layers: tuple[ChromeLayer, ...]) -> str:
+    """One log field: `chrome=yok` or `chrome=[Miui Caption of Task=309 60x12 görünür α1.00; …]`."""
+    if not layers:
+        return "chrome=yok"
+    parts = []
+    for layer in layers:
+        size = f" {layer.size[0]}x{layer.size[1]}" if layer.size else ""
+        alpha = f" α{layer.alpha:.2f}" if layer.alpha is not None else ""
+        parts.append(f"{layer.name}{size} {'görünür' if layer.visible else 'gizli'}{alpha}")
+    return "chrome=[" + "; ".join(parts) + "]"
+
+
+async def probe_task_surface(adb, serial: str, task_id: str) -> tuple[TaskGeometry | None, tuple[ChromeLayer, ...]]:
+    """Geometry and window chrome of a task from ONE SurfaceFlinger dump: (None, ()) when the dump cannot be read."""
+    sf_dump = await read_sf_dump(adb, serial)
+    if sf_dump is None:
+        return None, ()
+    return parse_task_geometry(sf_dump, task_id), parse_task_chrome(sf_dump, task_id)
 
 
 Transform = tuple[float, float, float, float]  # (scale_x, scale_y, tx, ty)

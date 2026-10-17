@@ -264,6 +264,30 @@ class Settings(BaseSettings):
     # and the start of the next; requests overtaken meanwhile are dropped (newest wins). Caps the phone at ~3
     # reconfigurations a second; a calm single resize waits 0. 0 = no wait, newest-wins still applies.
     RESIZE_MIN_INTERVAL_S: float = 0.3
+    # A virtual-display resize leaks a one-frame snapshot of the app onto the PHONE's own screen (HyperOS/Android 16: the WM
+    # display-change transition; measured 2026-10-15). With this on, the phone's `transition_animation_scale` is held at 0 around
+    # a resize (and the burst of resizes of a drag) and put back `RESIZE_TRANSITION_TAIL_S` after the last one — see
+    # windows/transition_gate.py. Off = the system's own value is never touched.
+    RESIZE_SUPPRESS_TRANSITION: bool = True
+    # Moving an app between the PC window and the phone makes Android recreate its activity (the app does not declare the display's
+    # touchscreen / colour-mode change), which STOPS the video it was playing — position kept in its media session. With this on,
+    # a session that was playing before the move and is stopped after it is resumed (play + seek to where it stopped);
+    # one that kept playing, and one the user had paused, are left alone. See windows/playback_continuity.py.
+    PLAYBACK_CONTINUITY: bool = True
+    # The same crossing also drops an app's watch page to its home feed + a mini player. With this on, an app that reports (in its own
+    # AssistContent, read over Binder, no UI touched) that its player is the full page has that page's web address read before the
+    # move and reopened after it with a deep link (`am start -a VIEW -d <address> -p <package>`; YouTube also gets `&t=<second>`).
+    # Measured on YouTube 21.x; needs the daemon's `assist_content`, without it the plain resume above is used. See
+    # windows/playback_continuity.py.
+    PLAYBACK_DEEP_LINK: bool = True
+    # Closing a window (X) used to destroy the app's task with its virtual display (scrcpy's default vd_destroy_content): the next
+    # open was a cold start and every bit of state (a paused video, a half-written message, a scroll position) was gone, while the
+    # same app left on the phone resumes from Recents. With this on, X moves the task onto the phone's own screen and sends it to
+    # the background first — exactly where an app the user left on the phone is — and the next open of it is the warm move that
+    # already works for apps open on the phone. A playing app is paused (closing a window must not leave sound running).
+    # See WindowManager._keep_app_on_phone.
+    CLOSE_KEEPS_APP: bool = True
+    RESIZE_TRANSITION_TAIL_S: float = 1.0
     # Keyframe on demand: least time between two requests for one window. The encoder's own keyframe interval is 60 s on
     # the patched server (10 s upstream), so a decoder that lost its reference chain would otherwise show a frozen
     # picture for up to that long. The interval keeps a stalled network from turning requests into a storm.
@@ -282,9 +306,6 @@ class Settings(BaseSettings):
     # QUIET: a burst of density changes (dragging a DP slider) collapses into one restart after this much silence.
     # MIN_GAP: never restart the same app twice within this window (restart-loop guard).
     DENSITY_REFRESH_VERIFY_TIMEOUT_S: float = 6.0
-    # How long we wait for the system event log to show the in-place activity relaunch (`am update-appinfo`) before
-    # escalating to a process restart.
-    DENSITY_REFRESH_RELAUNCH_PROOF_S: float = 2.5
     DENSITY_REFRESH_POLL_S: float = 0.25     # poll interval while waiting for the app's process identity to change
     DENSITY_REFRESH_QUIET_S: float = 1.2     # a burst of density changes becomes ONE restart after this much silence
     DENSITY_REFRESH_MIN_GAP_S: float = 5.0   # never restart the same app twice within this many seconds

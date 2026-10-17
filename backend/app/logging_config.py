@@ -108,7 +108,7 @@ class _Formatter(logging.Formatter):
 
 # İzleme kategorisi → ilgili logger önekleri. Terminalde bu önekler için INFO/DEBUG açılır.
 TRACE_CATEGORIES: dict[str, tuple[str, ...]] = {
-    "handoff": ("app.windows.handoff_manager",),
+    "handoff": ("app.windows.handoff_manager", "app.windows.playback_continuity"),
     "teleport": (
         "app.windows.task_teleporter", "app.windows.task_windowing", "app.windows.task_movement",
         "app.windows.surfaceflinger_probe",
@@ -117,9 +117,10 @@ TRACE_CATEGORIES: dict[str, tuple[str, ...]] = {
     "workspace": ("app.windows.eco_workspace", "app.windows.workspace_slots"),
     "windows": (
         "app.windows.window_manager", "app.windows.session_reconfigure", "app.windows.budget_reallocator",
+        "app.windows.transition_gate",
         "app.windows.session_table", "app.windows.encoder_stress_test", "app.windows.display_ids",
     ),
-    "density": ("app.windows.density_reconciler", "app.windows.app_restart"),
+    "density": ("app.windows.density_reconciler", "app.windows.app_restart", "app.windows.parked_apps"),
     "continuity": ("app.windows.app_continuity", "app.windows.app_presence"),
     "web": ("app.windows.cdp_refresher", "app.windows.web_inspector", "app.windows.web_reload"),
     "power": ("app.device.display_power", "app.device.phone_awake"),
@@ -139,7 +140,7 @@ TRACE_CATEGORIES: dict[str, tuple[str, ...]] = {
     "adb": (
         "app.device.adb", "app.device.device_manager", "app.device.device_tracker", "app.device.capability_probe",
         "app.device.android_shell", "app.device.tools_jar", "app.device.xml_inspector", "app.device.network_utils",
-        "app.device.daemon_auth", "app.device.device_queries",
+        "app.device.daemon_auth", "app.device.device_queries", "app.device.usb_stability",
     ),
     "scrcpy": ("app.windows.scrcpy_launcher",),
     "input": ("app.input.touch_control", "app.input.keyboard_control", "app.input.keyboard_setup"),

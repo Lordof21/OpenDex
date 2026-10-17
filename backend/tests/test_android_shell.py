@@ -122,6 +122,28 @@ async def test_unlock_display0_gesture_navigation_keeps_the_freeform_mode():
     assert adb.calls[0].startswith("am start --display 0 -a android.intent.action.MAIN -c android.intent.category.HOME; sleep 0.15; ")
 
 
+async def test_unlock_display0_gesture_navigation_keeps_the_users_open_app_behind_the_target():
+    """Log 2026-10-16: Home as the intermediate hid the app the user had open on the phone (YouTube Music) behind the launcher.
+    The foreground task is raised by id instead, so a freeform handoff floats over it."""
+    adb = _Adb("Starting: Intent")
+    daemon = SimpleNamespace(reorder_task=AsyncMock(return_value=True))
+    out = await android_shell.unlock_display0_gesture_navigation(
+        adb, "SER", "com.android.vending", windowing_mode=5, behind_task_id=371, daemon=daemon,
+    )
+    assert out == "Starting: Intent"
+    daemon.reorder_task.assert_awaited_once_with(371, front=True)
+    assert len(adb.calls) == 1 and "category.HOME" not in adb.calls[0]
+    assert adb.calls[0].startswith("am start --display 0 --windowingMode 5 ")
+
+
+async def test_unlock_display0_gesture_navigation_falls_back_to_home_when_the_task_cannot_be_raised():
+    adb = _Adb("")
+    for daemon in (SimpleNamespace(reorder_task=AsyncMock(return_value=False)), SimpleNamespace(reorder_task=AsyncMock(side_effect=RuntimeError("x")))):
+        adb.calls.clear()
+        await android_shell.unlock_display0_gesture_navigation(adb, "SER", "com.android.chrome", behind_task_id=5, daemon=daemon)
+        assert "category.HOME; sleep 0.15; " in adb.calls[0]
+
+
 async def test_set_display_density_prefers_the_daemon():
     adb = _Adb("")
     daemon = SimpleNamespace(is_connected=True, set_display_density=AsyncMock(return_value=True))

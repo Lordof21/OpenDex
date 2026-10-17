@@ -169,6 +169,7 @@ async def _wait_for_app_lock(ctx: Any, pkg: str, disp_id: str) -> bool:
         p1_dpi=session.dpi,
         daemon=getattr(ctx, "daemon_client", None),
         is_alive=lambda: ctx.window_manager.get_session(win_id) is session,
+        display_of=lambda: str(session.state.display_id) if getattr(session.state, "display_id", None) else None,
     )
 
 
@@ -274,8 +275,13 @@ async def _execute_deep_navigation(ctx: Any, pkg: str, disp_id: str | None, targ
         if not landed and await device_queries.app_lock_visible(ctx.adb, ctx.serial, timeout_s=1.5):
             log.info("🔒 [BİLDİRİM HEDEFİ] %s telefonda kilitli; AppLock bekleyicisi devreye giriyor", pkg)
             if await _wait_for_app_lock(ctx, pkg, disp_id):
-                res = await notification_invoker.launch(ctx.adb, ctx.serial, target_key, disp_id)
-                landed = bool(res.get("ok")) and await _landed_on_display(ctx, pkg, disp_id, attempts=8)
+                # The AppLock hands the original intent back after the unlock: the tapped notification's target is
+                # already open (and the app has usually dismissed the notification itself). Sending the PendingIntent again
+                # — or, when it is gone, the safe launch below — would only start the app over at its home page.
+                landed = await _landed_on_display(ctx, pkg, disp_id, attempts=8)
+                if not landed:
+                    res = await notification_invoker.launch(ctx.adb, ctx.serial, target_key, disp_id)
+                    landed = bool(res.get("ok")) and await _landed_on_display(ctx, pkg, disp_id, attempts=8)
 
         if kind != "activity" and await find_task_id_for_package(ctx, pkg, display_id="0") is not None:
             log.warning("⚠️ [BİLDİRİM HEDEFİ] pending_intent=%s: hedef telefonun kendi ekranında açılmış olabilir (pkg=%s)", kind, pkg)
