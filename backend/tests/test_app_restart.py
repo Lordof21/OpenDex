@@ -1,4 +1,4 @@
-"""app_restart.py — "Uygulamayı yeniden başlat": process restart → plan B (onDestroy→onCreate) → cold start of an app that is
+"""app_restart.py — "Uygulamayı yeniden başlat": process restart → cold start of an app that is
 not running at all. Verified outcomes, never a hopeful "requested"."""
 from unittest.mock import AsyncMock, MagicMock
 
@@ -11,7 +11,6 @@ from app.windows import app_restart as ar
 from app.windows.density_reconciler import (
     NO_PROCESS,
     NO_TASK,
-    RELAUNCHED,
     RESTARTED,
     UNCONFIRMED,
     RefreshOutcome,
@@ -50,13 +49,6 @@ async def test_a_verified_process_restart_is_the_answer_and_nothing_else_runs():
 
     assert outcome == ar.AppRestartOutcome("restarted", PKG) and outcome.ok
     density.settle.assert_awaited_once_with(PKG, before=None, display="15", reason="manual", force=True)
-    start.assert_not_awaited()
-
-
-async def test_plan_b_in_place_relaunch_is_reported_as_relaunched():
-    outcome, start, _ = await _run(_session(), _density(RefreshOutcome(RELAUNCHED, PKG, detail="proof")))
-
-    assert outcome.action == "relaunched" and outcome.ok and outcome.detail == "proof"
     start.assert_not_awaited()
 
 

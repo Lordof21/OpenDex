@@ -34,6 +34,10 @@ async def test_list_reports_kind_size_mtime_hidden(env):
     fs, base, _ = env
     (base / "a.txt").write_bytes(b"12345")
     (base / ".hidden").write_text("h")
+    if sys.platform == "win32":   # there "hidden" is the file attribute (Explorer ignores a leading dot), not the name
+        import ctypes
+
+        assert ctypes.windll.kernel32.SetFileAttributesW(str(base / ".hidden"), 0x02)
     (base / "sub").mkdir()
     os.utime(base / "a.txt", (1_700_000_000, 1_700_000_000))
     entries = {e.name: e for e in await collect(fs.list(str(base)))}

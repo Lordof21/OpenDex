@@ -9,7 +9,7 @@ from app.config import resolve_backend_root
 def test_dev_interpreter_uses_source_tree():
     """Plain `python -m app.main`: neither marker set — backend/ is two parents up from this file."""
     got = resolve_backend_root(compiled=False, frozen=False, executable="/usr/bin/python3", meipass=None, file="/src/backend/app/config.py")
-    assert got == Path("/src/backend")
+    assert got == Path("/src/backend").resolve()   # resolve() like the code does (Windows adds the drive letter)
 
 
 def test_nuitka_onefile_uses_the_exes_own_directory():
@@ -25,7 +25,7 @@ def test_nuitka_onefile_uses_the_exes_own_directory():
         meipass=None,
         file="/nuitka-internal/app/config.py",  # must be ignored when compiled=True
     )
-    assert got == Path("/opt/OpenDeX")
+    assert got == Path("/opt/OpenDeX").resolve()   # resolve() like the code does: on Windows it adds the drive letter
 
 
 def test_pyinstaller_onefile_uses_meipass_not_the_exe_directory():
@@ -51,7 +51,7 @@ def test_compiled_takes_priority_over_frozen():
         meipass="/tmp/_MEI999",
         file="/tmp/_MEI999/app/config.py",
     )
-    assert got == Path("/opt/OpenDeX")
+    assert got == Path("/opt/OpenDeX").resolve()   # resolve() like the code does: on Windows it adds the drive letter
 
 
 def test_frozen_without_meipass_fails_loudly_instead_of_guessing():

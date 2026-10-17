@@ -541,7 +541,7 @@ async def test_the_load_monitor_measures_through_the_daemon_without_forking_anyt
 # ---------------------------------------------------------------- density proof, tasks, focus, power
 
 
-async def test_the_relaunch_proof_reads_the_event_log_through_the_daemon():
+async def test_the_rebuild_proof_reads_the_event_log_through_the_daemon():
     lines = [
         "1790777475.253100 30945 30945 I wm_on_destroy_called: [0,34230256,com.app.Main,performDestroy,24]",
         "1790777475.339200 30945 30945 I wm_on_create_called: [0,34230256,com.app.Main,performCreate,81]",
@@ -549,18 +549,18 @@ async def test_the_relaunch_proof_reads_the_event_log_through_the_daemon():
     daemon = FakeDaemon(event_log=lambda since, tags: lines)
     adb = RecordingAdb()
     rec = DensityReconciler(adb, Settings(), serial_getter=lambda: "SER", daemon_getter=lambda: daemon)
-    proof, _ = await rec._relaunch_proof("com.app", 1790777475.0, 30945, assets_only=False)
+    proof = await rec._rebuild_proof("com.app", 1790777475.0, 30945)
     assert proof == "app: pid 30945 recreated com.app.Main"
     (_, since, tags), = daemon.calls
     assert since == 1790777474.0 and "wm_relaunch_activity" in tags
     assert adb.commands == []
 
 
-async def test_the_relaunch_proof_falls_back_to_logcat_without_the_event_log_capability():
+async def test_the_rebuild_proof_falls_back_to_logcat_without_the_event_log_capability():
     adb = RecordingAdb({"logcat -b events": ""})
     rec = DensityReconciler(adb, Settings(), serial_getter=lambda: "SER",
                             daemon_getter=lambda: FakeDaemon(caps={"find_task"}))
-    await rec._relaunch_proof("com.app", 1.0, 1)
+    await rec._rebuild_proof("com.app", 1.0, 1)
     assert any("logcat -b events" in c for c in adb.commands)
 
 

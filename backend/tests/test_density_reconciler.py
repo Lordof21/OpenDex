@@ -27,7 +27,6 @@ from app.windows.density_reconciler import (
     NO_DAEMON,
     NO_PROCESS,
     NO_TASK,
-    RELAUNCHED,
     RESTARTED,
     UNCONFIRMED,
     UNSUPPORTED,
@@ -45,22 +44,12 @@ class FakePhone:
 
     def __init__(
         self, package: str = PKG, *, pid: int = 4000, ticks: int = 90_000, alive: bool = True,
-        relaunch_works: bool = True, app_side: bool = False,
     ):
         self.package, self.pid, self.ticks, self.alive = package, pid, ticks, alive
         self.kill_cmds: list[str] = []
         self.kill_works = True
         self.commands: list[str] = []
         self.wait_cmds = 0  # on-phone waits answered (one RPC each, however long the wait)
-        # `am update-appinfo`: recreates the visible activities in place; the system logs a wm_relaunch_activity event
-        # (config mask with CONFIG_ASSETS_PATHS). `relaunch_works=False` models a ROM where nothing is relaunched/logged.
-        self.relaunch_works = relaunch_works
-        # `app_side=True` models Android 11 (and 10): the SYSTEM logs nothing, the APP itself destroys and recreates its
-        # activities and writes wm_on_destroy_called / wm_on_create_called (`uid pid tid` columns) from its own pid.
-        self.app_side = app_side
-        self.app_events_pid: int | None = None  # None → the app's current pid
-        self.app_emit_create = True
-        self.relaunch_cmds: list[str] = []
         self.event_lines: list[str] = []
         # `date +%s.%N`: the device clock (the host's clock here); None models an old toybox without sub-seconds.
         self.precise_clock = True
@@ -99,22 +88,6 @@ class FakePhone:
             if self.kill_works:
                 self.alive = False
             return ""
-        if "am update-appinfo" in command:
-            self.relaunch_cmds.append(command)
-            now = time.time()
-            if self.relaunch_works and self.app_side:
-                # Android 11: the APP relaunches (same token), `[token,class,reason]` payload, `uid pid tid` columns.
-                pid = self.pid if self.app_events_pid is None else self.app_events_pid
-                cls = f"{self.package}.Main"
-                self.event_lines.append(f"{now + 0.1:.3f} 10123 {pid} {pid} I wm_on_destroy_called: [123,{cls},performDestroy]")
-                if self.app_emit_create:
-                    self.event_lines.append(f"{now + 0.2:.3f} 10123 {pid} {pid} I wm_on_create_called: [123,{cls},performCreate]")
-            elif self.relaunch_works:
-                self.event_lines.append(
-                    f"{now + 0.1:.3f}  1000  1234  1250 I wm_relaunch_activity: [0,7,42,{self.package}/.Main,80000000]"
-                )
-            clock = f"{now:.9f}" if self.precise_clock else f"{int(now)}"
-            return f"{clock}\nPackages updated with most recent ApplicationInfos.\n"
         if command.strip() == "date +%s.%N":
             return f"{time.time():.9f}\n" if self.precise_clock else f"{int(time.time())}.N\n"
         if "logcat -b events" in command:
@@ -125,14 +98,14 @@ class FakePhone:
 class FakeDaemon:
     is_connected = True
 
-    def __init__(self, phone: FakePhone, *, handles_density=True, restart_ok=True, reborn=True, playing=None):
+    def __init__(self, phone: FakePhone, *, handles_density=True, restart_ok=True, reborn=True, media=None):
         self.phone, self.handles_density, self.restart_ok, self.reborn = phone, handles_density, restart_ok, reborn
-        self.playing = playing  # what the phone says about the app's media session: True / False / None (unknown)
+        self.media = media  # does the app hold a media session (playing OR paused)? True / False / None (unknown)
         self.restarts: list[str] = []
         self.info_calls: list[str] = []
 
-    async def is_package_playing(self, package):
-        return self.playing
+    async def holds_media_session(self, package):
+        return self.media
 
     async def task_density_info(self, tid):
         self.info_calls.append(str(tid))
@@ -165,24 +138,15 @@ def tasks(monkeypatch):
     return table
 
 
-def make(phone: FakePhone, daemon=None, *, api: int | None = None, inplace=None, learned=None, **settings) -> DensityReconciler:
-    """``inplace``: what the device profile remembers about `am update-appinfo`; ``learned``: list collecting what the
-    reconciler learns (the profile setter)."""
+def make(phone: FakePhone, daemon=None, *, api: int | None = None, **settings) -> DensityReconciler:
     cfg = Settings(
         DENSITY_REFRESH_VERIFY_TIMEOUT_S=settings.pop("verify", 0.6),
-        DENSITY_REFRESH_RELAUNCH_PROOF_S=settings.pop("proof", 0.3),
         DENSITY_REFRESH_POLL_S=0.05,
         DENSITY_REFRESH_QUIET_S=settings.pop("quiet", 0.05),
         DENSITY_REFRESH_MIN_GAP_S=settings.pop("gap", 0.0),
         DENSITY_ADAPT_WAIT_S=settings.pop("adapt", 0.15),
     )
-
-    async def remember(value):
-        if learned is not None:
-            learned.append(value)
-
-    return DensityReconciler(phone, cfg, serial_getter=lambda: "SER", daemon_getter=lambda: daemon,
-                             api_level_getter=lambda: api, inplace_getter=lambda: inplace, inplace_setter=remember)
+    return DensityReconciler(phone, cfg, serial_getter=lambda: "SER", daemon_getter=lambda: daemon, api_level_getter=lambda: api)
 
 
 # ---------------------------------------------------------------- probe parsing
@@ -210,8 +174,8 @@ def test_parse_identity_without_stat_line_still_identifies_by_pid():
 # ---------------------------------------------------------------- settle: the decision
 
 
-async def test_same_process_that_lived_through_the_change_gets_a_verified_process_restart_when_the_relaunch_is_unproven(tasks):
-    phone = FakePhone(relaunch_works=False)  # nothing in the event log → escalate to the process restart
+async def test_same_process_that_lived_through_the_change_gets_a_verified_process_restart(tasks):
+    phone = FakePhone()
     daemon = FakeDaemon(phone)
     rec = make(phone, daemon)
     before = await rec.snapshot(PKG)
@@ -220,18 +184,17 @@ async def test_same_process_that_lived_through_the_change_gets_a_verified_proces
     outcome = await rec.settle(PKG, before=before, display="9", reason="test")
 
     assert outcome.action == RESTARTED and outcome.restarted
-    assert len(phone.relaunch_cmds) == 1  # the gentle tier was tried first
     assert outcome.identity == ProcessIdentity(4001, 90_500)
     assert daemon.restarts == ["42"]
     # The task is resolved on the TARGET display at decision time, not remembered from before a move.
     assert (PKG, "9") in tasks["calls"]
 
 
-async def test_a_playing_app_is_never_process_restarted_when_the_relaunch_is_unproven(tasks):
+async def test_an_app_with_a_media_session_is_never_process_restarted(tasks):
     """The YouTube Music report: the process that lived through the density change carried the playback service, and the
-    escalation to a process restart ended the music. A playing app is left alive instead (kept_playing)."""
-    phone = FakePhone(relaunch_works=False)
-    daemon = FakeDaemon(phone, playing=True)
+    process restart ended the music. An app holding a media session is left alive instead (kept_playing)."""
+    phone = FakePhone()
+    daemon = FakeDaemon(phone, media=True)
     rec = make(phone, daemon)
     before = await rec.snapshot(PKG)
 
@@ -242,36 +205,51 @@ async def test_a_playing_app_is_never_process_restarted_when_the_relaunch_is_unp
     assert (phone.pid, phone.ticks) == (4000, 90_000)  # the very same process is still running
 
 
-async def test_a_playing_video_player_keeps_the_old_process_restart(tasks):
-    """YouTube plays a video and must still be reborn under the new density (its layout stays phone-sized otherwise)."""
-    phone = FakePhone("com.google.android.youtube", relaunch_works=False)
-    daemon = FakeDaemon(phone, playing=True)
+async def test_a_video_player_with_a_session_is_not_process_restarted_either(tasks):
+    """YouTube used to be exempt (restart = state-preserving, re-laid the page out). Measured on a phone the restart killed the
+    process and the video; the display change rebuilds its activity anyway and playback_continuity.py resumes the video where it
+    stopped. So a video player is protected like any app that holds a media session (2026-10-15)."""
+    phone = FakePhone("com.google.android.youtube")
+    daemon = FakeDaemon(phone, media=True)
     rec = make(phone, daemon)
     before = await rec.snapshot("com.google.android.youtube")
 
     outcome = await rec.settle("com.google.android.youtube", before=before, display="9", reason="open")
 
-    assert outcome.action == RESTARTED and daemon.restarts == ["42"]
+    assert outcome.action == KEPT_PLAYING and daemon.restarts == []
 
 
-async def test_a_playing_app_with_a_hard_refresh_policy_is_still_not_killed(tasks, monkeypatch):
+async def test_an_app_with_a_media_session_and_a_hard_refresh_policy_is_still_not_killed(tasks, monkeypatch):
     phone = FakePhone()
-    daemon = FakeDaemon(phone, playing=True)
+    daemon = FakeDaemon(phone, media=True)
     rec = make(phone, daemon)
-    monkeypatch.setattr(rec, "_policy", AsyncMock(return_value=(True, True)))  # density_refresh_hard on: no gentle tier first
+    monkeypatch.setattr(rec, "_policy", AsyncMock(return_value=(True, True)))  # density_refresh_hard on
     before = await rec.snapshot(PKG)
 
     outcome = await rec.settle(PKG, before=before, display="9", reason="open")
 
-    assert daemon.restarts == []
-    # The in-place relaunch (the only thing allowed) was tried inside the guard and proven → the layout is rebuilt.
-    assert outcome.action == RELAUNCHED and outcome.detail.startswith("playing;")
+    assert outcome.action == KEPT_PLAYING and daemon.restarts == []
+    assert (phone.pid, phone.ticks) == (4000, 90_000)
+
+
+async def test_a_paused_video_is_protected_like_a_playing_one(tasks):
+    """Field report (2026-10-16): a window of a PAUSED YouTube video was closed and opened again and the video was gone — the
+    open's density settle restarted the process, and a pause had taken away the 'playing' protection. The guard asks whether the
+    app HOLDS a media session (playing or paused), and the daemon answers True for a paused one (test_media_state)."""
+    phone = FakePhone("com.google.android.youtube")
+    daemon = FakeDaemon(phone, media=True)
+    rec = make(phone, daemon)
+    before = await rec.snapshot("com.google.android.youtube")
+
+    outcome = await rec.settle("com.google.android.youtube", before=before, display="9", reason="open")
+
+    assert outcome.action == KEPT_PLAYING and outcome.detail == "media_session" and daemon.restarts == []
     assert (phone.pid, phone.ticks) == (4000, 90_000)
 
 
 async def test_the_users_explicit_restart_is_not_second_guessed_by_the_playback_guard(tasks):
     phone = FakePhone()
-    daemon = FakeDaemon(phone, playing=True)
+    daemon = FakeDaemon(phone, media=True)
     rec = make(phone, daemon)
 
     outcome = await rec.settle(PKG, before=None, display="9", reason="manual", force=True)
@@ -279,12 +257,12 @@ async def test_the_users_explicit_restart_is_not_second_guessed_by_the_playback_
     assert outcome.action == RESTARTED and daemon.restarts == ["42"]
 
 
-@pytest.mark.parametrize("playing", [False, None])
-async def test_a_silent_or_unknown_app_keeps_the_process_restart_escalation(tasks, playing):
-    """The guard needs a POSITIVE answer: an app the phone says is not playing (or a daemon that cannot tell) is
+@pytest.mark.parametrize("media", [False, None])
+async def test_an_app_without_a_session_or_an_unknown_one_is_process_restarted(tasks, media):
+    """The guard needs a POSITIVE answer: an app the phone says holds no media session (or a daemon that cannot tell) is
     reconciled exactly as before."""
-    phone = FakePhone(relaunch_works=False)
-    daemon = FakeDaemon(phone, playing=playing)
+    phone = FakePhone()
+    daemon = FakeDaemon(phone, media=media)
     rec = make(phone, daemon)
     before = await rec.snapshot(PKG)
 
@@ -301,10 +279,8 @@ async def test_declared_density_is_not_a_package_discriminator(tasks, package):
 
     outcome = await rec.settle(package, before=before, display="9", reason="test")
 
-    assert outcome.action == RELAUNCHED
-    assert outcome.detail.startswith(f"system: {package}/")
-    assert daemon.restarts == []  # no process was killed
-    assert phone.pid == 4000
+    assert outcome.action == RESTARTED and daemon.restarts == ["42"]
+    assert phone.pid == 4001
 
 
 async def test_activity_that_does_not_declare_density_is_left_to_android(tasks):
@@ -326,11 +302,11 @@ async def test_unknown_declaration_is_refreshed_rather_than_trusted(tasks):
     rec = make(phone, daemon)
     before = await rec.snapshot(PKG)
 
-    assert (await rec.settle(PKG, before=before, display="9", reason="test")).action == RELAUNCHED
+    assert (await rec.settle(PKG, before=before, display="9", reason="test")).action == RESTARTED
 
 
 async def test_force_is_the_hard_refresh_and_skips_every_filter(tasks):
-    """The user's explicit refresh: no did-it-live-through check, no declaration filter, no gentle tier."""
+    """The user's explicit refresh: no did-it-live-through check, no declaration filter."""
     phone = FakePhone()
     daemon = FakeDaemon(phone, handles_density=False)
     rec = make(phone, daemon)
@@ -339,144 +315,13 @@ async def test_force_is_the_hard_refresh_and_skips_every_filter(tasks):
 
     assert outcome.action == RESTARTED
     assert daemon.restarts == ["42"]
-    assert phone.relaunch_cmds == []
 
-
-async def test_gentle_tier_recreates_the_activities_in_place_and_leaves_the_process_alone(tasks):
-    """`am update-appinfo` bumps the assets sequence (CONFIG_ASSETS_PATHS, not declarable in configChanges), so Android
-    relaunches every visible activity of the package whatever it declares — without killing the process."""
-    phone = FakePhone()
-    daemon = FakeDaemon(phone, handles_density=True)  # declares density and would otherwise ignore the change
-    rec = make(phone, daemon)
-    before = await rec.snapshot(PKG)
-
-    outcome = await rec.settle(PKG, before=before, display="9", reason="test")
-
-    assert outcome.action == RELAUNCHED and outcome.refreshed and not outcome.restarted
-    assert phone.relaunch_cmds == [f"date +%s.%N; am update-appinfo all {PKG}"]
-    assert daemon.restarts == [] and (phone.pid, phone.ticks) == (4000, 90_000)
-    assert outcome.identity == ProcessIdentity(4000, 90_000)
-
-
-async def test_gentle_tier_needs_no_daemon(tasks):
-    phone = FakePhone()
-    rec = make(phone, None)
-    before = await rec.snapshot(PKG)
-
-    assert (await rec.settle(PKG, before=before, display="9", reason="test")).action == RELAUNCHED
-
-
-async def test_an_event_older_than_the_command_is_not_proof(tasks):
-    phone = FakePhone(relaunch_works=False)
-    phone.event_lines.append(f"1000000000.100  1000  1  2 I wm_relaunch_activity: [0,7,42,{PKG}/.Main,80000000]")
-    daemon = FakeDaemon(phone)
-    rec = make(phone, daemon)
-    before = await rec.snapshot(PKG)
-
-    outcome = await rec.settle(PKG, before=before, display="9", reason="test")
-
-    assert outcome.action == RESTARTED  # the stale line was ignored → escalated to the process restart
-
-
-@pytest.mark.parametrize(
-    "line",
-    [
-        "{now}.1  1000  1  2 I wm_relaunch_activity: [0,7,42,com.someone.else/.Main,80000000]",  # another package
-        "{now}.1  1000  1  2 I wm_relaunch_activity: [0,7,42,{pkg}/.Main,1000]",  # a density relaunch, not our assets bump
-        "{now}.1  1000  1  2 I wm_relaunch_activity: [0,7,42,{pkg}/.Main,garbage]",
-    ],
-)
-async def test_only_a_relaunch_of_this_package_with_the_assets_bit_counts_as_proof(tasks, line):
-    phone = FakePhone(relaunch_works=False)
-    phone.event_lines.append(line.format(now=int(time.time()) + 1, pkg=PKG))
-    daemon = FakeDaemon(phone)
-    rec = make(phone, daemon)
-    before = await rec.snapshot(PKG)
-
-    assert (await rec.settle(PKG, before=before, display="9", reason="test")).action == RESTARTED
-
-
-# ---------------------------------------------------------------- Android 11: the APP relaunches, the app's own events prove it
-
-
-async def test_android_11_relaunch_is_proven_by_the_apps_own_lifecycle_events(tasks):
-    """On Android 11 the system logs no wm_relaunch_activity: ActivityThread.handleApplicationInfoChanged makes the APP
-    destroy and recreate its activities. The proof is the process' own destroy → create pair."""
-    phone = FakePhone(app_side=True)
-    daemon = FakeDaemon(phone)
-    rec = make(phone, daemon, api=30)
-    before = await rec.snapshot(PKG)
-
-    outcome = await rec.settle(PKG, before=before, display="9", reason="test")
-
-    assert outcome.action == RELAUNCHED and outcome.detail.startswith("app: pid 4000")
-    assert daemon.restarts == [] and phone.pid == 4000
-
-
-async def test_android_11_lifecycle_events_of_another_process_are_no_proof(tasks):
-    phone = FakePhone(app_side=True)
-    phone.app_events_pid = 9999  # some other app's activities were recreated, not ours
-    rec = make(phone, FakeDaemon(phone), api=30)
-    before = await rec.snapshot(PKG)
-
-    outcome = await rec.settle(PKG, before=before, display="9", reason="test")
-
-    assert outcome.action == UNSUPPORTED
-
-
-async def test_android_11_a_destroy_without_a_create_is_no_proof(tasks):
-    phone = FakePhone(app_side=True)
-    phone.app_emit_create = False
-    rec = make(phone, FakeDaemon(phone), api=30)
-    before = await rec.snapshot(PKG)
-
-    assert (await rec.settle(PKG, before=before, display="9", reason="test")).action == UNSUPPORTED
-
-
-async def test_android_11_lifecycle_events_older_than_the_command_are_no_proof(tasks):
-    phone = FakePhone(relaunch_works=False)
-    phone.event_lines += [
-        "1000000000.300 10123 4000 4000 I wm_on_destroy_called: [1,com.example.video.Main,performDestroy]",
-        "1000000000.450 10123 4000 4000 I wm_on_create_called: [2,com.example.video.Main,performCreate]",
-    ]
-    rec = make(phone, FakeDaemon(phone), api=30)
-    before = await rec.snapshot(PKG)
-
-    assert (await rec.settle(PKG, before=before, display="9", reason="test")).action == UNSUPPORTED
-
-
-async def test_a_create_before_the_destroy_is_no_proof(tasks):
-    """A recreation is destroy THEN create; an activity that merely started (create only, or create before destroy) is not it."""
-    phone = FakePhone(relaunch_works=False)
-    now = int(time.time()) + 1
-    phone.event_lines += [
-        f"{now}.100 10123 4000 4000 I wm_on_create_called: [2,com.example.video.Main,performCreate]",
-        f"{now}.200 10123 4000 4000 I wm_on_destroy_called: [1,com.example.video.Main,performDestroy]",
-    ]
-    rec = make(phone, FakeDaemon(phone), api=30)
-    before = await rec.snapshot(PKG)
-
-    assert (await rec.settle(PKG, before=before, display="9", reason="test")).action == UNSUPPORTED
-
-
-async def test_lifecycle_columns_without_a_uid_are_read_too(tasks):
-    """Some ROMs print `pid tid` only; the pid is always the second-to-last number before the priority."""
-    phone = FakePhone(relaunch_works=False)
-    now = int(time.time()) + 1
-    phone.event_lines += [
-        f"{now}.300 4000 4000 I wm_on_destroy_called: [1,com.example.video.Main,performDestroy]",
-        f"{now}.450 4000 4000 I wm_on_create_called: [1,com.example.video.Main,performCreate]",
-    ]
-    rec = make(phone, FakeDaemon(phone), api=30)
-    before = await rec.snapshot(PKG)
-
-    assert (await rec.settle(PKG, before=before, display="9", reason="test")).action == RELAUNCHED
 
 
 async def test_android_11_has_no_state_preserving_process_restart_so_it_says_so(tasks):
     """The daemon's Android 11 fallback would pass a task token where an activity token is required — a silent no-op that
     reports success. The reconciler must not call it and must not claim it worked."""
-    phone = FakePhone(relaunch_works=False)
+    phone = FakePhone()
     daemon = FakeDaemon(phone)
     rec = make(phone, daemon, api=30)
     before = await rec.snapshot(PKG)
@@ -485,24 +330,10 @@ async def test_android_11_has_no_state_preserving_process_restart_so_it_says_so(
 
     assert outcome.action == UNSUPPORTED and not outcome.ok and outcome.detail == "android_api=30"
     assert daemon.restarts == []
-    assert len(phone.relaunch_cmds) == 1  # the gentle tier was still tried
-
-
-async def test_android_11_hard_mode_still_uses_the_only_tool_it_has(tasks):
-    """'Hard' means: skip the gentle tier because the process must be reborn. Where a rebirth cannot be requested, skipping
-    the gentle tier would mean doing nothing at all."""
-    phone = FakePhone(app_side=True)
-    daemon = FakeDaemon(phone)
-    rec = make(phone, daemon, api=30)
-    before = await rec.snapshot(PKG)
-
-    outcome = await rec.settle(PKG, before=before, display="9", reason="test", force=True)
-
-    assert outcome.action == RELAUNCHED and daemon.restarts == []
 
 
 async def test_android_11_forced_and_unproven_is_unsupported_not_a_silent_success(tasks):
-    phone = FakePhone(relaunch_works=False)
+    phone = FakePhone()
     daemon = FakeDaemon(phone)
     rec = make(phone, daemon, api=30)
     before = await rec.snapshot(PKG)
@@ -514,7 +345,7 @@ async def test_android_11_forced_and_unproven_is_unsupported_not_a_silent_succes
 
 @pytest.mark.parametrize("api", [31, 33, 36, None])
 async def test_android_12_and_up_or_an_unknown_release_keeps_the_verified_process_restart(tasks, api):
-    phone = FakePhone(relaunch_works=False)
+    phone = FakePhone()
     daemon = FakeDaemon(phone)
     rec = make(phone, daemon, api=api)
     before = await rec.snapshot(PKG)
@@ -542,8 +373,8 @@ async def test_every_settle_writes_one_outcome_line_with_pid_task_and_api(tasks,
     (line,) = [r for r in _density_lines(caplog) if "SONUÇ" in r.getMessage()]
     msg = line.getMessage()
     assert line.levelno == logging.INFO
-    assert f"{PKG} (handoff) → relaunched" in msg
-    assert "pid 4000 → 4000" in msg and "task=42" in msg and "android_api=34" in msg and "force=False" in msg
+    assert f"{PKG} (handoff) → restarted" in msg
+    assert "pid 4000 → 4001" in msg and "task=42" in msg and "android_api=34" in msg and "force=False" in msg
 
 
 @pytest.mark.parametrize("setup,action", [
@@ -565,7 +396,7 @@ async def test_the_no_op_outcomes_are_logged_too(tasks, caplog, setup, action):
 
 async def test_a_failed_refresh_is_logged_as_a_warning(tasks, caplog):
     caplog.set_level(logging.INFO)
-    phone = FakePhone(relaunch_works=False)
+    phone = FakePhone()
     rec = make(phone, FakeDaemon(phone), api=30)
     before = await rec.snapshot(PKG)
 
@@ -573,36 +404,6 @@ async def test_a_failed_refresh_is_logged_as_a_warning(tasks, caplog):
 
     (line,) = [r for r in _density_lines(caplog) if "SONUÇ" in r.getMessage()]
     assert line.levelno == logging.WARNING and "→ unsupported" in line.getMessage()
-
-
-async def test_no_proof_logs_the_event_lines_the_device_did_show(tasks, caplog):
-    """The Android 11 column format is unverified: when nothing matches, the raw lines must reach the log."""
-    caplog.set_level(logging.INFO)
-    phone = FakePhone(relaunch_works=False)
-    now = int(time.time()) + 1
-    phone.event_lines += [
-        f"{now}.300 10123 4000 4000 I wm_on_destroy_called: [1,{PKG}.Main,performDestroy]",  # right shape, no create
-        f"{now}.310 10123 4000 4000 I wm_relaunch_activity: [0,7,42,{PKG}/.Main,1000]",  # not our assets bit
-    ]
-    rec = make(phone, FakeDaemon(phone), api=30)
-    before = await rec.snapshot(PKG)
-
-    await rec.settle(PKG, before=before, display="9", reason="test")
-
-    (warn,) = [r for r in _density_lines(caplog) if "kanıtlanamadı" in r.getMessage()]
-    assert "wm_on_destroy_called" in warn.getMessage() and "pid=4000" in warn.getMessage()
-
-
-async def test_no_proof_and_an_empty_event_buffer_says_so(tasks, caplog):
-    caplog.set_level(logging.INFO)
-    phone = FakePhone(relaunch_works=False)
-    rec = make(phone, FakeDaemon(phone))
-    before = await rec.snapshot(PKG)
-
-    await rec.settle(PKG, before=before, display="9", reason="test")
-
-    (warn,) = [r for r in _density_lines(caplog) if "kanıtlanamadı" in r.getMessage()]
-    assert "olay günlüğü boş" in warn.getMessage()
 
 
 async def test_scheduling_and_coalescing_are_visible_in_the_log(tasks, caplog):
@@ -621,41 +422,6 @@ async def test_scheduling_and_coalescing_are_visible_in_the_log(tasks, caplog):
     assert sum("SONUÇ" in m for m in messages) == 1  # two requests, one settle, one outcome line
 
 
-async def test_unreadable_device_clock_means_no_proof(tasks, monkeypatch):
-    phone = FakePhone()
-    original = phone.shell
-
-    async def shell(command, serial=None, timeout_s=None):
-        if "am update-appinfo" in command:
-            phone.relaunch_cmds.append(command)
-            return "Packages updated.\n"  # no leading epoch line
-        return await original(command, serial=serial, timeout_s=timeout_s)
-
-    phone.shell = shell
-    daemon = FakeDaemon(phone)
-    rec = make(phone, daemon)
-    before = await rec.snapshot(PKG)
-
-    assert (await rec.settle(PKG, before=before, display="9", reason="test")).action == RESTARTED
-
-
-async def test_a_failing_update_appinfo_command_escalates(tasks):
-    phone = FakePhone()
-    original = phone.shell
-
-    async def shell(command, serial=None, timeout_s=None):
-        if "am update-appinfo" in command:
-            raise RuntimeError("Security exception: requires CHANGE_CONFIGURATION")
-        return await original(command, serial=serial, timeout_s=timeout_s)
-
-    phone.shell = shell
-    daemon = FakeDaemon(phone)
-    rec = make(phone, daemon)
-    before = await rec.snapshot(PKG)
-
-    assert (await rec.settle(PKG, before=before, display="9", reason="test")).action == RESTARTED
-
-
 async def test_hard_setting_restarts_the_process_directly_and_ignores_the_declaration_filter(tasks, monkeypatch):
     class Hard:
         density_refresh_enabled = True
@@ -663,14 +429,13 @@ async def test_hard_setting_restarts_the_process_directly_and_ignores_the_declar
 
     monkeypatch.setattr("app.storage.settings_db.get_project_settings", AsyncMock(return_value=Hard()))
     phone = FakePhone()
-    daemon = FakeDaemon(phone, handles_density=False)  # gentle mode would leave this one to Android
+    daemon = FakeDaemon(phone, handles_density=False)  # the default would leave this one to Android
     rec = make(phone, daemon)
     before = await rec.snapshot(PKG)
 
     outcome = await rec.settle(PKG, before=before, display="9", reason="test")
 
     assert outcome.action == RESTARTED
-    assert phone.relaunch_cmds == []
     assert daemon.restarts == ["42"]
 
 
@@ -711,7 +476,7 @@ async def test_no_process_means_nothing_to_do(tasks):
 async def test_a_restart_that_never_changes_the_process_is_reported_unconfirmed(tasks):
     """AOSP's restartProcessIfVisible silently returns for a finishing/unattached activity: the RPC 'succeeds' but the
     process survives. That must NOT be reported as done."""
-    phone = FakePhone(relaunch_works=False)
+    phone = FakePhone()
     daemon = FakeDaemon(phone, reborn=False)
     rec = make(phone, daemon, verify=0.3)
     before = await rec.snapshot(PKG)
@@ -723,8 +488,43 @@ async def test_a_restart_that_never_changes_the_process_is_reported_unconfirmed(
     assert daemon.restarts == ["42"]
 
 
+class _KillsWithoutRelaunch(FakeDaemon):
+    """The daemon restarts only a VISIBLE task: here the process is killed and nothing brings it back (a black screen)."""
+
+    async def restart_task_activity(self, tid):
+        self.restarts.append(str(tid))
+        self.phone.alive = False
+        return True
+
+    async def task_info(self, tid):
+        return {"ok": True, "task_id": tid, "top": f"{PKG}/.app.Main", "display": 0}
+
+
+async def test_a_killed_app_that_nothing_relaunched_is_started_again_where_its_task_is(tasks):
+    phone = FakePhone()
+    daemon = _KillsWithoutRelaunch(phone)
+    rec = make(phone, daemon, verify=0.2)
+    before = await rec.snapshot(PKG)
+
+    outcome = await rec.settle(PKG, before=before, display="9", reason="test")
+
+    assert outcome.action == UNCONFIRMED
+    assert any(c.startswith(f"am start --display 0 -n {PKG}/.app.Main") for c in phone.commands), phone.commands
+
+
+async def test_an_app_that_is_still_alive_is_not_relaunched_by_the_safety_net(tasks):
+    phone = FakePhone()
+    daemon = FakeDaemon(phone, reborn=False)       # the process survived: unconfirmed, but nothing is dead
+    rec = make(phone, daemon, verify=0.2)
+    before = await rec.snapshot(PKG)
+
+    await rec.settle(PKG, before=before, display="9", reason="test")
+
+    assert not any(c.startswith("am start") for c in phone.commands)
+
+
 async def test_refused_rpc_is_unconfirmed(tasks):
-    phone = FakePhone(relaunch_works=False)
+    phone = FakePhone()
     daemon = FakeDaemon(phone, restart_ok=False)
     rec = make(phone, daemon)
     before = await rec.snapshot(PKG)
@@ -735,7 +535,7 @@ async def test_refused_rpc_is_unconfirmed(tasks):
 
 
 async def test_without_daemon_or_task_nothing_is_attempted(tasks):
-    phone = FakePhone(relaunch_works=False)
+    phone = FakePhone()
     rec = make(phone, None)
     before = await rec.snapshot(PKG)
     # The process restart lives in the on-device daemon; without it and without a proven relaunch there is nothing to do.
@@ -789,8 +589,7 @@ async def test_a_burst_of_changes_collapses_into_one_restart_using_the_earliest_
         await asyncio.sleep(0.03)
     await rec.wait_idle()
 
-    assert len(phone.relaunch_cmds) == 1  # exactly one refresh, not five
-    assert daemon.restarts == []
+    assert daemon.restarts == ["42"]  # exactly one refresh, not five
 
 
 def _slow_restarts(daemon, delay: float) -> list[float]:
@@ -810,9 +609,9 @@ def _slow_restarts(daemon, delay: float) -> list[float]:
 async def test_a_change_applied_before_the_restart_was_requested_is_not_refreshed_twice(tasks):
     """Device log, YouTube: one DP change → restart, then a SECOND restart a few seconds later. The second change had
     been applied (and reported) BEFORE the first restart was requested, so the reborn process was born under it."""
-    phone = FakePhone(relaunch_works=False)
+    phone = FakePhone()
     daemon = FakeDaemon(phone)
-    rec = make(phone, daemon, quiet=0.05, inplace=False)  # the device already taught us: straight to the restart
+    rec = make(phone, daemon, quiet=0.05)  # the device already taught us: straight to the restart
     first = await rec.snapshot(PKG)
     requested = _slow_restarts(daemon, 0.3)
 
@@ -830,9 +629,9 @@ async def test_a_change_applied_before_the_restart_was_requested_is_not_refreshe
 async def test_a_change_arriving_after_the_restart_was_requested_restarts_the_reborn_process_again(tasks):
     """A change reported AFTER the restart was requested may reach the new process mid-birth: the reborn process is the
     new baseline and — having lived through the later change — is restarted again, never trusted."""
-    phone = FakePhone(relaunch_works=False)
+    phone = FakePhone()
     daemon = FakeDaemon(phone)
-    rec = make(phone, daemon, quiet=0.05, inplace=False)
+    rec = make(phone, daemon, quiet=0.05)
     first = await rec.snapshot(PKG)
     requested = _slow_restarts(daemon, 0.3)
 
@@ -872,7 +671,7 @@ async def test_min_gap_guards_against_restart_loops(tasks):
     rec.schedule_settle("win", PKG, before, display="9", reason="resize", quiet_s=0.0)
     await rec.wait_idle()
 
-    assert len(phone.relaunch_cmds) == 1
+    assert daemon.restarts == ["42"]
     assert rec._clock() - started >= 0.35
 
 
@@ -886,7 +685,7 @@ async def test_on_done_receives_the_outcome(tasks):
     rec.schedule_settle("win", PKG, before, display="9", reason="x", on_done=lambda o: seen.append(o.action))
     await rec.wait_idle()
 
-    assert seen == [RELAUNCHED]
+    assert seen == [RESTARTED]
 
 
 async def test_display_may_be_resolved_lazily(tasks):
@@ -991,7 +790,7 @@ async def test_a_phone_that_cannot_run_the_wait_falls_back_to_asking_question_by
 
 @pytest.mark.parametrize("package", ["com.android.chrome", "org.example.anything"])
 async def test_an_app_that_recreated_itself_after_the_change_is_left_alone(tasks, package):
-    """Chrome recreates its activity on every density change; refreshing it again (update-appinfo, then a process
+    """Chrome recreates its activity on every density change; refreshing it again (a process
     restart) was the 'needless refresh right after the DPI was already right'. Package-agnostic: the proof is the
     process' own recreate AFTER the change."""
     phone = FakePhone(package)
@@ -1004,7 +803,7 @@ async def test_an_app_that_recreated_itself_after_the_change_is_left_alone(tasks
     outcome = await rec.settle(package, before=before, display="9", reason="resize", changed_at=changed_at)
 
     assert outcome.action == ADAPTED and outcome.ok and not outcome.refreshed
-    assert phone.relaunch_cmds == [] and daemon.restarts == [] and daemon.info_calls == []
+    assert daemon.restarts == [] and daemon.info_calls == []
 
 
 async def test_hard_setting_restarts_even_an_app_that_recreated_itself(tasks, monkeypatch):
@@ -1032,7 +831,7 @@ async def test_hard_setting_restarts_even_an_app_that_recreated_itself(tasks, mo
 async def test_self_recreate_across_the_phone_window_boundary_is_not_enough(tasks, reason):
     """Saha (2026-10-07, Chrome): etkinliğini KENDİ yeniden kuran uygulama telefon ⇄ pencere geçişinde yazıları eski yoğunlukta
     bırakıyor (WebView/Blink süreç önbelleği); Play Store gibi Android'in yeniden kurduğu uygulamalar sorunsuz. Kanıt "app:"
-    ise bu geçişlerde süreç durum korunarak yeniden başlatılır — tek yenileme, `update-appinfo` yok."""
+    ise bu geçişlerde süreç durum korunarak yeniden başlatılır — tek yenileme."""
     phone = FakePhone(PKG)
     daemon = FakeDaemon(phone, handles_density=True)
     rec = make(phone, daemon)
@@ -1044,7 +843,7 @@ async def test_self_recreate_across_the_phone_window_boundary_is_not_enough(task
     outcome = await rec.settle(PKG, before=before, display="9", reason=reason, changed_at=changed_at)
 
     assert outcome.action == RESTARTED
-    assert daemon.restarts == ["42"] and phone.relaunch_cmds == []
+    assert daemon.restarts == ["42"]
 
 
 async def test_android_relaunch_across_the_boundary_is_still_trusted(tasks):
@@ -1092,15 +891,15 @@ async def test_android_relaunching_the_app_for_the_change_is_adaptation_too(task
     outcome = await rec.settle(PKG, before=before, display="9", reason="reclaim", changed_at=changed_at)
 
     assert outcome.action == ADAPTED and outcome.detail.startswith(f"system: {PKG}/")
-    assert phone.relaunch_cmds == [] and daemon.restarts == []
+    assert daemon.restarts == []
 
 
 async def test_a_rebuild_before_the_last_change_does_not_count(tasks):
     """Device log, YouTube reclaim: the move relaunched it under 520 dpi, THEN the display went 520 → 180 and the app lived
     through that without rebuilding — the 'big DPI after bringing it back'. Only a rebuild after the last change counts."""
-    phone = FakePhone(relaunch_works=False)
+    phone = FakePhone()
     daemon = FakeDaemon(phone)
-    rec = make(phone, daemon, inplace=False)
+    rec = make(phone, daemon)
     before = await rec.snapshot(PKG)
     phone.recreate(at=time.time() - 0.3)  # relaunched by the move, under the OLD density
     changed_at = await rec.mark()          # … and only now the density that matters changes
@@ -1112,9 +911,9 @@ async def test_a_rebuild_before_the_last_change_does_not_count(tasks):
 
 async def test_navigating_to_another_activity_is_not_a_recreate(tasks):
     """destroy of one activity and create of ANOTHER (a new ActivityRecord token) is navigation, not adaptation."""
-    phone = FakePhone(relaunch_works=False)
+    phone = FakePhone()
     daemon = FakeDaemon(phone)
-    rec = make(phone, daemon, inplace=False)
+    rec = make(phone, daemon)
     before = await rec.snapshot(PKG)
     changed_at = await rec.mark()
     at = changed_at + 0.1
@@ -1144,7 +943,7 @@ async def test_the_apps_own_recreate_trailing_the_change_is_waited_for(tasks):
     outcome = await rec.settle(PKG, before=before, display="9", reason="resize", changed_at=changed_at)
     await late
 
-    assert outcome.action == ADAPTED and phone.relaunch_cmds == [] and daemon.restarts == []
+    assert outcome.action == ADAPTED and daemon.restarts == []
 
 
 async def test_force_ignores_adaptation(tasks):
@@ -1159,18 +958,90 @@ async def test_force_ignores_adaptation(tasks):
     assert outcome.action == RESTARTED
 
 
-async def test_the_apps_own_recreate_just_before_the_command_is_no_proof_of_our_relaunch(tasks):
-    """Device log: with a whole-second clock (−1 s of slack) Chrome's own recreate from just before `update-appinfo` was
-    counted as the in-place relaunch ('relaunched') even though the command relaunched nothing."""
-    phone = FakePhone(relaunch_works=False)
-    daemon = FakeDaemon(phone)
-    rec = make(phone, daemon)
+# ---------------------------------------------------------------- the app's own lifecycle events as adaptation proof
+
+
+async def _settle_after(phone, daemon, lines_at, *, api=None):
+    """Settle with the given event lines stamped `lines_at` seconds after the last density change."""
+    rec = make(phone, daemon, api=api)
     before = await rec.snapshot(PKG)
-    phone.recreate(at=time.time() - 0.4)  # before the command; no changed_at passed, so no adaptation check either
+    changed_at = await rec.mark()
+    phone.event_lines += [line.format(t=changed_at + dt) for dt, line in lines_at]
+    return await rec.settle(PKG, before=before, display="9", reason="resize", changed_at=changed_at)
 
-    outcome = await rec.settle(PKG, before=before, display="9", reason="resize")
 
-    assert outcome.action == RESTARTED  # the command's own proof was required — and it never came
+async def test_lifecycle_columns_with_a_uid_are_read_too(tasks):
+    """Some ROMs print `uid pid tid`; the pid is always the second-to-last number before the priority."""
+    phone = FakePhone()
+    outcome = await _settle_after(phone, FakeDaemon(phone), [
+        (0.1, "{t:.3f} 10123 4000 4000 I wm_on_destroy_called: [1,com.example.video.Main,performDestroy]"),
+        (0.2, "{t:.3f} 10123 4000 4000 I wm_on_create_called: [1,com.example.video.Main,performCreate]"),
+    ])
+    assert outcome.action == ADAPTED and outcome.detail.startswith("app: pid 4000")
+
+
+async def test_lifecycle_events_of_another_process_are_no_proof(tasks):
+    phone = FakePhone()
+    outcome = await _settle_after(phone, FakeDaemon(phone), [
+        (0.1, "{t:.3f} 10123 9999 9999 I wm_on_destroy_called: [1,com.example.video.Main,performDestroy]"),
+        (0.2, "{t:.3f} 10123 9999 9999 I wm_on_create_called: [1,com.example.video.Main,performCreate]"),
+    ])
+    assert outcome.action == RESTARTED     # some other app's activities were recreated, not ours
+
+
+async def test_a_destroy_without_a_create_is_no_proof(tasks):
+    phone = FakePhone()
+    outcome = await _settle_after(phone, FakeDaemon(phone), [
+        (0.1, "{t:.3f} 10123 4000 4000 I wm_on_destroy_called: [1,com.example.video.Main,performDestroy]"),
+    ])
+    assert outcome.action == RESTARTED
+
+
+async def test_a_create_before_the_destroy_is_no_proof(tasks):
+    """A recreation is destroy THEN create; an activity that merely started (create only, or create before destroy) is not it."""
+    phone = FakePhone()
+    outcome = await _settle_after(phone, FakeDaemon(phone), [
+        (0.1, "{t:.3f} 10123 4000 4000 I wm_on_create_called: [2,com.example.video.Main,performCreate]"),
+        (0.2, "{t:.3f} 10123 4000 4000 I wm_on_destroy_called: [1,com.example.video.Main,performDestroy]"),
+    ])
+    assert outcome.action == RESTARTED
+
+
+async def test_a_relaunch_of_another_package_is_no_proof(tasks):
+    phone = FakePhone()
+    outcome = await _settle_after(phone, FakeDaemon(phone), [
+        (0.1, "{t:.3f}  1842  2668 I wm_relaunch_resume_activity: [0,249615623,1822,com.someone.else/.Main,1500]"),
+    ])
+    assert outcome.action == RESTARTED
+
+
+# ---------------------------------------------------------------- the user's explicit refresh has no weaker fallback
+
+
+async def test_forced_refresh_reports_a_refused_restart_as_it_is(tasks):
+    """"Uygulamayı yeniden başlat": there is no weaker tool behind the process restart — a refusal is reported, not hidden."""
+    phone = FakePhone()
+    rec = make(phone, FakeDaemon(phone, restart_ok=False))
+
+    outcome = await rec.settle(PKG, before=None, display="9", reason="manual", force=True)
+
+    assert outcome.action == UNCONFIRMED and not outcome.refreshed and outcome.detail == "rpc_refused"
+
+
+async def test_forced_refresh_reports_a_restart_that_never_changes_the_process(tasks):
+    phone = FakePhone()
+    rec = make(phone, FakeDaemon(phone, reborn=False), verify=0.3)
+
+    outcome = await rec.settle(PKG, before=None, display="9", reason="manual", force=True)
+
+    assert outcome.action == UNCONFIRMED and outcome.detail == "identity_unchanged"
+
+
+async def test_forced_refresh_without_a_daemon_says_so(tasks):
+    phone = FakePhone()
+    rec = make(phone, None)
+
+    assert (await rec.settle(PKG, before=None, display="9", reason="manual", force=True)).action == NO_DAEMON
 
 
 # ---------------------------------------------------------------- the device clock (mark)
@@ -1190,10 +1061,10 @@ async def test_mark_reads_the_device_clock_once_and_reuses_the_offset(tasks):
 
 async def test_a_device_clock_without_sub_seconds_disables_the_adaptation_check(tasks):
     """A whole-second clock cannot order a rebuild against a change a few hundred ms apart: nothing is assumed."""
-    phone = FakePhone(relaunch_works=False)
+    phone = FakePhone()
     phone.precise_clock = False
     daemon = FakeDaemon(phone)
-    rec = make(phone, daemon, inplace=False)
+    rec = make(phone, daemon)
     before = await rec.snapshot(PKG)
     phone.recreate()
 
@@ -1201,59 +1072,6 @@ async def test_a_device_clock_without_sub_seconds_disables_the_adaptation_check(
     outcome = await rec.settle(PKG, before=before, display="9", reason="resize", changed_at=None)
     assert outcome.action == RESTARTED
 
-
-# ---------------------------------------------------------------- learned: does `am update-appinfo` work here?
-
-
-async def test_a_device_where_the_in_place_relaunch_never_works_goes_straight_to_the_restart(tasks):
-    """HyperOS 16 (device log): update-appinfo relaunched nothing — every YouTube refresh paid a 2.5 s proof wait and a
-    second visible refresh. Learned once, persisted; the next settle restarts directly."""
-    phone = FakePhone(relaunch_works=False)
-    daemon = FakeDaemon(phone)
-    learned: list = []
-    rec = make(phone, daemon, learned=learned)
-
-    first = await rec.settle(PKG, before=await rec.snapshot(PKG), display="9", reason="resize")
-    second = await rec.settle(PKG, before=await rec.snapshot(PKG), display="9", reason="resize")
-
-    assert first.action == RESTARTED and second.action == RESTARTED
-    assert len(phone.relaunch_cmds) == 1  # tried once, never again
-    assert learned == [False]
-
-
-async def test_a_persisted_answer_skips_the_attempt_after_a_backend_restart(tasks):
-    phone = FakePhone()  # it WOULD work — but the profile says it does not on this device
-    daemon = FakeDaemon(phone)
-    rec = make(phone, daemon, inplace=False)
-
-    outcome = await rec.settle(PKG, before=await rec.snapshot(PKG), display="9", reason="resize")
-
-    assert outcome.action == RESTARTED and phone.relaunch_cmds == []
-
-
-async def test_one_app_opting_out_does_not_condemn_a_device_where_it_works(tasks):
-    """Android 16: an activity declaring `assetsPaths` is not relaunched. That app goes straight to the restart next
-    time; other apps keep the gentle tier."""
-    phone = FakePhone(relaunch_works=False)
-    daemon = FakeDaemon(phone)
-    learned: list = []
-    rec = make(phone, daemon, inplace=True, learned=learned)
-
-    await rec.settle(PKG, before=await rec.snapshot(PKG), display="9", reason="resize")
-    await rec.settle(PKG, before=await rec.snapshot(PKG), display="9", reason="resize")
-
-    assert len(phone.relaunch_cmds) == 1 and learned == []
-    assert rec._inplace_expected("org.other.app") is True
-
-
-async def test_android_11_keeps_the_in_place_relaunch_even_when_it_failed_before(tasks):
-    """It is the only tool Android 11 has."""
-    phone = FakePhone(relaunch_works=False)
-    rec = make(phone, FakeDaemon(phone), api=30, inplace=False)
-
-    outcome = await rec.settle(PKG, before=await rec.snapshot(PKG), display="9", reason="resize")
-
-    assert outcome.action == UNSUPPORTED and len(phone.relaunch_cmds) == 1
 
 
 def test_outcome_flags():
@@ -1264,72 +1082,3 @@ def test_outcome_flags():
     assert Snapshot(PKG, None).identity is None
 
 
-# ---------------------------------------------------------------- the user's explicit refresh: plan B
-
-
-async def test_forced_refresh_falls_back_to_the_in_place_relaunch_when_the_process_restart_is_refused(tasks):
-    """"Uygulamayı yeniden başlat": the process restart is tier 1; when the daemon refuses it, onDestroy→onCreate in place
-    (`am update-appinfo`) is plan B — an explicit restart must not end on "did not work" while a weaker tool still can."""
-    phone = FakePhone()
-    daemon = FakeDaemon(phone, restart_ok=False)
-    rec = make(phone, daemon)
-
-    outcome = await rec.settle(PKG, before=None, display="9", reason="manual", force=True)
-
-    assert daemon.restarts == ["42"]                       # tier 1 was tried first
-    assert outcome.action == RELAUNCHED and outcome.refreshed
-    assert len(phone.relaunch_cmds) == 1                   # plan B ran exactly once
-
-
-async def test_forced_refresh_falls_back_when_the_restart_never_changes_the_process(tasks):
-    phone = FakePhone()
-    daemon = FakeDaemon(phone, reborn=False)               # the RPC "worked", the identity never changed
-    rec = make(phone, daemon)
-
-    outcome = await rec.settle(PKG, before=None, display="9", reason="manual", force=True)
-
-    assert outcome.action == RELAUNCHED and len(phone.relaunch_cmds) == 1
-
-
-async def test_forced_refresh_without_a_daemon_still_has_plan_b(tasks):
-    """Plan B needs adb only."""
-    phone = FakePhone()
-    rec = make(phone, None)
-
-    outcome = await rec.settle(PKG, before=None, display="9", reason="manual", force=True)
-
-    assert outcome.action == RELAUNCHED
-
-
-async def test_forced_refresh_reports_the_first_failure_when_plan_b_cannot_be_proven_either(tasks):
-    phone = FakePhone(relaunch_works=False)
-    daemon = FakeDaemon(phone, restart_ok=False)
-    rec = make(phone, daemon)
-
-    outcome = await rec.settle(PKG, before=None, display="9", reason="manual", force=True)
-
-    assert outcome.action == UNCONFIRMED and not outcome.refreshed
-    assert outcome.detail == "rpc_refused;plan_b_unproven"
-
-
-async def test_a_verified_process_restart_never_runs_plan_b(tasks):
-    phone = FakePhone()
-    daemon = FakeDaemon(phone)
-    rec = make(phone, daemon)
-
-    outcome = await rec.settle(PKG, before=None, display="9", reason="manual", force=True)
-
-    assert outcome.action == RESTARTED and phone.relaunch_cmds == []
-
-
-async def test_automatic_hard_refresh_has_no_plan_b(tasks):
-    """Plan B belongs to the user's explicit restart only: the automatic density flows keep their documented behaviour."""
-    phone = FakePhone()
-    daemon = FakeDaemon(phone, restart_ok=False)
-    rec = make(phone, daemon)
-    rec._policy = AsyncMock(return_value=(True, True))     # hard refresh configured, but not forced
-    before = await rec.snapshot(PKG)
-
-    outcome = await rec.settle(PKG, before=before, display="9", reason="test")
-
-    assert outcome.action == UNCONFIRMED and phone.relaunch_cmds == []

@@ -16,31 +16,18 @@ invariant is a process one:
 
     an app process must not live through a density change it cannot prove it adapted to.
 
-Two ways to make the app rebuild itself, gentlest first (verified against AOSP android-11 … android-16/main):
+The way to make the app rebuild itself — a state-preserving PROCESS restart (verified against AOSP android-12 … android-16/main):
 
-  1. ACTIVITY relaunch in the same process — ``am update-appinfo <user> <package>`` (Binder:
-     ``IActivityManager.scheduleApplicationInfoChanged``; ``CHANGE_CONFIGURATION`` is in the shell's manifest on every
-     release). An ApplicationInfo change relaunches EVERY activity of the package whatever ``android:configChanges``
-     says — the mechanism behind "a wallpaper/overlay change recreates your activities" — but WHO relaunches differs:
-       * Android 11 (and 10): the APP does it. ``ActivityThread.handleApplicationInfoChanged`` dispatches a configuration
-         with a new ``assetsSeq`` and calls ``relaunchAllActivities(true)`` — no configChanges check at all. The system
-         logs nothing; proof is the app's own ``wm_on_destroy_called`` / ``wm_on_create_called`` events (pid-matched).
-       * Android 12 … 16: the SYSTEM does it. ``ProcessList.updateApplicationInfoLOSP`` →
-         ``ActivityTaskManagerService.updateAssetConfiguration`` → ``WindowProcessController.updateAssetConfiguration``
-         gives every activity a new ``assetsSeq``; the diff is ``CONFIG_ASSETS_PATHS`` (0x80000000), which up to Android
-         15 is ``@hide`` and cannot be declared in ``android:configChanges``, so ``shouldRelaunchLocked`` is always true.
-         Proof is ``wm_relaunch_activity`` (component + config mask with bit 0x80000000). Android 16 adds the manifest
-         flags ``assetsPaths`` / ``resourcesUnused`` (aconfig ``handle_all_config_changes``): an activity that declares
-         them is NOT relaunched — no proof appears, and the ladder escalates.
-     The process survives: no lost background service, no lost in-memory state.
-  2. PROCESS restart — what the SizeCompat "Restart" button uses: ``ITaskOrganizerController.
-     restartTaskTopActivityProcessIfVisible`` (daemon RPC ``restart_task_activity``): the activity saves its state, the
-     process is killed and relaunched under the CURRENT density of its display. Needed when the app keeps density in
-     process-level state that an activity relaunch does not reset (React Native's DisplayMetricsHolder, Avalonia, a
-     WebView's pinned scale are documented examples), or when (1) could not be proven. That API exists from Android 12;
-     Android 11 only has ``ATMS.restartActivityProcessIfVisible(IBinder activityToken)``, which needs the ACTIVITY's
-     token — a shell process cannot obtain it (a task's WindowContainerToken is silently ignored) — so on Android 11 the
-     hard tier is reported ``unsupported`` instead of pretending.
+  What the SizeCompat "Restart" button uses: ``ITaskOrganizerController.restartTaskTopActivityProcessIfVisible`` (daemon RPC
+  ``restart_task_activity``): the activity saves its state, the process is killed and relaunched under the CURRENT density of
+  its display. The API exists from Android 12; Android 11 only has ``ATMS.restartActivityProcessIfVisible(IBinder
+  activityToken)``, which needs the ACTIVITY's token — a shell process cannot obtain it (a task's WindowContainerToken is
+  silently ignored) — so on Android 11 the restart is reported ``unsupported`` instead of pretending.
+
+  An in-place relaunch of the activities (``am update-appinfo``) was the gentler first tier until 2026-10-16. It is gone: on
+  Android 16 an activity may opt out of the assets-path relaunch (manifest ``assetsPaths`` / ``resourcesUnused``), and on the
+  one phone it ran on (HyperOS 16) it relaunched nothing — 47 attempts in the logs of 10–16 October, 47 proofs never seen, each
+  one a 2.9 s wait in the middle of a handoff.
 
 What is decided here (package-agnostic — no package names, no per-app tables)
 -----------------------------------------------------------------------------
@@ -50,10 +37,9 @@ meantime is recognised as already born under the final density:
 
     no process alive                        → nothing to do (the next launch is a cold birth)
     identity changed / did not exist before → already fresh
-    same process lived through the change   → relaunch its activities in place and confirm it in the event log; if that
-                                              cannot be proven (or "hard" refresh is on) restart the process and VERIFY
-                                              the identity really changed (the RPC is fire-and-forget; AOSP silently
-                                              returns for a finishing or unattached activity)
+    same process lived through the change   → restart the process (state preserving) and VERIFY the identity really changed
+                                              (the RPC is fire-and-forget; AOSP silently returns for a finishing or
+                                              unattached activity)
 
 The only manifest signal used is the *negative* one: an activity that does NOT declare ``density`` is relaunched by
 Android itself on a density change, so no process restart is needed (``android_relaunches``).
@@ -71,25 +57,24 @@ Before touching anything, ``settle`` asks the event log whether the process REBU
 Such an app is ``adapted``: refreshing it again was the "needless second refresh". Only a rebuild AFTER the last change
 counts: YouTube relaunched by a move under 520 dpi and THEN switched to 200 dpi without rebuilding is not adapted.
 
-Whether ``am update-appinfo`` relaunches anything is also learned, per device (Android 16 activities may opt out; on
-HyperOS 16 it relaunched nothing): once it failed, that app — and, while it never worked on this device, every app —
-goes straight to the verified process restart instead of paying the 2.5 s proof wait and a second visible refresh.
-
-Playback is never cut (2026-10-13)
-----------------------------------
+Media is never cut (2026-10-13, widened 2026-10-16)
+---------------------------------------------------
 A process restart kills the app's playback service with it: opening YouTube Music on a window while it was playing on the
 phone ended the music, because the process that carried the density change was reborn. An AUTOMATIC process restart is
-therefore refused for an app that has a playing media session (``is_playing``, asked live from the daemon): the activities
-are recreated in place instead (the process, its service and the session survive — the tier above) and, when even that
-cannot be proven, the app is left as it is (``kept_playing``) — a stale layout is a cosmetic problem the user can fix
-with "Uygulamayı yeniden başlat" (``force``), cut music is not. ``force`` is the user's explicit request and is never
-second-guessed; "unknown" (no daemon, unreadable sessions) keeps the old behaviour — the guard needs a positive answer.
+therefore refused for an app that holds a media session — playing OR paused (``holds_media``, asked live from the daemon).
+A paused session is protected too: its video, its position and its queue live in the process, and a restart loses them
+("I closed the window of a paused video and opened it again: the video was gone"). The app is left as it is
+(``kept_playing``) — a stale layout is a cosmetic problem the user can fix with "Uygulamayı yeniden başlat" (``force``), a lost
+video or cut music is not. ``force`` is the user's explicit request and is never second-guessed; "unknown" (no daemon,
+unreadable sessions) keeps the old behaviour — the guard needs a positive answer.
 
-Video players are exempt (``PLAYBACK_GUARD_EXEMPT``): for them the process restart is the right tool — it is state-preserving
-and the app re-opens what it was showing, while without it the layout stays "phone sized" (YouTube). The exemption is a short
-list on purpose: measured on a phone (2026-10-13), YouTube playing a video and YouTube Music playing a track are
-indistinguishable to the system — both report ``CONTENT_TYPE_MUSIC``, both hold a ``mediaPlayback`` foreground service and a
-SurfaceView, both have ``flags=3`` media sessions — so "is this a video app" cannot be asked of the phone.
+Video players are no longer exempt (2026-10-15; ``PLAYBACK_GUARD_EXEMPT`` is empty). YouTube used to be: its process restart
+re-laid the page out for the phone, and "playing" could not tell a video from music. Measured on a phone, though, that restart
+KILLED the process and lost the video, and the layout it was meant to fix does not go stale in practice: after a handoff YouTube
+shows the phone layout (its activity is rebuilt by Android on the display change anyway) and keeps its process. What the display
+change does cost a playing video — Android rebuilds the activity, which STOPS playback, position kept in the media session — is
+given back by ``windows/playback_continuity.py`` (play + seek to where it stopped). A layout that does stay stale is fixed by the
+user's "Uygulamayı yeniden başlat" (``force``).
 
 Also here: ``discard_stale_cached_process`` — a cached, task-less process of the target app was born under some other
 display's density; ``am kill`` (which only ever kills processes that are safe to kill) makes the launch a real cold
@@ -149,34 +134,24 @@ def _precise_epoch(raw: str | None) -> float | None:
     return float(f"{match.group(1)}.{match.group(2)}") if match else None
 
 
-def _stamp(line: str) -> float:
-    """The epoch a `logcat -v epoch` line starts with (inf when it does not parse: keep the line for the diagnostic)."""
-    head = line.split(None, 1)[0] if line else ""
-    try:
-        return float(head)
-    except ValueError:
-        return float("inf")
-
 
 PROCESS_RESTART_MIN_API = 31  # ITaskOrganizerController.restartTaskTopActivityProcessIfVisible exists from Android 12
-CONFIG_ASSETS_PATHS = 0x80000000  # ActivityInfo.CONFIG_ASSETS_PATHS (@hide): cannot be declared in configChanges
 
-# Apps whose playback is VIDEO: playing does not protect their process from the density restart (see "Playback is never cut").
-PLAYBACK_GUARD_EXEMPT = frozenset({"com.google.android.youtube"})
+# Apps whose playing does NOT protect their process from the density restart. Empty since 2026-10-15 (see "Playback is never cut").
+PLAYBACK_GUARD_EXEMPT: frozenset[str] = frozenset()
 
 # --- outcome vocabulary -------------------------------------------------------------------------------------------
 NO_PROCESS = "no_process"                # nothing alive: whatever launches next is a fresh birth
 FRESH_PROCESS = "fresh_process"          # replaced (or born) after the snapshot → already under the final density
 ADAPTED = "adapted"                      # the app rebuilt itself (or Android relaunched it) AFTER the last change
 ANDROID_RELAUNCHES = "android_relaunches"  # activity does not declare density → the system rebuilt it itself
-RELAUNCHED = "relaunched"                # activities recreated in place (event-log proof); the process survived
 RESTARTED = "restarted"                  # state-preserving process restart, identity change verified
 UNCONFIRMED = "unconfirmed"              # asked, but the process identity never changed
 DISABLED = "disabled"                    # user switched density refresh off
 NO_DAEMON = "no_daemon"                  # the RPC lives in the on-device daemon
 NO_TASK = "no_task"                      # no task of the package on the target display
 UNSUPPORTED = "unsupported"              # this Android release has no usable process-restart API (Android 11)
-KEPT_PLAYING = "kept_playing"            # the app is playing media: its process was NOT killed (see "Playback is never cut")
+KEPT_PLAYING = "kept_playing"            # the app holds a media session (playing or paused): its process was NOT killed (see "Media is never cut")
 INVALID = "invalid_package"
 
 
@@ -204,8 +179,8 @@ class RefreshOutcome:
     task_id: str | None = None
     detail: str = ""
     identity: ProcessIdentity | None = None  # the new incarnation after RESTARTED
-    # Host monotonic time at which the rebuild (in-place relaunch or process restart) was REQUESTED: a density change
-    # reported before it was already in effect for the rebuilt app (see _worker_loop).
+    # Host monotonic time at which the process restart was REQUESTED: a density change reported before it was already in
+    # effect for the rebuilt app (see _worker_loop).
     acted_at: float | None = None
 
     @property
@@ -214,8 +189,8 @@ class RefreshOutcome:
 
     @property
     def refreshed(self) -> bool:
-        """The app was made to rebuild itself (activity relaunch or process restart), verified."""
-        return self.action in (RELAUNCHED, RESTARTED)
+        """The app's process was restarted, verified."""
+        return self.action == RESTARTED
 
     @property
     def ok(self) -> bool:
@@ -279,8 +254,6 @@ class DensityReconciler:
         clock: Callable[[], float] = time.monotonic,
         api_level_getter: Callable[[], int | None] | None = None,
         wallclock: Callable[[], float] = time.time,
-        inplace_getter: Callable[[], bool | None] | None = None,
-        inplace_setter: Callable[[bool], Awaitable[None]] | None = None,
     ) -> None:
         self._adb = adb
         self._settings = settings
@@ -296,12 +269,6 @@ class DensityReconciler:
         # (serial, device clock − host clock, host monotonic when measured): lets mark() stamp a density change on the
         # DEVICE clock — the clock of the event log it is compared with — without an adb round trip per change.
         self._offset: tuple[str, float, float] | None = None
-        # Does `am update-appinfo` relaunch anything on this device? None = not tried yet. Persisted through the
-        # getter/setter (the device profile) so the answer survives a backend restart.
-        self._inplace_getter = inplace_getter or (lambda: None)
-        self._inplace_setter = inplace_setter
-        self._inplace_learned: dict[str, bool] = {}          # serial -> learned this run
-        self._inplace_failed: set[tuple[str, str]] = set()   # (serial, package) it did not work for
 
     _OFFSET_TTL_S = 300.0
 
@@ -315,7 +282,7 @@ class DensityReconciler:
 
     async def _policy(self) -> tuple[bool, bool]:
         """(enabled, hard) from the user's settings: ``density_refresh_enabled`` is the kill switch; ``density_refresh_hard``
-        skips the gentle in-place activity relaunch and restarts the process directly (for an app that keeps density in
+        restarts the process even when the app shows proof that it rebuilt itself (for an app that keeps density in
         process-level state). An unreadable DB means the defaults: on, gentle."""
         try:
             from ..storage import settings_db
@@ -453,12 +420,9 @@ class DensityReconciler:
         """One line per settle, whichever path called it — the line to grep when "the app was not refreshed"."""
         was = before.identity.pid if before is not None and before.identity is not None else None
         now = outcome.identity.pid if outcome.identity is not None else None
-        if outcome.action in (RESTARTED, RELAUNCHED):
+        if outcome.action == RESTARTED:
             # On the load timeline: a restart is a cold start of the app — real work for the phone.
-            load_markers.record(
-                "app_restart" if outcome.action == RESTARTED else "app_relaunch",
-                package=outcome.package, detail=reason,
-            )
+            load_markers.record("app_restart", package=outcome.package, detail=reason)
         api = self._api_level_getter()
         log.log(
             logging.INFO if outcome.ok else logging.WARNING,
@@ -610,89 +574,35 @@ class DensityReconciler:
 
         api = self._api_level_getter()
         # Android 11 has no API a shell process can use to restart an app process while keeping its state (the daemon's
-        # fallback there would silently do nothing), so the in-place relaunch is the strongest tool it has — "hard" or not.
-        restart_available = api is None or api >= PROCESS_RESTART_MIN_API
-
-        tried_inplace = False
-        if not restart_available or (not hard and self._inplace_expected(package)):
-            # Gentlest first: recreate the activities IN PLACE (assets-path change: not opt-out-able via configChanges).
-            tried_inplace = True
-            acted_at = self._clock()
-            proof = await self._relaunch_and_learn(package, after.pid)
-            if proof:
-                self._last_restart[package] = self._clock()
-                log.info("[DENSITY] %s (%s): etkinlikler süreç öldürülmeden yeniden kuruldu (pid=%s, %s)",
-                         package, reason, after.pid, proof)
-                return RefreshOutcome(RELAUNCHED, package, task_id=tid, detail=proof, identity=after, acted_at=acted_at)
-            log.info("[DENSITY] %s (%s): etkinlik yeniden kurma doğrulanamadı%s", package, reason,
-                     " → süreç yeniden başlatılıyor" if restart_available else "")
-        elif not hard:
-            log.info("[DENSITY] %s (%s): `am update-appinfo` bu cihazda/uygulamada etkinlikleri yeniden kurmuyor "
-                     "(öğrenildi)", package, reason)
-
-        if not restart_available:
+        # fallback there would silently do nothing): reported as unsupported rather than pretended.
+        if api is not None and api < PROCESS_RESTART_MIN_API:
             log.info("[DENSITY] %s (%s): Android %d'de durum korumalı süreç yeniden başlatma yolu yok", package, reason, api)
             return RefreshOutcome(UNSUPPORTED, package, task_id=tid, detail=f"android_api={api}")
-        if not force and await self.is_playing(package):
-            return await self._keep_playing(package, reason, after, tid, tried_inplace)
-        outcome = await self._restart_process(package, reason, after, tid, declares, daemon if connected else None)
-        if not force or outcome.action not in (UNCONFIRMED, NO_DAEMON):
-            return outcome
-        # The user's explicit refresh must not end on "the restart did not work" while a weaker tool still can: the
-        # process restart was refused or never changed the process, so recreate the activities in place (plan B).
-        # Needs neither the daemon nor a task id, only adb (the gentle tier above is skipped when forced, so this is its first try).
-        acted_at = self._clock()
-        proof = await self._relaunch_and_learn(package, after.pid)
-        if not proof:
-            return RefreshOutcome(outcome.action, package, task_id=tid, detail=f"{outcome.detail};plan_b_unproven".lstrip(";"))
-        self._last_restart[package] = self._clock()
-        log.info("[DENSITY] %s (%s): süreç yeniden başlatılamadı (%s) → etkinlikler yerinde yeniden kuruldu (%s)",
-                 package, reason, outcome.detail or outcome.action, proof)
-        return RefreshOutcome(RELAUNCHED, package, task_id=tid, detail=proof, identity=after, acted_at=acted_at)
+        if not force and await self.holds_media(package):
+            return self._keep_media(package, reason, after, tid)
+        return await self._restart_process(package, reason, after, tid, declares, daemon if connected else None)
 
-    async def is_playing(self, package: str) -> bool:
-        """True only on a POSITIVE answer from the phone that ``package`` has a playing media session (and is not a video
-        player, PLAYBACK_GUARD_EXEMPT). Unknown is False: the guard exists to protect what is demonstrably playing, not to
-        freeze every app the daemon cannot see."""
+    async def holds_media(self, package: str) -> bool:
+        """True only on a POSITIVE answer from the phone that ``package`` holds a media session — playing or paused — and is
+        not a video player exempted by PLAYBACK_GUARD_EXEMPT. Unknown is False: the guard exists to protect what demonstrably
+        holds a video or music, not to freeze every app the daemon cannot see."""
         if package in PLAYBACK_GUARD_EXEMPT:
             return False
         daemon = self._daemon_getter()
-        probe = getattr(daemon, "is_package_playing", None) if daemon is not None else None
+        probe = getattr(daemon, "holds_media_session", None) if daemon is not None else None
         if not callable(probe):
             return False
         try:
             return (await probe(package)) is True
         except Exception as exc:  # noqa: BLE001 — a probe hiccup must not turn into a kill NOR into a crash
-            log.debug("[DENSITY] oynatma durumu okunamadı (%s): %s", package, exc)
+            log.debug("[DENSITY] medya oturumu okunamadı (%s): %s", package, exc)
             return False
 
-    async def relaunch_in_place(self, package: str) -> bool:
-        """The process-preserving rebuild on its own (``am update-appinfo``, proven by the event log): for callers that
-        need "re-inflate the app" but must not kill the process (handoff of an app that is playing)."""
-        after = await self._identity(package)
-        return after is not None and bool(await self._relaunch_and_learn(package, after.pid))
-
-    async def _relaunch_and_learn(self, package: str, pid: int) -> str | None:
-        """``_relaunch_activities`` plus remembering whether it worked (``_learn_inplace``): the proof, or None."""
-        proof = await self._relaunch_activities(package, pid)
-        await self._learn_inplace(package, bool(proof))
-        return proof
-
-    async def _keep_playing(
-        self, package: str, reason: str, after: ProcessIdentity, tid: str, tried_inplace: bool,
-    ) -> RefreshOutcome:
-        """A process restart was due but the app is playing: recreate the activities in place when that was not tried yet
-        (nothing is lost — the service and the session live in the process), else leave the app as it is."""
-        acted_at = self._clock()
-        proof = None if tried_inplace else await self._relaunch_and_learn(package, after.pid)
-        if proof:
-            self._last_restart[package] = self._clock()
-            log.info("[DENSITY] %s (%s): uygulama çalıyor → süreç öldürülmedi, etkinlikler yerinde yeniden kuruldu (%s)",
-                     package, reason, proof)
-            return RefreshOutcome(RELAUNCHED, package, task_id=tid, detail=f"playing;{proof}", identity=after, acted_at=acted_at)
-        log.info("[DENSITY] %s (%s): uygulama müzik çalıyor — süreç yeniden başlatılmadı (çalma kesilmesin); yerleşim bayat "
-                 "kalabilir, \"Uygulamayı yeniden başlat\" ile yenilenir", package, reason)
-        return RefreshOutcome(KEPT_PLAYING, package, task_id=tid, detail="media_session_playing", identity=after)
+    def _keep_media(self, package: str, reason: str, after: ProcessIdentity, tid: str) -> RefreshOutcome:
+        """A process restart was due but the app holds a video or music session: the app is left as it is."""
+        log.info("[DENSITY] %s (%s): uygulamanın medya oturumu var (oynuyor ya da duraklatılmış) — süreç yeniden başlatılmadı "
+                 "(video/müzik kaybolmasın); yerleşim bayat kalabilir, \"Uygulamayı yeniden başlat\" ile yenilenir", package, reason)
+        return RefreshOutcome(KEPT_PLAYING, package, task_id=tid, detail="media_session", identity=after)
 
     async def _restart_process(
         self, package: str, reason: str, after: ProcessIdentity, tid: str, declares: Any, daemon: Any,
@@ -712,10 +622,32 @@ class DensityReconciler:
         if reborn is None:
             log.warning("[DENSITY] %s: yeniden başlatma istendi ama süreç kimliği değişmedi (%.1fs) — sonuç doğrulanamadı",
                         package, self._num("DENSITY_REFRESH_VERIFY_TIMEOUT_S", 6.0))
+            await self._relaunch_if_dead(package, tid, daemon)
             return RefreshOutcome(UNCONFIRMED, package, task_id=tid, detail="identity_unchanged")
         self._last_restart[package] = self._clock()
         log.info("[DENSITY] %s: süreç yeniden doğdu (pid %s → %s)", package, after.pid, reborn.pid)
         return RefreshOutcome(RESTARTED, package, task_id=tid, identity=reborn, acted_at=acted_at)
+
+    async def _relaunch_if_dead(self, package: str, tid: str, daemon: Any) -> None:
+        """The restart killed the process and nothing brought it back (the daemon relaunches only a VISIBLE task): the task is left
+        on its display with no process — a black screen. Started again where the task is. Never raises."""
+        try:
+            if await self._identity(package) is not None:
+                return                                    # alive (just not "reborn": nothing to do)
+            info = await daemon.task_info(tid)
+            if not isinstance(info, dict):
+                return
+            component = info.get("top") or info.get("base")
+            display = info.get("display")
+            serial = self._serial_getter()
+            if not (component and serial is not None and display is not None):
+                return
+            log.warning("⚠️ [DENSITY] %s: süreç öldürüldü ama geri gelmedi — görev %s'de yeniden başlatılıyor", package, display)
+            await self._adb.shell(f"am start --display {int(display)} -n {component} -f 0x10200000", serial=serial, timeout_s=3.0)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — a safety net must not turn into the failure
+            log.debug("[DENSITY] %s yeniden başlatılamadı: %s", package, exc)
 
     # ------------------------------------------------------------------ adaptation & learned capability
 
@@ -729,122 +661,24 @@ class DensityReconciler:
         remaining = (changed_at + wait) - (self._wallclock() + offset) if offset is not None else 0.0
         deadline = self._clock() + max(0.0, remaining)
         while True:
-            proof, _seen = await self._relaunch_proof(package, changed_at - self._MARK_SLACK_S, pid, assets_only=False)
+            proof = await self._rebuild_proof(package, changed_at - self._MARK_SLACK_S, pid)
             if proof or self._clock() >= deadline:
                 return proof
             await asyncio.sleep(0.2)
 
-    def _inplace_device(self) -> bool | None:
-        serial = self._serial_getter() or ""
-        if serial in self._inplace_learned:
-            return self._inplace_learned[serial]
-        try:
-            return self._inplace_getter()  # persisted in the bound device's profile
-        except Exception:  # noqa: BLE001
-            return None
-
-    def _inplace_expected(self, package: str) -> bool:
-        """Worth trying `am update-appinfo`? Not for an app it already failed for, and not on a device where it never
-        worked once it failed there (the attempt costs a 2.5 s proof wait before the restart anyway)."""
-        return (self._serial_getter() or "", package) not in self._inplace_failed and self._inplace_device() is not False
-
-    async def _learn_inplace(self, package: str, worked: bool) -> None:
-        serial = self._serial_getter() or ""
-        if worked:
-            self._inplace_failed.discard((serial, package))
-            learned: bool | None = True
-        else:
-            self._inplace_failed.add((serial, package))
-            learned = False if self._inplace_device() is not True else None  # one app opting out ≠ a broken device
-        if learned is None or learned == self._inplace_device():
-            return
-        self._inplace_learned[serial] = learned
-        log.info("[DENSITY] öğrenildi: bu cihazda `am update-appinfo` etkinlikleri %s", "yeniden kuruyor" if learned
-                 else "YENİDEN KURMUYOR → bundan sonra doğrudan durum korumalı süreç yeniden başlatma")
-        if self._inplace_setter is not None:
-            with contextlib.suppress(Exception):
-                await self._inplace_setter(learned)
-
-    async def _relaunch_activities(self, package: str, pid: int) -> str | None:
-        """Recreates every visible activity of ``package`` in its own process (``am update-appinfo``) and returns the proof
-        — or None when it cannot be proven (command failed/unsupported, the events buffer is unreadable, nothing was
-        relaunched, or — Android 16 — the activities declare ``assetsPaths``/``resourcesUnused``).
-
-        Proof (either is enough, both are only trusted when newer than the command by the DEVICE's own clock):
-          * system side, Android 12+: ``wm_relaunch_activity`` for this package with config-mask bit 0x80000000;
-          * app side, Android 11+: this process' own ``wm_on_destroy_called`` followed by ``wm_on_create_called``
-            (Activity.performDestroy / performCreate) — the only trace on Android 11, where the APP does the relaunch."""
-        if not is_package_name(package):
-            return None
-        return await self._run_and_prove(package, pid, f"am update-appinfo all {package}", assets_only=True)
-
-    async def _run_and_prove(self, package: str, pid: int, command: str, *, assets_only: bool) -> str | None:
-        """Runs ``command`` stamped with the device clock and waits (≤ DENSITY_REFRESH_RELAUNCH_PROOF_S) for the event-log
-        proof that ``package`` was relaunched after it (see _relaunch_proof)."""
-        serial = self._serial_getter()
-        if not serial:
-            return None
-        label = command.split(" --", 1)[0]
-        try:
-            out = await self._adb.shell(f"date +%s.%N; {command}", serial=serial, timeout_s=4.0)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("[DENSITY] %s: %s çalıştırılamadı: %s", package, label, exc)
-            return None
-        lines = (out or "").strip().splitlines()
-        head = lines[0].strip() if lines else ""
-        precise = _precise_epoch(head)
-        if precise is not None:
-            # 50 ms of slack. The old whole-second clock (−1 s) let the app's OWN recreate from just before the command
-            # pass as our relaunch — the false "relaunched" of the device log.
-            since: float = precise - 0.05
-        else:
-            try:
-                since = int(head.split(".", 1)[0]) - 1  # whole-second device clock, 1 s of slack
-            except ValueError:
-                log.warning("[DENSITY] %s: cihaz saati okunamadı, kanıt aranamaz (çıktı: %r)", package, (out or "")[:200])
-                return None  # without the device clock an old event could be mistaken for ours
-        log.debug("[DENSITY] %s: %s çıktısı: %s", package, label, " | ".join(lines[1:4])[:300] or "(boş)")
-        deadline = self._clock() + self._num("DENSITY_REFRESH_RELAUNCH_PROOF_S", 2.5)
-        while True:
-            proof, seen = await self._relaunch_proof(package, since, pid, assets_only=assets_only)
-            if proof:
-                return proof
-            if self._clock() >= deadline:
-                # The lines the device DID show us: the way to tell an Android 16 opt-out (nothing relaunched), an
-                # unreadable events buffer (nothing at all) and a log-format surprise (lines present, none matched).
-                log.warning(
-                    "[DENSITY] %s: yerinde yeniden kurma (%s) kanıtlanamadı (pid=%s, since=%s). Görülen %d olay satırı%s",
-                    package, label, pid, since, len(seen),
-                    (": " + " || ".join(seen[-6:])) if seen else " (olay günlüğü boş/okunamadı)",
-                )
-                return None
-            await asyncio.sleep(0.4)  # a relaunch deferred until the activity finished pausing
-
-    async def _relaunch_proof(
-        self, package: str, since: float, pid: int, *, assets_only: bool = True,
-    ) -> tuple[str | None, list[str]]:
-        """(proof or None, the relevant event lines seen — for the diagnostic when there is no proof).
-
-        Proof is a rebuild of the app at/after ``since`` (device clock): Android's relaunch of this package — with
-        ``assets_only`` only one carrying CONFIG_ASSETS_PATHS (our `update-appinfo`), otherwise any config change — or
-        this pid destroying and then creating the SAME activity (token + class)."""
+    async def _rebuild_proof(self, package: str, since: float, pid: int) -> str | None:
+        """The proof that the app rebuilt itself at/after ``since`` (device clock), or None: Android's relaunch of this package
+        (any config change) or this pid destroying and then creating the SAME activity (token + class)."""
         all_lines = await self._proof_event_lines(since)
         if all_lines is None:
-            return None, []
-        # What to show when there is no proof: this run's lines that concern us; else the newest lines whatever they look
-        # like (a log-format surprise must be visible, that is the whole point).
-        seen = [ln[:200] for ln in all_lines if (package in ln or f" {pid} " in ln) and _stamp(ln) >= since][-6:]
-        seen = seen or [ln[:200] for ln in all_lines[-3:]]
+            return None
         destroyed: dict[tuple[str, str], float] = {}
         for line in all_lines:
             m = _RELAUNCH_EVENT.match(line)
             if m:
                 stamp, component, mask = float(m.group(1)), m.group(2), int(m.group(3), 16)
-                if (
-                    stamp >= since and component.split("/", 1)[0] == package
-                    and (mask & CONFIG_ASSETS_PATHS or not assets_only)
-                ):
-                    return f"system: {component} mask=0x{mask:x}", seen
+                if stamp >= since and component.split("/", 1)[0] == package:
+                    return f"system: {component} mask=0x{mask:x}"
                 continue
             a = _APP_LIFECYCLE_EVENT.match(line)
             if a:
@@ -857,8 +691,8 @@ class DensityReconciler:
                 if kind == "destroy":
                     destroyed.setdefault(key, stamp)
                 elif key in destroyed and stamp >= destroyed[key]:
-                    return f"app: pid {pid} recreated {key[1]}", seen
-        return None, seen
+                    return f"app: pid {pid} recreated {key[1]}"
+        return None
 
     async def _proof_event_lines(self, since: float) -> list[str] | None:
         """The `events` lines a proof is made of (`logcat -v epoch` format), None when unreadable.

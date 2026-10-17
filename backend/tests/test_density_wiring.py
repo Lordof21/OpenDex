@@ -142,9 +142,9 @@ async def test_live_dpi_change_restarts_the_process_that_lived_through_it(monkey
     await manager.resize_window(handle.window_id, 1920, 1032, dpi=229)  # 180 → 229: a real density change
     await manager._density.wait_idle()
 
-    # Refreshed by the gentle tier: the activities are recreated IN PLACE, the process is not killed.
-    assert len(phone.relaunch_cmds) == 1 and daemon.restarts == []
-    assert phone.pid == 4001
+    # The process lived through the density change without proof of adapting: one state-preserving restart.
+    assert daemon.restarts == ["42"]
+    assert phone.pid == 4002
 
 
 async def test_live_dpi_change_on_the_flex_path_settles_too(monkeypatch, tmp_db, tasks):
@@ -161,7 +161,7 @@ async def test_live_dpi_change_on_the_flex_path_settles_too(monkeypatch, tmp_db,
 
     manager._reconfigure._flex_resize.assert_awaited_once()
     assert any("wm density 229 -d 33" in c for c in phone.commands)
-    assert len(phone.relaunch_cmds) == 1 and daemon.restarts == []
+    assert daemon.restarts == ["42"]
 
 
 async def test_live_dpi_change_leaves_an_app_that_recreated_itself_alone(monkeypatch, tmp_db, tasks):
@@ -186,7 +186,7 @@ async def test_live_dpi_change_leaves_an_app_that_recreated_itself_alone(monkeyp
     await manager.resize_window(handle.window_id, 1920, 1032, dpi=229)
     await manager._density.wait_idle()
 
-    assert phone.relaunch_cmds == [] and daemon.restarts == []
+    assert daemon.restarts == []
     assert phone.pid == 4001
 
 
@@ -212,7 +212,7 @@ async def test_atomic_resize_carries_the_mark_so_only_an_app_that_did_not_adapt_
     await manager._density.wait_idle()
 
     assert manager._reconfigure._flex_resize.await_args.kwargs["dpi"] == 229  # the atomic path really ran
-    assert (len(phone.relaunch_cmds) == 0) is recreates and daemon.restarts == []
+    assert (len(daemon.restarts) == 0) is recreates
 
 
 async def test_resize_without_a_density_change_never_probes_the_process(monkeypatch, tmp_db, tasks):
@@ -223,12 +223,11 @@ async def test_resize_without_a_density_change_never_probes_the_process(monkeypa
     await manager._density.wait_idle()
     manager._reconfigure._flex_resize = AsyncMock(return_value=True)
     phone.commands.clear()
-    phone.relaunch_cmds.clear()
 
     await manager.resize_window(handle.window_id, 1920, 1032, dpi=None)  # same density: only the size changes
     await manager._density.wait_idle()
 
-    assert daemon.restarts == [] and phone.relaunch_cmds == []  # neither tier ran
+    assert daemon.restarts == []
     assert not any("pidof" in c for c in phone.commands)
 
 
@@ -246,8 +245,7 @@ async def test_a_dpi_slider_burst_restarts_the_app_once(monkeypatch, tmp_db, tas
         await manager.resize_window(handle.window_id, 1920, 1032, dpi=dpi)
     await manager._density.wait_idle()
 
-    assert len(phone.relaunch_cmds) == 1  # five changes, one refresh
-    assert daemon.restarts == []
+    assert daemon.restarts == ["42"]  # five changes, one refresh
 
 
 async def test_closing_the_window_cancels_a_pending_settle(monkeypatch, tmp_db, tasks):
@@ -263,7 +261,7 @@ async def test_closing_the_window_cancels_a_pending_settle(monkeypatch, tmp_db, 
     await asyncio.sleep(0.7)
 
     assert not manager._density._workers
-    assert daemon.restarts == [] and phone.relaunch_cmds == []  # neither tier ran
+    assert daemon.restarts == []
 
 
 # ---------------------------------------------------------------- cold-launch hygiene & close
@@ -346,7 +344,7 @@ async def test_workspace_task_density_change_applies_inplace_without_reconciler_
     await manager._density.wait_idle()
 
     # Görev in-place adapte olur; DensityReconciler devreye girip süreci veya activity'yi yeniden kurmaz
-    assert daemon.restarts == [] and phone.relaunch_cmds == []
+    assert daemon.restarts == []
 
 
 async def test_workspace_same_density_is_a_noop(monkeypatch, tmp_db, tasks):
@@ -361,4 +359,4 @@ async def test_workspace_same_density_is_a_noop(monkeypatch, tmp_db, tasks):
     await manager.set_workspace_task_density("w1", 200)
     await manager._density.wait_idle()
 
-    assert daemon.restarts == [] and phone.relaunch_cmds == []  # neither tier ran
+    assert daemon.restarts == []

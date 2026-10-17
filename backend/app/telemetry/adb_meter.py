@@ -51,7 +51,7 @@ def classify(command: str) -> str:
         return "process_probe"
     if c.startswith("wm ") or " wm " in c:
         return "density"
-    if c.startswith(("am ", "cmd ", "monkey ")) or "am update-appinfo" in c:
+    if c.startswith(("am ", "cmd ", "monkey ")):
         return "app_control"
     if c.startswith("input "):
         return "input"

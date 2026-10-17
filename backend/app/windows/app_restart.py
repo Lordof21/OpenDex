@@ -5,14 +5,12 @@ died while the link flapped, an activity that kept pre-drop pixel sizes, a UI th
 re-opening the window is the heavy way out (new virtual display, new encoder, lost window state); this is the light
 one: rebuild the APP in the SAME window. Package-agnostic — nothing here knows an app.
 
-The ladder, gentlest-that-works first (the first two are DensityReconciler's forced settle, see density_reconciler.py):
+The ladder:
 
   1. PROCESS restart under the window's current density (state-preserving: the activity saves its state, the process
-     is killed and relaunched). Identity-verified. Needs Android 12+ and the on-device daemon.
-  2. PLAN B — onDestroy → onCreate in place (``am update-appinfo``): every activity of the package is recreated in the
-     same process. Proven by the event log. The only tool on Android 11, and what is tried when (1) is refused or never
-     changed the process identity.
-  3. NOTHING RUNNING (no process, or no task on this window's display — what a crash / "app closed on the phone" leaves
+     is killed and relaunched; DensityReconciler's forced settle, see density_reconciler.py). Identity-verified. Needs
+     Android 12+ and the on-device daemon.
+  2. NOTHING RUNNING (no process, or no task on this window's display — what a crash / "app closed on the phone" leaves
      behind): start it cold. A leftover task-less cached process is discarded first so the launch is a real birth, then
      START_APP is sent into the window and the task is awaited.
 
@@ -27,7 +25,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Awaitable, Callable
 
-from .density_reconciler import NO_PROCESS, NO_TASK, RELAUNCHED, RESTARTED, DensityReconciler, RefreshOutcome
+from .density_reconciler import NO_PROCESS, NO_TASK, RESTARTED, DensityReconciler, RefreshOutcome
 from .mirror_packages import is_internal_package
 
 if TYPE_CHECKING:
@@ -37,7 +35,6 @@ log = logging.getLogger(__name__)
 
 # What the caller (and the user) is told. ``ok`` outcomes mean "the app is running again under this window".
 ACTION_RESTARTED = RESTARTED          # process restarted, identity change verified
-ACTION_RELAUNCHED = RELAUNCHED        # plan B: activities recreated in place, event-log proof
 ACTION_LAUNCHED = "launched"          # nothing was running: cold-started, task seen on the window's display
 NOT_RESTARTABLE = "not_restartable"   # OpenDeX's own pseudo-window (phone mirror, Workspace anchor)
 HANDED_OFF = "handed_off"             # the app is on the phone's own screen
@@ -56,7 +53,7 @@ class AppRestartOutcome:
 
     @property
     def ok(self) -> bool:
-        return self.action in (ACTION_RESTARTED, ACTION_RELAUNCHED, ACTION_LAUNCHED)
+        return self.action in (ACTION_RESTARTED, ACTION_LAUNCHED)
 
 
 def refusal_for(session: "WindowSession") -> str | None:
@@ -92,8 +89,8 @@ async def restart_app(
     if outcome.refreshed:
         return AppRestartOutcome(outcome.action, package, outcome.detail)
     if outcome.action not in (NO_PROCESS, NO_TASK):
-        # Both restart tiers were tried (the reconciler runs plan B itself) and neither could be verified.
-        log.warning("[RESTART] %s: süreç yeniden başlatma da, yerinde yeniden kurma da doğrulanamadı → %s %s",
+        # The process restart was asked for and could not be verified.
+        log.warning("[RESTART] %s: süreç yeniden başlatma doğrulanamadı → %s %s",
                     package, outcome.action, outcome.detail)
         return AppRestartOutcome(FAILED, package, f"{outcome.action}:{outcome.detail}".rstrip(":"))
 

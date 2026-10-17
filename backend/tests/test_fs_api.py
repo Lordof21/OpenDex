@@ -3,6 +3,8 @@ import asyncio
 import io
 import json
 import os
+import sys
+from urllib.parse import quote
 from pathlib import Path
 
 import httpx
@@ -143,7 +145,7 @@ async def test_an_empty_folder_still_has_meta_and_end(env):
 async def test_listing_errors_are_real_http_errors_with_a_code(env):
     res = await env.client.get("/api/fs/list", params={"provider": "pc", "path": str(env.docs / "nope")})
     assert res.status_code == 404 and res.json()["code"] == "not_found" and res.json()["detail"]
-    res = await env.client.get("/api/fs/list", params={"provider": "pc", "path": "/etc"})
+    res = await env.client.get("/api/fs/list", params={"provider": "pc", "path": os.path.abspath("/etc")})   # absolute on Windows too ("C:\etc")
     assert res.status_code == 403 and res.json()["code"] == "outside_roots"
     res = await env.client.get("/api/fs/list", params={"provider": "phone", "path": "/data/data/com.x"})
     assert res.status_code == 403 and res.json()["code"] == "outside_roots"
@@ -326,7 +328,7 @@ async def test_conflicts_are_answered_over_http(env):
 
 
 async def test_transfer_requests_are_validated_before_a_job_exists(env):
-    bad = await env.client.post("/api/fs/transfers", json={"op": "copy", "sources": [{"provider": "pc", "path": "/etc/passwd"}],
+    bad = await env.client.post("/api/fs/transfers", json={"op": "copy", "sources": [{"provider": "pc", "path": os.path.abspath("/etc/passwd")}],
                                                            "dest": {"provider": "pc", "path": str(env.docs)}})
     assert bad.status_code == 403 and (await env.client.get("/api/fs/transfers")).json()["items"] == []
     assert (await env.client.post("/api/fs/transfers", json={"op": "teleport", "sources": [], "dest": {"provider": "pc", "path": "/x"}})).status_code == 422
@@ -455,9 +457,11 @@ async def test_open_on_pc_copies_a_phone_file_under_its_own_name_only_because_th
 
 
 async def test_file_names_in_headers_survive_unicode_and_quotes(env):
-    (env.docs / 'ş "q".txt').write_text("x")
-    res = await env.client.get("/api/fs/content", params={"provider": "pc", "path": str(env.docs / 'ş "q".txt')})
-    assert "filename*=UTF-8''%C5%9F%20%22q%22.txt" in res.headers["content-disposition"] and '"' not in res.headers["content-disposition"].split('filename="')[1].split('"')[0]
+    name = 'ş q.txt' if sys.platform == "win32" else 'ş "q".txt'   # Windows cannot name a file with a double quote
+    (env.docs / name).write_text("x")
+    res = await env.client.get("/api/fs/content", params={"provider": "pc", "path": str(env.docs / name)})
+    disposition = res.headers["content-disposition"]
+    assert f"filename*=UTF-8''{quote(name)}" in disposition and '"' not in disposition.split('filename="')[1].split('"')[0]
 
 
 # ---------------------------------------------------------------------------------------------- the desktop
@@ -475,7 +479,8 @@ async def test_grants_need_the_shell_token_and_open_exactly_what_was_dropped(env
     assert res.status_code == 200 and res.json()["items"][0]["name"] == "d.txt"
     assert (await env.client.get("/api/fs/stat", params={"provider": "pc", "path": str(outside / "d.txt")})).status_code == 200
     assert (await env.client.get("/api/fs/stat", params={"provider": "pc", "path": str(outside)})).status_code == 403   # not the folder
-    assert oct((env.tmp / "shell-token").stat().st_mode & 0o777) == oct(0o600)
+    if sys.platform != "win32":   # POSIX permission bits mean nothing on NTFS (it reports 0o666)
+        assert oct((env.tmp / "shell-token").stat().st_mode & 0o777) == oct(0o600)
 
 
 async def test_open_refuses_programs(env, monkeypatch):

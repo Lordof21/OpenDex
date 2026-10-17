@@ -10,7 +10,6 @@ from app.windows.density_reconciler import (
     NO_DAEMON,
     NO_PROCESS,
     NO_TASK,
-    RELAUNCHED,
     RESTARTED,
     UNCONFIRMED,
     UNSUPPORTED,
@@ -82,18 +81,6 @@ async def test_endpoint_success_reports_the_action():
     resp = await ep.refresh_window_density(RefreshDensityRequest(window_id="win-1"), ctx)
 
     assert resp == {"ok": True, "window_id": "win-1", "action": "restarted"}
-
-
-async def test_an_in_place_relaunch_is_a_successful_refresh():
-    """Android 11 cannot restart a process from a shell; there the verified in-place relaunch IS the refresh."""
-    wm = _wm(sessions={"win-1": _session()})
-    wm._density.settle = AsyncMock(return_value=RefreshOutcome(RELAUNCHED, "p", detail="app: pid 4000 destroyed and recreated an activity"))
-    assert await wm.refresh_window_density("win-1") is True
-
-    ctx = MagicMock()
-    ctx.window_manager.refresh_window_density_outcome = AsyncMock(return_value=RefreshOutcome(RELAUNCHED, "p"))
-    resp = await ep.refresh_window_density(RefreshDensityRequest(window_id="win-1"), ctx)
-    assert resp == {"ok": True, "window_id": "win-1", "action": "relaunched"}
 
 
 async def test_endpoint_unknown_window_is_404():

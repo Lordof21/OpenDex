@@ -600,7 +600,7 @@ async def test_create_validates_at_once(rig):
     with pytest.raises(FsError):
         rig.engine.create(rig.spec("copy", [rig.pc("a"), rig.pc("a")], rig.pc()))
     with pytest.raises(FsError) as err:
-        rig.engine.create(rig.spec("copy", [rig.pc("a")], Location("pc", "/etc")))
+        rig.engine.create(rig.spec("copy", [rig.pc("a")], Location("pc", os.path.abspath("/etc"))))
     assert err.value.code == "outside_roots"
     with pytest.raises(FsError):
         rig.engine.create(rig.spec("teleport", [rig.pc("a")], rig.pc()))

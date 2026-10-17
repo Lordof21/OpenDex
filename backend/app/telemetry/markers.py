@@ -13,7 +13,6 @@ from typing import Any
 # kind -> human label (the frontend keys icons on `kind`)
 KINDS: dict[str, str] = {
     "app_restart": "Uygulama yeniden başlatıldı",
-    "app_relaunch": "Uygulama yerinde yeniden kuruldu",
     "dpi_change": "DPI değişti",
     "window_open": "Pencere açıldı",
     "window_close": "Pencere kapandı",

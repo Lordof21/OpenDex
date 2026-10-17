@@ -48,9 +48,6 @@ class DeviceProfile(BaseModel):
     phone_width: int | None = None      # kısa kenar (px)
     phone_height: int | None = None     # uzun kenar (px)
     phone_density: int | None = None
-    # `am update-appinfo` bu cihazda etkinlikleri yerinde yeniden kuruyor mu (density_reconciler.py, öğrenilir)?
-    # False: yoğunluk uzlaştırması doğrudan durum korumalı süreç yeniden başlatmaya gider. None = henüz denenmedi.
-    density_inplace_relaunch: bool | None = None
 
 
 class KnownDevice(BaseModel):
