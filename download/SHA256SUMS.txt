@@ -1,2 +1,2 @@
-273b3c52ee382b41dcf9325be1470cfab0ecddd0c510751c5400318c307ad073  OpenDeX_0.1.0_windows-x64_portable.zip
-a3d8987a89558fcd8118db44b4fb561dbca62e0305ec5fc2b2bca87b59b6b906  OpenDeX_0.1.0_x64_tr-TR.msi
+a54e3d5b3570bcfbd22347a171da57d0e37460b4efcd72d2d4df4982003b3a16  OpenDeX_0.1.0_windows-x64_portable.zip
+9cda05d71f4880f189c35c77ac5a9dc4ab38368c6aedf84c0fbf30eb73271394  OpenDeX_0.1.0_x64_tr-TR.msi

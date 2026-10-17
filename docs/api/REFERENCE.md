@@ -949,6 +949,7 @@ Updates settings and applies live quality/audio reconfigurations.
 | `handoff_prelanding` | boolean | no | default `true` |
 | `windowing_mode` | `"eco"` \| `"independent"` \| `"hybrid_auto"` | no | default `"hybrid_auto"` |
 | `remember_devices` | boolean | no | default `true` |
+| `usb_stability_guard` | boolean | no | default `true` |
 | `phone_handoff_windowing` | `"fullscreen"` \| `"freeform"` | no | default `"fullscreen"` |
 | `app_closed_behavior` | `"close"` \| `"badge"` | no | default `"close"` |
 

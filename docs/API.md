@@ -375,11 +375,12 @@ frame** (`0 … width`, `0 … height` of the stream — the same space as the p
 |---|---|---|
 | `down` `move` `up` | `x`, `y` | One finger. `down` presses, `move` drags, `up` lifts. |
 | `scroll` | `x`, `y`, `hscroll`, `vscroll` (floats; positive `vscroll` scrolls up) | Wheel / two-finger scroll at a point. |
+| `hover` | `x`, `y` | The mouse pointer resting at a point with no finger down (a `SOURCE_MOUSE` hover: highlights, tooltips). Ignored while this connection holds a finger down; positions past 120 per second are dropped, not queued — send at the window's frame rate. A position past the edge is pulled onto it. |
 | `clipboard` | `text`, `paste` (default `true`) | Sets the phone's clipboard and, if `paste`, pastes. |
 | `release_all` | — | Lifts whatever this connection still holds down. Send it when your page loses focus or closes. |
 
 Accepted types: <!-- BEGIN GENERATED: ws-input-types -->
-`clipboard`, `down`, `move`, `release_all`, `scroll`, `up`
+`clipboard`, `down`, `hover`, `move`, `release_all`, `scroll`, `up`
 <!-- END GENERATED: ws-input-types -->.
 
 **A finger never stays stuck.** Android keeps a pointer pressed until told otherwise. The backend records what each input socket

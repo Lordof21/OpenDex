@@ -97,9 +97,9 @@ yerinde yeniden kurma, soğuk başlatma) yalnızca gerçek cihazda doğrulanabil
   kullanmamalı); günlükte `frozen window for … could not be woken; dropping it to open fresh` görürsen eski oturum atılıp sıfırdan
   açılmıştır — beklenen davranış.
 - **Hub › «Uygulamayı yeniden başlat»:** takılan / siyah kalan bir uygulamada bas. Günlükte `[DENSITY] SONUÇ … manual → …`:
-  `restarted` (süreç yeniden doğdu — Android 12+ ve daemon gerekir), `relaunched` (**yedek**: onDestroy→onCreate yerinde),
-  uygulama hiç çalışmıyorsa `[RESTART] … soğuk başlatma` ve bildirim «başlatıldı». HyperOS'ta `am update-appinfo` etkinlikleri
-  yeniden kurmuyorsa (öğrenilmişse) yedek de kanıtlanamaz: bildirim «yeniden başlatılamadı» der, pencereyi kapatıp açmak gerekir.
+  `restarted` (süreç yeniden doğdu — Android 12+ ve daemon gerekir), uygulama hiç çalışmıyorsa `[RESTART] … soğuk başlatma` ve
+  bildirim «başlatıldı». Yeniden başlatma doğrulanamazsa (daemon reddetti ya da süreç kimliği değişmedi) bildirim
+  «yeniden başlatılamadı» der; yedek bir yol yoktur, pencereyi kapatıp açmak gerekir.
 - **Hub › Ekran kilidi:** kilitliyken pencereyi serbestçe büyüt/küçült: görüntü (px + DPI) değişmez, sığdırılır; `[OpenDeX Resize:REQ]`
   satırı **çıkmamalı**. Kilidi aç: pencere boyutuna göre yeniden boyutlanır.
 - **Kaplama / tam ekran / orta boy:** başlıktaki «Ekranı kapla» ile Hub'daki «Tam ekran» arasında art arda geç, ortadaki boya dön.

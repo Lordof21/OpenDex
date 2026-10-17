@@ -6323,17 +6323,6 @@
               }
             ],
             "title": "Phone Density"
-          },
-          "density_inplace_relaunch": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Density Inplace Relaunch"
           }
         },
         "type": "object",
@@ -7283,6 +7272,11 @@
           "remember_devices": {
             "type": "boolean",
             "title": "Remember Devices",
+            "default": true
+          },
+          "usb_stability_guard": {
+            "type": "boolean",
+            "title": "Usb Stability Guard",
             "default": true
           },
           "phone_handoff_windowing": {
