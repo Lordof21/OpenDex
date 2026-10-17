@@ -9,7 +9,6 @@ import {
   Cpu,
   Layers,
   Minus,
-  Monitor,
   RotateCw,
   Smartphone,
   Sparkles,
@@ -187,8 +186,21 @@ export default function BootSplash({ onReady }) {
               transition={{ repeat: Infinity, duration: 2.4, ease: 'easeInOut' }}
               className="relative flex items-center justify-center text-primary"
             >
-              <Monitor className="size-8 drop-shadow-sm" />
-              <Smartphone className="size-4 absolute -bottom-1 -right-1 text-muted-foreground" />
+              {/* OpenDeX işareti: şeffaf maske (public/brand/logo-mark.svg), rengi tema token'ından (--primary) gelir: açıkta mürekkep, koyuda krem. */}
+              <span
+                aria-hidden="true"
+                className="block size-10 bg-primary drop-shadow-sm"
+                style={{
+                  maskImage: 'url(/brand/logo-mark.svg)',
+                  WebkitMaskImage: 'url(/brand/logo-mark.svg)',
+                  maskSize: 'contain',
+                  WebkitMaskSize: 'contain',
+                  maskRepeat: 'no-repeat',
+                  WebkitMaskRepeat: 'no-repeat',
+                  maskPosition: 'center',
+                  WebkitMaskPosition: 'center',
+                }}
+              />
             </motion.div>
           </div>
         </div>
