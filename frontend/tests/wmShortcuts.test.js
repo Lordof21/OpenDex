@@ -140,3 +140,40 @@ describe('Sözleşme: uygulanan kısayol telefona İLETİLMEZ (uygulama ⇔ enje
     }
   });
 });
+
+describe('Ctrl+G (tuş düzenini aç / kapat)', () => {
+  it('yalnız KAYITLI bir tuş düzeni olan pencerede tanınır; yoksa tuş uygulamanındır', () => {
+    const e = ev({ ctrlKey: true, key: 'g' });
+    expect(matchWmShortcut(e, { layout: true })).toBe(WM_ACTIONS.toggleKeymap);
+    expect(matchWmShortcut(e)).toBeNull();
+    expect(matchWmShortcut(ev({ ctrlKey: true, shiftKey: true, key: 'G' }), { layout: true })).toBeNull();
+    expect(isWindowManagerShortcut(e, { layout: true })).toBe(true);
+  });
+
+  it('oyun kipindeyken de çalışır (düzenden çıkmanın tek yolu bu)', () => {
+    expect(matchWmShortcut(ev({ ctrlKey: true, key: 'g' }), { game: true, layout: true })).toBe(WM_ACTIONS.toggleKeymap);
+  });
+});
+
+describe('Ctrl+G uygulanışı', () => {
+  it('odaktaki pencerenin düzenini kapatır, tekrar basınca açar; düzeni olmayan pencerede tuşu tüketmez', async () => {
+    const { useKeymapStore } = await import('../src/keymapper/keymapStore.js');
+    const node = { id: 'n1', type: 'tap', key: 'KeyF', x: 0.5, y: 0.5, enabled: true };
+    useKeymapStore.setState({ presets: { 'com.game': [node] }, layoutOff: {}, windowOwned: {} });
+    useWindowStore.setState({ windows: [{ id: 'w1', package: 'com.game', focused: true, minimized: false }] });
+    const press = () => {
+      const e = ev({ ctrlKey: true, key: 'g' });
+      return [useWindowStore.getState().handleWindowManagerShortcut(e), e];
+    };
+
+    expect(press()[0]).toBe(true);
+    expect(useKeymapStore.getState().layoutOff['com.game']).toBe(true);
+    expect(press()[0]).toBe(true);
+    expect(useKeymapStore.getState().layoutOff['com.game']).toBeUndefined();
+
+    useKeymapStore.setState({ presets: {}, layoutOff: {} });
+    const [consumed, event] = press();
+    expect(consumed).toBe(false);
+    expect(event.preventDefault).not.toHaveBeenCalled();
+  });
+});

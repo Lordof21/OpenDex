@@ -15,18 +15,14 @@ export const NAMED_KEYS = new Set([
   'Home', 'End', 'PageUp', 'PageDown',
 ]);
 
-// The on-screen D-pad's buttons ("Yön tuşları"): a direction is the Android D-pad key of the same name. Backend
-// keycode names (input/keyboard_control.py), pinned by tests/inputContract.test.js.
-export const DPAD_KEYS = Object.freeze({ up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright' });
-export const DPAD_SELECT_KEY = 'enter';
-
 // Matches backend keyboard_control keycode table: ASCII letters, digits and
 // common punctuation go the keycode path; everything else (ç, ğ, ı, ö, ş, ü…)
 // goes the clipboard path — NO backup, by audited decision.
 const ASCII_RE = /^[a-zA-Z0-9 .,\-=/;'[\]\\`\n\t]$/;
 
-export function isWindowManagerShortcut(domEvent) {
-  return matchWmShortcut(domEvent) !== null;
+/** `options.game`: pencere oyun kipinde (aktif tuş düzeni) — Ctrl+W / Ctrl+M oyuna gider (bkz. wmShortcuts.matchWmShortcut). */
+export function isWindowManagerShortcut(domEvent, options) {
+  return matchWmShortcut(domEvent, options) !== null;
 }
 
 export function resolveKeyEvent(domEvent) {
@@ -49,22 +45,6 @@ export function resolveKeyEvent(domEvent) {
 
 export async function sendKeycode(windowId, key) {
   await api.post('/api/input/key', { window_id: windowId, kind: 'keycode', key });
-}
-
-/**
- * One press of an on-screen D-pad button. A refused press is LOGGED, not swallowed: the buttons used to post a
- * `kind` the backend does not accept and `.catch(() => {})` hid the 422 for months — they simply did nothing.
- */
-export function sendDpad(windowId, direction) {
-  const key = direction === 'select' ? DPAD_SELECT_KEY : DPAD_KEYS[direction];
-  if (!key) return Promise.resolve(false);
-  return sendKeycode(windowId, key).then(
-    () => true,
-    (err) => {
-      logger.warn('input', 'dpad_press_failed', { windowId, direction, key, error: err?.message || String(err) });
-      return false;
-    }
-  );
 }
 
 export async function sendChar(windowId, char) {

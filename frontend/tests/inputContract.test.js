@@ -9,7 +9,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../src/lib/api.js', () => ({ api: { post: vi.fn() }, wsUrl: (p) => `ws://test${p}` }));
 
-import { DPAD_KEYS, DPAD_SELECT_KEY, NAMED_KEYS } from '../src/input/keyboardInject.js';
+import { NAMED_KEYS } from '../src/input/keyboardInject.js';
 
 const ROOT = join(__dirname, '..');
 const contract = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'backend-input-contract.json'), 'utf8'));
@@ -72,7 +72,7 @@ describe('giriş sözleşmesi: arayüzün gönderdiği değerleri backend kabul 
   });
 
   it('adlandırılmış klavye tuşları ve D-pad tuşları backend keycode tablosunda', () => {
-    const wanted = [...[...NAMED_KEYS].map((k) => k.toLowerCase()), ...Object.values(DPAD_KEYS), DPAD_SELECT_KEY];
+    const wanted = [...NAMED_KEYS].map((k) => k.toLowerCase());
     expect(wanted.filter((k) => !contract.keycode_names.includes(k))).toEqual([]);
   });
 

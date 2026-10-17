@@ -1,5 +1,5 @@
 // Tuş düzenleyicisinden Esc ile çıkış. Değişiklikler her adımda kaydedildiği için kapatmak veri kaybettirmez. Esc
-// "escape yığını" üzerinden gider: tam ekrandan çıkmaz, telefona Esc yazılmaz, açık tuş seçici varsa önce o kapanır.
+// "escape yığını" üzerinden gider: tam ekrandan çıkmaz, telefona Esc yazılmaz, tuş dinleniyorsa önce dinleme biter.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
@@ -41,15 +41,16 @@ describe('KeymapperOverlay — Esc', () => {
     expect(bubbled).not.toHaveBeenCalled();
   });
 
-  it('açık tuş seçici varsa önce o kapanır, düzenleyici açık kalır; ikinci Esc düzenleyiciyi kapatır', async () => {
+  it('tuş dinleniyorsa önce dinleme biter, düzenleyici açık kalır; ikinci Esc düzenleyiciyi kapatır', async () => {
     const onClose = vi.fn();
     render(<KeymapperOverlay win={WIN} isEditing onCloseEdit={onClose} />);
 
-    fireEvent.click(screen.getByTitle('Tuş değiştir'));
-    expect(screen.getByText('Fiziksel Tuş Seçin')).toBeInTheDocument();
+    fireEvent.pointerDown(document.querySelector('[data-node-id="n1"]'), { button: 0 });   // düğümü seç → denetçide tuş alanı
+    fireEvent.click(screen.getByRole('button', { name: 'Tuş ata' }));
+    expect(screen.getByRole('status')).toHaveTextContent(/Bir tuşa bas/);
 
     esc();
-    await waitFor(() => expect(screen.queryByText('Fiziksel Tuş Seçin')).toBeNull()); // çıkış animasyonu biter
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
     expect(onClose).not.toHaveBeenCalled();
 
     esc();

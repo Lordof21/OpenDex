@@ -26,6 +26,7 @@
   "ws_input_types": [
     "clipboard",
     "down",
+    "hover",
     "move",
     "release_all",
     "scroll",

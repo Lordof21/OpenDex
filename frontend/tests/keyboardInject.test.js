@@ -3,9 +3,7 @@ import {
   isWindowManagerShortcut,
   resolveKeyEvent,
   injectDomKeyEvent,
-  sendDpad,
 } from '../src/input/keyboardInject.js';
-import { logger } from '../src/lib/logger.js';
 import { api } from '../src/lib/api.js';
 
 vi.mock('../src/lib/api.js', () => ({
@@ -64,30 +62,4 @@ describe('keyboardInject', () => {
     });
   });
 
-  describe('sendDpad (the on-screen "Yön tuşları")', () => {
-    test.each([
-      ['up', 'arrowup'],
-      ['down', 'arrowdown'],
-      ['left', 'arrowleft'],
-      ['right', 'arrowright'],
-      ['select', 'enter'],
-    ])('%s presses the Android key "%s" through the keycode path the backend accepts', async (direction, key) => {
-      await expect(sendDpad('win-1', direction)).resolves.toBe(true);
-      expect(api.post).toHaveBeenCalledTimes(1);
-      expect(api.post).toHaveBeenCalledWith('/api/input/key', { window_id: 'win-1', kind: 'keycode', key });
-    });
-
-    test('an unknown direction sends nothing', async () => {
-      await expect(sendDpad('win-1', 'diagonal')).resolves.toBe(false);
-      expect(api.post).not.toHaveBeenCalled();
-    });
-
-    test('a refused press is logged, never swallowed silently, and does not throw', async () => {
-      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => ({}));
-      api.post.mockRejectedValueOnce(new Error('422 Unprocessable'));
-      await expect(sendDpad('win-1', 'up')).resolves.toBe(false);
-      expect(warn).toHaveBeenCalledWith('input', 'dpad_press_failed', expect.objectContaining({ direction: 'up', key: 'arrowup' }));
-      warn.mockRestore();
-    });
-  });
 });

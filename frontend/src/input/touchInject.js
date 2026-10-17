@@ -112,6 +112,9 @@ export function computeAdaptiveUnitsPerTick(deviceH, viewportH) {
   return Math.round(baseUnits * Math.sqrt(heightRatio) * (1 / Math.sqrt(viewportRatio)));
 }
 
+// A hover is dropped while this much is still waiting to be sent on the socket (about sixty positions).
+const HOVER_MAX_BUFFERED_BYTES = 4096;
+
 /** One persistent input channel per open window (mirrors WindowVideoDecoder's
  * per-window WebSocket lifecycle). Messages are dropped silently while the
  * socket isn't open (window frozen/closing) — matching the old REST path's
@@ -190,6 +193,17 @@ export class WindowTouchSocket {
     const payload = { type: 'up', x, y };
     if (pointerId) payload.pointer_id = pointerId;
     this._send(payload);
+  }
+
+  /**
+   * The mouse pointer resting over (x, y) — see hoverInject.js. Best effort and silent: a hover that cannot go now is worth
+   * nothing a moment later, so it is not logged when the socket is closed, never reconnects the socket by itself and is
+   * dropped (not queued) while the socket is backed up behind touches or the network.
+   */
+  hover(x, y) {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN || ws.bufferedAmount > HOVER_MAX_BUFFERED_BYTES) return;
+    ws.send(JSON.stringify({ type: 'hover', x, y }));
   }
 
   scroll(x, y, hscroll, vscroll) {
