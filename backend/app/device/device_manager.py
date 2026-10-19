@@ -5,6 +5,7 @@ import asyncio
 import contextlib
 import logging
 import re
+import time
 from typing import Callable
 
 from ..schemas import DeviceInfo, DeviceState
@@ -19,6 +20,10 @@ _DEVICE_LINE = re.compile(r"^(?P<serial>\S+)\s+(?P<state>\S+)(?P<rest>.*)$")
 _WIFI_IFACE = r"(?:s?wlan|softap|ap)\d+"
 _WIFI_INET = re.compile(rf"inet\s+([0-9.]+)/\d+[^\n]*?\s({_WIFI_IFACE})\b")
 _WIFI_ROUTE_SRC = re.compile(rf"\bdev\s+{_WIFI_IFACE}\b[^\n]*?\bsrc\s+([0-9.]+)")
+# Reading a link's ANDROID_ID (one `settings get` on the phone): how long one read may take, and how long a link whose read
+# failed is left alone before it is asked again (a phone that just came up answers "closed" for a moment).
+_IDENTITY_TIMEOUT_S = 3.0
+_IDENTITY_RETRY_S = 10.0
 
 
 class DeviceUnauthorizedError(RuntimeError):
@@ -44,6 +49,11 @@ class DeviceManager:
         self._last: list[DeviceInfo] = []
         self._seen: dict[str, DeviceInfo] = {}  # last entry adb reported per serial (model, transport …)
         self._listeners: list[Callable[[], None]] = []
+        # Which phone each link belongs to: serial → (transport_id it was read over, ANDROID_ID). See DeviceInfo.android_id.
+        self._identities: dict[str, tuple[int | None, str]] = {}
+        self._identity_failed: dict[tuple[str, int | None], float] = {}   # (serial, transport_id) → when a read failed
+        self._identity_tasks: dict[tuple[str, int | None], asyncio.Task] = {}
+        self._resolve_identities = False
 
     def attach_tracker(self, tracker: DeviceTracker) -> None:
         """The adb server's pushed device list (device_tracker.py): while it is up, list_devices starts no process, and
@@ -81,8 +91,81 @@ class DeviceManager:
         known = self._seen.get(serial)
         return known.model_copy() if known is not None else None
 
+    # ------------------------------------------------------------------ link identity
+
+    def enable_identity_resolution(self) -> None:
+        """From now on every link adb lists as `device` gets its ANDROID_ID read once (DeviceInfo.android_id), and the list
+        is republished with it. Off by default: only the running app turns it on (the lifespan), so a DeviceManager built
+        for a test or a script runs no adb behind its back."""
+        self._resolve_identities = True
+        self._observe([d.model_copy() for d in self._last])
+
+    async def stop_identity_resolution(self) -> None:
+        self._resolve_identities = False
+        tasks = list(self._identity_tasks.values())
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+
+    def remember_identity(self, serial: str, android_id: str) -> None:
+        """A link whose ANDROID_ID was just read for another reason (binding it): no second read."""
+        seen = self._seen.get(serial)
+        self._identities[serial] = (seen.transport_id if seen is not None else None, android_id)
+        if any(d.serial == serial and d.android_id != android_id for d in self._last):
+            self._observe([d.model_copy() for d in self._last])
+
+    def android_id_of(self, serial: str) -> str | None:
+        """The phone behind `serial` as last read (no device round trip); None when unknown."""
+        seen = self._seen.get(serial)
+        return self._identity_for(serial, seen.transport_id if seen is not None else None)
+
+    def _identity_for(self, serial: str, transport_id: int | None) -> str | None:
+        entry = self._identities.get(serial)
+        if entry is None:
+            return None
+        read_over, android_id = entry
+        # A USB serial IS the phone's own serial number: the same phone whatever the link id. An ip:port that was
+        # re-established may be another phone that took the address, so it is read again.
+        if ":" in serial and read_over is not None and transport_id is not None and read_over != transport_id:
+            return None
+        return android_id
+
+    def _schedule_identity(self, serial: str, transport_id: int | None) -> None:
+        key = (serial, transport_id)
+        if key in self._identity_tasks:
+            return
+        failed_at = self._identity_failed.get(key)
+        if failed_at is not None and time.monotonic() - failed_at < _IDENTITY_RETRY_S:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._identity_tasks[key] = loop.create_task(self._read_identity(serial, transport_id), name=f"adb-identity-{serial}")
+
+    async def _read_identity(self, serial: str, transport_id: int | None) -> None:
+        key = (serial, transport_id)
+        try:
+            android_id = await asyncio.wait_for(self.get_android_id(serial), _IDENTITY_TIMEOUT_S)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — closed / timed out: asked again on a later list after the pause
+            self._identity_failed[key] = time.monotonic()
+            log.debug("[DeviceManager] %s kimliği okunamadı: %s", serial, exc)
+            return
+        finally:
+            self._identity_tasks.pop(key, None)
+        self._identity_failed.pop(key, None)
+        self._identities[serial] = (transport_id, android_id)
+        self._observe([d.model_copy() for d in self._last])  # the same list again, now with the identity: listeners hear it
+
     def _observe(self, devices: list[DeviceInfo]) -> None:
         for device in devices:
+            device.android_id = self._identity_for(device.serial, device.transport_id)
+            if device.android_id is None and self._resolve_identities and device.state == DeviceState.DEVICE:
+                self._schedule_identity(device.serial, device.transport_id)
             self._seen[device.serial] = device.model_copy()
         changed = [d.model_dump() for d in devices] != [d.model_dump() for d in self._last]
         self._last = devices

@@ -14,16 +14,14 @@ import {
   ChevronUp,
   Wifi,
   Smartphone,
-  X,
   Check,
   RotateCw,
   AlertTriangle,
 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useSystemStore } from '../state/systemStore.js';
-import { Dialog } from '../ui/Dialog.jsx';
-import { IconButton } from '../ui/IconButton.jsx';
 import { cn } from '../lib/utils.js';
+import { isWirelessLink } from './connectionStatus.js';
 import { t } from '../i18n/index.js';
 
 // ── Themed QR Skeleton ────────────────────────────────────────────────────────
@@ -79,6 +77,8 @@ export function ManualIpEntry({ initialIp = '' }) {
   const [busy, setBusy] = useState(false);
   const [tcpipBusy, setTcpipBusy] = useState(false);
   const pushToast = useSystemStore((s) => s.pushToast);
+  // `adb tcpip` runs over the bound USB session: with no session (or a wireless one) the button would only fail with 409.
+  const usbSession = useSystemStore((s) => s.connectionState === 'connected' && !isWirelessLink(s.devices));
 
   useEffect(() => {
     if (!ip) {
@@ -128,7 +128,7 @@ export function ManualIpEntry({ initialIp = '' }) {
         <button
           type="button"
           onClick={switchTcpip}
-          disabled={tcpipBusy}
+          disabled={tcpipBusy || !usbSession}
           className="flex items-center justify-center gap-2 w-full h-9 px-4 rounded-md bg-primary text-primary-foreground text-[11px] font-semibold transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
         >
           {tcpipBusy ? (
@@ -138,6 +138,9 @@ export function ManualIpEntry({ initialIp = '' }) {
           )}
           <span>{tcpipBusy ? t('wireless.5555_modu_etkinlestiriliyor') : t('wireless.usb_ile_5555_modunu_etkinlestir')}</span>
         </button>
+        {!usbSession && (
+          <p className="mt-2 text-[10px] leading-snug text-muted-foreground">{t('devices.tcpip_needs_usb')}</p>
+        )}
       </div>
 
       {/* Manuel IP */}
@@ -380,10 +383,9 @@ export function PairingCodeEntry() {
   );
 }
 
-// ── Master QrPairing Export ───────────────────────────────────────────────────
-const QR_CARD_LAYOUT = { layout: true, transition: { layout: { duration: 0.28, ease: [0.4, 0, 0.2, 1] } } };
-
-export default function QrPairing({ onClose }) {
+// ── Yeni cihaz eşleştirme yöntemleri (QR · 6 haneli kod · 5555/USB) ─────────────
+// "Cihaz bağla" penceresinin (devices/ConnectDialog.jsx) sağ sütunu. Kendi kabuğu yoktur: pencere başlığı ve kapanış dışarıda.
+export default function PairingMethods({ className }) {
   const [activeTab, setActiveTab] = useState('qr');
   const [qrDataUrl, setQrDataUrl] = useState('');
   const [loading, setLoading] = useState(true);
@@ -438,42 +440,7 @@ export default function QrPairing({ onClose }) {
   ];
 
   return (
-    // Esc (escapeStack) ve dış tıklama Dialog'dan gelir; kart yüksekliği sekme değişince `layout` ile yumuşak büyür.
-    <Dialog
-      open
-      onClose={onClose}
-      label={t('wireless.kablosuz_eslestirme')}
-      align="top"
-      overlayClassName="p-3 pb-10 pt-6 sm:p-6 sm:pt-10"
-      className="relative flex max-w-[480px] shrink-0 flex-col overflow-hidden rounded-xl"
-      cardProps={QR_CARD_LAYOUT}
-    >
-        {/* ── Titlebar ──────────────────────────────────────────────────── */}
-        <header className="flex h-11 shrink-0 items-center gap-2 border-b border-border/70 bg-muted/40 px-3 select-none">
-          <span className="grid size-6 shrink-0 place-items-center rounded-[7px] bg-primary text-[10px] font-semibold text-primary-foreground">
-            {t('common.w')}
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-[12px] font-semibold leading-none text-foreground">
-              {t('wireless.kablosuz_eslestirme')}
-            </p>
-            <p className="mt-0.5 truncate text-[9px] text-muted-foreground">
-              {t('wireless.opendex_adb_kablosuz_baglanti_merkezi')}
-            </p>
-          </div>
-          <span className="hidden shrink-0 items-center gap-1.5 rounded-full bg-background px-2 py-1 text-[9px] font-medium text-muted-foreground sm:inline-flex">
-            <span className="size-1.5 rounded-full bg-status-active" />
-            {t('wireless.dinleniyor')}
-          </span>
-          {onClose && (
-            <IconButton label={t('common.kapat')} size="sm" danger="close" tooltipPosition="bottom" tooltipAlign="end" onClick={onClose}>
-              <X />
-            </IconButton>
-          )}
-        </header>
-
-        {/* ── Body ──────────────────────────────────────────────────────── */}
-        <div className="flex flex-col gap-4 p-4 sm:p-5">
+        <div className={cn('flex flex-col gap-4', className)}>
 
           {/* Tab Switcher */}
           <div className="grid grid-cols-3 gap-1.5 shrink-0">
@@ -724,6 +691,5 @@ export default function QrPairing({ onClose }) {
             </AnimatePresence>
           </div>
         </div>
-    </Dialog>
   );
 }

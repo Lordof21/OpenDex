@@ -2,14 +2,14 @@
 
 # API reference
 
-All 125 operations of the public OpenAPI document ([`openapi.json`](openapi.json), OpenAPI 3.1.0), grouped by tag. Conventions that apply to every operation — authentication, the Origin/Host guard, limits, error shapes — are in [API.md](../API.md); the WebSocket channels and the event types are there too.
+All 126 operations of the public OpenAPI document ([`openapi.json`](openapi.json), OpenAPI 3.1.0), grouped by tag. Conventions that apply to every operation — authentication, the Origin/Host guard, limits, error shapes — are in [API.md](../API.md); the WebSocket channels and the event types are there too.
 
 Paths are relative to `http://127.0.0.1:8710/api/v1` (every operation is also served under `/api`, unversioned). **Auth** `token` = needs the API token; **Device** = answers `409` while no phone is bound.
 
 | Group | Operations |
 |---|---|
 | [general](#general) | 2 |
-| [devices](#devices) | 29 |
+| [devices](#devices) | 30 |
 | [pairing](#pairing) | 4 |
 | [apps](#apps) | 4 |
 | [windows](#windows) | 23 |
@@ -68,11 +68,12 @@ The bound phone: connection state, battery and its diagnostics, volumes, quick t
 | `GET` | `/device/profile` | Returns the bound device profile and encoder capabilities. | token |  |
 | `POST` | `/device/encoder-stress-test` | Opt-in, manually-triggered empirical measurement of how many concurrent virtual-display/encoder sessions th… | token |  |
 | `POST` | `/device/unlock` | Wakes the phone panel (through the display-power controller) and dismisses the keyguard. | token | yes |
-| `POST` | `/device/disconnect` | Disconnects the currently bound device and unbinds the session. | token |  |
+| `POST` | `/device/disconnect` | Ends the session (its windows close) and keeps it ended: automatic connecting pauses until the user picks a… | token |  |
 | `POST` | `/device/tcpip` | USB -> Wi-Fi (`adb tcpip`) with the open windows. `ok` only once the wireless link is VERIFIED and the sess… | token |  |
-| `POST` | `/device/bind` | Switches active OpenDeX connection to the specified device serial (USB or Wireless). | token |  |
+| `POST` | `/device/bind` | Makes the given adb link (USB or Wi-Fi) the session — the user's pick in the Device Center. With no session… | token |  |
 | `GET` | `/devices/known` | Remembered devices for one-click reconnect (Cihaz Geçiş Planı §3), most recently seen first. ``discovered``… | token |  |
 | `POST` | `/devices/known/{android_id}/connect` | Explicit, user-clicked reconnect to a remembered device (Cihaz Geçiş Planı §7.1 — this endpoint is the ONLY… | token |  |
+| `PATCH` | `/devices/known/{android_id}` | Renames a remembered device (`alias`; empty = the model name again). | token |  |
 | `DELETE` | `/devices/known/{android_id}` | Removes a device from the remembered list (does not touch an active session). | token |  |
 | `GET` | `/device/battery/health` | The Battery page: health (%, capacity, cycles, first use), the charger (class, limits, real current, ETA),… | token | yes |
 | `GET` | `/device/battery` | Returns real-time battery level, charging status, voltage, and temperature. | token | yes |
@@ -146,7 +147,9 @@ Wakes the phone panel (through the display-power controller) and dismisses the k
 
 ### `POST /device/disconnect`
 
-Disconnects the currently bound device and unbinds the session.
+Ends the session (its windows close) and keeps it ended: automatic connecting pauses until the user picks a phone
+(`auto_connect_paused` in the device state) — a plugged-in cable no longer brings the session straight back. Only the
+session's own Wi-Fi link is released from adb; a USB link stays listed, ready to be picked again.
 
 *token required*
 
@@ -167,7 +170,10 @@ moved onto it; otherwise 502 and the session stays on USB (see AppContext.switch
 
 ### `POST /device/bind`
 
-Switches active OpenDeX connection to the specified device serial (USB or Wireless).
+Makes the given adb link (USB or Wi-Fi) the session — the user's pick in the Device Center. With no session it binds;
+another link of the bound phone moves the session (and its windows) onto it; another phone ends the current session
+(its windows close) and brings that one up. Ends a pause a disconnect put on automatic connecting. 502 when the phone
+could not be brought up (the reason is in `detail`).
 
 *token required*
 
@@ -203,6 +209,24 @@ ever happens; nothing calls it automatically).
 | Parameter | In | Type | Required | Notes |
 |---|---|---|---|---|
 | `android_id` | path | string | yes |  |
+
+**Responses:** `200` Successful Response · `422` Validation Error · `401` token missing/wrong · `403` foreign Origin/Host · `411` chunked body · `413` body too large
+
+### `PATCH /devices/known/{android_id}`
+
+Renames a remembered device (`alias`; empty = the model name again).
+
+*token required*
+
+| Parameter | In | Type | Required | Notes |
+|---|---|---|---|---|
+| `android_id` | path | string | yes |  |
+
+**Request body** (JSON, `KnownDeviceUpdate`)
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `alias` | string (≤ 40 chars) (nullable) | no |  |
 
 **Responses:** `200` Successful Response · `422` Validation Error · `401` token missing/wrong · `403` foreign Origin/Host · `411` chunked body · `413` body too large
 

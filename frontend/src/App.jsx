@@ -9,7 +9,8 @@ import WindowFrame from './window/WindowFrame.jsx';
 import Taskbar from './taskbar/Taskbar.jsx';
 import DexQuickPanelHost from './taskbar/DexQuickPanelHost.jsx';
 import SettingsPanel from './settings/SettingsPanel.jsx';
-import QrPairing from './wireless/QrPairing.jsx';
+import ConnectDialog from './devices/ConnectDialog.jsx';
+import { useDeviceHubStore } from './devices/deviceHubStore.js';
 import Toasts from './ui/Toasts.jsx';
 import NoticeDialog from './ui/NoticeDialog.jsx';
 import ToastContainer from './notifications/ToastContainer.jsx';
@@ -136,10 +137,25 @@ export default function App() {
 
   const wallpaper = useWallpaper();
   useWallpaperSlideshow();
+  // "Cihaz bağla" penceresi: istenince (Cihaz Merkezi "+", bağlantıyı kesince) ya da kendiliğinden — telefon yokken ve hiç
+  // pencere yokken, kullanıcı kapatmadıysa. Bir telefon bağlanınca kapanır; kapatma kararı bir sonraki bağlantıya dek geçerli.
+  // `useHeldTrue`: hemen başarısız olan bir bağlanma ("offline" adb kaydı) birkaç ms "connected"dan geçer — pencere bu yüzden
+  // inip kalkıp QR dinleyicisini yeniden başlatmasın.
+  const dialog = useDeviceHubStore((s) => s.dialog);
+  const closeConnectDialog = useDeviceHubStore((s) => s.closeConnectDialog);
   const [pairingDismissed, setPairingDismissed] = useState(false);
-  // The QR panel goes away only when the connection stays up: a bind that fails at once (an adb entry that is "offline")
-  // passes through "connected" for a few milliseconds and would otherwise tear the panel down and restart its listener.
-  const showPairing = useHeldTrue(connectionState === 'disconnected' && windows.length === 0 && !pairingDismissed, 1500);
+  const autoPairing = useHeldTrue(connectionState === 'disconnected' && windows.length === 0 && !pairingDismissed, 1500);
+  const stableConnected = !useHeldTrue(connectionState !== 'connected', 1200);
+  useEffect(() => {
+    if (!stableConnected) return;
+    setPairingDismissed(false); // a new session: the next time there is none, the dialog may offer itself again
+    closeConnectDialog();
+  }, [stableConnected, closeConnectDialog]);
+  const showConnect = dialog.open || autoPairing;
+  const dismissConnect = () => {
+    closeConnectDialog();
+    setPairingDismissed(true);
+  };
 
   if (pipWinId) {
     return <PipApp winId={pipWinId} />;
@@ -209,9 +225,7 @@ export default function App() {
           <DexQuickPanelHost />
 
           {/* Global Dialogs & Modals */}
-          <AnimatePresence>
-            {showPairing && <QrPairing onClose={() => setPairingDismissed(true)} />}
-          </AnimatePresence>
+          <ConnectDialog open={showConnect} onClose={dismissConnect} />
 
           <SettingsPanel />
           <Toasts />

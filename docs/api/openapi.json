@@ -245,7 +245,7 @@
           "devices"
         ],
         "summary": "Disconnect Device",
-        "description": "Disconnects the currently bound device and unbinds the session.",
+        "description": "Ends the session (its windows close) and keeps it ended: automatic connecting pauses until the user picks a phone\n(`auto_connect_paused` in the device state) — a plugged-in cable no longer brings the session straight back. Only the\nsession's own Wi-Fi link is released from adb; a USB link stays listed, ready to be picked again.",
         "operationId": "disconnect_device_api_v1_device_disconnect_post",
         "responses": {
           "200": {
@@ -331,7 +331,7 @@
           "devices"
         ],
         "summary": "Bind Specific Device",
-        "description": "Switches active OpenDeX connection to the specified device serial (USB or Wireless).",
+        "description": "Makes the given adb link (USB or Wi-Fi) the session — the user's pick in the Device Center. With no session it binds;\nanother link of the bound phone moves the session (and its windows) onto it; another phone ends the current session\n(its windows close) and brings that one up. Ends a pause a disconnect put on automatic connecting. 502 when the phone\ncould not be brought up (the reason is in `detail`).",
         "operationId": "bind_specific_device_api_v1_device_bind_post",
         "requestBody": {
           "content": {
@@ -465,6 +465,69 @@
       }
     },
     "/api/v1/devices/known/{android_id}": {
+      "patch": {
+        "tags": [
+          "devices"
+        ],
+        "summary": "Update Known Device",
+        "description": "Renames a remembered device (`alias`; empty = the model name again).",
+        "operationId": "update_known_device_api_v1_devices_known__android_id__patch",
+        "parameters": [
+          {
+            "name": "android_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Android Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnownDeviceUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnownDeviceInfo"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForeignOrigin"
+          },
+          "411": {
+            "$ref": "#/components/responses/LengthRequired"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          }
+        }
+      },
       "delete": {
         "tags": [
           "devices"
@@ -6214,6 +6277,17 @@
               }
             ],
             "title": "Transport Id"
+          },
+          "android_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Android Id"
           }
         },
         "type": "object",
@@ -6698,6 +6772,17 @@
             ],
             "title": "Model"
           },
+          "alias": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alias"
+          },
           "last_seen_at": {
             "type": "number",
             "title": "Last Seen At"
@@ -6773,6 +6858,24 @@
         ],
         "title": "KnownDeviceInfo",
         "description": "API response shape: KnownDevice plus runtime-only discovery state that\nis never persisted (computed fresh from the live mDNS listener on every\nrequest — see mdns_discovery.MdnsDiscovery.get_live_connect_endpoints)."
+      },
+      "KnownDeviceUpdate": {
+        "properties": {
+          "alias": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 40
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alias"
+          }
+        },
+        "type": "object",
+        "title": "KnownDeviceUpdate"
       },
       "LogLevelRequest": {
         "properties": {
@@ -7880,6 +7983,13 @@
           "type": {
             "type": "string",
             "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
           }
         },
         "type": "object",

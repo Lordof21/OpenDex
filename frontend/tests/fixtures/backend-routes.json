@@ -45,6 +45,7 @@
   "GET /api/window/{}/xml-elements",
   "GET /api/windows",
   "GET /api/windows/{}/web-reload",
+  "PATCH /api/devices/known/{}",
   "POST /api/apps/icon-v2/{}/refresh",
   "POST /api/apps/refresh",
   "POST /api/audio/clock",

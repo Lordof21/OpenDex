@@ -54,7 +54,7 @@ EventType = Literal[
     "thermal_throttle",    # {level}
     "device_load_sample",  # {sample, insights, adb, markers} — the "Phone Load" panel (telemetry/load_monitor.py)
     "device_connected",    # {android_id, transport}
-    "device_lost",         # {reason}
+    "device_lost",         # {reason: "transport" (link dropped; reconnecting) | "user_disconnect" | "switch_failed" | "device_switch"}
     "device_reconnected",  # {android_id}
     "link_quality",        # {weak} — the phone stopped answering while its video is silent (a stalled link); cleared when it answers
     "encoder_limit_hit",   # {max_windows}
@@ -89,7 +89,7 @@ EventType = Literal[
     "device_display_added",          # {id, name?, w?, h?}
     "device_display_removed",        # {id}
     "device_profile_changed",        # {profile} — the phone's own screen changed (display size / smallest width) while bound
-    "devices_changed",               # {devices: [DeviceInfo], active_serial} — adb's list / the bound phone changed
+    "devices_changed",               # {devices: [DeviceInfo], active_serial, active_android_id, session, auto_connect_paused, switching, seq} — adb's list / the bound phone changed
     "device_bind_failed",            # {serial, reason, attempt} — bringing a session up failed and was undone; retries follow
     "window_app_closed",             # {window_id, package, action: "close"|"badge"} — app closed ON THE PHONE
     "window_app_restored",           # {window_id, package} — a badged window's app is running again

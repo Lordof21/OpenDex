@@ -24,6 +24,11 @@ class BindDeviceRequest(BaseModel):
     serial: str
 
 
+class KnownDeviceUpdate(BaseModel):
+    # The user's name for the phone; empty / whitespace = back to the model name.
+    alias: str | None = Field(None, max_length=40)
+
+
 @router.get("/devices", response_model=list[DeviceInfo])
 async def get_devices(ctx: AppContextDep):
     """Lists currently detected ADB devices (USB and Wireless)."""
@@ -84,7 +89,9 @@ async def unlock_device(ctx: AppContextDep):
 
 @router.post("/device/disconnect")
 async def disconnect_device(ctx: AppContextDep):
-    """Disconnects the currently bound device and unbinds the session."""
+    """Ends the session (its windows close) and keeps it ended: automatic connecting pauses until the user picks a phone
+    (`auto_connect_paused` in the device state) — a plugged-in cable no longer brings the session straight back. Only the
+    session's own Wi-Fi link is released from adb; a USB link stays listed, ready to be picked again."""
     if ctx.serial is None:
         raise HTTPException(status_code=409, detail="Bağlı cihaz yok.")
     await ctx.unbind_device(disconnect_adb=True)
@@ -111,10 +118,18 @@ async def switch_device_tcpip(ctx: AppContextDep, port: int = 5555):
 
 @router.post("/device/bind")
 async def bind_specific_device(body: BindDeviceRequest, ctx: AppContextDep):
-    """Switches active OpenDeX connection to the specified device serial (USB or Wireless)."""
+    """Makes the given adb link (USB or Wi-Fi) the session — the user's pick in the Device Center. With no session it binds;
+    another link of the bound phone moves the session (and its windows) onto it; another phone ends the current session
+    (its windows close) and brings that one up. Ends a pause a disconnect put on automatic connecting. 502 when the phone
+    could not be brought up (the reason is in `detail`)."""
     if ctx.serial == body.serial:
+        ctx.auto_connect_paused = False
         return {"ok": True, "serial": body.serial, "message": "Zaten bu bağlantı aktif."}
-    await ctx.switch_transport(body.serial)
+    try:
+        await ctx.connect_device(body.serial)
+    except Exception as exc:
+        log.warning("[Devices] %s bağlanamadı: %s", body.serial, exc)
+        raise HTTPException(status_code=502, detail=f"Bağlanılamadı: {exc}") from exc
     return {"ok": True, "serial": body.serial, "message": f"Aktif bağlantı {body.serial} olarak değiştirildi."}
 
 
@@ -172,6 +187,17 @@ async def connect_known_device(android_id: str, ctx: AppContextDep):
     except Exception as exc:
         log.warning("[KnownDevices] reconnect to %s (%s:%s) failed: %s", android_id, ip, port, exc)
         raise HTTPException(status_code=502, detail=f"Bağlantı başarısız: {exc}") from exc
+
+
+@router.patch("/devices/known/{android_id}", response_model=KnownDeviceInfo)
+async def update_known_device(android_id: str, body: KnownDeviceUpdate):
+    """Renames a remembered device (`alias`; empty = the model name again)."""
+    known = await settings_db.get_known_device(android_id)
+    if not known:
+        raise HTTPException(status_code=404, detail="Kayıtlı cihaz bulunamadı.")
+    known.alias = (body.alias or "").strip() or None
+    await settings_db.upsert_known_device(known)
+    return KnownDeviceInfo(**known.model_dump())
 
 
 @router.delete("/devices/known/{android_id}")

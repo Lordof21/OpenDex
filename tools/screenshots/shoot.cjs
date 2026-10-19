@@ -147,7 +147,9 @@ const SCENARIOS = {
   },
 
   async devices(browser) {
-    const s = await desktop(browser);
+    // The Device Center: the bound phone (USB, its Wi-Fi link offered) and a saved tablet reached over Wi-Fi last time.
+    const s = await openApp(browser, { ...SIZE, scale: SCALE, theme: 'dark', windows: [], mutate: (fx) => { fx.windows = []; } });
+    await waitForDesktop(s.page);
     await s.page.locator('button[aria-label^="Cihaz merkezi"]').click();
     await s.page.waitForTimeout(1200);
     await s.page.screenshot({ path: path.join(RAW, 'devices.png') });

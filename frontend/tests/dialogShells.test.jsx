@@ -1,4 +1,4 @@
-// ui/Dialog'a taşınan kabuklar: QrPairing Esc ile kapanır; NoticeDialog Esc/dış tıklamayla KAPANMAZ (kapatmak
+// ui/Dialog'a taşınan kabuklar: "Cihaz bağla" penceresi Esc ile kapanır; NoticeDialog Esc/dış tıklamayla KAPANMAZ (kapatmak
 // bildirimi kalıcı "görüldü" yapar), yalnız "Anladım" kalıcı olarak kapatır.
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -14,18 +14,18 @@ vi.mock('../src/startup/firstRunNotices.js', () => ({
   runNoticeAction: vi.fn().mockResolvedValue(undefined),
 }));
 
-import QrPairing from '../src/wireless/QrPairing.jsx';
+import ConnectDialog from '../src/devices/ConnectDialog.jsx';
 import NoticeDialog from '../src/ui/NoticeDialog.jsx';
 import { dismissNotice } from '../src/startup/firstRunNotices.js';
 
 afterEach(cleanup);
 
-describe('QrPairing (ui/Dialog)', () => {
+describe('ConnectDialog (ui/Dialog)', () => {
   it('diyalog olarak çizilir; Esc onClose çağırır', async () => {
     const onClose = vi.fn();
-    render(<QrPairing onClose={onClose} />);
+    render(<ConnectDialog open onClose={onClose} />);
     await act(async () => {});
-    expect(screen.getByRole('dialog', { name: 'Kablosuz Eşleştirme' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Cihaz bağla' })).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(1);
   });

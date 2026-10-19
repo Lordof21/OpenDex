@@ -11,6 +11,7 @@ import { useNotificationStore } from '../state/notificationStore.js';
 import { useAudioMixerStore } from '../state/audioMixerStore.js';
 import { useConnectivityStore } from '../state/connectivityStore.js';
 import { useDeviceLoadStore } from '../telemetry/deviceLoadStore.js';
+import { useDeviceHubStore } from '../devices/deviceHubStore.js';
 import { logger } from '../lib/logger.js';
 import { t } from '../i18n/index.js';
 
@@ -87,8 +88,9 @@ function logFlowEvent(event) {
   }
 }
 
-// device_lost reasons after which there is no session to reconnect (see AppContext._unbind_locked).
-const SESSION_ENDED_REASONS = new Set(['user_disconnect', 'switch_failed']);
+// device_lost reasons after which there is no session to reconnect (see AppContext._unbind_locked). `device_switch`: the user
+// picked another phone — this one's windows close, the other's session follows with device_connected.
+const SESSION_ENDED_REASONS = new Set(['user_disconnect', 'switch_failed', 'device_switch']);
 
 export function handleEvent(event) {
   notifyEventListeners(event);
@@ -222,6 +224,8 @@ export function handleEvent(event) {
       systemStore.setDeviceIdentity(event.payload);
       // Wi-Fi/Bluetooth detail data and "refused this session" flags belong to the previous device.
       useConnectivityStore.getState().reset();
+      // The user's name for the phone (saved devices) shows on the taskbar button before any device panel is opened.
+      useDeviceHubStore.getState().fetchKnown();
       windowStore.syncWindowsWithBackend();
       systemStore.fetchBatteryInfo();
       systemStore.fetchHardwareStates();
