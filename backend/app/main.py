@@ -32,6 +32,7 @@ from .api.v1 import api_router
 from .api.websockets import ws_router
 from .apps.app_registry import AppRegistry
 from .config import Settings, get_settings
+from .lifecycle import register_server, watch_parent
 from .device import daemon_auth
 from .device.adb import Adb, AdbError
 from .device.capability_probe import CapabilityProbe
@@ -1032,9 +1033,11 @@ async def lifespan(app: FastAPI):
     # calls adb connect itself, just tracks which known devices are reachable
     # via Wireless Debugging so Device Center can offer a one-click hint.
     await ctx.mdns.start_persistent_connect_listener()
+    parent_watch = asyncio.create_task(watch_parent(), name="parent-watch")
     try:
         yield {"ctx": ctx}
     finally:
+        parent_watch.cancel()
         await ctx.mdns.stop_persistent_connect_listener()
         if ctx.settings.FS_ENABLED:
             await ctx.fs.stop()
@@ -1205,7 +1208,7 @@ def run() -> None:
     # cases that actually require the string/re-import form) and works
     # identically in both the plain `python -m app.main` and frozen-exe paths.
     try:
-        uvicorn.run(
+        config = uvicorn.Config(
             create_app,
             factory=True,
             host=settings.HTTP_HOST,
@@ -1219,6 +1222,9 @@ def run() -> None:
             ws_max_size=settings.WS_MAX_MESSAGE_BYTES,
             server_header=False,
         )
+        server = uvicorn.Server(config)
+        register_server(server)  # POST /api/system/shutdown and the parent watch stop it gracefully
+        server.run()
     except api_auth.RemoteBindRefused as exc:
         log.error("🔐 [Auth] %s", exc)
         raise SystemExit(2) from exc

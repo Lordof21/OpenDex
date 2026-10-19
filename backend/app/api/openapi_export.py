@@ -22,13 +22,13 @@ from fastapi import APIRouter, FastAPI
 from fastapi.routing import APIRoute
 
 from .deps import get_active_serial
-from .v1.endpoints import apps, audio, devices, diagnostics, fs, input, notifications, pairing, settings, telemetry, windows
+from .v1.endpoints import apps, audio, devices, diagnostics, fs, input, notifications, pairing, settings, system, telemetry, windows
 
 # The endpoint routers api/v1/router.py mounts. Their `routes` are plain APIRoute objects whatever the FastAPI version
 # (the mounted app's own route list is a tree of lazily included routers on recent versions) — so the per-route facts the
 # schema cannot show (the bound-device guard) are read from these. tests/test_openapi_snapshot.py pins that the list is complete.
 ENDPOINT_ROUTERS: tuple[APIRouter, ...] = tuple(
-    module.router for module in (devices, pairing, apps, windows, settings, audio, input, notifications, diagnostics, telemetry, fs)
+    module.router for module in (devices, pairing, apps, windows, settings, audio, input, notifications, diagnostics, system, telemetry, fs)
 )
 
 PUBLIC_PREFIX = "/api/v1"

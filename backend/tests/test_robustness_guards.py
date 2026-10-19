@@ -97,16 +97,27 @@ def test_only_a_previous_opendex_backend_may_be_killed_for_holding_the_port(imag
 def test_run_wires_the_configurable_ws_size_limit_not_a_hardcoded_one(monkeypatch):
     """A first version of this hardcoded ws_max_size=1_048_576 — smaller than a large clipboard paste (/ws/input's
     "clipboard" message is arbitrary, uncapped text) can reach — silently breaking large pastes. It must come from
-    Settings, so an operator (or this test) can see and change the real ceiling. `uvicorn.run` is mocked out, so
-    `create_app` (and the token file it would otherwise touch) is never actually invoked."""
+    Settings, so an operator (or this test) can see and change the real ceiling. `uvicorn.Config`/`Server` are mocked
+    out, so `create_app` (and the token file it would otherwise touch) is never actually invoked."""
     calls = {}
     monkeypatch.setattr(main_module, "get_settings", lambda: Settings(WS_MAX_MESSAGE_BYTES=12_345))
     monkeypatch.setattr(main_module, "_kill_stale_process_on_port", lambda *_: None)
+    monkeypatch.setattr(main_module, "register_server", lambda server: calls.update(registered=server))
     # `run()` does `import uvicorn` locally — the same module object `sys.modules` already holds, so patching the
     # top-level import here reaches it too.
-    monkeypatch.setattr(uvicorn, "run", lambda *a, **kw: calls.update(kw))
+    monkeypatch.setattr(uvicorn, "Config", lambda *a, **kw: calls.update(kw) or "config")
+
+    class _Server:
+        def __init__(self, config):
+            self.config = config
+
+        def run(self):
+            calls["ran"] = True
+
+    monkeypatch.setattr(uvicorn, "Server", _Server)
     main_module.run()
     assert calls["ws_max_size"] == 12_345
+    assert calls["ran"] and calls["registered"].config == "config"   # the server that runs is the one shutdown can stop
 
 
 def test_the_default_ws_size_limit_is_paste_safe_but_far_below_the_uvicorn_default():

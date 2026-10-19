@@ -1,20 +1,32 @@
 // Python backend as a Tauri sidecar.
 //
 // spawn_backend: starts the bundled FastAPI process, captures stdout/stderr
-// into the app log. watch_and_restart: if the sidecar dies unexpectedly it is
-// restarted once and the user is notified via a tray tooltip. shutdown_backend:
-// graceful termination so the backend's lifespan-finally (close_all → audio
-// stop → monitors stop) always runs.
+// into the app log; if the sidecar dies unexpectedly it is restarted once.
+// shutdown_backend: asks the backend to end itself (POST /api/system/shutdown)
+// so its lifespan cleanup runs (windows close, the phone's scrcpy servers and
+// virtual displays stop) and kills it only when it does not end in time — a
+// kill is TerminateProcess / SIGKILL and skips that cleanup. If this shell
+// dies without asking, the backend notices its OPENDEX_PARENT_PID is gone and
+// ends itself the same way (backend/app/lifecycle.py).
 
+use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
 pub struct BackendProcess(pub Mutex<Option<CommandChild>>);
+
+// The app is quitting: a backend that ends now must not be restarted, and a second shutdown call is a no-op.
+static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
+// The sidecar we started has ended (its Terminated event arrived).
+static EXITED: AtomicBool = AtomicBool::new(false);
+// Long enough for the backend's own cleanup (closing windows, stopping the phone's servers); then it is killed.
+const GRACEFUL_EXIT: Duration = Duration::from_secs(8);
 
 pub fn init(app: &AppHandle) {
     app.manage(BackendProcess(Mutex::new(None)));
@@ -66,6 +78,8 @@ fn spawn_backend_attempt(app: AppHandle, is_retry: bool) {
         }
     };
 
+    // The backend watches this PID and ends itself when the shell is gone without asking (crash, Task Manager).
+    let sidecar = sidecar.env("OPENDEX_PARENT_PID", std::process::id().to_string());
     let (mut rx, child) = match sidecar.spawn() {
         Ok(pair) => pair,
         Err(err) => {
@@ -83,6 +97,7 @@ fn spawn_backend_attempt(app: AppHandle, is_retry: bool) {
     if let Some(state) = app.try_state::<BackendProcess>() {
         *state.0.lock().unwrap() = Some(child);
     }
+    EXITED.store(false, Ordering::SeqCst);
 
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -98,6 +113,11 @@ fn spawn_backend_attempt(app: AppHandle, is_retry: bool) {
                         "[sidecar] Backend process exited with code {:?}",
                         status.code
                     );
+                    EXITED.store(true, Ordering::SeqCst);
+                    if SHUTTING_DOWN.load(Ordering::SeqCst) {
+                        log::info!("{term_msg} (app quitting)");
+                        break;
+                    }
                     log::warn!("{term_msg}");
                     let _ = handle.emit("backend-error", &term_msg);
 
@@ -115,12 +135,51 @@ fn spawn_backend_attempt(app: AppHandle, is_retry: bool) {
 }
 
 pub fn shutdown_backend(app: &AppHandle) {
-    if let Some(state) = app.try_state::<BackendProcess>() {
-        if let Some(child) = state.0.lock().unwrap().take() {
-            // Triggers the backend lifespan-finally: window_manager.close_all()
+    if SHUTTING_DOWN.swap(true, Ordering::SeqCst) {
+        return; // tray "quit" already did it; the window's Destroyed event comes after
+    }
+    let Some(state) = app.try_state::<BackendProcess>() else {
+        return;
+    };
+    if state.0.lock().unwrap().is_none() {
+        return; // not ours: dev mode, or a backend that was already running
+    }
+    if request_shutdown(app) {
+        let deadline = Instant::now() + GRACEFUL_EXIT;
+        while !EXITED.load(Ordering::SeqCst) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+    if let Some(child) = state.0.lock().unwrap().take() {
+        if !EXITED.load(Ordering::SeqCst) {
+            log::warn!("[sidecar] Backend did not end in time — killing it");
             let _ = child.kill();
         }
     }
+}
+
+/// POST /api/system/shutdown with the API token over a plain loopback socket (no HTTP client dependency). True when
+/// the backend accepted (202) — it is then ending itself.
+fn request_shutdown(app: &AppHandle) -> bool {
+    let Some(token) = api_token(app.clone()) else {
+        return false;
+    };
+    let Ok(addr) = "127.0.0.1:8710".parse::<SocketAddr>() else {
+        return false;
+    };
+    let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(500)) else {
+        return false;
+    };
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+    let request = format!(
+        "POST /api/system/shutdown HTTP/1.1\r\nHost: 127.0.0.1:8710\r\nAuthorization: Bearer {token}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    );
+    if stream.write_all(request.as_bytes()).is_err() {
+        return false;
+    }
+    let mut status = [0u8; 12]; // "HTTP/1.1 202"
+    stream.read_exact(&mut status).is_ok() && &status[9..12] == b"202"
 }
 
 /// The backend's per-user API token (backend/app/api/auth.py): `~/.opendex/api-token`, written with mode 0600 by

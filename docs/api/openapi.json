@@ -4201,6 +4201,39 @@
         }
       }
     },
+    "/api/v1/system/shutdown": {
+      "post": {
+        "tags": [
+          "system",
+          "system"
+        ],
+        "summary": "Shutdown",
+        "description": "Ends the backend gracefully — the desktop shell's \"quit\": windows close and the phone's servers stop before the\nprocess exits. 409 when this process was not started by the backend's own runner (nothing to stop).",
+        "operationId": "shutdown_api_v1_system_shutdown_post",
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForeignOrigin"
+          },
+          "411": {
+            "$ref": "#/components/responses/LengthRequired"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          }
+        }
+      }
+    },
     "/api/v1/telemetry": {
       "get": {
         "tags": [

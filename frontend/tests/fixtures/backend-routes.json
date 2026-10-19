@@ -101,6 +101,7 @@
   "POST /api/pairing/manual",
   "POST /api/pairing/pair-code",
   "POST /api/pairing/qr",
+  "POST /api/system/shutdown",
   "POST /api/windows/applock/retry",
   "POST /api/windows/close",
   "POST /api/windows/dock",

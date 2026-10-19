@@ -14,6 +14,7 @@ from .endpoints import (
     notifications,
     pairing,
     settings,
+    system,
     telemetry,
     windows,
 )
@@ -29,5 +30,6 @@ api_router.include_router(audio.router, tags=["audio"])
 api_router.include_router(input.router, tags=["input"])
 api_router.include_router(notifications.router, tags=["notifications"])
 api_router.include_router(diagnostics.router, tags=["diagnostics"])
+api_router.include_router(system.router, tags=["system"])
 api_router.include_router(telemetry.router, tags=["telemetry"])
 api_router.include_router(fs.router, tags=["fs"])

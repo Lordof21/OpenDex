@@ -2,7 +2,7 @@
 
 # API reference
 
-All 126 operations of the public OpenAPI document ([`openapi.json`](openapi.json), OpenAPI 3.1.0), grouped by tag. Conventions that apply to every operation — authentication, the Origin/Host guard, limits, error shapes — are in [API.md](../API.md); the WebSocket channels and the event types are there too.
+All 127 operations of the public OpenAPI document ([`openapi.json`](openapi.json), OpenAPI 3.1.0), grouped by tag. Conventions that apply to every operation — authentication, the Origin/Host guard, limits, error shapes — are in [API.md](../API.md); the WebSocket channels and the event types are there too.
 
 Paths are relative to `http://127.0.0.1:8710/api/v1` (every operation is also served under `/api`, unversioned). **Auth** `token` = needs the API token; **Device** = answers `409` while no phone is bound.
 
@@ -20,6 +20,7 @@ Paths are relative to `http://127.0.0.1:8710/api/v1` (every operation is also se
 | [diagnostics](#diagnostics) | 8 |
 | [telemetry](#telemetry) | 2 |
 | [fs](#fs) | 29 |
+| [system](#system) | 1 |
 
 The same few refusals apply to many operations; they are named once here and abbreviated in each operation's *Responses* line:
 
@@ -1876,3 +1877,20 @@ however it got its script — cannot widen what the file manager may read.
 | `paths` | array of string | yes |  |
 
 **Responses:** `200` Successful Response · `422` Validation Error · `401` token missing/wrong · `403` foreign Origin/Host · `411` chunked body · `413` body too large
+
+## system
+
+
+
+| Method | Path | Summary | Auth | Device |
+|---|---|---|---|---|
+| `POST` | `/system/shutdown` | Ends the backend gracefully — the desktop shell's "quit": windows close and the phone's servers stop before… | token |  |
+
+### `POST /system/shutdown`
+
+Ends the backend gracefully — the desktop shell's "quit": windows close and the phone's servers stop before the
+process exits. 409 when this process was not started by the backend's own runner (nothing to stop).
+
+*token required*
+
+**Responses:** `202` Successful Response · `401` token missing/wrong · `403` foreign Origin/Host · `411` chunked body · `413` body too large

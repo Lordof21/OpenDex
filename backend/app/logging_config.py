@@ -148,7 +148,7 @@ TRACE_CATEGORIES: dict[str, tuple[str, ...]] = {
     "pairing": ("app.wireless",),
     "api": ("app.api",),
     "apps": ("app.apps",),
-    "core": ("app.events", "app.storage"),
+    "core": ("app.events", "app.storage", "app.lifecycle"),
     "client": ("app.client",),
     "daemon_raw": (),  # yalnızca _DaemonMediaFilter'ı kapatır (DIAG/RPC gürültüsü de görünsün)
     "all": ("app",),
@@ -157,6 +157,7 @@ TRACE_CATEGORIES: dict[str, tuple[str, ...]] = {
 # Terminalde INFO seviyesinde her zaman görünen az sıklıkta "önemli olay" kaynakları.
 _ALWAYS_INFO: tuple[str, ...] = (
     "app.main",
+    "app.lifecycle",
     "app.device.connection_supervisor",
     "app.device.display_power",
     "app.device.phone_awake",
