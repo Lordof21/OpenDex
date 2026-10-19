@@ -12,6 +12,15 @@ import { t } from '../i18n/index.js';
 
 const PULSING = new Set(['binding', 'switching', 'reconnecting']);
 
+export const EASE = [0.22, 1, 0.36, 1];
+/** Yerinde açılıp kapanan şerit (not, onay, uyarı): yükseklik + opaklık. */
+export const COLLAPSE = {
+  initial: { opacity: 0, height: 0 },
+  animate: { opacity: 1, height: 'auto' },
+  exit: { opacity: 0, height: 0 },
+  transition: { duration: 0.18, ease: EASE },
+};
+
 /** Cihaz simgesi + sağ altta durum noktası. Etkin cihazda çerçeve durum rengini alır. */
 export function DeviceGlyph({ group, size = 'md', className }) {
   const { tone } = statusLine(group);
@@ -213,10 +222,7 @@ export function InlineNote({ note, className }) {
         <motion.p
           key={note.text}
           role={note.tone === 'error' ? 'alert' : 'status'}
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: 'auto' }}
-          exit={{ opacity: 0, height: 0 }}
-          transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+          {...COLLAPSE}
           className="overflow-hidden"
         >
           <span className={cn('mt-1.5 flex items-start gap-1.5 rounded-[8px] border px-2 py-1.5 text-[10px] leading-snug', style.cls, className)}>

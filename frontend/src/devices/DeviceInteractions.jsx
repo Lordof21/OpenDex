@@ -16,6 +16,7 @@ import { useWindowStore } from '../window/windowStore.js';
 import { useDeviceHubStore } from './deviceHubStore.js';
 import { deviceMenu } from './deviceModel.js';
 import { REASON_TEXT } from './deviceText.js';
+import { EASE } from './DeviceParts.jsx';
 import { t } from '../i18n/index.js';
 
 const MENU_WIDTH = 240;
@@ -63,10 +64,8 @@ export function DeviceInteractionProvider({ groups, active, children }) {
         else hub.connect(group);
         break;
       case 'switch-usb':
-        hub.switchLink(group, 'usb');
-        break;
       case 'switch-wifi':
-        hub.switchLink(group, 'wifi');
+        hub.switchLink(group, id === 'switch-usb' ? 'usb' : 'wifi');
         break;
       case 'disconnect':
         if (windowCount > 0) setConfirm({ key: group.key, kind: 'disconnect' });
@@ -76,14 +75,12 @@ export function DeviceInteractionProvider({ groups, active, children }) {
         setConfirm(null);
         setRenaming(group.key);
         break;
-      case 'copy-serial': {
-        const serial = group.activeLink?.serial || group.usbLink?.serial;
-        if (serial) hub.copy(serial, t('devices.serial_number'));
-        break;
-      }
+      case 'copy-serial':
       case 'copy-ip': {
-        const ip = deviceMenu(group).find((item) => item.id === 'copy-ip')?.value;
-        if (ip) hub.copy(ip);
+        const value = id === 'copy-ip'
+          ? deviceMenu(group).find((item) => item.id === 'copy-ip')?.value
+          : group.activeLink?.serial || group.usbLink?.serial;
+        if (value) hub.copy(value, id === 'copy-serial' ? t('devices.serial_number') : undefined);
         break;
       }
       case 'forget':
@@ -171,17 +168,6 @@ export function DeviceInteractionProvider({ groups, active, children }) {
   );
 }
 
-/** Onay şeridinin cümlesi ve düğmesi. */
-export function confirmCopy(kind, group, windowCount) {
-  if (kind === 'disconnect') {
-    return { message: t('devices.confirm_disconnect', { count: windowCount }), label: t('taskbar.baglantiyi_kes') };
-  }
-  if (kind === 'switch-device') {
-    return { message: t('devices.confirm_switch_device', { name: group?.name || '', count: windowCount }), label: t('devices.action_switch_device') };
-  }
-  return { message: t('devices.confirm_forget', { name: group?.name || '' }), label: t('devices.action_forget_short') };
-}
-
 function DeviceMenu({ group, anchor, onPick, onClose }) {
   const reduce = useReducedMotion();
   const ref = useRef(null);
@@ -249,7 +235,7 @@ function DeviceMenu({ group, anchor, onPick, onClose }) {
         onKeyDown={onKeyDown}
         initial={reduce ? { opacity: 0 } : { opacity: 0, y: -4, scale: 0.97 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={{ duration: reduce ? 0.1 : 0.16, ease: [0.22, 1, 0.36, 1] }}
+        transition={{ duration: reduce ? 0.1 : 0.16, ease: EASE }}
         style={{ transformOrigin: `${pos?.originX ?? MENU_WIDTH / 2}px ${pos?.originY ?? 0}px` }}
         className="select-none overflow-hidden rounded-[12px] border border-taskbar-border/80 bg-popover p-1 text-popover-foreground shadow-window"
       >

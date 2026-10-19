@@ -13,34 +13,26 @@ import Button from '../ui/Button.jsx';
 import { useDeviceHubStore } from './deviceHubStore.js';
 import { primaryAction } from './deviceModel.js';
 import { BUSY_TEXT, HINT_TEXT, PRIMARY_LABEL, TONE_TEXT, statusLine } from './deviceText.js';
-import { DeviceGlyph, InlineNote, LinkChip } from './DeviceParts.jsx';
-import { confirmCopy, useDeviceInteractions } from './DeviceInteractions.jsx';
+import { COLLAPSE, DeviceGlyph, EASE, InlineNote, LinkChip } from './DeviceParts.jsx';
+import { useDeviceInteractions } from './DeviceInteractions.jsx';
 import { t } from '../i18n/index.js';
 
-export const ROW_MOTION = {
+const ROW_MOTION = {
   initial: { opacity: 0, y: 6 },
   animate: { opacity: 1, y: 0 },
   exit: { opacity: 0, y: -4, transition: { duration: 0.12 } },
-  transition: { duration: 0.2, ease: [0.22, 1, 0.36, 1] },
+  transition: { duration: 0.2, ease: EASE },
 };
 
 /** Satır içi onay: yıkıcı ya da pencere kapatan eylemler ilk dokunuşta çalışmaz. Açılınca odak onay düğmesindedir. */
-export function ConfirmBar({ message, confirmLabel, onConfirm, onCancel, destructive = true }) {
+function ConfirmBar({ message, confirmLabel, onConfirm, onCancel, destructive = true }) {
   const confirmRef = useRef(null);
   useEffect(() => {
     confirmRef.current?.focus({ preventScroll: true });
     return pushEscapeHandler(onCancel);
   }, [onCancel]);
   return (
-    <motion.div
-      role="alertdialog"
-      aria-label={message}
-      initial={{ opacity: 0, height: 0 }}
-      animate={{ opacity: 1, height: 'auto' }}
-      exit={{ opacity: 0, height: 0 }}
-      transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
-      className="overflow-hidden"
-    >
+    <motion.div role="alertdialog" aria-label={message} {...COLLAPSE} className="overflow-hidden">
       <div className={cn('mt-1.5 rounded-[9px] border p-2', destructive ? 'border-destructive/30 bg-destructive/[0.05]' : 'border-border/70 bg-muted/50')}>
         <p className="text-[10.5px] leading-snug text-foreground">{message}</p>
         <div className="mt-1.5 flex justify-end gap-1">
@@ -54,8 +46,36 @@ export function ConfirmBar({ message, confirmLabel, onConfirm, onCancel, destruc
   );
 }
 
+// Onay şeridinin cümlesi ve düğmesi, onay türüne göre: [mesaj, düğme].
+const CONFIRM = {
+  disconnect: (group, count) => [t('devices.confirm_disconnect', { count }), t('taskbar.baglantiyi_kes')],
+  'switch-device': (group, count) => [t('devices.confirm_switch_device', { name: group.name, count }), t('devices.action_switch_device')],
+  forget: (group) => [t('devices.confirm_forget', { name: group.name }), t('devices.action_forget_short')],
+};
+
+/** Bu cihaz için bekleyen onay (bağlantıyı kes · başka telefona geç · unut) — satırın ya da kartın altında. */
+export function GroupConfirm({ group }) {
+  const ui = useDeviceInteractions();
+  const kind = ui.confirm?.key === group.key ? ui.confirm.kind : null;
+  const [message, label] = kind ? CONFIRM[kind](group, ui.windowCount) : [];
+  return (
+    <AnimatePresence initial={false}>
+      {kind && (
+        <ConfirmBar
+          key={kind}
+          message={message}
+          confirmLabel={label}
+          destructive={kind !== 'switch-device'}
+          onConfirm={ui.confirmNow}
+          onCancel={() => ui.setConfirm(null)}
+        />
+      )}
+    </AnimatePresence>
+  );
+}
+
 /** Yerinde yeniden adlandırma: Enter kaydeder, Esc vazgeçer, boş = model adı. */
-export function RenameField({ group, onDone, className }) {
+function RenameField({ group, onDone, className }) {
   const [draft, setDraft] = useState(group.alias || group.model || '');
   const inputRef = useRef(null);
   const done = useRef(false);
@@ -96,25 +116,63 @@ export function RenameField({ group, onDone, className }) {
   );
 }
 
+/** Cihazın adı (takma ad varsa ipucunda model); yeniden adlandırılırken yerinde düzenleme kutusu. */
+export function DeviceName({ group, className, fieldClassName }) {
+  const ui = useDeviceInteractions();
+  if (ui.renaming === group.key) return <RenameField group={group} onDone={() => ui.setRenaming(null)} className={fieldClassName} />;
+  return (
+    <span className={cn('truncate font-semibold', className)} title={group.alias && group.model ? group.model : undefined}>
+      {group.name}
+    </span>
+  );
+}
+
+/** "⋯" — bağlam menüsünü açar/kapatır. `reveal`: fareli cihazda yalnız satırın üstündeyken ya da odaktayken görünür. */
+export function MoreButton({ group, reveal = false }) {
+  const ui = useDeviceInteractions();
+  const ref = useRef(null);
+  const open = ui.menuKey === group.key;
+  return (
+    <button
+      ref={ref}
+      type="button"
+      aria-label={t('devices.more_actions', { name: group.name })}
+      aria-haspopup="menu"
+      aria-expanded={open}
+      data-tooltip={t('devices.more')}
+      data-tooltip-align="end"
+      onClick={(e) => {
+        e.stopPropagation();
+        if (open) ui.closeMenu();
+        else ui.openMenu(group, ref.current);
+      }}
+      className={cn(
+        'grid size-7 shrink-0 cursor-pointer place-items-center rounded-[7px] text-muted-foreground outline-none duration-150 hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring',
+        reveal
+          ? 'transition-[opacity,background-color,color] focus-visible:opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/row:opacity-100 [@media(hover:hover)]:group-focus-within/row:opacity-100'
+          : 'transition-colors',
+        open && '!opacity-100 bg-accent text-foreground',
+      )}
+    >
+      <MoreHorizontal className="size-4" />
+    </button>
+  );
+}
+
 // forwardRef: AnimatePresence `popLayout` measures the leaving row through its ref.
 export const DeviceRow = forwardRef(function DeviceRow({ group, className }, ref) {
   const reduce = useReducedMotion();
   const busy = useDeviceHubStore((s) => s.busy);
   const note = useDeviceHubStore((s) => s.notes[group.key]);
   const ui = useDeviceInteractions();
-  const moreRef = useRef(null);
   const status = statusLine(group);
   const primary = primaryAction(group);
   const working = busy?.key === group.key;
-  const anyBusy = Boolean(busy);
   const renaming = ui.renaming === group.key;
-  const confirm = ui.confirm?.key === group.key ? ui.confirm : null;
-  const copy = confirm ? confirmCopy(confirm.kind, group, ui.windowCount) : null;
   const handlers = ui.menuHandlers(group);
-  const menuOpen = ui.menuKey === group.key;
 
   const runPrimary = () => {
-    if (primary?.action && !anyBusy) ui.perform(primary.action, group);
+    if (primary?.action && !busy) ui.perform(primary.action, group);
   };
 
   return (
@@ -135,19 +193,13 @@ export const DeviceRow = forwardRef(function DeviceRow({ group, className }, ref
         className={cn(
           'group/row relative flex items-center gap-2.5 rounded-[11px] px-2 py-2 outline-none transition-[background-color,box-shadow] duration-150',
           'hover:bg-foreground/[0.045] focus-visible:bg-foreground/[0.045] focus-visible:ring-2 focus-visible:ring-ring/70',
-          (menuOpen || renaming || confirm) && 'bg-foreground/[0.045]',
+          (ui.menuKey === group.key || renaming || ui.confirm?.key === group.key) && 'bg-foreground/[0.045]',
         )}
       >
         <DeviceGlyph group={group} />
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-1.5">
-            {renaming ? (
-              <RenameField group={group} onDone={() => ui.setRenaming(null)} />
-            ) : (
-              <span className="min-w-0 truncate text-[12px] font-semibold leading-4 text-foreground" title={group.alias && group.model ? group.model : undefined}>
-                {group.name}
-              </span>
-            )}
+            <DeviceName group={group} className="min-w-0 text-[12px] leading-4 text-foreground" />
             {!renaming && group.links.map((link) => <LinkChip key={link.serial} link={link} />)}
           </span>
           <span className={cn('mt-0.5 block truncate text-[10px] leading-[14px]', TONE_TEXT[status.tone])}>
@@ -159,8 +211,8 @@ export const DeviceRow = forwardRef(function DeviceRow({ group, className }, ref
           <Button
             size="xs"
             variant={group.status === 'ready' || group.status === 'discovered' ? 'default' : 'outline'}
-            disabled={anyBusy && !working}
-            loading={working && (busy.action === 'connect')}
+            disabled={Boolean(busy) && !working}
+            loading={working && busy.action === 'connect'}
             onClick={(e) => {
               e.stopPropagation();
               runPrimary();
@@ -176,43 +228,10 @@ export const DeviceRow = forwardRef(function DeviceRow({ group, className }, ref
         ) : null}
 
         {working && busy.action !== 'connect' && <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-hidden="true" />}
-
-        <button
-          ref={moreRef}
-          type="button"
-          aria-label={t('devices.more_actions', { name: group.name })}
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-          data-tooltip={t('devices.more')}
-          data-tooltip-align="end"
-          onClick={(e) => {
-            e.stopPropagation();
-            if (menuOpen) ui.closeMenu();
-            else ui.openMenu(group, moreRef.current);
-          }}
-          className={cn(
-            'grid size-7 shrink-0 cursor-pointer place-items-center rounded-[7px] text-muted-foreground outline-none transition-[opacity,background-color,color] duration-150',
-            'hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring',
-            '[@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/row:opacity-100 [@media(hover:hover)]:group-focus-within/row:opacity-100',
-            menuOpen && '!opacity-100 bg-accent text-foreground',
-          )}
-        >
-          <MoreHorizontal className="size-4" />
-        </button>
+        <MoreButton group={group} reveal />
       </div>
 
-      <AnimatePresence initial={false}>
-        {copy && (
-          <ConfirmBar
-            key={confirm.kind}
-            message={copy.message}
-            confirmLabel={copy.label}
-            destructive={confirm.kind !== 'switch-device'}
-            onConfirm={ui.confirmNow}
-            onCancel={() => ui.setConfirm(null)}
-          />
-        )}
-      </AnimatePresence>
+      <GroupConfirm group={group} />
       <InlineNote note={note} className="mx-1" />
     </motion.li>
   );

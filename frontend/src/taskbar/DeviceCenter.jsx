@@ -5,7 +5,7 @@
 //   Bağlı cihaz yoksa: neden (siz kestiniz / henüz bağlanmadı) ve "Cihaz bağla" penceresine giden tek düğme.
 //
 // Eylemler devices/deviceHubStore.js'te; fiziksel cihaz modeli devices/deviceModel.js'te. Ölçülemeyen değer "—" olur.
-import React, { forwardRef, useEffect, useRef, useState } from 'react';
+import React, { forwardRef, useEffect, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import {
   Activity,
@@ -14,7 +14,6 @@ import {
   Cpu,
   Gauge,
   Loader2,
-  MoreHorizontal,
   Plus,
   RotateCw,
   Smartphone,
@@ -38,9 +37,9 @@ import { useDeviceHubStore } from '../devices/deviceHubStore.js';
 import { useDevices, useWatchKnownDevices } from '../devices/useDevices.js';
 import { LINK_USB, LINK_WIFI, linkChoices } from '../devices/deviceModel.js';
 import { BUSY_TEXT, TONE_TEXT, linkLabel, statusLine, suggestsUsb } from '../devices/deviceText.js';
-import { DeviceGlyph, InlineNote, LinkSwitcher, PortChip, ProgressStrip } from '../devices/DeviceParts.jsx';
-import { DeviceInteractionProvider, confirmCopy, useDeviceInteractions } from '../devices/DeviceInteractions.jsx';
-import { ConfirmBar, DeviceSection, RenameField } from '../devices/DeviceList.jsx';
+import { DeviceGlyph, EASE, InlineNote, LinkSwitcher, PortChip, ProgressStrip } from '../devices/DeviceParts.jsx';
+import { DeviceInteractionProvider, useDeviceInteractions } from '../devices/DeviceInteractions.jsx';
+import { DeviceName, DeviceSection, GroupConfirm, MoreButton } from '../devices/DeviceList.jsx';
 import { syncDeviceState } from '../wireless/deviceState.js';
 import { t } from '../i18n/index.js';
 
@@ -135,7 +134,7 @@ export const DeviceCenter = forwardRef(function DeviceCenter(motionProps, ref) {
     <DeviceInteractionProvider groups={devices.all} active={active}>
       <motion.section
         ref={ref} {...motionProps}
-        transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+        transition={{ duration: 0.16, ease: EASE }}
         aria-label={t('taskbar.cihaz_merkezi')}
         data-taskbar-portal="true"
         style={{ zIndex: Z_INDEX.flyout }}
@@ -225,7 +224,6 @@ const ActiveDeviceCard = forwardRef(function ActiveDeviceCard({ group }, ref) {
   const switchLink = useDeviceHubStore((s) => s.switchLink);
   const batteryInfo = useSystemStore((s) => s.batteryInfo);
   const thermalLevel = useSystemStore((s) => s.thermalLevel);
-  const moreRef = useRef(null);
 
   // Canlı ölçümler yalnız bu panel açıkken ve cihaz gerçekten bağlıyken sorgulanır (media/telemetry.js).
   const connected = group.status === 'connected' || group.status === 'weak';
@@ -245,10 +243,7 @@ const ActiveDeviceCard = forwardRef(function ActiveDeviceCard({ group }, ref) {
   const pendingLink = working === 'switch-usb' ? LINK_USB : working === 'switch-wifi' ? LINK_WIFI
     : group.status === 'switching' ? (choices.current === LINK_USB ? LINK_WIFI : LINK_USB) : null;
   const switching = group.status === 'switching' || group.status === 'binding' || Boolean(pendingLink);
-  const confirm = ui.confirm?.key === group.key ? ui.confirm : null;
-  const copy = confirm ? confirmCopy(confirm.kind, group, ui.windowCount) : null;
   const handlers = ui.menuHandlers(group);
-  const menuOpen = ui.menuKey === group.key;
   const onUsb = choices.current === LINK_USB;
 
   let footnote;
@@ -265,7 +260,7 @@ const ActiveDeviceCard = forwardRef(function ActiveDeviceCard({ group }, ref) {
       initial={{ opacity: 0, scale: 0.98 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.98 }}
-      transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+      transition={{ duration: 0.2, ease: EASE }}
       aria-label={t('devices.active_device', { name: group.name })}
       className="relative overflow-hidden rounded-[14px] border border-border/70 bg-muted/35 p-3"
     >
@@ -281,34 +276,13 @@ const ActiveDeviceCard = forwardRef(function ActiveDeviceCard({ group }, ref) {
       >
         <DeviceGlyph group={group} size="lg" />
         <span className="min-w-0 flex-1 pt-0.5">
-          {ui.renaming === group.key ? (
-            <RenameField group={group} onDone={() => ui.setRenaming(null)} className="mb-0.5 text-[12.5px]" />
-          ) : (
-            <span className="block truncate text-[13px] font-semibold leading-5" title={group.alias && group.model ? group.model : undefined}>
-              {group.name}
-            </span>
-          )}
-          <span className={cn('flex items-center gap-1.5 text-[10.5px] font-medium', TONE_TEXT[status.tone])}>
-            <span className="truncate">{working ? BUSY_TEXT[working]?.() || status.text : status.text}</span>
+          <DeviceName group={group} className="block text-[13px] leading-5" fieldClassName="mb-0.5 text-[12.5px]" />
+          <span className={cn('block truncate text-[10.5px] font-medium', TONE_TEXT[status.tone])}>
+            {working ? BUSY_TEXT[working]?.() || status.text : status.text}
           </span>
           <span className="mt-0.5 block truncate font-mono text-[9.5px] text-muted-foreground">{group.activeLink?.serial}</span>
         </span>
-        <button
-          ref={moreRef}
-          type="button"
-          aria-label={t('devices.more_actions', { name: group.name })}
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-          data-tooltip={t('devices.more')}
-          data-tooltip-align="end"
-          onClick={() => (menuOpen ? ui.closeMenu() : ui.openMenu(group, moreRef.current))}
-          className={cn(
-            'grid size-7 shrink-0 cursor-pointer place-items-center rounded-[7px] text-muted-foreground outline-none transition-colors duration-150 hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring',
-            menuOpen && 'bg-accent text-foreground',
-          )}
-        >
-          <MoreHorizontal className="size-4" />
-        </button>
+        <MoreButton group={group} />
       </div>
 
       <LinkSwitcher
@@ -326,38 +300,16 @@ const ActiveDeviceCard = forwardRef(function ActiveDeviceCard({ group }, ref) {
       <InlineNote note={note} />
 
       <div className="mt-2.5 grid grid-cols-3 gap-1.5">
-        <Metric
-          icon={Zap}
-          label={t('taskbar.adb_gecikmesi')}
-          value={live?.device?.adb_rtt_ms != null ? `${live.device.adb_rtt_ms} ms` : '—'}
-          title={t('taskbar.bilgisayar_telefon_adb_hattinin_gidis')}
-        />
-        <Metric
-          icon={Cpu}
-          label={t('taskbar.telefon_cpu')}
-          value={formatPercent(live?.device?.cpu_pct)}
-          title={t('taskbar.telefonun_tum_cekirdeklerinin_toplam', { value: live?.device?.cores ? t('taskbar.cores_cekirdek', { cores: live.device.cores }) : '' })}
-        />
-        <Metric icon={BatteryMedium} label={t('common.pil')} value={battery != null ? `${battery}%` : '—'} />
-        <Metric
-          icon={Gauge}
-          label={t('taskbar.kare_hizi')}
-          value={streams ? `${streams.fps} fps` : '—'}
-          title={t('taskbar.pencere_akislarinin_en_yuksek_kare')}
-        />
-        <Metric
-          icon={Activity}
-          label={t('taskbar.bant_genisligi')}
-          value={streams ? `${streams.mbps} Mbps` : '—'}
-          title={t('taskbar.tum_pencere_akislarinin_toplam_video')}
-        />
-        <Metric
-          icon={Thermometer}
-          label={t('common.sicaklik')}
-          value={formatTemperature(temperature)}
-          tone={thermalTone(thermalLevel)}
-          title={t('taskbar.pil_sicakligi_android_isil_durumu', { value: THERMAL_LABEL[thermalLevel] || thermalLevel })}
-        />
+        {[
+          [Zap, t('taskbar.adb_gecikmesi'), live?.device?.adb_rtt_ms != null ? `${live.device.adb_rtt_ms} ms` : '—', t('taskbar.bilgisayar_telefon_adb_hattinin_gidis')],
+          [Cpu, t('taskbar.telefon_cpu'), formatPercent(live?.device?.cpu_pct),
+            t('taskbar.telefonun_tum_cekirdeklerinin_toplam', { value: live?.device?.cores ? t('taskbar.cores_cekirdek', { cores: live.device.cores }) : '' })],
+          [BatteryMedium, t('common.pil'), battery != null ? `${battery}%` : '—'],
+          [Gauge, t('taskbar.kare_hizi'), streams ? `${streams.fps} fps` : '—', t('taskbar.pencere_akislarinin_en_yuksek_kare')],
+          [Activity, t('taskbar.bant_genisligi'), streams ? `${streams.mbps} Mbps` : '—', t('taskbar.tum_pencere_akislarinin_toplam_video')],
+          [Thermometer, t('common.sicaklik'), formatTemperature(temperature),
+            t('taskbar.pil_sicakligi_android_isil_durumu', { value: THERMAL_LABEL[thermalLevel] || thermalLevel }), thermalTone(thermalLevel)],
+        ].map(([icon, label, value, title, tone]) => <Metric key={label} icon={icon} label={label} value={value} title={title} tone={tone} />)}
       </div>
 
       {(cpuGroups.length > 0 || (systemCpu != null && systemCpu > 0)) && (
@@ -375,17 +327,7 @@ const ActiveDeviceCard = forwardRef(function ActiveDeviceCard({ group }, ref) {
       >
         {t('taskbar.baglantiyi_kes')}
       </Button>
-      <AnimatePresence initial={false}>
-        {copy && (
-          <ConfirmBar
-            key={confirm.kind}
-            message={copy.message}
-            confirmLabel={copy.label}
-            onConfirm={ui.confirmNow}
-            onCancel={() => ui.setConfirm(null)}
-          />
-        )}
-      </AnimatePresence>
+      <GroupConfirm group={group} />
     </motion.section>
   );
 });
@@ -439,7 +381,7 @@ function CpuBreakdown({ cpuGroups, systemCpu, device }) {
             initial={reduce ? { opacity: 0 } : { opacity: 0, height: 0 }}
             animate={reduce ? { opacity: 1 } : { opacity: 1, height: 'auto' }}
             exit={reduce ? { opacity: 0 } : { opacity: 0, height: 0 }}
-            transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: 0.2, ease: EASE }}
             className="overflow-hidden"
           >
             <div className="pt-1">

@@ -33,18 +33,6 @@ const toast = (message, tone) => useSystemStore.getState().pushToast(message, to
 const errorText = (err, fallback) => (typeof err?.detail === 'string' && err.detail.trim() ? err.detail : fallback);
 
 export const useDeviceHubStore = create((set, get) => {
-  /** Satır içi sonuç notu (eylemin yapıldığı satırın altında, birkaç saniye). */
-  const note = (key, tone, text) => {
-    clearTimeout(noteTimers.get(key));
-    set((s) => ({ notes: { ...s.notes, [key]: { tone, text } } }));
-    noteTimers.set(key, setTimeout(() => {
-      noteTimers.delete(key);
-      set((s) => {
-        const { [key]: _gone, ...rest } = s.notes;
-        return { notes: rest };
-      });
-    }, NOTE_MS));
-  };
   const clearNote = (key) => {
     clearTimeout(noteTimers.get(key));
     noteTimers.delete(key);
@@ -54,6 +42,12 @@ export const useDeviceHubStore = create((set, get) => {
         return { notes: rest };
       });
     }
+  };
+  /** Satır içi sonuç notu (eylemin yapıldığı satırın altında, birkaç saniye). */
+  const note = (key, tone, text) => {
+    clearTimeout(noteTimers.get(key));
+    set((s) => ({ notes: { ...s.notes, [key]: { tone, text } } }));
+    noteTimers.set(key, setTimeout(() => clearNote(key), NOTE_MS));
   };
 
   /**
@@ -148,25 +142,17 @@ export const useDeviceHubStore = create((set, get) => {
 
     /** Etkin cihazın hattını değiştir. Wi-Fi: aynı telefonun açık Wi-Fi hattı varsa ona geçer, yoksa USB'den `adb tcpip`. */
     async switchLink(group, target) {
-      if (!group?.active) return false;
-      if (target === LINK_USB) {
-        const usb = group.usbLink;
-        if (usb?.state !== 'device') {
-          note(group.key, 'info', t('devices.note_plug_usb'));
-          return false;
-        }
-        return run(group.key, 'switch-usb', () => api.post('/api/device/bind', { serial: usb.serial }), {
-          success: t('devices.toast_on_usb'),
-          failure: t('devices.error_switch_usb'),
-        });
+      if (!group?.active || (target !== LINK_USB && target !== LINK_WIFI)) return false;
+      const usb = target === LINK_USB;
+      const link = usb ? group.usbLink : group.wifiLink;
+      if (link?.state === 'device' && (usb || !link.active)) {
+        return run(group.key, `switch-${target}`, () => api.post('/api/device/bind', { serial: link.serial }), usb
+          ? { success: t('devices.toast_on_usb'), failure: t('devices.error_switch_usb') }
+          : { success: t('devices.toast_on_wifi'), failure: t('devices.error_switch_wifi') });
       }
-      if (target !== LINK_WIFI) return false;
-      const wifi = group.wifiLink;
-      if (wifi?.state === 'device' && !wifi.active) {
-        return run(group.key, 'switch-wifi', () => api.post('/api/device/bind', { serial: wifi.serial }), {
-          success: t('devices.toast_on_wifi'),
-          failure: t('devices.error_switch_wifi'),
-        });
+      if (usb) {
+        note(group.key, 'info', t('devices.note_plug_usb'));
+        return false;
       }
       const port = get().port;
       if (!(Number(port) >= 1 && Number(port) <= 65535)) {

@@ -105,9 +105,7 @@ class DeviceManager:
         tasks = list(self._identity_tasks.values())
         for task in tasks:
             task.cancel()
-        for task in tasks:
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await task
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     def remember_identity(self, serial: str, android_id: str) -> None:
         """A link whose ANDROID_ID was just read for another reason (binding it): no second read."""

@@ -15,6 +15,7 @@ import { cn } from '../lib/utils.js';
 import { useDevices, useWatchKnownDevices } from './useDevices.js';
 import { DeviceInteractionProvider } from './DeviceInteractions.jsx';
 import { DeviceSection } from './DeviceList.jsx';
+import { COLLAPSE } from './DeviceParts.jsx';
 import PairingMethods from '../wireless/QrPairing.jsx';
 import { t } from '../i18n/index.js';
 
@@ -75,13 +76,7 @@ function ConnectDialogBody({ onClose }) {
 
           <AnimatePresence initial={false}>
             {paused && (
-              <motion.p
-                key="paused"
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                className="overflow-hidden"
-              >
+              <motion.p key="paused" {...COLLAPSE} className="overflow-hidden">
                 <span className="flex items-start gap-2 rounded-[10px] border border-border/70 bg-background/70 px-2.5 py-2 text-[10.5px] leading-snug text-muted-foreground">
                   <PauseCircle className="mt-px size-3.5 shrink-0 text-foreground/70" />
                   <span>{t('devices.paused_body')}</span>
@@ -131,9 +126,9 @@ function UsbCard({ waiting }) {
             {waiting ? t('devices.usb_waiting') : t('devices.usb_present')}
           </p>
           <ol className="mt-1.5 space-y-0.5 text-[10px] leading-relaxed text-muted-foreground">
-            <li className="flex gap-1.5"><span className="font-mono text-foreground/60">1</span>{t('devices.usb_step_1')}</li>
-            <li className="flex gap-1.5"><span className="font-mono text-foreground/60">2</span>{t('devices.usb_step_2')}</li>
-            <li className="flex gap-1.5"><span className="font-mono text-foreground/60">3</span>{t('devices.usb_step_3')}</li>
+            {[t('devices.usb_step_1'), t('devices.usb_step_2'), t('devices.usb_step_3')].map((step, i) => (
+              <li key={step} className="flex gap-1.5"><span className="font-mono text-foreground/60">{i + 1}</span>{step}</li>
+            ))}
           </ol>
         </div>
       </div>
