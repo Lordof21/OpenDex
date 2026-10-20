@@ -1,23 +1,27 @@
-import React, { useEffect, forwardRef } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+// Cihaz Merkezi (taskbar paneli) — docs/design/DEVICE_MANAGER.md §6.
+//
+//   Etkin cihaz kartı: ad + durum, hat seçici (USB | Wi-Fi), hat değişirken ilerleme şeridi, canlı ölçümler, işlemci dağılımı,
+//   "Bağlantıyı kes" (açık pencere varsa satır içi onay). Altında "Bu bilgisayarda" ve "Kayıtlı" listeleri.
+//   Bağlı cihaz yoksa: neden (siz kestiniz / henüz bağlanmadı) ve "Cihaz bağla" penceresine giden tek düğme.
+//
+// Eylemler devices/deviceHubStore.js'te; fiziksel cihaz modeli devices/deviceModel.js'te. Ölçülemeyen değer "—" olur.
+import React, { forwardRef, useEffect, useState } from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import {
   Activity,
   BatteryMedium,
-  Check,
+  ChevronRight,
   Cpu,
   Gauge,
-  Link2Off,
   Loader2,
   Plus,
   RotateCw,
   Smartphone,
-  Tablet,
   Thermometer,
   Unplug,
   Usb,
   Wifi,
   WifiOff,
-  X,
   Zap,
 } from 'lucide-react';
 import { Z_INDEX } from '../ui/zIndex.js';
@@ -25,36 +29,35 @@ import { cn } from '../lib/utils.js';
 import { resolveAppDisplayName } from '../desktop/appRegistry.js';
 import { LOCUS_LABEL, appsByLocus, formatCores, formatPercent, startTelemetry, streamSummary, systemCpuResidual, useTelemetry } from '../media/telemetry.js';
 import AppIcon from '../ui/AppIcon.jsx';
-import { THERMAL_LABEL, formatTemperature, thermalTone } from '../state/deviceThermal.js';
+import Button from '../ui/Button.jsx';
+import { IconButton } from '../ui/IconButton.jsx';
+import { THERMAL_LABEL, batteryTemperatureC, formatTemperature, thermalTone } from '../state/deviceThermal.js';
 import { useSystemStore } from '../state/systemStore.js';
-import QrPairing from '../wireless/QrPairing.jsx';
+import { useDeviceHubStore } from '../devices/deviceHubStore.js';
+import { useDevices, useWatchKnownDevices } from '../devices/useDevices.js';
+import { LINK_USB, LINK_WIFI, linkChoices } from '../devices/deviceModel.js';
+import { BUSY_TEXT, TONE_TEXT, linkLabel, statusLine, suggestsUsb } from '../devices/deviceText.js';
+import { DeviceGlyph, EASE, InlineNote, LinkSwitcher, PortChip, ProgressStrip } from '../devices/DeviceParts.jsx';
+import { DeviceInteractionProvider, useDeviceInteractions } from '../devices/DeviceInteractions.jsx';
+import { DeviceName, DeviceSection, GroupConfirm, MoreButton } from '../devices/DeviceList.jsx';
+import { syncDeviceState } from '../wireless/deviceState.js';
 import { t } from '../i18n/index.js';
 
-const STATUS_LABEL = {
-  connected: t('common.bagli'),
-  connecting: t('taskbar.baglaniyor'),
-  available: t('taskbar.kullanilabilir'),
-  offline: t('taskbar.baglanti_kesildi'),
-  unauthorized: t('taskbar.yetki_bekliyor'),
-  disconnected: t('common.cihaz_bagli_degil'),
-};
-
-export function DeviceTrayButton({ hub, open, onOpen, className }) {
-  const { active } = hub;
-  const wireless = active.link === 'wifi';
-  const noDevice = active.status === 'disconnected';
-  const LinkIcon = active.status === 'connecting' ? Loader2 : noDevice ? WifiOff : wireless ? Wifi : Usb;
+/** Taskbar'daki telefon düğmesi: model/seri + hat. */
+export function DeviceTrayButton({ open, onOpen, className }) {
+  const { active } = useDevices();
+  const wireless = active?.activeLink?.transport === LINK_WIFI;
+  const busy = active && ['binding', 'switching', 'reconnecting'].includes(active.status);
+  const LinkIcon = busy ? Loader2 : !active ? WifiOff : wireless ? Wifi : Usb;
+  const status = statusLine(active);
 
   return (
     <button
       type="button"
       onClick={onOpen}
-      aria-label={
-        noDevice
-          ? t('taskbar.cihaz_merkezi_cihaz_bagli_degil')
-          : t('taskbar.cihaz_merkezi_model_value_hat_value2', { model: active.model, value: wireless ? 'kablosuz' : 'USB', value2: STATUS_LABEL[active.status] || active.status })
-      }
-      data-tooltip={noDevice ? t('common.cihaz_bagli_degil') : `${active.model} · ${wireless ? t('taskbar.wi_fi_value', { value: active.ip || '' }) : 'USB'}`}
+      aria-label={active ? t('devices.tray_label', { name: active.name, status: status.text }) : t('taskbar.cihaz_merkezi_cihaz_bagli_degil')}
+      aria-expanded={open}
+      data-tooltip={active ? `${active.name} · ${status.text}` : t('common.cihaz_bagli_degil')}
       className={cn(
         // Sağ küme kuralları (Taskbar.jsx): 10 px yarıçap, dış boşluk yok (aralığı kapsül ya da küme verir), klavye odak halkası.
         'relative inline-flex h-8 shrink-0 cursor-pointer select-none items-center gap-1 self-center rounded-[9px] px-1.5 text-taskbar-foreground outline-none transition-colors duration-150 hover:bg-accent/65 focus-visible:ring-2 focus-visible:ring-ring',
@@ -67,414 +70,363 @@ export function DeviceTrayButton({ hub, open, onOpen, className }) {
         <span
           className={cn(
             'absolute -bottom-1 -right-1.5 grid size-[11px] place-items-center rounded-full bg-taskbar ring-1',
-            noDevice
+            !active
               ? 'text-muted-foreground ring-border'
+              : active.status === 'reconnecting' || active.status === 'weak'
+              ? 'text-warning ring-warning/45'
               : wireless
               ? 'text-status-active ring-status-active/45'
               : 'text-primary ring-primary/45'
           )}
         >
-          <LinkIcon className={cn('size-[8px]', active.status === 'connecting' && 'animate-spin')} strokeWidth={2.6} />
+          <LinkIcon className={cn('size-[8px]', busy && 'animate-spin')} strokeWidth={2.6} />
         </span>
       </span>
       <span className="hidden min-w-0 flex-col items-start leading-none lg:flex">
-        <span className="max-w-[58px] truncate font-mono text-[9px] font-semibold">
-          {noDevice ? '—' : active.serial}
+        <span className="max-w-[64px] truncate text-[9px] font-semibold">
+          {active ? active.name : '—'}
         </span>
         <span
           className={cn(
             'mt-0.5 text-[8px] font-semibold uppercase tracking-wide',
-            noDevice ? 'text-muted-foreground' : wireless ? 'text-status-active' : 'text-muted-foreground'
+            !active ? 'text-muted-foreground' : wireless ? 'text-status-active' : 'text-muted-foreground'
           )}
         >
-          {noDevice ? t('taskbar.yok') : wireless ? 'Wi-Fi' : 'USB'}
+          {active ? linkLabel(active.activeLink?.transport) : t('taskbar.yok')}
         </span>
       </span>
     </button>
   );
 }
 
-function LinkIconFor({ link, className }) {
-  return link === 'wifi' ? <Wifi className={className} /> : <Usb className={className} />;
-}
+export const DeviceCenter = forwardRef(function DeviceCenter(motionProps, ref) {
+  useWatchKnownDevices();
+  const devices = useDevices();
+  const openConnectDialog = useDeviceHubStore((s) => s.openConnectDialog);
+  const fetchKnown = useDeviceHubStore((s) => s.fetchKnown);
+  const [scanning, setScanning] = useState(false);
+  const { active, nearby, saved, session } = devices;
 
-export const DeviceCenter = forwardRef(function DeviceCenter({ hub, ...motionProps }, ref) {
-  const {
-    devices, active, port, setPort, scanning, toast, knownDevices,
-    pairingOpen, openPairing, closePairing,
-    switchLink, disconnect, connect, activate, connectKnown, forgetKnown, rescan,
-  } = hub;
-  const wireless = active.link === 'wifi';
-  const noActiveDevice = active.status === 'disconnected';
-  const others = devices.filter((d) => d.id !== active.id);
+  const rescan = async () => {
+    if (scanning) return;
+    setScanning(true);
+    const started = Date.now();
+    try {
+      await Promise.all([
+        fetchKnown(),
+        syncDeviceState(),
+        useSystemStore.getState().fetchBatteryInfo(),
+      ]);
+    } finally {
+      // En az bir dönüş: anında biten tazeleme "bir şey oldu mu?" sorusu bırakmasın.
+      setTimeout(() => setScanning(false), Math.max(0, 450 - (Date.now() - started)));
+    }
+  };
 
-  // Live numbers come from the backend (media/telemetry.js) and are polled only while this panel is open on a connected
-  // device. Whatever could not be measured is null and shown as "—" — never as a made-up 0.
-  const connected = active.status === 'connected';
+  // The card says how the bound phone is; the header speaks only when there is none.
+  const subtitle = active
+    ? null
+    : session?.autoConnectPaused
+    ? t('devices.paused_short')
+    : t('common.cihaz_bagli_degil');
+
+  return (
+    <DeviceInteractionProvider groups={devices.all} active={active}>
+      <motion.section
+        ref={ref} {...motionProps}
+        transition={{ duration: 0.16, ease: EASE }}
+        aria-label={t('taskbar.cihaz_merkezi')}
+        data-taskbar-portal="true"
+        style={{ zIndex: Z_INDEX.flyout }}
+        className="absolute bottom-[calc(100%+16px)] right-4 z-flyout flex max-h-[min(640px,calc(100vh-82px))] w-[min(368px,calc(100vw-32px))] flex-col overflow-hidden rounded-2xl border border-taskbar-border bg-popover text-popover-foreground shadow-2xl sm:right-24 sm:bg-popover/95 sm:backdrop-blur-xl"
+      >
+        <header className="flex shrink-0 items-center gap-2 border-b border-border/60 px-3.5 py-2.5">
+          <span className="min-w-0 flex-1">
+            <h2 className="truncate text-[12.5px] font-semibold">{t('taskbar.cihaz_merkezi_2')}</h2>
+            {subtitle && <p className="truncate text-[10px] text-muted-foreground">{subtitle}</p>}
+          </span>
+          <IconButton
+            label={t('taskbar.cihazlari_yeniden_tara')}
+            size="sm"
+            tooltipAlign="end"
+            onClick={rescan}
+            className="rounded-[8px]"
+          >
+            <RotateCw className={cn(scanning && 'animate-spin')} />
+          </IconButton>
+          <IconButton
+            label={t('devices.add_device')}
+            size="sm"
+            tooltipAlign="end"
+            onClick={() => openConnectDialog('add')}
+            className="rounded-[8px]"
+          >
+            <Plus />
+          </IconButton>
+        </header>
+
+        <div className="dex-scroll min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2.5">
+          <AnimatePresence initial={false} mode="popLayout">
+            {active ? (
+              <ActiveDeviceCard key={`active-${active.key}`} group={active} />
+            ) : (
+              <NoDeviceCard key="none" paused={Boolean(session?.autoConnectPaused)} onConnect={() => openConnectDialog(session?.autoConnectPaused ? 'disconnected' : 'add')} />
+            )}
+          </AnimatePresence>
+
+          <DeviceSection className="mt-3" title={t('devices.section_nearby')} groups={nearby} />
+          <DeviceSection className="mt-3" title={t('taskbar.kayitli_cihazlar')} groups={saved} />
+
+          <button
+            type="button"
+            onClick={() => openConnectDialog('add')}
+            className="mt-3 flex h-9 w-full cursor-pointer items-center justify-center gap-1.5 rounded-[10px] border border-dashed border-border/80 text-[11px] font-semibold text-muted-foreground outline-none transition-colors duration-150 hover:border-foreground/25 hover:bg-foreground/[0.03] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Plus className="size-3.5" /> {t('devices.add_new_device')}
+          </button>
+        </div>
+      </motion.section>
+    </DeviceInteractionProvider>
+  );
+});
+
+const NoDeviceCard = forwardRef(function NoDeviceCard({ paused, onConnect }, ref) {
+  return (
+    <motion.section
+      ref={ref}
+      initial={{ opacity: 0, scale: 0.98 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.98 }}
+      transition={{ duration: 0.18 }}
+      className="flex flex-col items-center gap-2.5 rounded-[14px] border border-dashed border-border/70 bg-muted/30 px-4 py-5 text-center"
+    >
+      <span className="grid size-11 place-items-center rounded-full bg-background text-muted-foreground ring-1 ring-border/70">
+        {paused ? <Unplug className="size-5" strokeWidth={1.8} /> : <WifiOff className="size-5" strokeWidth={1.8} />}
+      </span>
+      <span className="text-[12px] font-semibold text-foreground">{t('common.cihaz_bagli_degil')}</span>
+      <p className="max-w-[250px] text-[10.5px] leading-relaxed text-muted-foreground">
+        {paused ? t('devices.paused_body') : t('taskbar.telefonu_usb_ile_takin_veya_kablosuz')}
+      </p>
+      <Button size="sm" onClick={onConnect} startIcon={<Plus className="size-3.5" />} className="mt-0.5 rounded-[9px]">
+        {t('devices.connect_device')}
+      </Button>
+    </motion.section>
+  );
+});
+
+const ActiveDeviceCard = forwardRef(function ActiveDeviceCard({ group }, ref) {
+  const reduce = useReducedMotion();
+  const ui = useDeviceInteractions();
+  const busy = useDeviceHubStore((s) => s.busy);
+  const note = useDeviceHubStore((s) => s.notes[group.key]);
+  const port = useDeviceHubStore((s) => s.port);
+  const setPort = useDeviceHubStore((s) => s.setPort);
+  const switchLink = useDeviceHubStore((s) => s.switchLink);
+  const batteryInfo = useSystemStore((s) => s.batteryInfo);
+  const thermalLevel = useSystemStore((s) => s.thermalLevel);
+
+  // Canlı ölçümler yalnız bu panel açıkken ve cihaz gerçekten bağlıyken sorgulanır (media/telemetry.js).
+  const connected = group.status === 'connected' || group.status === 'weak';
   useEffect(() => (connected ? startTelemetry() : undefined), [connected]);
   const telemetry = useTelemetry();
   const live = connected ? telemetry : null;
   const streams = streamSummary(live);
   const cpuGroups = appsByLocus(live);
   const systemCpu = systemCpuResidual(live);
-  // Temperature: the battery's reading (daemon push) and Android's thermal status (the `thermal_throttle` event).
-  const thermalLevel = useSystemStore((s) => s.thermalLevel);
-  // Known devices already visible in the live /api/devices list don't need
-  // their own "remembered" row — they're already shown above as active/other.
-  const visibleSerials = new Set(devices.map((d) => d.serial));
-  const offlineKnown = knownDevices.filter((d) => {
-    const guessedSerial = d.last_transport === 'wireless' && d.last_known_ip
-      ? `${d.last_known_ip}:${d.last_known_port || ''}`
-      : null;
-    return !visibleSerials.has(guessedSerial);
-  });
+  const battery = connected ? batteryInfo?.level ?? null : null;
+  const temperature = connected ? batteryTemperatureC(batteryInfo) : null;
+
+  const status = statusLine(group);
+  const choices = linkChoices(group);
+  const working = busy?.key === group.key ? busy.action : null;
+  // The link being switched to: this panel's own action, or one the backend reports under way (started elsewhere).
+  const pendingLink = working === 'switch-usb' ? LINK_USB : working === 'switch-wifi' ? LINK_WIFI
+    : group.status === 'switching' ? (choices.current === LINK_USB ? LINK_WIFI : LINK_USB) : null;
+  const switching = group.status === 'switching' || group.status === 'binding' || Boolean(pendingLink);
+  const handlers = ui.menuHandlers(group);
+  const onUsb = choices.current === LINK_USB;
+
+  let footnote;
+  if (switching) footnote = pendingLink === LINK_USB || (!pendingLink && !onUsb) ? t('devices.foot_switching_usb') : t('devices.foot_switching_wifi');
+  else if (group.status === 'reconnecting') footnote = t('devices.foot_reconnecting');
+  else if (onUsb) footnote = group.wifiLink?.state === 'device' ? t('devices.foot_usb_wifi_ready') : t('devices.foot_usb');
+  else if (suggestsUsb(group)) footnote = t('devices.foot_wifi_usb_ready');
+  else footnote = t('devices.foot_wifi');
 
   return (
-    <>
-      <motion.section
-        ref={ref} {...motionProps}
-        transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
-        aria-label={t('taskbar.cihaz_merkezi')}
-        data-taskbar-portal="true"
-        style={{ zIndex: Z_INDEX.flyout }}
-        className="absolute bottom-[calc(100%+16px)] right-4 z-flyout flex h-[min(520px,calc(100vh-82px))] w-[min(340px,calc(100vw-32px))] flex-col overflow-hidden rounded-2xl border border-taskbar-border bg-popover text-popover-foreground shadow-2xl sm:right-24 sm:bg-popover/95 sm:backdrop-blur-xl"
+    <motion.section
+      ref={ref}
+      layout={!reduce}
+      initial={{ opacity: 0, scale: 0.98 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.98 }}
+      transition={{ duration: 0.2, ease: EASE }}
+      aria-label={t('devices.active_device', { name: group.name })}
+      className="relative overflow-hidden rounded-[14px] border border-border/70 bg-muted/35 p-3"
+    >
+      <ProgressStrip active={switching || group.status === 'reconnecting'} className="absolute inset-x-0 top-0 rounded-none" />
+
+      <div
+        tabIndex={0}
+        role="group"
+        aria-label={`${group.name} — ${status.text}`}
+        onContextMenu={handlers.onContextMenu}
+        onKeyDown={handlers.onKeyDown}
+        className="-m-1 flex items-start gap-2.5 rounded-[10px] p-1 outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
       >
-        <header className="flex shrink-0 items-center justify-between gap-2 border-b border-border/70 px-3 py-2.5">
-          <span className="min-w-0">
-            <h2 className="truncate text-[12px] font-semibold">{t('taskbar.cihaz_merkezi_2')}</h2>
-            <p className="truncate text-[9px] text-muted-foreground">{t('taskbar.scrcpy_4_1_adb_koprusu')}</p>
+        <DeviceGlyph group={group} size="lg" />
+        <span className="min-w-0 flex-1 pt-0.5">
+          <DeviceName group={group} className="block text-[13px] leading-5" fieldClassName="mb-0.5 text-[12.5px]" />
+          <span className={cn('block truncate text-[10.5px] font-medium', TONE_TEXT[status.tone])}>
+            {working ? BUSY_TEXT[working]?.() || status.text : status.text}
           </span>
-          <button
-            type="button"
-            onClick={rescan}
-            aria-label={t('taskbar.cihazlari_yeniden_tara')}
-            data-tooltip={t('taskbar.yeniden_tara')}
-            data-tooltip-align="end"
-            className="size-7 shrink-0 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
-          >
-            <RotateCw className={cn('size-3.5', scanning && 'animate-spin')} />
-          </button>
-        </header>
+          <span className="mt-0.5 block truncate font-mono text-[9.5px] text-muted-foreground">{group.activeLink?.serial}</span>
+        </span>
+        <MoreButton group={group} />
+      </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden dex-scroll p-3 space-y-2.5">
-          {noActiveDevice ? (
-            <section className="flex flex-col items-center gap-3 rounded-md border border-dashed border-border/70 bg-muted/30 px-4 py-6 text-center">
-              <span className="grid size-11 place-items-center rounded-full bg-background text-muted-foreground ring-1 ring-border/70">
-                <WifiOff className="size-5" strokeWidth={1.8} />
-              </span>
-              <span className="text-[11.5px] font-semibold text-foreground">{t('common.cihaz_bagli_degil')}</span>
-              <p className="max-w-[220px] text-[10px] leading-relaxed text-muted-foreground">
-                {t('taskbar.telefonu_usb_ile_takin_veya_kablosuz')}
-              </p>
-              <button
-                type="button"
-                onClick={openPairing}
-                className="mt-1 flex h-9 items-center gap-1.5 rounded-md bg-primary px-3.5 text-[11px] font-semibold text-primary-foreground transition-colors hover:bg-primary/90 cursor-pointer"
-              >
-                <Plus className="size-3.5" /> {' '}{t('taskbar.cihaz_eslestir')}
-              </button>
-            </section>
-          ) : (
-            <section
-              className={cn(
-                'rounded-md border p-2.5 transition-colors',
-                active.status === 'offline' ? 'border-border/70 bg-muted/40' : 'border-primary/50 bg-primary/[0.07]'
-              )}
-            >
-              <div className="flex items-start gap-2.5">
-                <span
-                  className={cn(
-                    'grid size-9 shrink-0 place-items-center rounded-[10px] bg-background text-foreground shadow-sm ring-1 ring-border/70',
-                    active.status === 'connected' && 'text-primary'
-                  )}
-                >
-                  {active.tablet ? <Tablet className="size-4.5" strokeWidth={1.9} /> : <Smartphone className="size-4.5" strokeWidth={1.9} />}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-1.5">
-                    <span className="min-w-0 flex-1 truncate text-[11px] font-semibold">{active.model}</span>
-                    <span
-                      className={cn(
-                        'flex shrink-0 items-center gap-1 rounded-full px-1.5 py-[1px] text-[8px] font-semibold uppercase tracking-wide',
-                        wireless ? 'bg-status-active/15 text-status-active' : 'bg-primary/15 text-primary'
-                      )}
-                    >
-                      <LinkIconFor link={active.link} className="size-2.5" />
-                      {wireless ? 'Wi-Fi' : 'USB'}
-                    </span>
-                  </span>
-                  <span className="mt-0.5 block truncate font-mono text-[9px] text-muted-foreground">
-                    {active.serial}
-                  </span>
-                  <span className="mt-1 flex items-center gap-1.5 text-[9px] font-medium">
-                    <span
-                      className={cn(
-                        'size-1.5 rounded-full',
-                        active.status === 'connected'
-                          ? 'bg-status-active animate-pulse'
-                          : active.status === 'connecting'
-                          ? 'bg-window-minimize'
-                          : 'bg-muted-foreground'
-                      )}
-                    />
-                    <span className={active.status === 'connected' ? 'text-status-active' : 'text-muted-foreground'}>
-                      {t('taskbar.aktif_hat_value', { value: STATUS_LABEL[active.status] || active.status })}
-                    </span>
-                  </span>
-                </span>
-              </div>
+      <LinkSwitcher
+        className="mt-3"
+        choices={choices}
+        pending={pendingLink}
+        onPick={(link) => switchLink(group, link)}
+      />
+      <div className="mt-1.5 flex min-h-5 items-center gap-1.5 px-0.5">
+        <p className={cn('min-w-0 flex-1 text-[10px] leading-snug', suggestsUsb(group) && !switching ? 'text-foreground' : 'text-muted-foreground')}>
+          {footnote}
+        </p>
+        {onUsb && !switching && group.wifiLink?.state !== 'device' && <PortChip port={port} onChange={setPort} />}
+      </div>
+      <InlineNote note={note} />
 
-              <div className="mt-2.5 grid grid-cols-3 gap-1.5">
-                <Metric
-                  icon={Zap}
-                  label={t('taskbar.adb_gecikmesi')}
-                  value={live?.device?.adb_rtt_ms != null ? `${live.device.adb_rtt_ms} ms` : '—'}
-                  title={t('taskbar.bilgisayar_telefon_adb_hattinin_gidis')}
-                />
-                <Metric
-                  icon={Cpu}
-                  label={t('taskbar.telefon_cpu')}
-                  value={formatPercent(live?.device?.cpu_pct)}
-                  title={t('taskbar.telefonun_tum_cekirdeklerinin_toplam', { value: live?.device?.cores ? t('taskbar.cores_cekirdek', { cores: live.device.cores }) : '' })}
-                />
-                <Metric icon={BatteryMedium} label={t('common.pil')} value={active.battery != null ? `${active.battery}%` : '—'} />
-                <Metric
-                  icon={Gauge}
-                  label={t('taskbar.kare_hizi')}
-                  value={streams ? `${streams.fps} fps` : '—'}
-                  title={t('taskbar.pencere_akislarinin_en_yuksek_kare')}
-                />
-                <Metric
-                  icon={Activity}
-                  label={t('taskbar.bant_genisligi')}
-                  value={streams ? `${streams.mbps} Mbps` : '—'}
-                  title={t('taskbar.tum_pencere_akislarinin_toplam_video')}
-                />
-                <Metric
-                  icon={Thermometer}
-                  label={t('common.sicaklik')}
-                  value={formatTemperature(connected ? active.temperatureC : null)}
-                  tone={thermalTone(thermalLevel)}
-                  title={t('taskbar.pil_sicakligi_android_isil_durumu', { value: THERMAL_LABEL[thermalLevel] || thermalLevel })}
-                />
-              </div>
+      <div className="mt-2.5 grid grid-cols-3 gap-1.5">
+        {[
+          [Zap, t('taskbar.adb_gecikmesi'), live?.device?.adb_rtt_ms != null ? `${live.device.adb_rtt_ms} ms` : '—', t('taskbar.bilgisayar_telefon_adb_hattinin_gidis')],
+          [Cpu, t('taskbar.telefon_cpu'), formatPercent(live?.device?.cpu_pct),
+            t('taskbar.telefonun_tum_cekirdeklerinin_toplam', { value: live?.device?.cores ? t('taskbar.cores_cekirdek', { cores: live.device.cores }) : '' })],
+          [BatteryMedium, t('common.pil'), battery != null ? `${battery}%` : '—'],
+          [Gauge, t('taskbar.kare_hizi'), streams ? `${streams.fps} fps` : '—', t('taskbar.pencere_akislarinin_en_yuksek_kare')],
+          [Activity, t('taskbar.bant_genisligi'), streams ? `${streams.mbps} Mbps` : '—', t('taskbar.tum_pencere_akislarinin_toplam_video')],
+          [Thermometer, t('common.sicaklik'), formatTemperature(temperature),
+            t('taskbar.pil_sicakligi_android_isil_durumu', { value: THERMAL_LABEL[thermalLevel] || thermalLevel }), thermalTone(thermalLevel)],
+        ].map(([icon, label, value, title, tone]) => <Metric key={label} icon={icon} label={label} value={value} title={title} tone={tone} />)}
+      </div>
 
-              {(cpuGroups.length > 0 || (systemCpu != null && systemCpu > 0)) && (
-                <div className="mt-2.5" aria-label={t('taskbar.uygulama_cpu_kullanimi')}>
-                  <div className="mb-1 flex items-center justify-between px-0.5">
-                    <p className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">{t('taskbar.islemci_dagilimi')}</p>
-                    {live?.device?.cpu_pct != null && (
-                      <span className="font-mono text-[9px] font-semibold text-muted-foreground/90">
-                        {t('taskbar.toplam_formatpercent', { formatPercent: formatPercent(live.device.cpu_pct) })}
-                      </span>
-                    )}
-                  </div>
-                  {cpuGroups.map((group) => (
-                    <div key={group.locus} className="mb-1.5 last:mb-0">
-                      <p className="mb-0.5 px-0.5 text-[8px] font-semibold uppercase tracking-wide text-muted-foreground/80">
-                        {LOCUS_LABEL[group.locus] || group.locus}
-                      </p>
-                      {group.apps.map((app) => (
-                        <AppCpuRow key={app.package} app={app} cores={live?.device?.cores} />
-                      ))}
-                    </div>
-                  ))}
-                  {systemCpu != null && systemCpu > 0 && (
-                    <div className="mt-1.5 border-t border-border/40 pt-1.5">
-                      <div
-                        className="flex items-center justify-between gap-2 px-1 py-0.5 text-[10px]"
-                        title={t('taskbar.surfaceflinger_ekran_birlestirici_ses')}
-                      >
-                        <span className="truncate text-muted-foreground font-medium">
-                          {t('taskbar.sistem_ekran_yansitma')}
-                        </span>
-                        <span className="flex shrink-0 items-center gap-1.5 font-mono text-[9.5px]">
-                          {live?.device?.cores && (
-                            <span className="text-[8.5px] text-muted-foreground/75 font-sans">
-                              {formatCores(systemCpu, live.device.cores)}
-                            </span>
-                          )}
-                          <span className="w-11 text-right font-semibold text-muted-foreground">
-                            {formatPercent(systemCpu)}
-                          </span>
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                  <p className="mt-1 px-0.5 text-[8px] leading-snug text-muted-foreground">
-                    {t('taskbar.pay_telefonun_tum_cekirdeklerinin')}
-                  </p>
-                </div>
-              )}
+      {(cpuGroups.length > 0 || (systemCpu != null && systemCpu > 0)) && (
+        <CpuBreakdown cpuGroups={cpuGroups} systemCpu={systemCpu} device={live?.device} />
+      )}
 
-              <div className="mt-2.5 flex gap-1.5">
-                <button
-                  type="button"
-                  disabled={active.status !== 'connected'}
-                  onClick={() => switchLink(active.id, wireless ? 'usb' : 'wifi')}
-                  className="h-9 flex-1 flex items-center justify-center gap-1.5 rounded-[6px] border border-primary/45 bg-primary/10 px-2 text-[10px] font-semibold text-primary hover:bg-primary/20 disabled:opacity-45 transition-colors cursor-pointer"
-                >
-                  {wireless ? <Usb className="size-3.5" /> : <Wifi className="size-3.5" />}
-                  <span className="truncate">{wireless ? t('taskbar.usb_hattina_don') : t('taskbar.kablosuz_hatta_gec_port', { port })}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => (active.status === 'available' ? connect(active.id) : disconnect(active.id))}
-                  aria-label={active.status === 'available' ? t('taskbar.etkinlestir') : t('taskbar.baglantiyi_kes')}
-                  data-tooltip={active.status === 'available' ? t('taskbar.etkinlestir') : t('taskbar.baglantiyi_kes')}
-                  className="size-9 shrink-0 flex items-center justify-center rounded-[6px] border border-border/70 bg-background p-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors cursor-pointer"
-                >
-                  {active.status === 'available' ? <Unplug className="size-3.5" /> : <Link2Off className="size-3.5" />}
-                </button>
-              </div>
-            </section>
-          )}
-
-          {others.length > 0 && (
-            <>
-              <p className="mb-1.5 mt-3 px-0.5 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">{t('taskbar.diger_cihazlar')}</p>
-              <div className="flex flex-col gap-1.5">
-                {others.map((device) => (
-                  <button
-                    key={device.id}
-                    type="button"
-                    onClick={() => activate(device.id)}
-                    className="flex items-center gap-2.5 rounded-[6px] border border-border/70 bg-background px-2.5 py-2 text-left transition-colors hover:bg-accent/55 cursor-pointer"
-                  >
-                    <span className="grid size-7 shrink-0 place-items-center rounded-[8px] bg-muted text-muted-foreground">
-                      {device.tablet ? <Tablet className="size-3.5" /> : <Smartphone className="size-3.5" />}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[11px] font-medium">{device.model}</span>
-                      <span className="flex items-center gap-1 font-mono text-[9px] text-muted-foreground">
-                        <LinkIconFor link={device.link} className="size-2.5 shrink-0" />
-                        <span className="min-w-0 flex-1 truncate">{device.serial}</span>
-                      </span>
-                    </span>
-                    <span
-                      className={cn(
-                        'shrink-0 rounded-full px-1.5 py-[2px] text-[8px] font-semibold',
-                        device.status === 'connected'
-                          ? 'bg-status-active/15 text-status-active'
-                          : device.status === 'connecting'
-                          ? 'bg-window-minimize/20 text-foreground'
-                          : device.status === 'unauthorized'
-                          ? 'bg-destructive/12 text-destructive'
-                          : 'bg-muted text-muted-foreground'
-                      )}
-                    >
-                      {device.status === 'connecting' ? <Loader2 className="size-3 animate-spin" /> : STATUS_LABEL[device.status] || device.status}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-
-          {offlineKnown.length > 0 && (
-            <>
-              <p className="mb-1.5 mt-3 px-0.5 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">{t('taskbar.kayitli_cihazlar')}</p>
-              <div className="flex flex-col gap-1.5">
-                {offlineKnown.map((device) => (
-                  <div
-                    key={device.android_id}
-                    className="flex items-center gap-2.5 rounded-[6px] border border-border/70 bg-background px-2.5 py-2"
-                  >
-                    <span
-                      className={cn(
-                        'grid size-7 shrink-0 place-items-center rounded-[8px]',
-                        device.discovered ? 'bg-status-active/15 text-status-active' : 'bg-muted text-muted-foreground'
-                      )}
-                    >
-                      <Smartphone className="size-3.5" />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[11px] font-medium">{device.model || t('common.android_cihazi')}</span>
-                      <span className="flex items-center gap-1 font-mono text-[9px] text-muted-foreground">
-                        <LinkIconFor link={device.last_transport === 'wireless' ? 'wifi' : 'usb'} className="size-2.5 shrink-0" />
-                        <span className="min-w-0 flex-1 truncate">
-                          {device.discovered
-                            ? t('taskbar.agda_bulundu')
-                            : device.last_transport === 'usb'
-                            ? t('taskbar.usb_ile_baglanir')
-                            : device.last_known_ip
-                            ? `Son IP: ${device.last_known_ip}`
-                            : t('taskbar.ip_bilinmiyor')}
-                        </span>
-                      </span>
-                    </span>
-                    {device.last_transport !== 'usb' && (
-                      <button
-                        type="button"
-                        onClick={() => connectKnown(device.android_id)}
-                        className={cn(
-                          'shrink-0 rounded-full px-2 py-1 text-[9px] font-semibold transition-colors cursor-pointer',
-                          device.discovered
-                            ? 'bg-status-active/15 text-status-active hover:bg-status-active/25'
-                            : 'bg-muted text-muted-foreground hover:bg-accent hover:text-foreground'
-                        )}
-                      >
-                        {device.discovered ? t('common.baglan') : t('taskbar.yeniden_dene')}
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => forgetKnown(device.android_id)}
-                      aria-label={t('taskbar.kayitli_listeden_kaldir')}
-                      data-tooltip={t('taskbar.unut')}
-                      className="size-6 shrink-0 flex items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors cursor-pointer"
-                    >
-                      <X className="size-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-
-          <div className="mt-3 flex items-center gap-1.5 rounded-[6px] border border-border/70 bg-muted/40 px-2.5 py-2">
-            <label htmlFor="adb-port" className="shrink-0 text-[10px] font-medium text-muted-foreground">
-              {t('taskbar.tcp_ip_portu')}
-            </label>
-            <input
-              id="adb-port"
-              inputMode="numeric"
-              value={port}
-              onChange={(e) => setPort(e.target.value.replace(/\D/g, '').slice(0, 5))}
-              className="h-7 w-16 rounded-[5px] border border-border bg-background px-2 text-center font-mono text-[10px] tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            />
-            <button
-              type="button"
-              onClick={openPairing}
-              className="ml-auto flex items-center gap-1 h-7 px-2 rounded-md text-[10px] font-semibold hover:bg-accent text-foreground transition-colors cursor-pointer"
-            >
-              <Plus className="size-3" /> {' '}{t('taskbar.cihaz_eslestir')}
-            </button>
-          </div>
-        </div>
-
-        <AnimatePresence>
-          {toast && (
-            <motion.p
-              key={toast}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 6 }}
-              className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-center gap-1.5 border-t border-border/70 bg-muted/90 px-3 py-2 text-[10px] font-medium backdrop-blur-md text-status-active"
-            >
-              <Check className="size-3 shrink-0 text-status-active" strokeWidth={2.6} />
-              <span className="truncate">{toast}</span>
-            </motion.p>
-          )}
-        </AnimatePresence>
-      </motion.section>
-
-      <AnimatePresence>
-        {pairingOpen && <QrPairing onClose={closePairing} />}
-      </AnimatePresence>
-    </>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={Boolean(busy) && working !== 'disconnect'}
+        loading={working === 'disconnect'}
+        startIcon={<Unplug className="size-3.5" />}
+        onClick={() => ui.perform('disconnect', group)}
+        className="mt-3 w-full rounded-[9px] border-border/70 bg-background/70 text-foreground shadow-none transition-[background-color,color,border-color,transform] hover:border-destructive/40 hover:bg-destructive/[0.07] hover:text-destructive active:scale-[0.99]"
+      >
+        {t('taskbar.baglantiyi_kes')}
+      </Button>
+      <GroupConfirm group={group} />
+    </motion.section>
   );
 });
+
+const CPU_OPEN_KEY = 'opendex.deviceCenter.cpuOpen';
+
+function readCpuOpen() {
+  try {
+    return window.localStorage.getItem(CPU_OPEN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+/** Uygulama başına işlemci payı — katlanabilir (varsayılan kapalı; kullanıcının seçimi bu cihazda hatırlanır): cihaz yönetimi
+ *  panelin asıl işi, ayrıntılı yük dökümü isteyene açılır. */
+function CpuBreakdown({ cpuGroups, systemCpu, device }) {
+  const reduce = useReducedMotion();
+  const [open, setOpen] = useState(readCpuOpen);
+  const toggle = () => {
+    setOpen((value) => {
+      try {
+        window.localStorage.setItem(CPU_OPEN_KEY, value ? '0' : '1');
+      } catch {
+        /* depolama yoksa yalnız bu oturum */
+      }
+      return !value;
+    });
+  };
+  return (
+    <div className="mt-2.5">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={toggle}
+        className="flex w-full cursor-pointer items-center gap-1.5 rounded-[7px] px-1 py-1 text-left outline-none transition-colors hover:bg-foreground/[0.04] focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <ChevronRight className={cn('size-3 shrink-0 text-muted-foreground transition-transform duration-200', open && 'rotate-90')} />
+        <span className="flex-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">{t('taskbar.islemci_dagilimi')}</span>
+        {device?.cpu_pct != null && (
+          <span className="font-mono text-[9px] font-semibold text-muted-foreground/90">
+            {t('taskbar.toplam_formatpercent', { formatPercent: formatPercent(device.cpu_pct) })}
+          </span>
+        )}
+      </button>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            key="cpu"
+            aria-label={t('taskbar.uygulama_cpu_kullanimi')}
+            initial={reduce ? { opacity: 0 } : { opacity: 0, height: 0 }}
+            animate={reduce ? { opacity: 1 } : { opacity: 1, height: 'auto' }}
+            exit={reduce ? { opacity: 0 } : { opacity: 0, height: 0 }}
+            transition={{ duration: 0.2, ease: EASE }}
+            className="overflow-hidden"
+          >
+            <div className="pt-1">
+              {cpuGroups.map((cpuGroup) => (
+                <div key={cpuGroup.locus} className="mb-1.5 last:mb-0">
+                  <p className="mb-0.5 px-0.5 text-[8px] font-semibold uppercase tracking-wide text-muted-foreground/80">
+                    {LOCUS_LABEL[cpuGroup.locus] || cpuGroup.locus}
+                  </p>
+                  {cpuGroup.apps.map((app) => (
+                    <AppCpuRow key={app.package} app={app} cores={device?.cores} />
+                  ))}
+                </div>
+              ))}
+              {systemCpu != null && systemCpu > 0 && (
+                <div className="mt-1.5 border-t border-border/40 pt-1.5">
+                  <div
+                    className="flex items-center justify-between gap-2 px-1 py-0.5 text-[10px]"
+                    title={t('taskbar.surfaceflinger_ekran_birlestirici_ses')}
+                  >
+                    <span className="truncate font-medium text-muted-foreground">
+                      {t('taskbar.sistem_ekran_yansitma')}
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1.5 font-mono text-[9.5px]">
+                      {device?.cores && (
+                        <span className="font-sans text-[8.5px] text-muted-foreground/75">
+                          {formatCores(systemCpu, device.cores)}
+                        </span>
+                      )}
+                      <span className="w-11 text-right font-semibold text-muted-foreground">
+                        {formatPercent(systemCpu)}
+                      </span>
+                    </span>
+                  </div>
+                </div>
+              )}
+              <p className="mt-1 px-0.5 text-[8px] leading-snug text-muted-foreground">
+                {t('taskbar.pay_telefonun_tum_cekirdeklerinin')}
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
 
 function AppCpuRow({ app, cores }) {
   const pct = app.cpu_pct;
@@ -493,7 +445,7 @@ function AppCpuRow({ app, cores }) {
 
 function Metric({ icon: Icon, label, value, title, tone }) {
   return (
-    <span title={title} className="flex flex-col items-center gap-0.5 rounded-[6px] bg-background/85 px-1 py-1.5 ring-1 ring-border/60">
+    <span title={title} className="flex flex-col items-center gap-0.5 rounded-[9px] bg-background/85 px-1 py-1.5 ring-1 ring-border/55">
       <Icon className={cn('size-3', tone || 'text-muted-foreground')} />
       <span className={cn('font-mono text-[10px] font-semibold tabular-nums', tone || 'text-foreground')}>{value}</span>
       <span className="text-[8px] text-muted-foreground">{label}</span>

@@ -62,6 +62,11 @@ async function installMockBackend(page, { fixtures = build(), onUnhandled = () =
     'GET /telemetry': () => state.fx.telemetry,
     'GET /telemetry/load': () => state.fx.load,
     'POST /pairing/qr': () => state.fx.qr,
+    'POST /pairing/manual': () => state.fx.devices[0],
+    'POST /pairing/pair-code': () => ({ ok: true }),
+    'POST /device/bind': (_q, body) => ({ ok: true, serial: body?.serial }),
+    'POST /device/disconnect': () => ({ ok: true }),
+    'POST /device/tcpip': (q) => ({ ok: true, ip: '192.0.2.45', port: Number(q.get('port') || 5555), serial: `192.0.2.45:${q.get('port') || 5555}` }),
     'GET /pairing/detected-ip': () => ({ ip: '192.0.2.45' }),
     'POST /diagnostics/client-log': () => ({ ok: true }),
     'POST /audio/clock': () => ({ clock_us: Math.round(performance.now() * 1000) }),
@@ -73,6 +78,20 @@ async function installMockBackend(page, { fixtures = build(), onUnhandled = () =
   };
   // Per-app audio routes: PUT /audio/apps/<package>/route and friends all answer with the app's (changed) state.
   const dynamic = [
+    // Saved devices: rename / forget / reconnect (the Device Center and the connect dialog).
+    [/^(PATCH|DELETE) \/devices\/known\/([^/]+)$/, (m, _q, body) => {
+      const id = decodeURIComponent(m[2]);
+      const known = state.fx.known_devices.find((d) => d.android_id === id);
+      if (m[1] === 'DELETE') {
+        state.fx.known_devices = state.fx.known_devices.filter((d) => d.android_id !== id);
+        return { ok: true, android_id: id };
+      }
+      if (known) known.alias = (body?.alias || '').trim() || null;
+      return known;
+    }],
+    [/^POST \/devices\/known\/([^/]+)\/connect$/, () => state.fx.devices[0]],
+    // Title bar "reload page" button: the sample apps are not web pages.
+    [/^GET \/windows\/([^/]+)\/web-reload$/, (m) => ({ window_id: decodeURIComponent(m[1]), available: false })],
     [/^PUT \/audio\/apps\/([^/]+)/, (m, _q, body) => {
       const app = state.fx.audio_apps.apps.find((a) => a.package === decodeURIComponent(m[1]));
       if (app && body?.route) { app.route = body.route; app.live_route = body.route; }

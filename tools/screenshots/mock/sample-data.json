@@ -343,7 +343,8 @@
       "model": "Example Phone",
       "transport": "usb",
       "is_active": true,
-      "transport_id": 1
+      "transport_id": 1,
+      "android_id": "0123456789abcdef"
     }
   ],
   "devices_state": {
@@ -354,21 +355,39 @@
         "model": "Example Phone",
         "transport": "usb",
         "is_active": true,
-        "transport_id": 1
+        "transport_id": 1,
+        "android_id": "0123456789abcdef"
       }
     ],
     "active_serial": "EXAMPLE0001",
+    "active_android_id": "0123456789abcdef",
     "session": "ready",
+    "auto_connect_paused": false,
+    "switching": false,
     "seq": 1
   },
   "known_devices": [
     {
       "android_id": "0123456789abcdef",
       "model": "Example Phone",
+      "alias": null,
       "last_seen_at": 1790000000.0,
       "last_transport": "usb",
       "last_known_ip": null,
       "last_known_port": null,
+      "wireless_debugging_paired": false,
+      "discovered": false,
+      "discovered_ip": null,
+      "discovered_port": null
+    },
+    {
+      "android_id": "fedcba9876543210",
+      "model": "Example Tablet",
+      "alias": null,
+      "last_seen_at": 1789740800.0,
+      "last_transport": "wireless",
+      "last_known_ip": "192.0.2.77",
+      "last_known_port": 5555,
       "wireless_debugging_paired": false,
       "discovered": false,
       "discovered_ip": null,
@@ -94597,7 +94616,10 @@
   "no_device": {
     "devices": [],
     "active_serial": null,
+    "active_android_id": null,
     "session": null,
+    "auto_connect_paused": false,
+    "switching": false,
     "seq": 1
   },
   "qr": {

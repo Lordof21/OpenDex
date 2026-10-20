@@ -97,9 +97,13 @@ stateDiagram-v2
   bound --> lost: link drops
   lost --> bound: reconnected (windows keep their last frame)
   bound --> binding: transport switch (USB ⇄ Wi-Fi)
+  bound --> paused: the user disconnects
+  paused --> binding: the user picks a phone (nothing binds by itself meanwhile)
 ```
 
-`GET /startup` and the boot screen read this state; `devices_changed` / `device_lost` / `device_reconnected` keep the UI in step
+A user's disconnect is a decision, not a drop: automatic binding pauses (`auto_connect_paused`) until they pick a phone in
+the Device Center or the connect dialog — a cable still plugged in does not bring the session back
+([design](design/DEVICE_MANAGER.md)). `GET /startup` and the boot screen read this state; `devices_changed` / `device_lost` / `device_reconnected` keep the UI in step
 ([API.md → events](API.md#event-types)). Short drops (a few seconds) do not close windows: they freeze on their last frame and resume.
 
 ## The backend, by package

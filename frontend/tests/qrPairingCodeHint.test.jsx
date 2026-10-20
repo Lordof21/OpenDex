@@ -20,9 +20,9 @@ vi.mock('qrcode', () => ({
 }));
 
 import { api } from '../src/lib/api.js';
-import QrPairing from '../src/wireless/QrPairing.jsx';
+import PairingMethods from '../src/wireless/QrPairing.jsx';
 
-describe('QrPairing QR-tab proactive code hint', () => {
+describe('PairingMethods QR-tab proactive code hint', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     api.post.mockImplementation((path) => {
@@ -42,7 +42,7 @@ describe('QrPairing QR-tab proactive code hint', () => {
   it('arms a 45s hint timer once the QR is displayed, and shows the hint when it fires', async () => {
     const setTimeoutSpy = vi.spyOn(window, 'setTimeout');
 
-    render(<QrPairing onClose={() => {}} />);
+    render(<PairingMethods />);
     // Kararlılık: yük altında (tam paket paralel koşarken) QR zinciri varsayılan 1 sn'yi aşabiliyordu ve zamanlayıcı
     // pasif etkide (görüntüden SONRA) kurulur — bu yüzden hem görüntü hem zamanlayıcı ayrı ve cömert zaman aşımıyla beklenir.
     await waitFor(() => expect(screen.getByAltText('OpenDeX Wireless Pairing QR')).toBeTruthy(), { timeout: 10_000 });

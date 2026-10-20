@@ -26,8 +26,8 @@ import { fetchAppList, STATIC_APPS } from '../desktop/appRegistry.js';
 import { cn } from '../lib/utils.js';
 
 import { DeviceCenter, DeviceTrayButton } from './DeviceCenter.jsx';
+import { useDeviceHubStore } from '../devices/deviceHubStore.js';
 import { DeviceLoadPanel, DeviceLoadTrayButton } from '../telemetry/DeviceLoadPanel.jsx';
-import { useDeviceHub } from './useDeviceHub.js';
 import { MediaWidget } from './MediaWidget.jsx';
 import { MediaCenter } from './media-center/MediaCenter.jsx';
 import { AppLauncher } from './AppLauncher.jsx';
@@ -81,7 +81,6 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
   const panelMotion = usePanelMotion();
   const [surface, setSurface] = useState(null);
   const [quickView, setQuickView] = useState('main');
-  const deviceHub = useDeviceHub();
   const [query, setQuery] = useState('');
   const [appsRegistry, setAppsRegistry] = useState([]);
 
@@ -370,6 +369,15 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
   useEffect(() => {
     if (surface !== 'appmenu' && appMenu) setAppMenu(null);
   }, [surface, appMenu]);
+
+  // "Cihaz bağla" penceresi açılınca (Cihaz Merkezi "+", bağlantı kesildi …) taskbar paneli arkasında bulanık kalmasın.
+  const connectDialogOpen = useDeviceHubStore((s) => s.dialog.open);
+  useEffect(() => {
+    if (connectDialogOpen) {
+      setSurface(null);
+      setLaunchpadOpen(false);
+    }
+  }, [connectDialogOpen, setLaunchpadOpen]);
 
   // DeX hızlı ayar paneli DexQuickPanelHost'ta yaşar (tam ekranda da açılabilsin diye); yine de aynı anda tek yüzey açık.
   useEffect(() => {
@@ -884,7 +892,6 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
             />
             <DeviceTrayButton
               className={PILL_HEIGHT}
-              hub={deviceHub}
               open={surface === 'devices'}
               onOpen={() => toggleSurface('devices')}
             />
@@ -1027,7 +1034,6 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
             <DeviceCenter
               key="devices"
               {...panelMotion}
-              hub={deviceHub}
             />
           )}
 

@@ -31,6 +31,13 @@ export function applyDeviceState(state) {
   const devices = Array.isArray(state?.devices) ? state.devices : [];
   const sys = useSystemStore.getState();
   sys.setDevices(devices);
+  sys.setDeviceSession({
+    phase: state?.session ?? null,
+    activeSerial: state?.active_serial ?? null,
+    activeAndroidId: state?.active_android_id ?? null,
+    autoConnectPaused: Boolean(state?.auto_connect_paused),
+    switching: Boolean(state?.switching),
+  });
   sys.setDeviceLabel(formatDeviceLabel(statusFromDevices(devices)));
 
   const next = connectionStateOf(state?.session);

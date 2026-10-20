@@ -23,6 +23,10 @@ class DeviceInfo(BaseModel):
     # adb's id of THIS connection (`adb devices -l`): a new one every time the link is (re)established, so it tells a
     # drop that was over before anyone polled (ConnectionSupervisor). None: an adb that does not print it.
     transport_id: int | None = None
+    # The phone behind this link (ANDROID_ID) — read once per link by DeviceManager, so the UI can show a phone's USB and
+    # Wi-Fi links as one device and match it to its saved record. None: not read yet, or the link cannot be asked
+    # (unauthorized / offline).
+    android_id: str | None = None
 
 
 class DeviceProfile(BaseModel):
@@ -63,6 +67,8 @@ class KnownDevice(BaseModel):
 
     android_id: str
     model: str | None = None
+    # The user's own name for the phone (two of the same model are otherwise indistinguishable). None: the model is shown.
+    alias: str | None = None
     last_seen_at: float
     last_transport: Literal["usb", "wireless"] = "usb"
     last_known_ip: str | None = None

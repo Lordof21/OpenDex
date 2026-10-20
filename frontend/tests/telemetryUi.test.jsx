@@ -52,6 +52,7 @@ const WIN = { id: 'w1', w: 1280, h: 720, deviceW: 1280, deviceH: 720 };
 
 beforeEach(() => {
   useSystemStore.setState({ thermalLevel: 'none', batteryInfo: null });
+  window.localStorage.removeItem('opendex.deviceCenter.cpuOpen');
   api.get.mockReset();
   api.get.mockImplementation((path) => Promise.resolve(path === '/api/telemetry' ? PAYLOAD : null));
 });
@@ -120,16 +121,21 @@ describe('LatencyHudOverlay', () => {
   });
 });
 
-const hub = (active) => ({
-  devices: [active], active, port: '5555', setPort: () => {}, scanning: false, toast: null, knownDevices: [],
-  pairingOpen: false, openPairing: () => {}, closePairing: () => {}, switchLink: () => {}, disconnect: () => {},
-  connect: () => {}, activate: () => {}, connectKnown: () => {}, forgetKnown: () => {}, rescan: () => {},
-});
-const ACTIVE = { id: 'S1', model: 'Pixel 8', serial: 'S1', link: 'usb', status: 'connected', battery: 80, tablet: false };
-
+// The Device Center reads the device state the backend pushes (systemStore) — the same path the app uses.
+const ACTIVE = { status: 'connected', temperatureC: null };
+const DEVICE = { serial: 'S1', state: 'device', model: 'Pixel_8', transport: 'usb', android_id: 'A1' };
+function center({ status = 'connected', temperatureC = null } = {}) {
+  const connected = status === 'connected';
+  useSystemStore.setState({
+    devices: status === 'disconnected' ? [] : [{ ...DEVICE, is_active: connected }],
+    deviceSession: { phase: connected ? 'ready' : null, activeSerial: connected ? 'S1' : null, activeAndroidId: connected ? 'A1' : null, autoConnectPaused: false, switching: false },
+    batteryInfo: { level: 80, temperature_c: temperatureC ?? 0 },
+  });
+  return <DeviceCenter />;
+}
 describe('DeviceCenter telemetry', () => {
   it('ADB gecikmesi, telefon CPU\'su, kare hızı ve bant genişliği gerçek ölçümlerle dolar', async () => {
-    render(<DeviceCenter hub={hub(ACTIVE)} />);
+    render(center(ACTIVE));
 
     expect(await screen.findByText('18.4 ms')).toBeInTheDocument();
     expect(screen.getByText('41.2 %')).toBeInTheDocument();
@@ -138,8 +144,9 @@ describe('DeviceCenter telemetry', () => {
   });
 
   it('uygulama CPU\'sunu konuma (DeX / Telefon) göre gruplar ve sistem artık payını gösterir', async () => {
-    render(<DeviceCenter hub={hub(ACTIVE)} />);
+    render(center(ACTIVE));
 
+    fireEvent.click(await screen.findByRole('button', { name: /İşlemci Dağılımı/i })); // folded by default
     const list = await screen.findByLabelText('Uygulama CPU kullanımı');
     expect(within(list).getByText('DeX')).toBeInTheDocument();
     expect(within(list).getByText('Telefon')).toBeInTheDocument();
@@ -150,8 +157,9 @@ describe('DeviceCenter telemetry', () => {
   });
 
   it('uygulama satırının ipucu yüzdeyi tam çekirdek karşılığıyla da söyler (8 çekirdekte %12.3 ≈ 1.0)', async () => {
-    render(<DeviceCenter hub={hub(ACTIVE)} />);
+    render(center(ACTIVE));
 
+    fireEvent.click(await screen.findByRole('button', { name: /İşlemci Dağılımı/i })); // folded by default
     const list = await screen.findByLabelText('Uygulama CPU kullanımı');
     const row = within(list).getByText('12.3 %').closest('[title]');
     expect(row).toHaveAttribute('title', expect.stringContaining('≈ 1.0 çekirdek'));
@@ -160,7 +168,7 @@ describe('DeviceCenter telemetry', () => {
 
   it('ölçüm gelene kadar "—" gösterir (sahte 0 yok)', () => {
     api.get.mockImplementation(() => new Promise(() => {})); // yanıt hiç gelmiyor
-    render(<DeviceCenter hub={hub(ACTIVE)} />);
+    render(center(ACTIVE));
 
     expect(screen.queryByText('0 fps')).not.toBeInTheDocument();
     expect(screen.queryByText('0 Mbps')).not.toBeInTheDocument();
@@ -168,13 +176,13 @@ describe('DeviceCenter telemetry', () => {
   });
 
   it('bağlı olmayan cihaz için telemetri sorgulanmaz', async () => {
-    render(<DeviceCenter hub={hub({ ...ACTIVE, status: 'available' })} />);
+    render(center({ ...ACTIVE, status: 'available' }));
     await act(async () => { await Promise.resolve(); });
     expect(api.get).not.toHaveBeenCalledWith('/api/telemetry');
   });
 
   it('aktif cihaz yokken (placeholder) paneli bozmaz', () => {
-    render(<DeviceCenter hub={hub({ id: 'none', model: 'Cihaz bağlı değil', serial: null, link: 'usb', status: 'disconnected' })} />);
+    render(center({ status: 'disconnected' }));
     expect(screen.getByText('Cihaz bağlı değil', { selector: 'span' })).toBeInTheDocument();
   });
 });
@@ -188,33 +196,33 @@ describe('Sıcaklık (taskbar)', () => {
   const metricOf = (label) => screen.getByText(label).parentElement; // the Metric cell holding the label
 
   it('Cihaz Merkezi pil sıcaklığını gösterir', () => {
-    render(<DeviceCenter hub={hub({ ...ACTIVE, temperatureC: 36.5 })} />);
+    render(center({ ...ACTIVE, temperatureC: 36.5 }));
     expect(within(metricOf('Sıcaklık')).getByText('36.5 °C')).toBeInTheDocument();
   });
 
   it('sıcaklık okunamıyorsa "—" gösterir, değer uydurmaz', () => {
-    render(<DeviceCenter hub={hub({ ...ACTIVE, temperatureC: null })} />);
+    render(center({ ...ACTIVE, temperatureC: null }));
     const metric = metricOf('Sıcaklık');
     expect(within(metric).getByText('—')).toBeInTheDocument();
     expect(screen.queryByText('32.4 °C')).not.toBeInTheDocument();
   });
 
   it('Android ısıl durumu yükselince değer uyarı/tehlike rengine geçer ve ipucunda durum yazar', () => {
-    const { rerender } = render(<DeviceCenter hub={hub({ ...ACTIVE, temperatureC: 44 })} />);
+    const { rerender } = render(center({ ...ACTIVE, temperatureC: 44 }));
     expect(within(metricOf('Sıcaklık')).getByText('44.0 °C')).not.toHaveClass('text-warning');
 
     act(() => useSystemStore.getState().setThermalLevel('moderate'));
-    rerender(<DeviceCenter hub={hub({ ...ACTIVE, temperatureC: 44 })} />);
+    rerender(center({ ...ACTIVE, temperatureC: 44 }));
     expect(within(metricOf('Sıcaklık')).getByText('44.0 °C')).toHaveClass('text-warning');
     expect(metricOf('Sıcaklık')).toHaveAttribute('title', expect.stringContaining('Orta ısınma'));
 
     act(() => useSystemStore.getState().setThermalLevel('critical'));
-    rerender(<DeviceCenter hub={hub({ ...ACTIVE, temperatureC: 44 })} />);
+    rerender(center({ ...ACTIVE, temperatureC: 44 }));
     expect(within(metricOf('Sıcaklık')).getByText('44.0 °C')).toHaveClass('text-destructive');
   });
 
   it('bağlı olmayan cihaz için sıcaklık gösterilmez', () => {
-    render(<DeviceCenter hub={hub({ ...ACTIVE, status: 'available', temperatureC: 36.5 })} />);
+    render(center({ ...ACTIVE, status: 'available', temperatureC: 36.5 }));
     expect(screen.queryByText('36.5 °C')).not.toBeInTheDocument();
   });
 

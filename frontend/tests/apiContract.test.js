@@ -23,7 +23,7 @@ function collectCalls() {
   for (const file of sourceFiles(join(ROOT, 'src'))) {
     const text = readFileSync(file, 'utf8');
     const rel = relative(ROOT, file);
-    for (const m of text.matchAll(/\bapi\.(get|post|put|delete)\(\s*[`'"]([^`'"]+)[`'"]/g)) {
+    for (const m of text.matchAll(/\bapi\.(get|post|put|patch|delete)\(\s*[`'"]([^`'"]+)[`'"]/g)) {
       calls.push({ key: `${m[1].toUpperCase()} ${normalize(m[2])}`, file: rel });
     }
     for (const m of text.matchAll(/\bfetch\(\s*`\$\{BASE\}(\/api\/[^`]+)`/g)) {

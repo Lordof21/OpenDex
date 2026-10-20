@@ -813,3 +813,39 @@
   .ov-flow-dot { opacity: 1; transform: translateX(160%); }
   .ov-sweep-bar { transform: translateX(80%); }
 }
+/* Cihaz yöneticisi: süresi bilinmeyen iş (hat değişimi, bağlanma) için ince, kesintisiz ilerleme şeridi. Hareket azaltma
+   açıksa şerit durur ve yarı saydam kalır — iş sürdüğü yine görünür. */
+@keyframes device-progress {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+.device-progress {
+  position: relative;
+  overflow: hidden;
+}
+.device-progress::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  border-radius: inherit;
+  background: currentColor;
+  animation: device-progress 1.15s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+}
+/* Bağlantı bekleyen USB kartının nabzı (ör. "Kabloyu takın"): sakin, 2.4 sn'de bir. */
+@keyframes device-await {
+  0% { transform: scale(0.85); opacity: 0.55; }
+  70%, 100% { transform: scale(1.6); opacity: 0; }
+}
+.device-await::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: currentColor;
+  animation: device-await 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .device-progress::after { animation: none; width: 100%; opacity: 0.45; }
+  .device-await::before { animation: none; opacity: 0; }
+}

@@ -24,10 +24,13 @@ export const useSystemStore = create((set, get) => ({
   deviceIdentity: null, // { android_id, transport }
   deviceLabel: null,
   deviceProfile: null,
-  // Single source of truth for the raw `/api/devices` list (Cihaz Geçiş Planı
-  // §8.5) — App.jsx's connection-status polling AND useDeviceHub both read
-  // this instead of each running their own independent fetch/cache.
+  // Single source of truth for the raw device list (pushed by `devices_changed`, wireless/deviceState.js) — the Device
+  // Center and the connect dialog derive physical devices from it (devices/useDevices.js); nothing keeps its own copy.
   devices: [],
+  // The backend's session as the device state reports it (GET /api/devices/state, `devices_changed`):
+  // phase null | 'binding' | 'ready' | 'lost' · autoConnectPaused: the user disconnected and nothing binds by itself until
+  // they pick a phone · switching: USB → Wi-Fi under way · activeAndroidId: the bound phone.
+  deviceSession: { phase: null, activeSerial: null, activeAndroidId: null, autoConnectPaused: false, switching: false },
   thermalLevel: 'none',
   toasts: [],
   settingsOpen: false,
@@ -67,6 +70,7 @@ export const useSystemStore = create((set, get) => ({
     set({ deviceProfile });
   },
   setDevices: (devices) => set({ devices: Array.isArray(devices) ? devices : [] }),
+  setDeviceSession: (deviceSession) => set({ deviceSession }),
 
   fetchDevices: async () => {
     try {

@@ -1,5 +1,5 @@
 // Tek modal kabuğu: karartma + kart + Esc (escapeStack: yalnız EN ÜSTTEKİ katman kapanır) + dış tıklamayla kapatma.
-// Desktop (2 modal), KeymapperOverlay, QrPairing ve NoticeDialog aynı kabuğu kullanır.
+// Desktop (2 modal), KeymapperOverlay, "Cihaz bağla" (devices/ConnectDialog) ve NoticeDialog aynı kabuğu kullanır.
 import React, { useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { cn } from '../lib/utils.js';
@@ -17,7 +17,7 @@ export function Dialog({
   align = 'center', // 'center' | 'top'
   className, // kart sınıfları (genişlik vb.)
   overlayClassName,
-  cardProps, // karta ek motion props (ör. QrPairing'in `layout` yükseklik animasyonu)
+  cardProps, // karta ek motion props (ör. "Cihaz bağla" penceresinin `layout` yükseklik animasyonu)
   children,
 }) {
   useEffect(() => {

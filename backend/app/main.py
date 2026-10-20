@@ -32,6 +32,7 @@ from .api.v1 import api_router
 from .api.websockets import ws_router
 from .apps.app_registry import AppRegistry
 from .config import Settings, get_settings
+from .lifecycle import register_server, watch_parent
 from .device import daemon_auth
 from .device.adb import Adb, AdbError
 from .device.capability_probe import CapabilityProbe
@@ -251,6 +252,10 @@ class AppContext:
         # True while switch_to_tcpip runs: adbd restarts and for a moment NO transport lists the phone — /api/devices
         # keeps reporting the bound device then, so the frontend doesn't take the blip for an unplug.
         self._transport_switching = False
+        # The user ended the session ("Bağlantıyı kes"): nothing binds a phone by itself (bootstrap, ensure_device) until the
+        # user picks one — otherwise the cable still plugged in (or the Wi-Fi link) brought the session straight back.
+        # Cleared by every explicit connect. In memory only: the next start of the app connects on its own again.
+        self._auto_connect_paused = False
 
     # -------------------------------------------------------------- device state (pushed to the UI)
 
@@ -273,6 +278,17 @@ class AppContext:
     def transport_switching(self, value: bool) -> None:
         if value != self._transport_switching:
             self._transport_switching = value
+            self._schedule_device_state()
+
+    @property
+    def auto_connect_paused(self) -> bool:
+        return self._auto_connect_paused
+
+    @auto_connect_paused.setter
+    def auto_connect_paused(self, value: bool) -> None:
+        if value != self._auto_connect_paused:
+            self._auto_connect_paused = value
+            log.info("[SESSION] otomatik bağlanma %s", "duraklatıldı (kullanıcı bağlantıyı kesti)" if value else "yeniden etkin")
             self._schedule_device_state()
 
     def with_active(self, devices: list[DeviceInfo]) -> list[DeviceInfo]:
@@ -302,7 +318,12 @@ class AppContext:
         return {
             "devices": [d.model_dump(mode="json") for d in devices],
             "active_serial": self._serial,
+            "active_android_id": self.android_id if self._serial else None,
             "session": self._session_phase(),
+            # The user disconnected: no phone is bound by itself until they pick one (the UI lists their devices).
+            "auto_connect_paused": self._auto_connect_paused,
+            # USB → Wi-Fi in progress (adbd restarting, windows parked): the UI shows it as one ongoing step.
+            "switching": self._transport_switching,
             # Numbered when computed: the UI's read on (re)connect can arrive after a newer event — it must not undo it.
             "seq": self._device_state_seq,
         }
@@ -354,6 +375,8 @@ class AppContext:
         """Returns self.serial if bound. If not bound, immediately discovers and binds an attached ready device."""
         if self.serial:
             return self.serial
+        if self._auto_connect_paused:
+            return None  # the user disconnected: only their own choice binds a phone
         if time.monotonic() < self._bind_retry_after:
             return None  # the last bind failed a moment ago: the bootstrap loop retries on its own schedule
         try:
@@ -392,6 +415,7 @@ class AppContext:
             await self.startup.reset("binding")
             await self.startup.update(transport=_transport_of(serial), model=self.device_manager.cached_model(serial))
             self.android_id = await self.device_manager.get_android_id(serial)
+            self.device_manager.remember_identity(serial, self.android_id)
             # The daemon FIRST, and proven healthy before anything asks the phone anything: everything below (the profile
             # probe, thermal, load, notifications, the supervisor, audio) then goes through its one socket instead of a
             # burst of `adb shell` processes that the daemon's own snapshots repeat a moment later.
@@ -504,11 +528,42 @@ class AppContext:
             if self.serial == new_serial:
                 return
             old_serial, old_android_id = self.serial, self.android_id
+            if old_serial is None:
+                await self._bind_locked(new_serial)
+                return
+            if await self._is_other_phone(new_serial, old_android_id):
+                # Another phone, not another link of this one: its windows cannot move there. End this session (its
+                # windows close — the UI asked the user first) and bring the other phone up from scratch.
+                log.info("[SWITCH] %s başka bir telefon — oturum kapatılıp yeniden kuruluyor", new_serial)
+                await self._unbind_locked(disconnect_adb=False, restart_bootstrap=False, reason="device_switch")
+                await self._bind_locked(new_serial)
+                return
             try:
                 await self._switch_locked(old_serial, new_serial)
             except Exception as exc:
                 await self._recover_failed_switch(old_serial, old_android_id, new_serial, exc)
                 raise
+
+    async def _is_other_phone(self, serial: str, android_id: str | None) -> bool:
+        """Is `serial` a link of a DIFFERENT phone than `android_id`? False when either side cannot be told (the switch then
+        runs as a transport switch and fails cleanly if the link is unusable)."""
+        if not android_id:
+            return False
+        other = self.device_manager.android_id_of(serial)
+        if other is None:
+            with contextlib.suppress(Exception):
+                other = await self.device_manager.get_android_id(serial)
+        return other is not None and other != android_id
+
+    async def connect_device(self, serial: str) -> None:
+        """The user picked this link (Device Center, the connect dialog): it becomes the session — bound when there is none,
+        moved to when it is another link of the same phone, a clean change of session when it is another phone. Once it is
+        up, a pause the user's earlier disconnect put on automatic connecting ends. (Not before: the bootstrap would race
+        this choice for another phone. A choice that fails leaves the pause as it was.)"""
+        self._bind_retry_after = 0.0
+        if self.serial != serial:
+            await self.switch_transport(serial)
+        self.auto_connect_paused = False
 
     async def _switch_locked(self, old_serial: str | None, new_serial: str) -> None:
         # Same rationale as bind_device: a pairing listener from a still-open
@@ -523,6 +578,7 @@ class AppContext:
         await self.startup.reset("binding")
         await self.startup.update(transport=_transport_of(new_serial), model=self.device_manager.cached_model(new_serial))
         self.android_id = await self.device_manager.get_android_id(new_serial)
+        self.device_manager.remember_identity(new_serial, self.android_id)
 
         # Stop background services on old serial (preserve notification cache for dedup)
         await self._stop_services(clear_notifications=False)
@@ -695,6 +751,7 @@ class AppContext:
                 await self.switch_transport(device.serial)
             else:
                 await self.bind_device(device.serial)
+        self.auto_connect_paused = False  # connecting to an address is the user's own choice (see connect_device)
         return device
 
     async def _remember_device(self, serial: str) -> None:
@@ -726,6 +783,7 @@ class AppContext:
             known = KnownDevice(
                 android_id=self.android_id,
                 model=model or (existing.model if existing else None),
+                alias=existing.alias if existing else None,
                 last_seen_at=time.time(),
                 last_transport="wireless" if is_wireless else "usb",
                 last_known_ip=ip or (existing.last_known_ip if existing else None),
@@ -836,16 +894,24 @@ class AppContext:
             log.warning("Master session audio start failed on device bind (%s): %s", serial, exc)
 
     async def unbind_device(self, disconnect_adb: bool = True, pause_bootstrap_s: float = 4.0) -> None:
+        """The user's "disconnect": the session ends AND stays ended — automatic connecting pauses until the user picks a
+        phone (otherwise the cable still in, or the Wi-Fi link, brought it straight back). `disconnect_adb` releases the
+        session's own Wi-Fi link (`adb disconnect ip:port`); a USB link is left alone (there is nothing to release, and a
+        bare `adb disconnect` would drop every OTHER wireless link adb holds)."""
         async with self._session_lock:
+            if self.serial is None:
+                return
+            self.auto_connect_paused = True
             await self._unbind_locked(disconnect_adb=disconnect_adb, pause_bootstrap_s=pause_bootstrap_s)
 
     async def _unbind_locked(
         self, *, disconnect_adb: bool = True, pause_bootstrap_s: float = 4.0, reason: str = "user_disconnect",
+        restart_bootstrap: bool = True,
     ) -> None:
         serial = self.serial
         if serial is None:
             return
-        log.info("unbinding device: %s (disconnect_adb=%s)", serial, disconnect_adb)
+        log.info("unbinding device: %s (disconnect_adb=%s, reason=%s)", serial, disconnect_adb, reason)
         self.serial = None
         self.android_id = None
         tools_jar.forget(serial)
@@ -858,15 +924,17 @@ class AppContext:
         await self.load_monitor.stop()
         await self.supervisor.stop()
         await self.notifications.stop()
-        if disconnect_adb and serial:
+        if disconnect_adb and ":" in serial:
             try:
-                await self.adb.disconnect(serial if ":" in serial else None)
+                await self.adb.disconnect(serial)
             except Exception as exc:
                 log.debug("adb disconnect failed: %s", exc)
         await self.event_bus.emit("device_lost", reason=reason)
         await self.startup.reset("waiting")
         if self.bootstrap_task and not self.bootstrap_task.done():
             self.bootstrap_task.cancel()
+        if not restart_bootstrap:
+            return
 
         async def _delayed_bootstrap():
             if pause_bootstrap_s > 0:
@@ -895,7 +963,7 @@ class AppContext:
             except Exception as exc:
                 log.debug("bootstrap poll failed: %s", exc)
                 devices = []
-            ready = [d for d in devices if d.state == DeviceState.DEVICE]
+            ready = [] if self._auto_connect_paused else [d for d in devices if d.state == DeviceState.DEVICE]
             if ready:
                 wireless = [d for d in ready if ":" in d.serial]
                 chosen = wireless[0] if wireless else ready[0]
@@ -924,6 +992,7 @@ class AppContext:
             self._last_wireless_pairing = (ip, time.time())
             if self.serial is None:
                 await self.bind_device(device.serial)
+            self.auto_connect_paused = False  # the user scanned the code: their choice (see connect_device)
 
         return asyncio.create_task(
             self.pairing.start_pairing_listener(payload, _on_paired),
@@ -970,6 +1039,7 @@ async def lifespan(app: FastAPI):
     )
     await settings_db.init(ctx.settings.DB_PATH)
     ctx.device_tracker.start()
+    ctx.device_manager.enable_identity_resolution()
     if ctx.settings.FS_ENABLED:
         await ctx.fs.start()
     ctx.bootstrap_task = asyncio.create_task(
@@ -982,13 +1052,16 @@ async def lifespan(app: FastAPI):
     # calls adb connect itself, just tracks which known devices are reachable
     # via Wireless Debugging so Device Center can offer a one-click hint.
     await ctx.mdns.start_persistent_connect_listener()
+    parent_watch = asyncio.create_task(watch_parent(), name="parent-watch")
     try:
         yield {"ctx": ctx}
     finally:
+        parent_watch.cancel()
         await ctx.mdns.stop_persistent_connect_listener()
         if ctx.settings.FS_ENABLED:
             await ctx.fs.stop()
         await ctx.shutdown()
+        await ctx.device_manager.stop_identity_resolution()
         await ctx.device_tracker.stop()
 
 
@@ -1154,7 +1227,7 @@ def run() -> None:
     # cases that actually require the string/re-import form) and works
     # identically in both the plain `python -m app.main` and frozen-exe paths.
     try:
-        uvicorn.run(
+        config = uvicorn.Config(
             create_app,
             factory=True,
             host=settings.HTTP_HOST,
@@ -1168,6 +1241,9 @@ def run() -> None:
             ws_max_size=settings.WS_MAX_MESSAGE_BYTES,
             server_header=False,
         )
+        server = uvicorn.Server(config)
+        register_server(server)  # POST /api/system/shutdown and the parent watch stop it gracefully
+        server.run()
     except api_auth.RemoteBindRefused as exc:
         log.error("🔐 [Auth] %s", exc)
         raise SystemExit(2) from exc
