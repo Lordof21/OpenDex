@@ -22,6 +22,7 @@ import asyncio
 import contextlib
 import logging
 import shlex
+import sys
 from typing import Any
 
 from ..logging_config import window_logger
@@ -75,6 +76,10 @@ async def find_task_id_for_package(
     dev_serial = getattr(ctx_or_adb, "serial", serial)
     if not dev_serial or not hasattr(adb, "shell"):
         return None
+    # Who asks, so a burst of lookups in the phone-load panel can be traced to its caller (debug log only).
+    caller = sys._getframe(1)
+    log.debug("[FIND_TASK] pkg=%s display=%s caller=%s:%s:%d", pkg_name, display_id,
+              caller.f_globals.get("__name__", "?"), caller.f_code.co_name, caller.f_lineno)
     # The daemon answers from ActivityTaskManager in a few ms; the full `dumpsys activity activities` it replaces is
     # one of the heaviest things a shell can ask system_server for (and this runs on every open / move / handoff).
     daemon = daemon_registry.live("find_task")

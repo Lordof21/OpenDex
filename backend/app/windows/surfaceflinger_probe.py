@@ -61,20 +61,6 @@ class TaskGeometry:
     oem_marks: tuple[str, ...] = ()
 
 
-async def read_sf_dump(adb, serial: str) -> str | None:
-    """`dumpsys SurfaceFlinger` metni; döküm daemon içinden okunur (`dumpsys` süreci açılmaz), daemon yoksa kabuk komutu.
-    None: okunamadı."""
-    daemon = daemon_registry.live("dump")
-    sf_dump = await daemon.dump("SurfaceFlinger") if daemon is not None else None
-    if sf_dump is None:
-        try:
-            sf_dump = await adb.shell("dumpsys SurfaceFlinger", serial=serial, timeout_s=2.5)
-        except Exception as exc:
-            log.warning("[Omni-Adapter] dumpsys SurfaceFlinger başarısız: %s", exc)
-            return None
-    return sf_dump
-
-
 async def probe_omni_geometry(adb, serial: str, task_id: str) -> TaskGeometry | None:
     """SurfaceFlinger ve WindowManager'ı sorgulayarak task'ın OEM-bağımsız tam geometri profilini üretir."""
     sf_dump = await read_sf_dump(adb, serial)
