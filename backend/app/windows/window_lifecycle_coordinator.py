@@ -297,14 +297,17 @@ async def _launch_if_not_moved(
     await _start_in_window(sockets, pkg_name, wlog)
 
 
-async def _watch_browser_tabs(adb: Adb, serial: str, pkg_name: str, wlog: logging.LoggerAdapter) -> None:
-    """Starts the window-mode tab watcher when ``pkg_name`` is a DevTools browser. Never raises, never holds the window up."""
+async def _watch_browser_tabs(adb: Adb, serial: str, pkg_name: str, wlog: logging.LoggerAdapter,
+                              width: int | None = None, height: int | None = None, dpi: int | None = None) -> None:
+    """Starts the window's tab watcher when ``pkg_name`` is a DevTools browser. The window's size decides the site its tabs get (a phone-sized
+    window the mobile site, a tablet / DeX one the desktop site) and ``dpi`` gives them the window's real scale (Chrome would otherwise run them
+    at x1.2 of it). Never raises, never holds the window up."""
     try:
-        from .cdp_refresher import start_browser_auto_attach_watcher
+        from .cdp_refresher import start_window_watcher
         from .web_inspector import inspect_app_runtime
         profile = await asyncio.wait_for(inspect_app_runtime(adb, serial, pkg_name), timeout=3.0)
         if profile.is_browser_cdp and profile.cdp_socket:
-            start_browser_auto_attach_watcher(adb, serial, profile.cdp_socket, pkg_name, None, mode="desktop")
+            start_window_watcher(adb, serial, profile.cdp_socket, pkg_name, width, height, dpi)
     except Exception as exc:  # noqa: BLE001 — a nicety: the window works without it
         wlog.debug("[CDP_WATCHER] pencere kipi izleyicisi başlatılamadı: %s", exc)
 
@@ -475,7 +478,11 @@ async def coordinate_window_lifecycle(
         # 4b. A browser in a window: its tabs follow the WINDOW's mode (desktop site) for as long as the window lives — a tab the phone
         #     loaded as the mobile site is switched (video and scroll kept), new tabs start as desktop (cdp_refresher watcher).
         if auto_start and not is_app_lock_flow:
-            await _watch_browser_tabs(adb, serial, pkg_name, wlog)
+            window = sessions.get(win_id)
+            await _watch_browser_tabs(
+                adb, serial, pkg_name, wlog,
+                getattr(window, "target_display_w", None), getattr(window, "target_display_h", None), p2_dpi,
+            )
 
         # 5. The app was rebuilt by the move (and maybe restarted by the density settle): if it is no longer on the watch page it
         #    was on, that page is reopened where it was — paused when it was paused. After 'live': the window is already usable.
