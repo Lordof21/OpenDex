@@ -216,13 +216,18 @@ const NOTE_STYLE = {
 export function InlineNote({ note, className }) {
   const style = NOTE_STYLE[note?.tone] || NOTE_STYLE.info;
   const Icon = style.icon;
+  // Not, bağlantı değişiminde (ve hemen yanındaki Wi-Fi/USB hattında) açılıp kapanır: yükseklik değişimi KAYDIRILMAZ, anında olur.
+  // Bir animasyonlu yükseklik, panelin üst kenarını ve hat seçicisini de dikey kaydırırdı (yatay geçiş ile birlikte çapraz sürünür).
   return (
     <AnimatePresence initial={false}>
       {note && (
         <motion.p
           key={note.text}
           role={note.tone === 'error' ? 'alert' : 'status'}
-          {...COLLAPSE}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0, transition: { duration: 0 } }}
+          transition={{ duration: 0.12 }}
           className="overflow-hidden"
         >
           <span className={cn('mt-1.5 flex items-start gap-1.5 rounded-[8px] border px-2 py-1.5 text-[10px] leading-snug', style.cls, className)}>

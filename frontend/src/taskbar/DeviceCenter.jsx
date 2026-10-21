@@ -225,16 +225,6 @@ const ActiveDeviceCard = forwardRef(function ActiveDeviceCard({ group }, ref) {
   const batteryInfo = useSystemStore((s) => s.batteryInfo);
   const thermalLevel = useSystemStore((s) => s.thermalLevel);
 
-  // Canlı ölçümler yalnız bu panel açıkken ve cihaz gerçekten bağlıyken sorgulanır (media/telemetry.js).
-  const connected = group.status === 'connected' || group.status === 'weak';
-  useEffect(() => (connected ? startTelemetry() : undefined), [connected]);
-  const telemetry = useTelemetry();
-  const live = connected ? telemetry : null;
-  const streams = streamSummary(live);
-  const cpuGroups = appsByLocus(live);
-  const systemCpu = systemCpuResidual(live);
-  const battery = connected ? batteryInfo?.level ?? null : null;
-  const temperature = connected ? batteryTemperatureC(batteryInfo) : null;
 
   const status = statusLine(group);
   const choices = linkChoices(group);
@@ -243,6 +233,17 @@ const ActiveDeviceCard = forwardRef(function ActiveDeviceCard({ group }, ref) {
   const pendingLink = working === 'switch-usb' ? LINK_USB : working === 'switch-wifi' ? LINK_WIFI
     : group.status === 'switching' ? (choices.current === LINK_USB ? LINK_WIFI : LINK_USB) : null;
   const switching = group.status === 'switching' || group.status === 'binding' || Boolean(pendingLink);
+  // Canlı ölçümler yalnız bu panel açıkken ve cihaz gerçekten bağlıyken sorgulanır (media/telemetry.js). Hat değişirken (Wi-Fi ⇄ USB)
+  // aynı telefon hâlâ bağlıdır: son ölçümler kalır. Yoksa değerler "—" olup CPU dökümü kaybolur ve panelin yüksekliği değişirdi.
+  const connected = group.status === 'connected' || group.status === 'weak' || switching;
+  useEffect(() => (connected ? startTelemetry() : undefined), [connected]);
+  const telemetry = useTelemetry();
+  const live = connected ? telemetry : null;
+  const streams = streamSummary(live);
+  const cpuGroups = appsByLocus(live);
+  const systemCpu = systemCpuResidual(live);
+  const battery = connected ? batteryInfo?.level ?? null : null;
+  const temperature = connected ? batteryTemperatureC(batteryInfo) : null;
   const handlers = ui.menuHandlers(group);
   const onUsb = choices.current === LINK_USB;
 
@@ -256,7 +257,6 @@ const ActiveDeviceCard = forwardRef(function ActiveDeviceCard({ group }, ref) {
   return (
     <motion.section
       ref={ref}
-      layout={!reduce}
       initial={{ opacity: 0, scale: 0.98 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.98 }}
@@ -291,8 +291,8 @@ const ActiveDeviceCard = forwardRef(function ActiveDeviceCard({ group }, ref) {
         pending={pendingLink}
         onPick={(link) => switchLink(group, link)}
       />
-      <div className="mt-1.5 flex min-h-5 items-center gap-1.5 px-0.5">
-        <p className={cn('min-w-0 flex-1 text-[10px] leading-snug', suggestsUsb(group) && !switching ? 'text-foreground' : 'text-muted-foreground')}>
+      <div className="mt-1.5 flex h-8 items-center gap-1.5 px-0.5">
+        <p className={cn('line-clamp-2 min-w-0 flex-1 text-[10px] leading-snug', suggestsUsb(group) && !switching ? 'text-foreground' : 'text-muted-foreground')}>
           {footnote}
         </p>
         {onUsb && !switching && group.wifiLink?.state !== 'device' && <PortChip port={port} onChange={setPort} />}
