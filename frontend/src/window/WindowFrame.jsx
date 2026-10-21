@@ -159,7 +159,7 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
       if (!s) {
         try { s = await getSettings(); } catch {}
       }
-      const mode = settingsForWindow(currentWin, s)?.resolution_mode || 'dynamic_fit';
+      const mode = settingsForWindow(currentWin, s)?.resolution_mode || 'dynamic_fix';
       const { customDpi, targetDp, phoneScale, autoDensity } = policyArgs(dpiPolicyOf(currentWin, s));
       const target = targetDisplaySizeForMode(
         mode,
@@ -201,7 +201,7 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
       if (!s) {
         try { s = await getSettings(); } catch {}
       }
-      const mode = settingsForWindow(currentWin, s)?.resolution_mode || 'dynamic_fit';
+      const mode = settingsForWindow(currentWin, s)?.resolution_mode || 'dynamic_fix';
       const { customDpi, targetDp, phoneScale, autoDensity } = policyArgs(dpiPolicyOf(currentWin, s));
       const target = targetDisplaySizeForMode(
         mode,
@@ -278,7 +278,7 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
       const winMode = modeOf(currentWin);
       const target = targetDisplaySizeForWindow(
         currentWin,
-        { ...s, resolution_mode: s?.resolution_mode || 'dynamic_fit' },
+        { ...s, resolution_mode: s?.resolution_mode || 'dynamic_fix' },
         { w: currentW, h: currentH },
         { mode: winMode },
       );

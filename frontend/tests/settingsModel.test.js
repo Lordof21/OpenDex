@@ -96,8 +96,8 @@ describe('profiller', () => {
   });
 
   it('eksik anahtarlar backend varsayılanlarıyla okunur', () => {
-    expect(activeProfileId({})).toBe('custom');                                   // gerçek çözünürlük varsayılanı kapalı
-    expect(activeProfileId({ dynamic_resolution_enabled: true })).toBe('balanced');
+    expect(activeProfileId({})).toBe('balanced');                                 // gerçek çözünürlük istemek varsayılanda açık
+    expect(activeProfileId({ dynamic_resolution_enabled: false })).toBe('custom');
   });
 
   it('profiller kişisel tercihlere (DPI, tema, ses, pencere) dokunmaz', () => {
@@ -137,7 +137,7 @@ describe('recommendations', () => {
   });
 
   it('en çok `limit` öneri döner', () => {
-    const many = { density_refresh_hard: true, video_bit_rate: 2_000_000, max_fps: 60, video_codec: 'h264', audio_output_mode: 'both' };
+    const many = { dynamic_resolution_enabled: false, density_refresh_hard: true, video_bit_rate: 2_000_000, max_fps: 60, video_codec: 'h264', audio_output_mode: 'both' };
     expect(recommendations(many).length).toBe(3);
     expect(recommendations(many, { limit: 5 }).length).toBe(5);
   });

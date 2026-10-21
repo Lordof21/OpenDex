@@ -429,8 +429,8 @@ export const APP_CLOSED_OPTIONS = [
 const labelOf = (options, value) => options.find((option) => option.value === value)?.label ?? '';
 
 const DEFAULTS = {
-  dynamic_resolution_enabled: false,
-  resolution_mode: 'dynamic',
+  dynamic_resolution_enabled: true,
+  resolution_mode: 'dynamic_fix',
   video_codec: 'auto',
   max_fps: 60,
   video_bit_rate: 8_000_000,

@@ -7,12 +7,12 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class ProjectSettings(BaseModel):
-    dynamic_resolution_enabled: bool = False
+    dynamic_resolution_enabled: bool = True   # "Gerçek çözünürlük iste": açık varsayılan
     resolution_mode: Literal[
         "dynamic", "dynamic_fit", "dynamic_fix", "phone_scale",
         "1080p", "tablet", "2k", "2.5k",
         "fixed_1080p", "fixed_1200p", "fixed_1440p", "fixed_1600p"
-    ] = "dynamic"
+    ] = "dynamic_fix"   # genel varsayılan: dinamik fix (tam oturtma)
     video_fit_mode: Literal["contain", "fill", "cover"] = "contain"
     screen_off_while_mirroring: bool = False
     enable_audio: bool = True

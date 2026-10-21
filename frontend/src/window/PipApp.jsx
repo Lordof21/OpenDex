@@ -100,7 +100,7 @@ export default function PipApp({ winId }) {
       if (!current || current.resolutionLocked) return;
       // The PiP webview has no main-window store: the window's own settings come from its persisted geometry.
       const own = settingsForWindow({ overrides: getSavedAppGeometry(win.package)?.overrides }, settings);
-      const mode = own?.resolution_mode || 'dynamic_fit';
+      const mode = own?.resolution_mode || 'dynamic_fix';
       // Same density policy as the desktop window (own policy > global setting): the PiP used to read only the global setting.
       const { customDpi, targetDp, phoneScale, autoDensity } = policyArgs(dpiPolicyOf(current, settings));
       // The stream is sized for the canvas VideoCanvas actually measured, not for "window minus a guessed chrome": the PiP

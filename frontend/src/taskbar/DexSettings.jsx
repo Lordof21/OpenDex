@@ -69,7 +69,7 @@ const WINDOW_MODES = [
 ];
 
 const RESOLUTION_OPTIONS = [
-  { value: 'dynamic', label: tt('common.dinamik'), tag: 'dynamic_fit' },
+  { value: 'dynamic', label: tt('common.dinamik'), tag: 'dynamic' },
   { value: 'dynamic_fix', label: tt('taskbar.dinamik_fix'), tag: 'dynamic_fix' },
   { value: 'phone_scale', label: tt('taskbar.telefon_olcegi'), tag: 'zoom' },
   { value: '1080p', label: '1080p (16:9)', tag: '1920×1080' },
@@ -200,7 +200,7 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
   const geometryFor = (forPolicy) => (activeWindow
     ? targetDisplaySizeForWindow(
         activeWindow,
-        { resolution_mode: resolution || 'dynamic_fit', header_hover_mode: dragTitle },
+        { resolution_mode: resolution || 'dynamic_fix', header_hover_mode: dragTitle },
         {
           w: activeWindow.w || (typeof window !== 'undefined' ? window.innerWidth : 1920),
           h: activeWindow.h || (typeof window !== 'undefined' ? window.innerHeight - 50 : 1030),
@@ -266,7 +266,7 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
     ? tt('taskbar.acik_pencere_yok_bir_pencere_secince')
     : tt('taskbar.calisma_alani_gorevlerinin_yogunlugu');
 
-  const resolutionTag = RESOLUTION_OPTIONS.find((item) => item.value === resolution)?.tag ?? 'dynamic_fit';
+  const resolutionTag = RESOLUTION_OPTIONS.find((item) => item.value === resolution)?.tag ?? 'dynamic_fix';
   const codecLabel =
     codec === 'h265'
       ? tt('taskbar.h_265_hevc_ultra_net')

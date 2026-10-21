@@ -87,3 +87,10 @@ def test_the_default_route_of_an_app_follows_the_output_setting():
     assert [default_route_for(m) for m in ("pc", "both", "phone")] == ["pc", "both", "phone"]
     assert default_route_for("both", enable_audio=False) == "phone"          # audio off: nothing to route
     assert default_route_for("whatever") == "pc"
+
+
+def test_the_default_resolution_asks_for_the_real_resolution_and_fits_the_video_exactly():
+    """A fresh install: "gerçek çözünürlük iste" is on, and the global resolution mode is dynamic fix (exact video fit)."""
+    defaults = ProjectSettings()
+    assert defaults.dynamic_resolution_enabled is True
+    assert defaults.resolution_mode == "dynamic_fix"

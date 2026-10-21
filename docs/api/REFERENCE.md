@@ -658,6 +658,9 @@ Brings an app that moved to Display 0 (the phone) back to the PC window
 |---|---|---|---|
 | `window_id` | string | yes |  |
 | `bounds` | array of integer (nullable) | no |  |
+| `width` | integer (1–8192) (nullable) | no |  |
+| `height` | integer (1–8192) (nullable) | no |  |
+| `dpi` | integer (72–1000) (nullable) | no |  |
 
 **Responses:** `200` Successful Response · `422` Validation Error · `401` token missing/wrong · `403` foreign Origin/Host · `411` chunked body · `413` body too large
 
@@ -945,8 +948,8 @@ Updates settings and applies live quality/audio reconfigurations.
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `dynamic_resolution_enabled` | boolean | no | default `false` |
-| `resolution_mode` | `"dynamic"` \| `"dynamic_fit"` \| `"dynamic_fix"` \| `"phone_scale"` \| `"1080p"` \| `"tablet"` \| `"2k"` \| `"2.5k"` \| `"fixed_1080p"` \| `"fixed_1200p"` \| `"fixed_1440p"` \| `"fixed_1600p"` | no | default `"dynamic"` |
+| `dynamic_resolution_enabled` | boolean | no | default `true` |
+| `resolution_mode` | `"dynamic"` \| `"dynamic_fit"` \| `"dynamic_fix"` \| `"phone_scale"` \| `"1080p"` \| `"tablet"` \| `"2k"` \| `"2.5k"` \| `"fixed_1080p"` \| `"fixed_1200p"` \| `"fixed_1440p"` \| `"fixed_1600p"` | no | default `"dynamic_fix"` |
 | `video_fit_mode` | `"contain"` \| `"fill"` \| `"cover"` | no | default `"contain"` |
 | `screen_off_while_mirroring` | boolean | no | default `false` |
 | `enable_audio` | boolean | no | default `true` |

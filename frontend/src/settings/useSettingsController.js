@@ -75,7 +75,7 @@ export function useSettingsController() {
     ? (targetDisplaySizeForWindow(
         activeWindow,
         {
-          resolution_mode: resolution || 'dynamic_fit',
+          resolution_mode: resolution || 'dynamic_fix',
           custom_dpi: dpi === 'auto' ? 0 : Number(dpi),
           target_dp: targetDp === 'auto' ? 0 : Number(targetDp),
         },
@@ -112,7 +112,7 @@ export function useSettingsController() {
         targetDp !== 'auto' && activeWindow
           ? targetDisplaySizeForWindow(
               activeWindow,
-              { resolution_mode: resolution || 'dynamic_fit', custom_dpi: 0, target_dp: Number(targetDp) },
+              { resolution_mode: resolution || 'dynamic_fix', custom_dpi: 0, target_dp: Number(targetDp) },
               boxOf(activeWindow),
               { mode: modeOf(activeWindow), policy: { mode: 'target', dp: Number(targetDp) } },
             )?.dpi

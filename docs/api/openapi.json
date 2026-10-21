@@ -7210,7 +7210,7 @@
           "dynamic_resolution_enabled": {
             "type": "boolean",
             "title": "Dynamic Resolution Enabled",
-            "default": false
+            "default": true
           },
           "resolution_mode": {
             "type": "string",
@@ -7229,7 +7229,7 @@
               "fixed_1600p"
             ],
             "title": "Resolution Mode",
-            "default": "dynamic"
+            "default": "dynamic_fix"
           },
           "video_fit_mode": {
             "type": "string",
@@ -7481,6 +7481,45 @@
               }
             ],
             "title": "Bounds"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 8192.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 8192.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "dpi": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1000.0,
+                "minimum": 72.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dpi"
           }
         },
         "type": "object",
@@ -8010,13 +8049,6 @@
           "type": {
             "type": "string",
             "title": "Error Type"
-          },
-          "input": {
-            "title": "Input"
-          },
-          "ctx": {
-            "type": "object",
-            "title": "Context"
           }
         },
         "type": "object",
