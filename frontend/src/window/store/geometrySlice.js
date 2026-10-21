@@ -319,8 +319,22 @@ export function createGeometrySlice(set, get) {
       const win = get().windows.find((w) => w.id === id);
       if (!win) return;
       const next = normalizeDpiPolicy(policy);
-      saveAppGeometry(win.package, { dpiPolicy: next });
-      patchWindow(id, { dpiPolicy: next });
+      // Açıkça "Oto" (Hub "Dinamik DP: Açık" / DeX Ayarları "Oto") seçmek, yoğunluğun boyuta uymasını İSTEMEKTİR; "Flex DP kilidi" ise
+      // boyutlandırmada yoğunluğu sabit tutar. İkisi aynı pencerede birlikte etkin kalırsa seçim sessizce işlemez ("Oto açık ama dp
+      // gelmiyor, Oto'ya basınca geliyor"): bu pencerenin kendi kilidi bırakılır. Genel ayara dokunulmaz — genel kilit açıksa yalnız bu pencere
+      // "Serbest" yazılır, kapalıysa pencerenin kendi katmanı silinir ("Genele uy").
+      let overrides = win.overrides;
+      if (next.mode === 'auto') {
+        const globalSettings = await settingsOrNull();
+        if (settingsForWindow(win, globalSettings)?.dp_lock_enabled) {
+          const draft = { ...normalizeWindowOverrides(win.overrides) };
+          if (globalSettings?.dp_lock_enabled) draft.dp_lock_enabled = false;
+          else delete draft.dp_lock_enabled;
+          overrides = normalizeWindowOverrides(draft);
+        }
+      }
+      saveAppGeometry(win.package, overrides !== win.overrides ? { dpiPolicy: next, overrides } : { dpiPolicy: next });
+      patchWindow(id, overrides !== win.overrides ? { dpiPolicy: next, overrides } : { dpiPolicy: next });
       await get().applyDynamicResolutionToOpenWindows({ onlyId: id, explicitDpi: true });
     },
 
@@ -718,11 +732,19 @@ export function createGeometrySlice(set, get) {
       // "Pencere bulunamadı", resize silently failed).
       if (win.isEcoWorkspace) return;
       if (win.resolutionLocked) return;
-
       const resolved = settings ?? await settingsOrNull();
 
       // Safe default: when dynamic resolution is off, stay purely visual — no backend display reconfiguration.
       if (resolved && resolved.dynamic_resolution_enabled === false) return;
+
+      // The app stands on the PHONE: no request now (each one changed the display's density and size and re-fitted the window's frame
+      // to the result — a loop that moved the DeX window around; field log 2026-10-20: nine requests in 40 s). The exact pixels the
+      // window wants are kept, and "geri al" sends them, so the window comes back at its own size.
+      if (win.handoffToPhone) {
+        const pending = { w, h, dpi: dpi ?? null };
+        set((state) => ({ windows: state.windows.map((x) => (x.id === id ? { ...x, pendingDisplay: pending } : x)) }));
+        return;
+      }
 
       // Only reachable when dynamic_resolution_enabled — ResizeHandle is not
       // rendered otherwise. Triggers a MediaCodec reconfigure server-side.

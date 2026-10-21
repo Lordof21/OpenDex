@@ -257,16 +257,27 @@ async def test_the_users_explicit_restart_is_not_second_guessed_by_the_playback_
     assert outcome.action == RESTARTED and daemon.restarts == ["42"]
 
 
-@pytest.mark.parametrize("media", [False, None])
-async def test_an_app_without_a_session_or_an_unknown_one_is_process_restarted(tasks, media):
-    """The guard needs a POSITIVE answer: an app the phone says holds no media session (or a daemon that cannot tell) is
-    reconciled exactly as before."""
+async def test_an_app_without_a_session_is_process_restarted(tasks):
+    """An app the phone says holds no media session is reconciled exactly as before."""
     phone = FakePhone()
-    daemon = FakeDaemon(phone, media=media)
+    daemon = FakeDaemon(phone, media=False)
     rec = make(phone, daemon)
     before = await rec.snapshot(PKG)
 
     assert (await rec.settle(PKG, before=before, display="9", reason="open")).action == RESTARTED
+
+
+async def test_an_app_whose_media_state_the_phone_cannot_tell_is_not_restarted(tasks):
+    """Field report 2026-10-20: a paused YouTube video was restarted during a handoff (the answer had been "no session") and its
+    page reloaded to another video. An unknown answer protects the process too."""
+    phone = FakePhone()
+    daemon = FakeDaemon(phone, media=None)
+    rec = make(phone, daemon)
+    before = await rec.snapshot(PKG)
+
+    outcome = await rec.settle(PKG, before=before, display="9", reason="open")
+
+    assert outcome.action == KEPT_PLAYING and daemon.restarts == []
 
 
 @pytest.mark.parametrize("package", ["com.android.chrome", "com.google.android.youtube", "org.example.anything"])

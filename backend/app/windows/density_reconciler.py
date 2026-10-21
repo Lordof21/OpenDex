@@ -578,9 +578,29 @@ class DensityReconciler:
         if api is not None and api < PROCESS_RESTART_MIN_API:
             log.info("[DENSITY] %s (%s): Android %d'de durum korumalı süreç yeniden başlatma yolu yok", package, reason, api)
             return RefreshOutcome(UNSUPPORTED, package, task_id=tid, detail=f"android_api={api}")
-        if not force and await self.holds_media(package):
+        if not force and await self.media_protected(package):
             return self._keep_media(package, reason, after, tid)
         return await self._restart_process(package, reason, after, tid, declares, daemon if connected else None)
+
+    async def media_protected(self, package: str) -> bool:
+        """The guard before a process restart: True when the app holds a media session OR the phone could not say whether it does.
+        A restart kills the video's process (field report 2026-10-20: a paused YouTube video was restarted during a handoff, its
+        page reloaded to another video with the description gone). A stale layout can be refreshed by the user; a lost video cannot."""
+        if package in PLAYBACK_GUARD_EXEMPT:
+            return False
+        daemon = self._daemon_getter()
+        probe = getattr(daemon, "holds_media_session", None) if daemon is not None else None
+        if not callable(probe):
+            return False                      # no daemon: the restart itself is refused later (NO_DAEMON)
+        try:
+            answer = await probe(package)
+        except Exception as exc:  # noqa: BLE001 — a probe hiccup must not turn into a kill
+            log.info("[DENSITY] %s: medya oturumu okunamadı (%s) — süreç korunuyor", package, exc)
+            return True
+        if answer is None:
+            log.info("[DENSITY] %s: medya oturumu bilinmiyor (telefon yanıt vermedi) — süreç korunuyor", package)
+            return True
+        return answer is True
 
     async def holds_media(self, package: str) -> bool:
         """True only on a POSITIVE answer from the phone that ``package`` holds a media session — playing or paused — and is

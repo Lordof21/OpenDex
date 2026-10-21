@@ -41,6 +41,11 @@ class ReclaimWindowRequest(BaseModel):
     # Yalnızca telefona park edilmiş Workspace üyesi için: kullanıcı ghost kartı sürüklediyse
     # yeni slot [l, t, r, b] (VD koordinatı). Verilmezse park anındaki yer kullanılır.
     bounds: list[int] | None = Field(default=None, min_length=4, max_length=4)
+    # The exact pixels the window asked for while its app was on the phone (the frontend sends them): the display comes back at
+    # this size and density, not at the size from before the move.
+    width: int | None = Field(default=None, ge=1, le=8192)
+    height: int | None = Field(default=None, ge=1, le=8192)
+    dpi: int | None = Field(default=None, ge=72, le=1000)
 
 
 class HandoffWindowRequest(BaseModel):
@@ -209,8 +214,11 @@ async def reclaim_window(body: ReclaimWindowRequest, ctx: AppContextDep):
     (Stealth DPI — see handoff_window)."""
     log.info("[Window:RECLAIM 📲] win=%s PC ekranına geri alınıyor", body.window_id)
     bounds = tuple(body.bounds) if body.bounds else None
+    requested = None
+    if body.width and body.height and body.dpi:
+        requested = (body.width, body.height, body.dpi)
     try:
-        ok = await ctx.window_manager.reclaim_window(body.window_id, bounds)
+        ok = await ctx.window_manager.reclaim_window(body.window_id, bounds, requested)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"ok": ok}

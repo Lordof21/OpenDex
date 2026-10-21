@@ -182,13 +182,16 @@ export function createContinuitySlice(set, get) {
         const slot = get()
           .windows.find((w) => w.isEcoWorkspace)
           ?.tasks.find((t) => t.windowId === windowId)?.bounds;
-        L.info('reclaim', 'clicked', { windowId, hasSlot: Boolean(slot) });
-        await api.post(
-          '/api/windows/reclaim',
-          slot ? { window_id: windowId, bounds: slot } : { window_id: windowId },
-          { opId: op },
-        );
+        // Telefondayken pencere boyutu değiştiyse (geometrySlice.commitResize bekleten boyutu tutar) tam piksel olarak gider:
+        // pencere kendi boyutunda geri gelir.
+        const pending = get().windows.find((w) => w.id === windowId)?.pendingDisplay;
+        const body = { window_id: windowId };
+        if (slot) body.bounds = slot;
+        if (pending) Object.assign(body, { width: pending.w, height: pending.h, dpi: pending.dpi ?? undefined });
+        L.info('reclaim', 'clicked', { windowId, hasSlot: Boolean(slot), pending: Boolean(pending) });
+        await api.post('/api/windows/reclaim', body, { opId: op });
         L.info('reclaim', 'request_done', { windowId, ms: Date.now() - started });
+        set((state) => ({ windows: state.windows.map((x) => (x.id === windowId ? { ...x, pendingDisplay: null } : x)) }));
         get().setHandoff(windowId, false);
       } catch (err) {
         L.error('reclaim', 'failed', { windowId, error: err?.message || String(err) });

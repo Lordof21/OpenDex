@@ -125,3 +125,25 @@ async def test_no_task_at_all_is_relaunched_on_the_virtual_display(monkeypatch):
     assert any(c.startswith("am start --display 7") and PKG in c for c in adb.shell_calls)
     assert session.state.handoff_to_phone is False
     assert seen["result"]["outcome"] == "relaunched"
+
+
+@pytest.mark.asyncio
+async def test_a_reclaim_with_the_window_pixels_brings_the_display_back_at_exactly_those_pixels(monkeypatch):
+    """The window was resized while its app stood on the phone (no requests went out then): the reclaim carries the exact pixels it
+    asked for, and the display is resized to them before the app returns — not to the geometry from before the move."""
+    from app.windows.handoff_manager import Geometry
+
+    mgr, session, adb, moves, seen = _build(monkeypatch, find_returns="42", move_raises=False)
+    session.target_display_w, session.target_display_h = 1220, 2712
+    session.landing = None
+    resized: list[tuple[int, int, int]] = []
+
+    async def _resize(window_id, width, height, dpi, *, in_place_only):
+        resized.append((width, height, dpi))
+        return True
+
+    mgr._resize_display = _resize
+    ok = await mgr.reclaim("w1", Geometry(1656, 1016, 180))
+    assert ok is True
+    assert resized == [(1656, 1016, 180)]
+    assert session.landing is None

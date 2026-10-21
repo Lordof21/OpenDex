@@ -131,3 +131,26 @@ describe('commitResize — a stream that keeps its size settles the pending tran
     expect(win().deviceW).toBe(1600);
   });
 });
+
+describe('commitResize — a window whose app stands on the phone', () => {
+  it('sends no resize: the display is not the app any more, and a resize would loop back into the window frame', async () => {
+    useWindowStore.setState({ windows: [{ ...WIN, handoffToPhone: true }], nextZ: 2 });
+    await useWindowStore.getState().commitResize('w1', 1200, 800, 180, { settings: SETTINGS });
+    expect(api.post).not.toHaveBeenCalled();
+  });
+});
+
+describe('telefondayken boyut değişimi: geri alınca tam piksel gider', () => {
+  it('boyut kaydedilir (istek yok), geri alma isteği bu tam pikselleri taşır', async () => {
+    useWindowStore.setState({ windows: [{ ...WIN, handoffToPhone: true }], nextZ: 2 });
+    await useWindowStore.getState().commitResize('w1', 1656, 1016, 180, { settings: SETTINGS });
+    expect(win().pendingDisplay).toEqual({ w: 1656, h: 1016, dpi: 180 });
+    expect(api.post).not.toHaveBeenCalled();
+
+    api.post.mockResolvedValue({ ok: true });
+    await useWindowStore.getState().reclaimWindow('w1');
+    const reclaimCall = api.post.mock.calls.find((c) => c[0] === '/api/windows/reclaim');
+    expect(reclaimCall[1]).toMatchObject({ window_id: 'w1', width: 1656, height: 1016, dpi: 180 });
+    expect(win().pendingDisplay).toBeNull();
+  });
+});

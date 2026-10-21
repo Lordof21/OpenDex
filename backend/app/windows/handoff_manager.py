@@ -33,6 +33,7 @@ from .cdp_refresher import (
     capture_browser_scroll_state,
     refresh_browser_layout_inplace,
     start_browser_auto_attach_watcher,
+    start_window_watcher,
     stop_browser_auto_attach_watcher,
 )
 from .display_ids import is_virtual_display_id, known_display_id
@@ -378,11 +379,30 @@ class HandoffManager:
                         pkg, outcome.action)
         return outcome.ok, before, changed_at
 
-    async def _restore_window_geometry(self, session: "WindowSession", wlog: logging.Logger) -> bool:
+    async def _restore_window_geometry(
+        self, session: "WindowSession", wlog: logging.Logger, requested: "Geometry | None" = None,
+    ) -> bool:
         """The display goes back to what the PC window needs — BEFORE the app returns to it (it is empty now: nothing is
         rebuilt by the change). True: restored by an actual resize. A window the user resized in the meantime keeps the
-        geometry it asked for (no-op, False). Never raises."""
+        geometry it asked for (no-op, False). Never raises.
+
+        ``requested``: the exact pixels the window asked for while the app was on the phone (the frontend sends them with the
+        reclaim). They win over the landing book, which is then dropped."""
         landing, session.landing = session.landing, None
+        if requested is not None:
+            window = requested
+            if self._resize_display is None or (session.target_display_w, session.target_display_h, session.dpi) == (
+                window.width, window.height, window.dpi,
+            ):
+                return False
+            try:
+                ok = await self._resize_display(session.state.window_id, window.width, window.height, window.dpi, in_place_only=False)
+            except Exception as exc:  # noqa: BLE001 — the move still carries the app to whatever the display is
+                wlog.warning("⚠️ [HANDOFF: GERİ ALMA] istenen %dx%d @ %d DPI uygulanamadı: %s", window.width, window.height, window.dpi, exc)
+                return False
+            if ok:
+                wlog.info("↩️ [HANDOFF: GERİ ALMA] pencerenin telefondayken istediği boyut: %dx%d @ %d DPI", window.width, window.height, window.dpi)
+            return ok
         if landing is None:
             return False
         window = self._geometry_to_restore(session, landing)
@@ -849,7 +869,7 @@ class HandoffManager:
             await self._restore_window_geometry(session, log)
             await self._land_on_vd(session, serial, task_id, log)
 
-    async def reclaim(self, window_id: str) -> bool:
+    async def reclaim(self, window_id: str, requested: "Geometry | None" = None) -> bool:
         """
         Telefon ➔ PC Reclaim: sanal ekran pencerenin yoğunluğunda (değişmedi — handoff ona dokunmaz); görev oraya
         TEK adımda taşınır, uygulama boyut + yoğunluk değişimini tek bir yeniden kurmayla karşılar. Kendini yeniden
@@ -926,7 +946,7 @@ class HandoffManager:
                 # Sanal ekran pencerenin geometrisinde (boyut + yoğunluk) olmalı: ön-iniş yapılmış bir aktarımdan sonra
                 # telefonunkindedir. Boş olduğundan geri yazım hiçbir uygulamayı etkilemez; sonra taşıma, değişimin TAMAMINI
                 # tek adımda taşır. Yapılmadıysa ekran zaten pencerenin değerindedir (yapılandırma değişikliği doğurmaz).
-                restored = await self._restore_window_geometry(session, wlog)
+                restored = await self._restore_window_geometry(session, wlog, requested=requested)
                 target_dpi = session.dpi or self._settings.VIRTUAL_DISPLAY_DPI
                 if not restored:
                     await self._set_density(disp_id, target_dpi, serial)
@@ -979,8 +999,10 @@ class HandoffManager:
                     # Pencere kipi: telefonda MOBİL siteyle yüklenmiş sekmeler pencerede MASAÜSTÜ siteye geçer (video ve kaydırma korunur),
                     # sonradan açılanlar da masaüstü kimliğiyle başlar; pencere yaşadıkça kalır (cdp_refresher.BrowserTabAutoAttachWatcher).
                     with contextlib.suppress(Exception):
-                        desktop_watcher = start_browser_auto_attach_watcher(
-                            self._adb, serial, runtime_profile.cdp_socket, pkg, None, mode="desktop",
+                        window_dpi = session.dpi or self._settings.VIRTUAL_DISPLAY_DPI
+                        desktop_watcher = start_window_watcher(
+                            self._adb, serial, runtime_profile.cdp_socket, pkg,
+                            session.target_display_w, session.target_display_h, window_dpi,
                         )
                         await desktop_watcher.wait_ready()
                         await desktop_watcher.wait_settled()

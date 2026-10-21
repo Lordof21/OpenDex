@@ -70,7 +70,7 @@ from .transition_gate import TransitionGate
 from .encoder_stress_test import StressTestBusyError, run_encoder_stress_test  # noqa: F401 (StressTestBusyError re-exported: app/api/v1/endpoints/devices.py imports it from here)
 from .app_presence import AppPresenceMonitor
 from .app_restart import AppRestartOutcome, restart_app
-from .cdp_refresher import stop_browser_auto_attach_watcher
+from .cdp_refresher import stop_browser_auto_attach_watcher, update_window_place
 from .handoff_manager import HandoffManager
 from .parked_apps import ParkedAppRefresher
 from .mirror_packages import is_internal_package, is_mirror_package
@@ -1095,21 +1095,29 @@ class WindowManager:
                 return await self._teleporter.workspace_to_phone(window_id, windowing=windowing)
             return await self._handoff.handoff_to_phone(window_id, windowing=windowing)
 
-    async def reclaim_window(self, window_id: str, bounds: tuple[int, int, int, int] | None = None) -> bool:
+    async def reclaim_window(
+        self, window_id: str, bounds: tuple[int, int, int, int] | None = None, requested: tuple[int, int, int] | None = None,
+    ) -> bool:
         """Phone ➔ PC reclaim, Stealth DPI (see HandoffManager.reclaim). Görev DOĞDUĞU YERE
         döner: Eco Workspace üyesi park edildiği slota (`bounds` frontend'de sürüklenmişse
         yeni slot), bağımsız pencere kendi VD'sine."""
         async with self._lock:
-            return await self._reclaim_locked(window_id, bounds)
+            return await self._reclaim_locked(window_id, bounds, requested)
 
-    async def _reclaim_locked(self, window_id: str, bounds: tuple[int, int, int, int] | None = None) -> bool:
+    async def _reclaim_locked(
+        self, window_id: str, bounds: tuple[int, int, int, int] | None = None, requested: tuple[int, int, int] | None = None,
+    ) -> bool:
         """reclaim_window'un KİLİTSİZ gövdesi. asyncio.Lock reentrant DEĞİL: kilidi zaten tutan
         bir yol (open_window → _reuse_existing_window_if_open) public sarmalayıcıyı çağırırsa
         kendi kilidinde sonsuza dek bekler — bu yüzden onlar BUNU çağırır."""
         session = self._sessions.get(window_id)
         if session is not None and session.state.workspace_id == "eco":
             return await self._teleporter.phone_to_workspace(window_id, bounds)
-        return await self._handoff.reclaim(window_id)
+        geometry = None
+        if requested is not None:
+            from .handoff_manager import Geometry
+            geometry = Geometry(*requested)
+        return await self._handoff.reclaim(window_id, geometry)
 
     def _schedule_eco_member_on_phone(self, window_id: str) -> None:
         """HandoffManager'ın Display 0 odak olayı / watchdog'u bir Workspace üyesinin
@@ -1376,7 +1384,12 @@ class WindowManager:
                         raise KeyError(window_id)
                     return session.handle(superseded=True)
             async with self._lock:
-                return await self._reconfigure.resize(window_id, width, height, dpi, project=project)
+                handle = await self._reconfigure.resize(window_id, width, height, dpi, project=project)
+                session = self._sessions.get(window_id)
+                if session is not None and session.dpi and not getattr(handle, "superseded", False):
+                    # A browser window's tabs follow the window's size: its real scale, and the site (mobile / desktop) its size class needs
+                    update_window_place(session.state.package, session.target_display_w, session.target_display_h, session.dpi)
+                return handle
 
     def _resize_gate(self, key: str) -> ResizeGate:
         gate = self._resize_gates.get(key)
