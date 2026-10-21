@@ -384,6 +384,20 @@ describe('dynamicDpStatusOf: karo gerçekte etkin mi', () => {
     expect(dynamicDpStatusOf(custom, { dynamic_resolution_enabled: true })).toMatchObject({ active: false, mode: 'off' });
   });
 
+  // Hub "Açık" derken DeX Ayarları'ndaki "Flex DP kilidi" dp'yi sabit tutuyordu: iki yüzey birbirinden habersizdi.
+  it('"Flex DP kilidi" etkinse "Açık" bile etkin sayılmaz ve karo bunu söyler (genel ya da pencerenin kendi katmanı)', () => {
+    const on = { dynamic_resolution_enabled: true };
+    expect(dynamicDpStatusOf(auto, { ...on, dp_lock_enabled: true })).toMatchObject({ active: false, locked: true, mode: 'on' });
+    expect(dynamicDpStatusOf({ ...auto, overrides: { dp_lock_enabled: true } }, { ...on, dp_lock_enabled: false }))
+      .toMatchObject({ active: false, locked: true });
+    // pencerenin kendi "Serbest"i genel kilidin üstüne biner
+    expect(dynamicDpStatusOf({ ...auto, overrides: { dp_lock_enabled: false } }, { ...on, dp_lock_enabled: true }))
+      .toMatchObject({ active: true, locked: false });
+    // özel DPI sabittir: kilit orada ayrıca belirtilmez; genel kapalıyken de kilit söz konusu değil
+    expect(dynamicDpStatusOf(custom, { ...on, dp_lock_enabled: true })).toMatchObject({ active: false, locked: false, mode: 'off' });
+    expect(dynamicDpStatusOf(auto, { dynamic_resolution_enabled: false, dp_lock_enabled: true })).toMatchObject({ active: false, locked: false });
+  });
+
   it('ayar yok sayılırsa (undefined) açık kabul edilir — DeX Ayarları ile aynı kural', () => {
     expect(dynamicDpStatusOf(auto, {})).toMatchObject({ active: true, resolutionOff: false });
     expect(dynamicDpStatusOf(auto, null)).toMatchObject({ active: true, resolutionOff: false });

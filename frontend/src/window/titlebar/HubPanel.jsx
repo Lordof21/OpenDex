@@ -46,6 +46,8 @@ export const HubPanel = forwardRef(function HubPanel(
     // ('follow' Genele uy | 'on' Açık | 'off' Kapalı). Karo üçlü döner.
     dynamicDp = true,
     dynamicDpMode = 'on',
+    // "Flex DP kilidi" bu pencerede etkinse (genel ya da pencerenin kendi ayarı) yoğunluk boyutlandırmada sabit kalır: karo bunu söyler.
+    dynamicDpLocked = false,
     // Genel "Gerçek çözünürlük" kapalıyken yoğunluk politikası hiçbir pencereye uygulanmaz: karo kapalı görünür ve bunu söyler.
     dynamicResolutionOff = false,
     onDynamicDp,
@@ -72,9 +74,11 @@ export const HubPanel = forwardRef(function HubPanel(
   const dynamicDpChoice = dynamicDpMode === 'follow' ? t('window.genele_uy') : dynamicDpMode === 'off' ? t('common.kapali_2') : t('common.acik_2');
   const dynamicDpHint = dynamicResolutionOff
     ? `${dynamicDpChoice} · ${t('settings.gercek_cozunurluk_kapali')}`
-    : dynamicDpMode === 'follow'
-      ? `${dynamicDpChoice} · ${dynamicDp ? t('common.acik_2') : t('common.kapali_2')}`
-      : dynamicDpChoice;
+    : dynamicDpLocked
+      ? `${dynamicDpChoice} · ${t('taskbar.kilitli')}`
+      : dynamicDpMode === 'follow'
+        ? `${dynamicDpChoice} · ${dynamicDp ? t('common.acik_2') : t('common.kapali_2')}`
+        : dynamicDpChoice;
   const isCrop = variant === 'workspace-crop';
   return (
     <motion.div

@@ -159,6 +159,7 @@ export function useWindowHub({
     reloadingPage,
     dynamicDp: dpStatus.active,
     dynamicDpMode: dpStatus.mode,
+    dynamicDpLocked: dpStatus.locked,
     dynamicResolutionOff: dpStatus.resolutionOff,
     onDynamicDp: () => useWindowStore.getState().cycleDynamicDp(win.id),
     onKeymap: hasKeymapEditor ? openKeymapEditor : undefined,

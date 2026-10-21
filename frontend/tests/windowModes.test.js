@@ -267,6 +267,42 @@ describe('DPI politikası pencere başına, kalıcı ve dışlaşmalı', () => {
     expect(winOf(id).dpiPolicy).toEqual({ mode: 'auto' });
   });
 
+  // Field report 2026-10-21: Hub "Dinamik DP: Açık" + pencerenin "Flex DP kilidi: Kilitli" → yeniden boyutlandırınca dp gelmiyor, "Oto"ya
+  // basınca geliyor. Oto'yu açıkça seçmek bu pencerenin kilidini bırakır; genel ayara dokunulmaz.
+  it('Oto seçimi pencerenin kendi DP kilidini bırakır (genel kilit kapalıysa katman silinir)', async () => {
+    settings.dynamic_resolution_enabled = true;
+    settings.dp_lock_enabled = false;
+    const id = await openWindowed();
+    await useWindowStore.getState().setWindowOverride(id, 'dp_lock_enabled', true, { apply: false });
+    expect(winOf(id).overrides).toEqual({ dp_lock_enabled: true });
+
+    await useWindowStore.getState().setWindowDpiPolicy(id, { mode: 'auto' });
+    expect(winOf(id).overrides ?? {}).toEqual({});
+    expect(getSavedAppGeometry(APP.package)?.overrides ?? {}).toEqual({});
+    expect(settings.dp_lock_enabled).toBe(false);                 // genel ayar değişmedi
+  });
+
+  it('genel kilit AÇIKKEN Oto seçimi yalnız bu pencereye "Serbest" yazar', async () => {
+    settings.dynamic_resolution_enabled = true;
+    settings.dp_lock_enabled = true;
+    const id = await openWindowed();
+    await useWindowStore.getState().setWindowDpiPolicy(id, { mode: 'auto' });
+    expect(winOf(id).overrides).toEqual({ dp_lock_enabled: false });
+    expect(settings.dp_lock_enabled).toBe(true);
+  });
+
+  it('kilit yoksa Oto seçimi pencere ayarlarına dokunmaz; özel DPI seçimi kilidi bırakmaz', async () => {
+    settings.dynamic_resolution_enabled = true;
+    const free = await openWindowed();
+    await useWindowStore.getState().setWindowDpiPolicy(free, { mode: 'auto' });
+    expect(winOf(free).overrides ?? {}).toEqual({});
+
+    const locked = await openWindowed(APP_B);
+    await useWindowStore.getState().setWindowOverride(locked, 'dp_lock_enabled', true, { apply: false });
+    await useWindowStore.getState().setWindowDpiPolicy(locked, { mode: 'custom', dpi: 300 });
+    expect(winOf(locked).overrides).toEqual({ dp_lock_enabled: true });   // yalnız Oto "boyuta uy" demektir
+  });
+
   it('"Genele uy": genel ayar değişince bu pencere de değişir, kendi politikası olanlar değişmez', async () => {
     const follower = await openWindowed();
     const pinned = await openWindowed({ package: 'com.app.b', display_name: 'B' });

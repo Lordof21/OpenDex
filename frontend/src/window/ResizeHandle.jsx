@@ -615,16 +615,30 @@ function Grip({ id, className, win, isHeaderOpen = false, onHoverChange, onResiz
       const policy = policyFor(settings);
       const isDpLocked = Boolean(settings?.dp_lock_enabled);
       const dpiHeld = d.dpiHeld ?? resolveHeldDpi(settings, d);
+      // The ideal density comes from the SAME function the DeX/Hub "Oto" button and every settings change use
+      // (windowModel.targetDisplaySizeForWindow), for the box the window was released at — never from a second formula. Two formulas
+      // is how "I resize and nothing changes, I press Oto and it changes" happens: the release kept the held density while
+      // the button asked a different function for the same window.
+      const idealGeometry = targetDisplaySizeForWindow(
+        useWindowStore.getState().windows.find((w) => w.id === win.id) || win,
+        settings, { w: finalGeo.w, h: finalGeo.h }, { mode: 'normal', ignoreDpLock: true, policy },
+      );
+      const dpiIdeal = idealGeometry?.dpi > 0 ? idealGeometry.dpi : resolveDpi(policy, settings.resolution_mode, target.w, target.h, finalGeo.w);
       let dpiToCommit = dpiHeld;
+      let dpiReason = isDpLocked ? 'kilit' : 'tutulan';
 
-      if (!isDpLocked) {
-        const dpiIdeal = resolveDpi(policy, settings.resolution_mode, target.w, target.h, finalGeo.w);
-        if (shouldReevaluateDpi({
-          held: dpiHeld, ideal: dpiIdeal, w: target.w, h: target.h, settingsChanged: Boolean(d.settingsDpiDrifted),
-        })) {
-          dpiToCommit = dpiIdeal;
-        }
+      if (!isDpLocked && shouldReevaluateDpi({
+        held: dpiHeld, ideal: dpiIdeal, w: target.w, h: target.h, settingsChanged: Boolean(d.settingsDpiDrifted),
+      })) {
+        dpiToCommit = dpiIdeal;
+        dpiReason = 'ideal';
       }
+      // One line per release, shipped to the backend log: WHY this density went out (lock, held or ideal) and where the lock came from.
+      logger.info('resizedpi', 'release', {
+        win: win.id, held: dpiHeld, ideal: dpiIdeal, commit: dpiToCommit, reason: dpiReason, locked: isDpLocked,
+        lockFrom: 'dp_lock_enabled' in (useWindowStore.getState().windows.find((w) => w.id === win.id)?.overrides || {}) ? 'pencere' : 'genel',
+        policy: policy?.mode, mode: settings.resolution_mode, w: target.w, h: target.h,
+      });
 
       // Release is authoritative: commit the exact final size and chosen DPI in a single atomic request,
       // eliminating back-to-back double commit and unnecessary DPI jumping.

@@ -107,10 +107,16 @@ export function dynamicDpModeOf(win) {
  */
 export function dynamicDpStatusOf(win, settings) {
   const resolutionOff = settings?.dynamic_resolution_enabled === false;
+  const policyMode = dpiPolicyOf(win, settings).mode;
+  // "Flex DP kilidi" (genel ayar ya da pencerenin kendi üst katmanı) boyutlandırmada yoğunluğu SABİT tutar: politika "Açık" bile olsa
+  // pencere yeniden boyutlanınca dp değişmez. Karo bunu söylemeden "Açık" gösterirse DeX Ayarları'ndaki kilitle çelişir ("Oto açık ama dp
+  // gelmiyor"). Özel DPI politikasında kilit zaten anlamsız (özel DPI sabittir), orada ayrıca belirtilmez.
+  const locked = !resolutionOff && policyMode !== 'custom' && Boolean(settingsForWindow(win, settings)?.dp_lock_enabled);
   return {
-    active: !resolutionOff && dpiPolicyOf(win, settings).mode !== 'custom',
+    active: !resolutionOff && policyMode !== 'custom' && !locked,
     mode: dynamicDpModeOf(win),
     resolutionOff,
+    locked,
   };
 }
 

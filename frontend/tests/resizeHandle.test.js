@@ -676,6 +676,29 @@ describe('Grip — Smart Resolution Buckets wiring', () => {
       expect(calls[0][1].dpi).toBe(found.ideal);
     });
 
+    // Field report 2026-10-21: "Oto açık, DP kilidi kapalı, pencereyi boyutlandırıyorum: dp değişmiyor; sonra Oto'ya basınca değişiyor".
+    // Aynı pencere, aynı ayar: bırakma yolu ile "Oto'ya bas" yolu AYNI dpi'yı üretmeli.
+    it('Dinamik-Fix + Oto + kilit kapalı: bırakınca tutulan dpi değil, yeni boyutun oto dpi değeri gider (Oto tuşuna basmak gerekmez)', async () => {
+      mockSettingsAndResize('dynamic_fix', { dp_lock_enabled: false });
+      const STALE_DPI = 205;
+      const win = seedFit({ deviceW: 800, deviceH: 450, dpi: STALE_DPI }, { flexSupported: true });
+      const grip = renderSeGrip(win);
+
+      firePointer('pointerdown', grip, { clientX: 0, clientY: 0 });
+      await flush();
+      firePointer('pointermove', grip, { clientX: -500, clientY: -280 });
+      firePointer('pointerup', grip, { clientX: -500, clientY: -280 });
+      await flush();
+
+      const calls = resizePostCalls();
+      expect(calls.length).toBeGreaterThanOrEqual(1);
+      const last = calls[calls.length - 1][1];
+      const fit = fitFor(1200 - 500, 675 - 280);
+      const ideal = calculateDynamicFitDpi(fit.w, fit.h, 0, 1200 - 500);
+      expect(ideal).not.toBe(STALE_DPI);                        // the fixture really differs from the held density
+      expect(last.dpi).toBe(ideal);
+    });
+
     it('a tiny drift that crosses the tablet threshold still commits the ideal density (layout class)', () => {
       // 632 px kısa kenar: 172 dpi'da 588 dp (telefon), 168 dpi'da 602 dp (tablet); sapma yalnız %2,3 (< %3)
       expect(layoutClassOf(1100, 632, 172)).not.toBe(layoutClassOf(1100, 632, 168));
