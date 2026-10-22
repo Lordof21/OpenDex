@@ -150,7 +150,9 @@ pub fn shutdown_backend(app: &AppHandle) {
             std::thread::sleep(Duration::from_millis(100));
         }
     }
-    if let Some(child) = state.0.lock().unwrap().take() {
+    // The guard is a temporary of the `if let` scrutinee; taking the child first drops it before `state` does.
+    let child = state.0.lock().unwrap().take();
+    if let Some(child) = child {
         if !EXITED.load(Ordering::SeqCst) {
             log::warn!("[sidecar] Backend did not end in time — killing it");
             let _ = child.kill();
