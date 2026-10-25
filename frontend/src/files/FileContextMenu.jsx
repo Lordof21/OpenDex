@@ -49,7 +49,7 @@ export default function FileContextMenu({ menu, x, y, bounds, onPick, onClose })
     <AnimatePresence>
       <MenuSurface
         key="files-menu"
-        ref={ref}
+        surfaceRef={ref}
         aria-label={t('files.dosya_menusu')}
         onKeyDown={onKeyDown}
         onContextMenu={(e) => e.preventDefault()}

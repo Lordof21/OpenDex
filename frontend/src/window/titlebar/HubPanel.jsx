@@ -246,15 +246,23 @@ export const HubPanel = forwardRef(function HubPanel(
   );
 });
 
-function HubAction({ icon, label, detail, onClick, trailing, emphasized = false, disabled = false }) {
+// Pencere hub'ının ve Workspace görev hub'ının ORTAK satır/döşeme dili (WorkspaceTaskHub aynı bileşenleri kullanır).
+// `choice`: seçmeli satır (aria-pressed; `checked` = seçili, tik gösterir). `destructive`: geri alınamaz eylem.
+// `compact`: küçük pencere — tek satır, açıklama yalnız ipucunda.
+export function HubAction({ icon, label, detail, onClick, trailing, emphasized = false, disabled = false, destructive = false, choice = false, checked = false, compact = false, testId }) {
   return (
     <button
       type="button"
+      data-testid={testId}
       disabled={disabled}
       aria-busy={disabled || undefined}
+      aria-pressed={choice ? checked : undefined}
+      title={compact ? detail : undefined}
       className={cn(
-        'flex h-auto w-full items-center justify-start gap-3 rounded-md px-2 py-2.5 text-left transition-colors hover:bg-accent cursor-pointer disabled:cursor-progress disabled:opacity-70 disabled:hover:bg-transparent',
-        emphasized && 'bg-secondary'
+        'flex h-auto w-full items-center justify-start gap-3 rounded-md px-2 text-left transition-colors hover:bg-accent cursor-pointer disabled:cursor-progress disabled:opacity-70 disabled:hover:bg-transparent',
+        compact ? 'py-1.5' : 'py-2.5',
+        (emphasized || checked) && 'bg-secondary',
+        destructive && 'hover:bg-destructive/10'
       )}
       onPointerDown={(e) => e.stopPropagation()}
       onClick={(e) => {
@@ -262,25 +270,31 @@ function HubAction({ icon, label, detail, onClick, trailing, emphasized = false,
         onClick?.(e);
       }}
     >
-      <span className="grid size-8 shrink-0 place-items-center rounded-sm bg-muted text-muted-foreground">
+      <span className={cn('grid size-8 shrink-0 place-items-center rounded-sm bg-muted text-muted-foreground', destructive && 'bg-destructive/10 text-destructive')}>
         {icon}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block text-xs font-medium">{label}</span>
-        <span className="block truncate text-[10px] font-normal text-muted-foreground">{detail}</span>
+        <span className={cn('block text-xs font-medium', destructive && 'text-destructive')}>{label}</span>
+        {detail && !compact && <span className="block truncate text-[10px] font-normal text-muted-foreground">{detail}</span>}
       </span>
+      {checked && (
+        <span className="grid size-4 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground" aria-hidden="true">
+          <Check className="size-2.5" strokeWidth={3.5} />
+        </span>
+      )}
       {trailing && <span className="text-muted-foreground">{trailing}</span>}
     </button>
   );
 }
 
-function HubTile({ icon, label, hint, active, onClick, className, badge, testId }) {
+export function HubTile({ icon, label, hint, active, onClick, className, badge, testId, compact = false }) {
   return (
     <button
       type="button"
       data-testid={testId}
       className={cn(
-        'relative flex min-h-[74px] min-w-0 flex-col items-center justify-center gap-1.5 overflow-hidden rounded-md px-2 py-2 text-center transition-all cursor-pointer',
+        'relative flex min-w-0 overflow-hidden rounded-md px-2 py-2 text-center transition-all cursor-pointer',
+        compact ? 'min-h-9 flex-row items-center justify-center gap-2' : 'min-h-[74px] flex-col items-center justify-center gap-1.5',
         active
           ? 'bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:text-primary-foreground'
           : 'bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground',
@@ -294,10 +308,10 @@ function HubTile({ icon, label, hint, active, onClick, className, badge, testId 
       aria-pressed={active}
       aria-label={`${label}: ${active ? t('common.acik') : t('common.kapali')}`}
     >
-      <span className="grid size-7 shrink-0 place-items-center rounded-full bg-background/20">
+      <span className={cn('grid shrink-0 place-items-center rounded-full bg-background/20', compact ? 'size-6' : 'size-7')}>
         {icon}
       </span>
-      <span className="line-clamp-2 w-full whitespace-normal text-[10px] font-semibold leading-[13px]">
+      <span className={cn('line-clamp-2 whitespace-normal text-[10px] font-semibold leading-[13px]', compact ? 'min-w-0 truncate' : 'w-full')}>
         {label}
       </span>
       {hint && <span className="-mt-1 line-clamp-2 w-full whitespace-normal text-[9px] leading-[11px] opacity-80">{hint}</span>}

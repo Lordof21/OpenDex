@@ -6,10 +6,12 @@ import { Check } from 'lucide-react';
 import { cn } from '../lib/utils.js';
 import { menuVariants } from './motion.js';
 
-export const MenuSurface = forwardRef(function MenuSurface({ className, children, ...props }, ref) {
+// `surfaceRef`: AnimatePresence'in doğrudan çocuğuna `ref` verilmez — framer-motion bunu props.ref olarak da okur ve React 18.3 dev'de
+// "`ref` is not a prop" uyarısı basar. AnimatePresence içinde yüzeye erişmek için `ref` yerine `surfaceRef` kullanılır.
+export const MenuSurface = forwardRef(function MenuSurface({ className, children, surfaceRef, ...props }, ref) {
   return (
     <motion.div
-      ref={ref}
+      ref={surfaceRef ?? ref}
       role="menu"
       variants={menuVariants}
       initial="initial"

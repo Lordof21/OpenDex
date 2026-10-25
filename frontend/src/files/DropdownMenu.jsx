@@ -42,7 +42,7 @@ export default function DropdownMenu({ label, trigger, align = 'start', width = 
         {open && (
           <MenuSurface
             key="dropdown"
-            ref={surface}
+            surfaceRef={surface}
             aria-label={label}
             onKeyDown={onKeyDown}
             className={cn('absolute top-full z-40 mt-1', align === 'end' ? 'right-0' : 'left-0')}

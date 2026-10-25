@@ -401,17 +401,7 @@
   }
   .island-halo { background: radial-gradient(closest-side, color-mix(in oklab, var(--island-tone) 45%, transparent), transparent); }
   .taskbar-surface {
-    box-shadow: inset 0 1px 0 var(--taskbar-inset), var(--shadow-taskbar);
-  }
-  .taskbar-surface::before {
-    content: "";
-    position: absolute;
-    inset-inline: 0;
-    top: -22px;
-    height: 22px;
-    pointer-events: none;
-    background: linear-gradient(to bottom, transparent, var(--taskbar-upper-fade));
-    mask-image: linear-gradient(to bottom, transparent, black);
+    box-shadow: inset 0 1px 0 var(--taskbar-inset);
   }
   .mixer-surface { box-shadow: inset 0 1px 0 var(--mixer-track-highlight); }
   .mixer-track { box-shadow: inset 0 1px 3px var(--mixer-track-shadow), inset 0 1px 0 var(--mixer-track-highlight); }
@@ -492,7 +482,7 @@
   0%, 100% { transform: scaleY(0.3); }
   50% { transform: scaleY(1); }
 }
-/* ── Medya merkezi "Afiş" (MEDYA_MERKEZI_TASARIM_PLANI.md) ── yalnız transform/opacity canlanır; hiçbir blur canlanmaz.
+/* ── Medya merkezi "Afiş" (docs/design/MEDIA_CENTER.md) ── yalnız transform/opacity canlanır; hiçbir blur canlanmaz.
    --media-surface : panel zemini = popover + kapak renginin %9'u (kapaktan renk alan kâğıt)
    --media-on-ink  : vurgu renginin (oynat düğmesi) üstündeki simge; kapak rengi L=0.6 sabit olduğundan açık renk,
                      kapak yoksa vurgu sistemin --primary'sidir ve onun karşıtı kullanılır (koyu temada koyu simge). */

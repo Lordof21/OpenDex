@@ -711,7 +711,7 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
       <nav
         ref={navRef}
         aria-label={tt('taskbar.dex_gorev_cubugu')}
-        className="taskbar-surface relative grid h-[50px] w-full grid-cols-[1fr_auto_1fr] items-center border-t border-taskbar-border bg-taskbar px-2.5 shadow-taskbar backdrop-blur-2xl sm:px-3"
+        className="taskbar-surface relative grid h-[50px] w-full grid-cols-[1fr_auto_1fr] items-center border-t border-taskbar-border bg-taskbar px-2.5 backdrop-blur-2xl sm:px-3"
       >
         {/* LEFT: Media Player Widget */}
         <div ref={leftRef} className="flex min-w-0 items-center justify-start">
