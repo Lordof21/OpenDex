@@ -1,6 +1,7 @@
 # Documentation screenshots
 
 Regenerates every image in [`docs/images/`](../../docs/images/) from the **real frontend** — no phone, no backend, no network.
+(The pictures in [`docs/images/live/`](../../docs/images/live/), used by the root README, are taken by hand on a real phone and are never touched by this tool.)
 
 ```bash
 cd frontend && npm ci && cd ..        # once
@@ -23,7 +24,7 @@ and Python 3 with Pillow (the captures are published as WebP: 150–200 KB inste
 The imaginary phone is "Example Phone" with fictional apps (`com.example.*`) — no real device, account, network, track or person
 appears. App icons are generated letters; thumbnails are gradients; addresses are RFC 5737 documentation addresses.
 
-The UI is Turkish today, so the screenshots are too; the sample notifications and apps are English so the pictures read either way.
+The generated screenshots use the source language of the UI (Turkish); the sample notifications and apps are English so the pictures read either way.
 
 ## Why it is trustworthy
 

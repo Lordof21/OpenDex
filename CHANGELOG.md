@@ -6,10 +6,16 @@ is in `git log` (mostly in Turkish).
 ## [Unreleased]
 
 ### Added
+- Multi-app sound (the phone's "several apps play at once" flag): Settings › Sound card with the live state, the time of the last reading and a **Check again** button; one-click, read-back-verified **Turn on** (policy *Ask* by default, *Always*, *Never*); restored when the last window closes; a once-per-run offer when one app pauses another; a mixer pill and a DeX panel shortcut. New daemon command `audio_multi_focus` (rebuild the helper jar), `GET/POST/PUT /api/audio/multi-focus`, event `multi_audio_focus_update`, setting `multi_audio_focus_policy` ([design/MULTI_APP_SOUND.md](docs/design/MULTI_APP_SOUND.md)).
 - First public documentation set: README (EN/TR), install, architecture, API (with a generated OpenAPI 3.1 document and reference), configuration reference, phone-helper protocol, audio, security model, testing, troubleshooting, FAQ, roadmap.
 - `tools/screenshots`: documentation images generated from the real UI against sample data.
 - `OPENDEX_NO_OBFUSCATE=1` / `build_release.py --no-obfuscate` for plain, debuggable builds.
 - Drift tests that fail when generated documentation, the OpenAPI document, the sample-data fixtures or the daemon-protocol tables fall out of step with the code.
+
+### Fixed
+- The OpenDeX Settings window now shows in the taskbar like any other task (icon, open / active / minimized state; click minimizes or restores it) — the entry was missing, so it never appeared.
+- "Maximize" on the Settings window no longer slides under the taskbar: its stage ends above the taskbar strip (and follows a screen resize).
+- `Ctrl` + mouse wheel (and `Ctrl` `+` / `-` / `0`, touchpad pinch) zooms the desktop UI in the native window like in Chrome (`zoomHotkeysEnabled`; WebView2's zoom control was off). Over a phone window `Ctrl` + wheel is still the pinch gesture sent to the phone.
 
 ### Changed
 - Device manager (docs/design/DEVICE_MANAGER.md): a phone's USB and Wi-Fi links are one device (the backend reads each link's ANDROID_ID once: `DeviceInfo.android_id`), saved devices are matched to it by identity instead of a guessed `ip:port`, and adb's own state (unauthorized, offline) reaches the UI with what to do about it. The Device Center has a USB | Wi-Fi link switcher with an in-progress state, inline confirmations (closing windows, forgetting), a right-click / ⋯ / Shift+F10 menu (connect, switch link, disconnect, rename, copy serial or IP, forget) and in-place renaming (`PATCH /api/devices/known/{android_id}`, `KnownDevice.alias`). One "Cihaz bağla" dialog replaces the QR panel: my devices (plugged in, on the network, saved, USB instructions) next to the pairing methods.

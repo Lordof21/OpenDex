@@ -2,123 +2,76 @@
 
 # OpenDeX
 
-**Turn your Android phone into a multi-window desktop on your computer.**
-Every app runs in its own window — resizable, side by side — with its own sound, a taskbar, a launcher, a file manager and your notifications.
+**Your Android phone as a multi-window desktop on Windows.**
+Every app in its own resizable window — with its own sound, a taskbar, a file manager and your notifications.
 
 [![License: GPL v3](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 ![Status](https://img.shields.io/badge/status-pre--1.0-orange)
 ![Desktop](https://img.shields.io/badge/desktop-Windows-lightgrey)
 ![Android](https://img.shields.io/badge/Android-10%2B-green)
-[![Backend CI](https://github.com/Lordof21/OpenDex/actions/workflows/backend-ci.yml/badge.svg)](https://github.com/Lordof21/OpenDex/actions/workflows/backend-ci.yml)
 
-[Download](#download) · [Install](docs/INSTALL.md) · [Documentation](docs/README.md) · [API](docs/API.md) · [Architecture](docs/ARCHITECTURE.md) · [Contributing](CONTRIBUTING.md) · [Türkçe](README.tr.md)
+[Download](#download) · [Install](docs/INSTALL.md) · [Documentation](docs/README.md) · [Türkçe](README.tr.md)
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/hero-dark.webp">
-  <img alt="OpenDeX: three phone apps (a video app, a notes app and a chat app) in resizable windows on a desktop with a taskbar" src="docs/images/hero-light.webp" width="900">
-</picture>
-
-<sub>Real OpenDeX interface; the phone apps in the windows are sample illustrations — see [how the screenshots are made](tools/screenshots/README.md).</sub>
+<img alt="OpenDeX: several phone apps in resizable windows on a Windows desktop with a taskbar" src="docs/images/live/hero.webp" width="900">
 
 </div>
 
-## Download
+## Hand an app over, take it back
 
-**Windows (x64)** — take the latest build from the [`download/`](download/) folder of this repository (checksums in `SHA256SUMS.txt`) or from the [Releases page](https://github.com/Lordof21/OpenDex/releases):
+<!-- TODO: add docs/images/live/handoff.gif (6-10 s: app in a PC window -> "Send to phone" -> phone screen -> back), then uncomment:
+<div align="center">
+<img alt="An app moves from its PC window to the phone's own screen and back" src="docs/images/live/handoff.gif" width="760">
+</div>
+-->
 
-| File | What it is |
-|---|---|
-| `OpenDeX_0.1.0_x64_tr-TR.msi` | Installer |
-| `OpenDeX_0.1.0_windows-x64_portable.zip` | Portable — unzip and run `opendex.exe`; nothing is installed |
+Screen mirroring shows the phone's *one* screen in *one* window. OpenDeX gives **each app its own virtual display** and its own window, so apps run side by side — and one click
+hands a running app to the phone's screen and back. Nothing is installed on the phone and no root is needed; OpenDeX drives it over `adb`, building on [scrcpy](https://github.com/Genymobile/scrcpy).
 
-Each release lists the SHA-256 checksums. The builds are **unsigned**, so Windows SmartScreen may warn (*More info → Run anyway*).
-You also need `adb` on your `PATH` and USB debugging on the phone — see [Install](docs/INSTALL.md). This is pre-1.0 software and the installer
-has not yet been tried on a clean machine ([what is verified](docs/DEVICE_COMPATIBILITY.md)). To build it yourself: [Building and releasing](docs/BUILD_AND_RELEASE.md).
-
-## What it is
-
-Screen mirroring shows your phone's *one* screen in *one* window. OpenDeX gives **each app its own virtual display** on the phone and shows it in **its own window** on the computer,
-so you can run several apps at once, resize them like desktop windows, hand one back to the phone and take it again. The phone's hardware encoder produces the video; nothing is installed on
-the phone and no root is needed — OpenDeX drives it over `adb`, building on [scrcpy](https://github.com/Genymobile/scrcpy)'s server.
-
-> **Status: pre-1.0.** Verified on one phone (Xiaomi POCO X7 Pro, Android 16) and on Windows. Expect rough edges elsewhere — [what is and is not verified](docs/DEVICE_COMPATIBILITY.md).
-> The interface is currently **Turkish only** (English is the first roadmap item); the code, API and documentation are English.
-
-## Features
+## What you get
 
 <table>
 <tr>
-<td width="50%"><img src="docs/images/launcher.webp" alt="App launcher"><br><b>Launcher & taskbar.</b> Every phone app, searchable (<kbd>Ctrl</kbd>+<kbd>K</kbd>), each opening in its own window.</td>
-<td width="50%"><img src="docs/images/workspace.webp" alt="Workspace with two freeform windows"><br><b>Workspace.</b> Several freeform tasks share one virtual display — no extra encoder per window.</td>
+<td width="50%"><img src="docs/images/live/window-hub.webp" alt="A window with its hub: send to the phone, fill the area, picture-in-picture, key layout, density"><br><b>One hub per window.</b> Send it to the phone, snap, picture-in-picture, key layout, density.</td>
+<td width="50%"><img src="docs/images/live/audio.webp" alt="Per-app audio mixer"><br><b>Sound per app.</b> Send each app to the phone, the PC or both, kept in step. <a href="docs/AUDIO.md">How</a></td>
 </tr>
 <tr>
-<td><img src="docs/images/audio-mixer.webp" alt="Per-app audio mixer"><br><b>Per-app audio.</b> Send each app's sound to the phone, the computer or both — kept in step, with a microphone-assisted calibration. <a href="docs/AUDIO.md">How</a></td>
-<td><img src="docs/images/files.webp" alt="File manager"><br><b>File manager.</b> Browse the phone and the PC, copy and move between them, resume big transfers, preview photos, video, PDF and Office files.</td>
+<td><img src="docs/images/live/files.webp" alt="File manager showing the phone and the PC with a transfer running"><br><b>Files.</b> Phone and PC side by side, resumable transfers, previews.</td>
+<td><img src="docs/images/live/media-center.webp" alt="Media center with the playing track and other streams"><br><b>Media Center.</b> Control whatever plays on the phone, pause all streams at once.</td>
 </tr>
 <tr>
-<td><img src="docs/images/media-center.webp" alt="Media center"><br><b>Media Center & notifications.</b> Control whatever is playing on the phone; open notifications from the desktop and reply where the app allows it.</td>
-<td><img src="docs/images/battery.webp" alt="Battery page"><br><b>Battery that tells the truth.</b> Health, who is charging how fast, time to full — a value the phone does not report is shown as "—", never invented.</td>
+<td><img src="docs/images/live/notifications.webp" alt="Notification center with a calendar"><br><b>Notifications.</b> Grouped by app; open or reply from the desktop.</td>
+<td><img src="docs/images/live/phone-load.webp" alt="Phone load panel with temperature and processor charts"><br><b>Phone Load.</b> CPU, temperature and what OpenDeX asks of the phone, in plain words.</td>
 </tr>
 <tr>
-<td><img src="docs/images/device-load.webp" alt="Phone load panel"><br><b>Phone Load.</b> CPU, temperature and what OpenDeX itself asks of the phone, with plain-language findings ("why is it warm?").</td>
-<td><img src="docs/images/pairing.webp" alt="Wireless pairing"><br><b>Wired or wireless.</b> USB, or QR / code pairing over Wi-Fi; switch between them without losing windows.</td>
+<td><img src="docs/images/live/quick-settings.webp" alt="Quick control center"><br><b>Quick controls.</b> Wi-Fi, Bluetooth, torch, volumes, default sound output.</td>
+<td><img src="docs/images/live/settings.webp" alt="OpenDeX settings overview with ready-made profiles"><br><b>Settings.</b> Ready-made profiles for quality, battery or a weak network.</td>
 </tr>
 </table>
 
-More: quick settings (Wi-Fi, Bluetooth, torch, volumes), a device centre, light and dark themes, window snapping, hand-off of an app to the phone and back, short-drop recovery
-(windows freeze on their last frame and resume), and a [boot screen](docs/images/boot.webp) that shows what is actually happening.
+## Download
 
-## Quick start
+**Windows (x64)** — from the [`download/`](download/) folder or the [Releases page](https://github.com/Lordof21/OpenDex/releases) (checksums in `SHA256SUMS.txt`):
 
-1. Install Android **platform-tools** (`adb`) and turn on **USB debugging** on the phone (Android 10+).
-2. Install OpenDeX — or run it from source (below). *No release has been published yet; see [BUILD_AND_RELEASE.md](docs/BUILD_AND_RELEASE.md).*
-3. Plug the phone in, accept the prompt, open OpenDeX. No phone yet? The pairing dialog opens.
+* `OpenDeX_0.1.0_x64_tr-TR.msi` — installer
+* `OpenDeX_0.1.0_windows-x64_portable.zip` — unzip and run `opendex.exe`
 
-Full steps, requirements per Android version and first-run help: **[docs/INSTALL.md](docs/INSTALL.md)**.
+The builds are **unsigned**, so SmartScreen may warn (*More info → Run anyway*).
 
-### From source
+## Get started
 
-```bash
-# backend → http://127.0.0.1:8710                      # frontend → http://localhost:5173
-cd backend                                              cd frontend
-python -m pip install -e ".[dev]"                       npm ci
-python -m app.main                                      npm run dev
-```
+1. Install Android **platform-tools** (`adb`) and turn on **USB debugging** on the phone.
+2. Install OpenDeX, plug the phone in, accept the prompt.
+3. Open OpenDeX and pick an app. No cable? The pairing dialog does QR / code pairing over Wi-Fi.
 
-Python 3.11+, Node 18+, `adb` on `PATH`. More (native window, tests, conventions): **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**.
+Details and per-Android-version notes: **[docs/INSTALL.md](docs/INSTALL.md)**. From source: **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**.
 
-## How it fits together
+> **Pre-1.0.** Verified on one phone (Xiaomi POCO X7 Pro, Android 16) — [what is verified](docs/DEVICE_COMPATIBILITY.md). The interface speaks **20 languages** (machine-translated, not yet reviewed by native speakers — [translating](docs/TRANSLATING.md)); code, API and docs are English.
 
-```
- React UI (Tauri window) ⇄  REST /api/v1 + WebSockets  ⇄  Python backend  ⇄ adb ⇄  scrcpy-server × N  +  OpenDexDaemon
-   windows · taskbar · files                (local, token)      sessions, relay       (one per window)       (one helper process)
-```
+## More
 
-The backend is a **local HTTP/WebSocket API** — the bundled UI is just one client of it, so you can script OpenDeX or write your own client.
-What the API, the OpenAPI file and the WebSockets are for: **[docs/API.md](docs/API.md)**. The parts and how a window goes from "click" to pixels: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+[Troubleshooting](docs/TROUBLESHOOTING.md) · [FAQ](docs/FAQ.md) · [Architecture](docs/ARCHITECTURE.md) · [API](docs/API.md) · [Security model](docs/SECURITY_MODEL.md) · [Roadmap](docs/ROADMAP.md) · [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md)
 
-## Privacy and security
+Local only: no accounts, no cloud, no telemetry. The backend is a local HTTP/WebSocket API — the UI is one client of it ([API](docs/API.md)).
 
-Local only: no accounts, no cloud, no telemetry, no update check. The API listens on loopback and is protected by an Origin/Host guard (other web pages) and a bearer token (other programs);
-the phone helper authenticates mutually with the backend. OpenDeX does enable a few Android *developer multi-window* settings that stay on — read
-[docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md) before you rely on it. Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
-
-## Documentation
-
-| | |
-|---|---|
-| Use it | [Install](docs/INSTALL.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [FAQ](docs/FAQ.md) · [Device compatibility](docs/DEVICE_COMPATIBILITY.md) |
-| Understand it | [Architecture](docs/ARCHITECTURE.md) · [Audio](docs/AUDIO.md) · [Security model](docs/SECURITY_MODEL.md) |
-| Build on it | [API](docs/API.md) · [API reference](docs/api/REFERENCE.md) · [OpenAPI](docs/api/openapi.json) · [Configuration](docs/CONFIGURATION.md) |
-| Change it | [Development](docs/DEVELOPMENT.md) · [Testing](docs/TESTING.md) · [Phone helper protocol](docs/DAEMON_PROTOCOL.md) · [Build & release](docs/BUILD_AND_RELEASE.md) |
-| Where it is going | [Roadmap](docs/ROADMAP.md) · [Changelog](CHANGELOG.md) |
-
-## Contributing
-
-Bug reports, phone-compatibility reports and pull requests are welcome — start with [CONTRIBUTING.md](CONTRIBUTING.md) and the [code of conduct](CODE_OF_CONDUCT.md). A change that touches the window
-manager, the audio path or the phone helper needs a check on a real phone ([checklist](docs/DEVICE_CHECKLIST.md)).
-
-## License
-
-[GPL-3.0-or-later](LICENSE). OpenDeX builds on [scrcpy](https://github.com/Genymobile/scrcpy) (Apache-2.0) and other open-source components —
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). "Android" is a trademark of Google LLC; OpenDeX is not affiliated with or endorsed by Google, Samsung or Genymobile.
+[GPL-3.0-or-later](LICENSE). Builds on [scrcpy](https://github.com/Genymobile/scrcpy) (Apache-2.0) and other open-source components — [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+"Android" is a trademark of Google LLC; OpenDeX is not affiliated with or endorsed by Google, Samsung or Genymobile.
