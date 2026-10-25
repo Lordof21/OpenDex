@@ -5,7 +5,7 @@
 //   dpad : scheme ('wasd' | 'esdf' | 'arrows'), radius (GERÇEK menzil), walkKey + walkScale (yürü: itmeyi ölçekler)
 //   look : radius, sensX, sensY, invertY
 //   her düğüm: enabled (varsayılan açık) — devre dışı düğüm düzende KALIR ama motor ve HUD onu yok sayar (geçici kapatmak için)
-// Tasarım: OYUN_TUS_DUZENI_TASARIM_PLANI.md
+// Tasarım: docs/design/KEYMAPPER.md
 
 export const NODE_TYPES = Object.freeze(['tap', 'dpad', 'look']);
 

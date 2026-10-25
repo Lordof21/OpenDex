@@ -8,6 +8,7 @@ Find your symptom, check the likely cause, then look at the log. The backend log
 | Symptom | Likely cause and fix |
 |---|---|
 | Boot screen stays on **"Çekirdek servisi — Başlatılıyor…"**, then an error | The backend did not answer on `127.0.0.1:8710`. Another program holds the port (OpenDeX only stops a previous OpenDeX backend, never someone else's process), or the sidecar was not found (development: start `python -m app.main` yourself). |
+| `ModuleNotFoundError: app` when starting the backend by hand | The command is not run from the `backend/` folder (`python -m app.main` looks for the `app` package in the current folder; `npm` likewise needs `frontend/`). |
 | `adb` not found | Install Android platform-tools and put them on `PATH`, or set `OPENDEX_ADB_PATH`. |
 | Everything returns **401** after you restarted the backend | The UI re-reads the token on a 401 once; if you run the dev server, restart it too (it reads `~/.opendex/api-token` at start). |
 | A request from your own script gets **403** | It sent an `Origin` header (browsers do) or a non-loopback `Host`. Curl and scripts should send neither — [API.md → browser protection](API.md#browser-protection-origin-and-host). |
@@ -47,6 +48,7 @@ Find your symptom, check the likely cause, then look at the log. The backend log
 | **Echo** with *İkisi* | The two copies are apart: use *Telefon–DeX ince ayarı → Oto* (microphone calibration) or adjust by ear. See [AUDIO.md](AUDIO.md#fine-tune-and-automatic-calibration). |
 | Sound **chops** on Wi-Fi | The link delivers unevenly. The player lengthens its cushion after each gap, so it settles within seconds; a USB cable or a better 5 GHz link removes the cause. See [AUDIO.md](AUDIO.md#weak-or-unstable-links). |
 | Sound plays twice | Two tabs/windows of the UI: the newest listener wins; close the other. |
+| One app **stops** when another starts playing | Android gives the audio focus to one app at a time. Turn on *Settings › Sound › Multi-app sound* (the mixer shows a pill while it is off). If it says *Not applied* or *Not supported*, the phone refused the change or the phone helper is old — reconnect OpenDeX. If the flag is **On** and apps still pause each other (HyperOS adds its own focus handling), close the background apps on the phone to free its memory — that fixed it on one phone; [AUDIO.md](AUDIO.md#several-apps-playing-at-once-multi-app-sound). |
 
 ## Files
 

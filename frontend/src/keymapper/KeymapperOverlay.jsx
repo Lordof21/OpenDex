@@ -3,7 +3,7 @@
 //   · Düzenleme (isEditing=true): Atölye (editor/Workbench.jsx) — sürükle-bırak, denetçi, şablonlar, test modu.
 //
 // Kaplama kabın tamamına değil, VİDEONUN GERÇEKTEN ÇİZİLDİĞİ dikdörtgene oturur (`fit`: pencerenin görüntü ölçeği). Böylece harf kutulu
-// ya da yakınlaştırılmış görüntüde bile çizilen nokta, motorun telefonda vurduğu pikselle aynıdır. Tasarım: OYUN_TUS_DUZENI_TASARIM_PLANI.md
+// ya da yakınlaştırılmış görüntüde bile çizilen nokta, motorun telefonda vurduğu pikselle aynıdır. Tasarım: docs/design/KEYMAPPER.md
 import { useEffect, useMemo, useRef } from 'react';
 import { layoutKey, useKeymapStore } from './keymapStore.js';
 import { pushEscapeHandler } from '../lib/escapeStack.js';

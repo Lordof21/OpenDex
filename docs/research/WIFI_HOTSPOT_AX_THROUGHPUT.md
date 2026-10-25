@@ -1,3 +1,7 @@
+> **Language note:** Turkish (translation is on the [roadmap](../ROADMAP.md)). Why file pull slows down when the phone hotspot runs 802.11ax.
+
+> Durum: ölçüm raporu (2026-10-12); öneri hotspot'ta ax'ı kapalı tutmak.
+
 # Hotspot'ta 802.11ax (Wi-Fi 6) açıkken dosya aktarımı neden yavaşlıyor?
 
 Tarih: 2026-10-12 · Cihazlar: POCO X7 Pro (HyperOS 3 / Android 16, MediaTek, Wi-Fi A-die `0x6637`) hotspot'u → laptop

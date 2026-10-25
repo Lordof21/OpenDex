@@ -1,3 +1,5 @@
+> **Language note:** Turkish (translation is on the [roadmap](../ROADMAP.md)). Design of the game key-mapping editor ('Game Station').
+
 # Oyun Tuş Düzeni — "Game Station" Tasarım Planı
 
 Durum: 2026-10-15 · Sahibi: ürün · Kapsam: `frontend/src/keymapper/*` (+ `useMouseLook`, `VideoCanvas`, `WorkspaceTaskFrame`)

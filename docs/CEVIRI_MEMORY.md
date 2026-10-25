@@ -1,5 +1,7 @@
 # Çeviri hafızası (CEVIRI_MEMORY)
 
+> Yaşayan çalışma listesi: çeviri bekleyen anahtarlar ve çeviri turu akışı. Sürecin genel anlatımı: [TRANSLATING.md](TRANSLATING.md).
+
 Arayüz metinleri 20 dilde (`frontend/src/locales/*.json`): **tr = kaynak**, **en = İngilizce**, 18 hedef dil (de, es, fr, hi, id, it, ja, ko, ku, nl, pl, pt-BR, ru, th, uk, vi, zh-CN, zh-TW).
 Bu dosya "ne, nerede çeviri bekliyor" bilgisinin tek yeridir ve geliştirme sırasında 20 dili tek tek çevirmemek içindir.
 
@@ -48,12 +50,7 @@ Geliştirirken buraya satır ekle; çeviri turundan sonra sil. (`npm run i18n:to
 
 | Anahtar(lar) | Nerede (dosya / ekran) | Not |
 |---|---|---|
-| settings.baglanti_kararliligi, settings.ekran_kilidi_baglantiyi_kesmesin, settings.kablo_takili_degilken_bile_kilidi | Ayarlar → Güç → "Bağlantı kararlılığı" (`usb_stability_guard`) | 3 anahtar, diller İngilizce yer tutucuda (2026-10-16) |
-| keymapper.oyna, keymapper.oyna_ipucu, keymapper.oynamayi_bitir, keymapper.oyna_kipi_bandi, keymapper.pencerede_oyna | Tuş düzenleyici → araç çubuğu "Oyna", alt bant, denetçi düğmesi (`Workbench.jsx`) | 5 anahtar (2026-10-17) |
-| keymapper.bakis_alanini_goster | Tuş düzenleyici → denetçi → "Bakış alanını göster" anahtarı (`Inspector.jsx`) | 2026-10-17 |
-| window.tus_duzeni_acildi, window.tus_duzeni_kapatildi | Ctrl+G ile tuş düzeni açılıp kapanınca çıkan bildirim (`shortcutsSlice.js`) | 2026-10-17 |
-| keymapper.paneli_kucult, keymapper.paneli_buyut, keymapper.paneli_surukle | Tuş düzenleyici yüzen paneller (denetçi, palet, üst çubuk): küçült/büyüt düğmesi ve tutamaç ipucu (`FloatingPanel.jsx`) | 3 anahtar (2026-10-17) |
-| keymapper.tus_tani, keymapper.tus_tani_vazgec, keymapper.ekran_klavyesi, keymapper.atanmamis, keymapper.sk_fare | Denetçi → tuş ataması: "Tuş tanı" düğmesi, klavye simgesi (ekran klavyesi), "Fare" başlığı (`KeyCapture.jsx`, `KeyPicker.jsx`) | 5 anahtar (2026-10-17) |
+| — | — | — |
 
 ## Metni değişenler (çeviri eskidi, otomatik bulunamaz)
 
@@ -68,6 +65,7 @@ Var olan anahtarın **Türkçe metni değiştiğinde** ekle; çeviri turunda o a
 | Tarih | Kapsam | Yöntem |
 |---|---|---|
 | 2026-10-16 | 222 anahtar × 18 dil: tuş düzeni (keymapper.*), kilit/aktarım örtüleri (overlay.*), otomatik yoğunluk (taskbar.oto_*), kablosuz doğrulama hatası, ortak kısa metinler | Sonnet 5.5 (elle, dil dil); sonraki turlar için Haiku önerilir |
+| 2026-10-25 | 57 anahtar × 18 dil (1026 metin): çoklu uygulama sesi (audio_focus.*, 41) + tuş düzenleyici "Oyna" / paneller / tuş tanı ve Ctrl+G bildirimleri (keymapper.*, window.tus_duzeni_*, 16); `i18n:todo` boş | Sonnet 5.5 (elle, dil dil; yer tutucular betikle doğrulandı) |
 
 ## Notlar
 

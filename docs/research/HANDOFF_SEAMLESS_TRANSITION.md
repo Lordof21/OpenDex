@@ -1,3 +1,7 @@
+> **Language note:** Turkish (translation is on the [roadmap](../ROADMAP.md)). Research on lossless, low-latency handoff to the phone.
+
+> Durum: öneriler kısmen uygulandı (koşulsuz süreç yeniden başlatma kanıta bağlandı, ölü süreç önlemleri eklendi). Bugünkü yapı için: [HANDOFF.md](../design/HANDOFF.md); Chrome sayfa ölçeği ayrıntısı: [BROWSER_PAGE_REFRESH.md](../design/BROWSER_PAGE_REFRESH.md). Açık: olay tabanlı bekleme (P1), süreklilik kipi (P5).
+
 # Telefona Aktar (handoff) — Gecikmesiz ve State Kaybı Olmayan Geçiş: Araştırma
 
 Tarih: 2026-10-10 · Kapsam: `handoff_manager.py`, `task_movement.py`, `task_windowing.py`, `density_reconciler.py`,

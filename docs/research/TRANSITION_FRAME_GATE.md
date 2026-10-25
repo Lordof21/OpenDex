@@ -1,3 +1,7 @@
+> **Language note:** Turkish (translation is on the [roadmap](../ROADMAP.md)). Research on holding the last good frame during resize/handoff.
+
+> Durum: araştırma + ölçüm (2026-10-12); kapı uygulanmadı. Sonradan resize'da Display 0'a sızan geçiş karesi ayrıca çözüldü: [HANDOFF.md](../design/HANDOFF.md) §7.
+
 # Geçiş karelerini ekrana sızdırmamak — araştırma (2026-10-12)
 
 Soru: Telefona aktarma ve yeniden boyutlandırma sırasında "çöp" kareler (yarım çizilmiş, gerilmiş, boş) PC'ye ulaşıyor. Biz

@@ -1,5 +1,5 @@
 // Atölye: tuş düzenini DÜZENLEME modu. Videonun gerçek dikdörtgeninin üstünde sürükle-bırak, sağda denetçi, solda palet, üstte araç çubuğu.
-// Tasarım ve kabul ölçütleri: OYUN_TUS_DUZENI_TASARIM_PLANI.md
+// Tasarım ve kabul ölçütleri: docs/design/KEYMAPPER.md
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {

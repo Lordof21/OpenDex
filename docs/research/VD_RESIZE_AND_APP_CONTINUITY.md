@@ -1,3 +1,7 @@
+> **Language note:** Turkish (translation is on the [roadmap](../ROADMAP.md)). Research on the phone-screen flash during VD resize and on app continuity (Samsung DeX comparison).
+
+> Durum: §8 (geçiş animasyonu kapısı, `transition_gate.py`) ve §9 (`PlaybackContinuity`) uygulandı. Özet: [HANDOFF.md](../design/HANDOFF.md).
+
 # VD yeniden boyutlandırmada telefon ekranına "pıt pıt" kare + Samsung DeX / App Continuity — araştırma
 
 Tarih: 2026-10-15 · Yazan: Claude (kod + log + cihaz + dış kaynak taraması) · **Kod değişikliği yapılmadı**; yalnızca bulgu ve öneri.
@@ -56,7 +60,7 @@ Kullanıcı sorusu üç parçalı: (A) Yapıştırılan "scrcpy resize → telef
 | 13 Eki | 33 | 33 | 0 | 0 | 0 |
 | 14 Eki | 94 | 94 | 0 | 0 | 2 (taşıyıcı geçişi) |
 
-12 Ekim'deki 11 hata, GORUNTU_GECIS raporunun §7.5'inde teşhis edilen **transpoze onay** hatasıydı (dikey kilitli uygulama → sunucu 800×1100 bildirir, beklenen 1100×800); `session_reconfigure.py:511` civarında düzeltildi, sonra **0**.
+12 Ekim'deki 11 hata, [TRANSITION_FRAME_GATE.md](TRANSITION_FRAME_GATE.md) raporunun §7.5'inde teşhis edilen **transpoze onay** hatasıydı (dikey kilitli uygulama → sunucu 800×1100 bildirir, beklenen 1100×800); `session_reconfigure.py:511` civarında düzeltildi, sonra **0**.
 **Sonuç:** Mekanizma 1 bugünkü resize yolumuz için geçerli değil. 12 Ekim'de geçerliydi (legacy), ama orada da görev Display 0'a **taşınmıyor, yok ediliyor** ve yeni VD'de `START_APP` ile yeniden başlatılıyor.
 
 ### 2.3 Mekanizma 2 — "SurfaceEncoder sıfırlanırken yüzey kopar → `STATE_OFF` → görev Display 0'a düşer"
@@ -68,7 +72,7 @@ Kaynak kodundan (v4.1, olduğu gibi):
 3. AOSP `VirtualDisplayAdapter.VirtualDisplayDevice.getDisplayDeviceInfoLocked`: **`mSurface == null` ise `STATE_OFF`**, değilse `mDisplayState` (varsayılan `STATE_ON`). Bizde `mSurface` hiç null olmuyor (eski nesne yeni nesneyle değişiyor) → **`STATE_OFF` oluşmaz.** `resizeLocked` yüzeye dokunmaz; boyut `performTraversalLocked` içinde `t.setDisplaySize` ile uygulanır.
 4. "Görevin odağını/leash'ini 1 VSYNC Display 0'a düşürür" iddiasına dair **hiçbir kaynak bulunamadı** (arama + AOSP dosyası). WM, görevleri bir ekrana (DisplayContent) bağlar; VD'nin yüzeyi değişince görev başka DisplayContent'e **taşınmaz**.
 
-Değerlendirme: encoder‑reset zamanlaması **gerçek ve PC tarafında çöp kare üretiyor** (bkz. GORUNTU_GECIS_KARELERI_ARASTIRMA.md §7: Ayarlar'da 390–480 ms siyah/yarım kare). Ama bu **PC'ye giden akıştaki** karelerdir; telefonun fiziksel ekranında görünür bir olay üretmesi için kanıt yok.
+Değerlendirme: encoder‑reset zamanlaması **gerçek ve PC tarafında çöp kare üretiyor** (bkz. [TRANSITION_FRAME_GATE.md](TRANSITION_FRAME_GATE.md) §7: Ayarlar'da 390–480 ms siyah/yarım kare). Ama bu **PC'ye giden akıştaki** karelerdir; telefonun fiziksel ekranında görünür bir olay üretmesi için kanıt yok.
 
 ### 2.4 Mekanizma 3 — "WM Shell geçiş anlık görüntüsü Display 0'a bağlanır"
 
@@ -92,13 +96,13 @@ Doğrudan kaynak **yok**. Android 12+'ta geçiş animasyonlarını Shell'in çiz
   1. *Telefona aktar* (handoff) ve *geri al* (reclaim),
   2. **Taşıyıcı geçişi** (USB↔Wi‑Fi): 14 Ekim 11:14:53 görevler Display 0'a alındı, `FREEZE reason=transport`, 11:14:58–59 `UNFREEZE` (~5 sn). Bu sırada telefon ekranında görev **görünür** — tasarım gereği.
 * Sunucu seçenekleri: `flex_display=true`, `display_ime_policy=local`, `vd_system_decorations=false`; `vd_destroy_content` varsayılan.
-* **Handoff'ta süreç sürekliliği** (HANDOFF_KESINTISIZ_GECIS_ARASTIRMA.md'deki P0 kısmen uygulanmış): `restart_task_activity` artık yalnızca `not prelanded or is_web_rendered_app` iken çalışıyor. Log: Chrome `pre_landing/reclaim → adapted … pid 12454 → 12454` (pid sabit). `open` sırasında Chrome'da `restarted | pid 30758 → 7121` hâlâ görülüyor (web‑render uygulamasına özel yol).
+* **Handoff'ta süreç sürekliliği** ([HANDOFF_SEAMLESS_TRANSITION.md](HANDOFF_SEAMLESS_TRANSITION.md)'deki P0 kısmen uygulanmış): `restart_task_activity` artık yalnızca `not prelanded or is_web_rendered_app` iken çalışıyor. Log: Chrome `pre_landing/reclaim → adapted … pid 12454 → 12454` (pid sabit). `open` sırasında Chrome'da `restarted | pid 30758 → 7121` hâlâ görülüyor (web‑render uygulamasına özel yol).
 
 ---
 
 ## 4. "Pıt pıt"ın gerçek nedeni — ayırt edici test (≈15 dk, kod yok)
 
-Önce **neyi** gördüğünüzü ayıralım: (i) telefonun *fiziksel panelinde* bir an görünen kare mi, (ii) PC penceresindeki geçiş karesi mi (GORUNTU_GECIS raporundaki çöp kareler, 0,15–0,5 sn)? İkisi farklı sorun ve farklı çözümdür.
+Önce **neyi** gördüğünüzü ayıralım: (i) telefonun *fiziksel panelinde* bir an görünen kare mi, (ii) PC penceresindeki geçiş karesi mi ([TRANSITION_FRAME_GATE.md](TRANSITION_FRAME_GATE.md) raporundaki çöp kareler, 0,15–0,5 sn)? İkisi farklı sorun ve farklı çözümdür.
 
 **Test 1 — gerçek kompozit kare mi, panel titremesi mi?** Telefon açık, bir pencereyi sürükleyerek birkaç kez büyüt/küçült; aynı anda kaydet:
 
@@ -131,7 +135,7 @@ Hipotezler (olasılığa göre, **hepsi doğrulanmadı**):
 | # | Hipotez | Neden akla yatkın | Elemek için |
 |---|---|---|---|
 | H1 | Panel/yenileme hızı titremesi (LTPO, düşük parlaklık) | VD/encoder yükü ekran modu oylarını değiştirir; Display 0 içeriği değişmediği hâlde "kare" gibi algılanır | Test 1 (videoda görünmez) + Test 3 |
-| H2 | HyperOS'un config‑change sırasındaki davranışı (Uygulama Kilidi, kilit/uyandırma, görev yeniden değerlendirme) Display 0'a kısa süre dokunuyor | MIUI Uygulama Kilidi daha önce VD akışına girmişti (GORUNTU_GECIS §7); `display 0` işlemleri OEM'de sık | Test 2 |
+| H2 | HyperOS'un config‑change sırasındaki davranışı (Uygulama Kilidi, kilit/uyandırma, görev yeniden değerlendirme) Display 0'a kısa süre dokunuyor | MIUI Uygulama Kilidi daha önce VD akışına girmişti ([TRANSITION_FRAME_GATE.md](TRANSITION_FRAME_GATE.md) §7); `display 0` işlemleri OEM'de sık | Test 2 |
 | H3 | `vd_system_decorations=false` + Shell geçişi (yapıştırılan metnin Mekanizma 3'ü) | Kaynak yok; yalnızca test edilebilir | Test 4 |
 | H4 | Çöp kare PC tarafında (encoder reset), "telefon" diye anlatılıyor | Ölçüldü: 130–480 ms | Kullanıcı netleştirmesi |
 | H5 | Legacy yol / taşıyıcı geçişi (12 Ekim) | 13–14 Ekim'de 0; transport'ta bilerek | Log: `FLEX_FAIL`, `FREEZE` sayısı |
@@ -177,7 +181,7 @@ Aynı satırlar bizim loglarımızla uyumlu: Chrome'da config yerinde işleniyor
 
 1. **Önce teşhis (kod yok):** §4 Test 1 → hangi dalda olduğumuzu söyler. Beklenen en olası sonuç H1 veya H2.
 2. **Düşük riskli, hemen değer:** `screen_off_while_mirroring` yalnızca ilk pencerede değil, **ekran uyandıkça yeniden uygulansın** (fail‑safe + toggle'a saygı ile); arayüzde "Yansıtırken telefon ekranını kapat" kısayolu. (Panel kapalıyken sızıntı gözle görülmez.)
-3. **Resize yolu zaten sağlıklı** (127/127 yerinde, ~142 ms): bu yola **dokunma**. Atomik yüzey yaması (0005) ancak Test 1 çöp karenin telefon değil PC tarafında olduğunu ve encoder penceresinden geldiğini gösterirse; o hâlde asıl çözüm PC tarafı **sunum kapısı** (GORUNTU_GECIS §3A).
+3. **Resize yolu zaten sağlıklı** (127/127 yerinde, ~142 ms): bu yola **dokunma**. Atomik yüzey yaması (0005) ancak Test 1 çöp karenin telefon değil PC tarafında olduğunu ve encoder penceresinden geldiğini gösterirse; o hâlde asıl çözüm PC tarafı **sunum kapısı** (TRANSITION_FRAME_GATE.md §3A).
 4. **Animasyon ölçeği** yalnızca tanı: geçici sıfırla/geri al; kalıcı yapma.
 5. **App continuity için:** (a) handoff'ta `am start` artık yedek olsun (P2); (b) web‑render uygulamalarındaki yeniden başlatma (Chrome `open`) görünür aralıkta değil ön‑inişte; (c) medya uygulamaları için MediaSession konum/oynat anlık görüntüsü (yalnızca süreç ölümü kaçınılmazsa).
 6. **Doğrulanacaklar (açık):** Test 1–4 sonuçları; Xiaomi'nin kamuya açık "uygulama akışı" belgesi (bulunamadı); Samsung "Send to other display"ın süreci koruyup korumadığı (belge yok; kendi cihazınızla denenebilir).
@@ -208,7 +212,7 @@ Aynı satırlar bizim loglarımızla uyumlu: Chrome'da config yerinde işleniyor
 * Samsung — DeX SSS (Send to other display): https://ushl.samsung.com/us/support/answer/ANS10001972
 * Android — Support connected displays: https://developer.android.com/develop/adaptive-apps/guides/support-connected-displays
 * Android — connected display GA (QPR3): https://android-developers.googleblog.com/2026/03/android-devices-extend-seamlessly-to.html
-* Önceki raporlarımız: `HANDOFF_KESINTISIZ_GECIS_ARASTIRMA.md`, `GORUNTU_GECIS_KARELERI_ARASTIRMA.md`, `backend/scrcpy/README.md`.
+* Önceki raporlarımız: [HANDOFF_SEAMLESS_TRANSITION.md](HANDOFF_SEAMLESS_TRANSITION.md), [TRANSITION_FRAME_GATE.md](TRANSITION_FRAME_GATE.md), `backend/scrcpy/README.md`.
 
 
 ---

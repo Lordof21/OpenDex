@@ -1,6 +1,6 @@
 // Keymap Zustand store — tuş düzenleri (uygulama paketi başına), fare tercihleri, düzenleyici/HUD tercihleri ve geri al/yinele.
 //
-// Düğüm şekli ve sınırlar: model.js. Tasarım: OYUN_TUS_DUZENI_TASARIM_PLANI.md
+// Düğüm şekli ve sınırlar: model.js. Tasarım: docs/design/KEYMAPPER.md
 //   presets[pkg]  : düğüm dizisi (v1 ile aynı şekil; okunurken `sanitizeLayout` ile temizlenir, yeni alanlar varsayılanla dolar)
 //   prefs         : genel fare tercihleri (Ayarlar): fareyle bakış açık/kapalı + duyarlılık
 //   uiPrefs       : düzenleyici / oyun içi HUD tercihleri (yapış, ızgara, ölçek, saydamlık, etiket)

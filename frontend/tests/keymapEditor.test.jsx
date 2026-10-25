@@ -1,4 +1,4 @@
-// Tuş düzeni atölyesi ve oyun içi HUD (OYUN_TUS_DUZENI_TASARIM_PLANI.md): ekleme + "bir tuşa bas" ataması, sürükle/yapış, kısayollar,
+// Tuş düzeni atölyesi ve oyun içi HUD (docs/design/KEYMAPPER.md): ekleme + "bir tuşa bas" ataması, sürükle/yapış, kısayollar,
 // geri al, test modu, şablon, aktarma, çakışma uyarısı ve kaplamanın videonun GERÇEK dikdörtgenine oturması.
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

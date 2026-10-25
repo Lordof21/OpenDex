@@ -1,3 +1,7 @@
+> **Language note:** Turkish (translation is on the [roadmap](../ROADMAP.md)). Review of the on-phone helper's architecture.
+
+> Durum: değerlendirme raporu (2026-10-11). R1–R9 önerileri bu raporla uygulanmadı; ayrıntılı gelişmeler için ilgili kod ve [DAEMON_PROTOCOL.md](../DAEMON_PROTOCOL.md).
+
 # "Daemon" gerçekten daemon mu? — Mimari değerlendirme
 
 Tarih: 2026-10-11 · Kapsam: `OpenDexDaemon.java` (+ `backend/java/src/com/opendex/tools/*`), `device_daemon_client.py`,

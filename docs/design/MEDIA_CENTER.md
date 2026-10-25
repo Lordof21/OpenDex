@@ -1,3 +1,5 @@
+> **Language note:** Turkish (translation is on the [roadmap](../ROADMAP.md)). The media center's front-end design: concept, measures, motion table.
+
 # Medya Merkezi — Sıfırdan Tasarım Planı ("Afiş")
 
 Tarih: 2026-10-12 · Kapsam: görev çubuğu medya panelinin ön yüz mimarisi + UI/UX + hareket sistemi.

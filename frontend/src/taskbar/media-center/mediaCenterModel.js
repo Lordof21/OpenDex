@@ -1,5 +1,5 @@
 import { t, activeLocale } from '../../i18n/index.js';
-// Medya merkezinin saf kuralları (React bilmez, birim testlidir). Tasarım gerekçesi: MEDYA_MERKEZI_TASARIM_PLANI.md.
+// Medya merkezinin saf kuralları (React bilmez, birim testlidir). Tasarım gerekçesi: docs/design/MEDIA_CENTER.md.
 
 /**
  * Afiş tipografisi: şarkı adı uzunluğuna göre üç boyuttan birini alır (kısa ad büyük ve iddialı, uzun ad iki satıra

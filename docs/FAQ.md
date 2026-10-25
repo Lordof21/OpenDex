@@ -13,7 +13,7 @@ It does change a few Android developer multi-window settings that stay on — [S
 **Windows only?** The packaged app targets Windows. The backend and the UI are cross-platform code (Linux CI), but there is no Linux/macOS package, and the Java helper build script
 looks for the Android SDK in Windows locations — [ROADMAP.md](ROADMAP.md).
 
-**Why is the interface Turkish?** The project began in Turkish and has no translation layer yet. An English UI is the first roadmap item; the code, the API and these docs are English.
+**Which languages does the interface speak?** Twenty: Turkish (the source language, because the project began in Turkish), English and 18 more — chosen in the taskbar → *Hidden icons* → **Language** (the app reloads). Every language except Turkish is machine-translated and has not been reviewed by native speakers, and some error sentences from the backend are still Turkish. To fix or add a language: [TRANSLATING.md](TRANSLATING.md). The code, the API and these docs are English.
 
 **Is it safe? Does it phone home?** It makes no network connection of its own and has no accounts or telemetry. The local API is protected by an Origin/Host guard and a bearer
 token — [SECURITY_MODEL.md](SECURITY_MODEL.md). Anyone with `adb` access to your phone controls it, with or without OpenDeX.

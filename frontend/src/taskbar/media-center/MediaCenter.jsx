@@ -1,4 +1,4 @@
-// Medya merkezi — "Afiş". Telefondaki tüm medya oturumlarının tek yönetim yüzeyi (tasarım: MEDYA_MERKEZI_TASARIM_PLANI.md).
+// Medya merkezi — "Afiş". Telefondaki tüm medya oturumlarının tek yönetim yüzeyi (tasarım: docs/design/MEDIA_CENTER.md).
 //
 //   kapak    panelin tepesinde kenardan kenara; üstünde uygulama + ses yolu rozetleri (PosterArt)
 //   başlık   durum satırı + Instrument Serif şarkı adı + sanatçı — albüm, kapağın erime bölgesine biner (TrackHeadline)

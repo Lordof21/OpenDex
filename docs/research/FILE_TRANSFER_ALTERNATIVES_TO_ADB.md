@@ -1,3 +1,7 @@
+> **Language note:** Turkish (translation is on the [roadmap](../ROADMAP.md)). Measurements and options for faster file transfer than adb.
+
+> Durum: ölçüm raporu (2026-10-12). Seçenek A (büyük dosyayı paralel aralıklarla akıtma) ve B (daemon'da gerçek TCP veri kanalı) uygulanmadı.
+
 # Dosya aktarımı: adb'den daha hızlı yol var mı? Daemon üzerinden mi, başka bir yoldan mı?
 
 Tarih: 2026-10-12 · Cihaz: POCO X7 Pro (Android 16) ↔ laptop, hotspot **ax kapalı**, 5 GHz ch149, 866,7 Mbps (80 MHz, 2×2) ·

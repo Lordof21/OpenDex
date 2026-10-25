@@ -1,3 +1,7 @@
+> **Language note:** Turkish (translation is on the [roadmap](../ROADMAP.md)). Root cause of the edge 'back' gesture not working after handoff on HyperOS.
+
+> Durum: kök neden uygulandı (Home → uygulama ön-plan geçişi). Özet: [HANDOFF.md](../design/HANDOFF.md) §4.
+
 # Telefona aktarımdan sonra kenar "geri" hareketinin çalışmaması — kök neden raporu
 
 Tarih: 2026-10-11 · Cihaz: POCO 2412DPC0AG, HyperOS 3 / Android 16 · **Kod değiştirilmedi** (yalnızca okuma + cihaz kaydı).
@@ -46,7 +50,7 @@ yani bu, Home'un jesti açan **tek** mekanizması.
 
 | Hipotez | Sonuç | Kanıt |
 |---|---|---|
-| InputDispatcher / odaklı ekran sanal ekranda takılı kalıyor (`memory.md` §6) | ❌ **Çürüdü** | `FocusedDisplayId=0` ve `mTopFocusedDisplayId=0` 19:55:40.1'den itibaren; odaklı pencere Chrome; IME hedefi display 0 |
+| InputDispatcher / odaklı ekran sanal ekranda takılı kalıyor (eski mimari notu) | ❌ **Çürüdü** | `FocusedDisplayId=0` ve `mTopFocusedDisplayId=0` 19:55:40.1'den itibaren; odaklı pencere Chrome; IME hedefi display 0 |
 | Klavye / IME katmanı | ❌ | `imeInputTarget in display# 0` aktarımla birlikte geçti |
 | Kenar jest pencereleri yok / yanlış yerde | ❌ | `GestureStubLeft [0,260][62,2636]`, `Right [1158…]` Chrome'un **üstünde** (z-sırası 6–7 < 14) |
 | Chrome geri geri-çağrımı (`OnBackInvokedCallback`) kayıtsız | ❌ | `CoreBackPreview: Setting back callback …` kayıtları var; zaten jest Chrome'a hiç ulaşmadan stub'ta kesiliyor |
@@ -77,7 +81,7 @@ bir uygulama başlatması Home'a ön-plan olayı vermiş olabilir; bu aralıklı
     MIUI Kenar Çubuğu (`SidebarTouchListener`) tepki veriyor. Handoff başına **iki kez** (CDP öncesi/sonrası).
   * `am broadcast CLOSE_SYSTEM_DIALOGS` açık sistem iletişim kutularını/gölgeyi kapatır.
   * Fazladan `am start … LAUNCHER` her seferinde Chrome'a ek pause/resume (`wm_on_top_resumed_lost/gained`) yaptırıyor.
-* Bunların hiçbiri Home'un jest durumunu etkilemedi (aynı saniyelerde stub'lar kapalı kaldı). `memory.md`'deki "Display 0 Gesture
+* Bunların hiçbiri Home'un jest durumunu etkilemedi (aynı saniyelerde stub'lar kapalı kaldı). Eski mimari notundaki "Display 0 Gesture
   Navigation & Touch Focus Synchronization" maddesi bu bulguyla çelişiyor ve güncellenmeli.
 * Bağımsız gözlem: aktarım süresi 6–11 sn (`FE:handoff to_phone_done ms=10870` / ~6,5 sn); büyük kısmı odak senkronu + CDP
   dürtmesi (4–5 sn).
@@ -92,7 +96,7 @@ bir uygulama başlatması Home'a ön-plan olayı vermiş olabilir; bu aralıklı
    Seçenekler: görevi VD'de arkaya almak + taşıma sonrası öne almak (iki WCT adımı). Risk: kısa görsel kare ve uygulamada
    bir pause/stop; **cihazda denenmeli** (varsayım: RESUMED→RESUMED olayı üretmiyor).
 2. **Zararlı çözümleri kaldırın:** dokunuş enjeksiyonu, `CLOSE_SYSTEM_DIALOGS`, yinelenen `am start` — hata düzeltmiyorlar, yan
-   etki üretiyorlar ve ~1–2 sn ekliyorlar (`memory.md` "kod bandajlama yasak" ilkesiyle de uyumlu).
+   etki üretiyorlar ve ~1–2 sn ekliyorlar ("kod bandajlama yasak" ilkesiyle de uyumlu: [HANDOFF.md](../design/HANDOFF.md) §1).
 3. **Doğrulama kapısı (iyileştirme değil, güvenlik):** aktarım sonunda Home'un durumunu *gözlemleyin* — günlükte
    (`onForegroundChanged → <paket>`) ya da daemon'un olay günlüğü okuyucusu üzerinden — ve gelmediyse (1)'deki geçişi tek
    sefer uygulayın. Böylece düzeltme yalnızca gerektiğinde çalışır.

@@ -1,3 +1,7 @@
+> **Language note:** Turkish (translation is on the [roadmap](../ROADMAP.md)). Report on drawing the virtual display larger than the stream.
+
+> Durum: yalnız rapor (2026-10-13); cihazda ölçülmedi, kod yazılmadı.
+
 # VD'yi büyük çizip küçük akıtmak (süper-örnekleme) — rapor
 
 2026-10-13 · yalnızca rapor, bu konuda kod değişikliği yok · kodu okuyarak yazıldı, cihazda ÖLÇÜLMEDİ
@@ -12,11 +16,11 @@
 1. **Bant genişliği kazancı bu yöntemden gelmez.** Akıtılan video yine 400×600; bit hızı, kodlayıcı yükü ve PC tarafı **bugünkü 1:1 düzenle aynı**. Süper-örnekleme bant genişliğini düşürmez, **aynı bit hızında görüntü kalitesini** (kenar yumuşatma, bloklaşma) biraz artırır. Bant genişliğini düşüren şey akıtılan çözünürlüğü küçültmektir; o zaten ayrı bir ayar.
 2. **Xiaomi'nin "daha keskin" görünüşünün büyük kısmı çözünürlük değil, yerleşimdir.** Pencere mantıksal olarak 1/0,7 = 1,43 kat büyük kutuda çizilir (örnekte 1220×1952 → sw381dp), sonra 0,7'ye küçülür. Yazı küçük ama ince ve düzenli görünür çünkü uygulama telefonun tam düzenini çizer. Bu etkiyi biz zaten DPI/boyut seçerek elde ediyoruz.
 
-**Net sonuç:** fikir, telefonun GPU'sunu k² kat daha çok çalıştırıp (k = 1,5 → 2,25 kat piksel) karşılığında yalnızca kenar kalitesinde küçük bir artış verir. Isı raporundaki (TELEFON_ISI_VE_YUK_KORUMA_RAPORU.md) tespitle çelişir: telefon zaten darboğaz. **Önce ölçmeden kod yazmamayı öneririm** (§6).
+**Net sonuç:** fikir, telefonun GPU'sunu k² kat daha çok çalıştırıp (k = 1,5 → 2,25 kat piksel) karşılığında yalnızca kenar kalitesinde küçük bir artış verir. Isı raporundaki (THERMAL_AND_LOAD_PROTECTION.md) tespitle çelişir: telefon zaten darboğaz. **Önce ölçmeden kod yazmamayı öneririm** (§6).
 
 ## 1. Xiaomi'nin yaptığı, bizim cihazdaki kanıtla
 
-- HyperOS serbest pencereyi 0,7 ölçekle çizer (`HYPEROS_FREEFORM_SCALE`, [task_windowing.py](backend/app/windows/task_windowing.py)). Görevin mantıksal kutusu görünür kutunun 1/0,7 katıdır (`visible_to_android_bounds`, [eco_workspace.py](backend/app/windows/eco_workspace.py)).
+- HyperOS serbest pencereyi 0,7 ölçekle çizer (`HYPEROS_FREEFORM_SCALE`, [task_windowing.py](../../backend/app/windows/task_windowing.py)). Görevin mantıksal kutusu görünür kutunun 1/0,7 katıdır (`visible_to_android_bounds`, [eco_workspace.py](../../backend/app/windows/eco_workspace.py)).
 - Uygulama mantıksal kutuda **tam** çözünürlükte çizer; SurfaceFlinger o katmanı 0,7'ye küçültür (GPU/HWC birleştirmesi, ek kodlayıcı maliyeti yok).
 - **Yan etki (bu oturumda düzeltildi):** küçültme yazıyı da 0,7'ye indirir. Otomatik DPI görünür kutuya göre hesaplandığı için yazı hedefin %30 küçüğü çıkıyordu. Android'e artık `DPI / ölçek` yazılıyor (`android_density`, 260 → 371); arayüzdeki ve kayıtlı DPI görünür değer olarak kalıyor.
 
@@ -29,7 +33,7 @@
 | Workspace paylaşımlı VD | 1920×1080 sabit | 1920×1080 (`max_size=0`) | yok |
 | Telefon aynası (display 0) | telefonun ekranı | `max_size=0` | yok |
 
-Kod yeri: [spawn_profile.py](backend/app/windows/spawn_profile.py), [scrcpy_launcher.py](backend/app/windows/scrcpy_launcher.py), `NewDisplayCapture.java` (scrcpy: flex'te `displaySize.constrain(...)` VD'yi kodlanan boyuta eşitler; flex değilken `filter.addResize` + GL küçültme).
+Kod yeri: [spawn_profile.py](../../backend/app/windows/spawn_profile.py), [scrcpy_launcher.py](../../backend/app/windows/scrcpy_launcher.py), `NewDisplayCapture.java` (scrcpy: flex'te `displaySize.constrain(...)` VD'yi kodlanan boyuta eşitler; flex değilken `filter.addResize` + GL küçültme).
 
 Yani **"VD büyük, akış küçük" mekanizması scrcpy'de zaten var**, yalnızca flex olmayan kipte ve `max_size` ile. Flex kipte VD'nin kodlanan boyuta kilitli olması bilinçli: yeniden boyutlandırma tek `VirtualDisplay.resize` çağrısı ve ack'i (`_PendingAck`) bu eşitliğe dayanıyor.
 

@@ -430,7 +430,7 @@ async def unlock_display0_gesture_navigation(
 ) -> str:
     """HyperOS / MIUI üzerinde kenar geri jestlerini (GestureStubLeft/Right) dokunuşa açar; `am start` çıktısını döndürür.
 
-    Kök Neden (bkz. HANDOFF_GERI_JESTI_KOK_NEDEN.md):
+    Kök Neden (bkz. docs/design/HANDOFF.md §4):
     HyperOS RecentsImpl (com.miui.home / com.mi.android.globallauncher), kenar geri jestlerini
     (GestureStubView) yalnızca Display 0 üzerinde gerçek bir ön plan değişimi (onForegroundChanged)
     aldığında 'setBackTouchable(true)' ve 'showGestureStub' yaparak açar. Görev sanal ekrandan WCT ile taşınınca
@@ -466,7 +466,7 @@ async def sync_display0_focus(
 
     Geçmişte denenen dokunma enjeksiyonları (motionevent DOWN/CANCEL) ve CLOSE_SYSTEM_DIALOGS
     yayını gerçek dokunma gibi algılanıp MIUI kenar çubuğunu ve jest izleyicilerini bozduğu
-    ve hatayı çözmediği için tamamen kaldırılmıştır (bkz. HANDOFF_GERI_JESTI_KOK_NEDEN.md).
+    ve hatayı çözmediği için tamamen kaldırılmıştır (bkz. docs/design/HANDOFF.md §4).
     """
     pass
 

@@ -1,3 +1,5 @@
+> **Language note:** Turkish (translation is on the [roadmap](../ROADMAP.md)). Product analysis of keyboard, touch and mouse input, with a roadmap.
+
 # Klavye + Dokunmatik/Fare — Ürün Analizi (Product Owner bakışı)
 
 Tarih: 2026-10-11 · Kapsam: frontend (`input/`, `window/VideoCanvas.jsx`, `useWheelKineticScroll.js`, `keymapper/`, `wmShortcuts.js`)
@@ -226,7 +228,7 @@ Not: DeX/Phone Link satırları sınırlı ve kısmen eski kaynaklara dayanıyor
 * "Kullanıcı ne istiyor": 5–8 hedef kullanıcıyla görüşme + mevcut kullanıcıların `backend/logs` ve telemetri verisinden (hangi
   uygulamada, ne kadar yazı/dokunma, hata oranı) nicel destek alınmalı; şu an öncelikler **kod bulguları + platform
   beklentisi** üzerine kurulu.
-* Önceki bulgularla ilişki: takılı jest sorunu (`HANDOFF_GERI_JESTI_KOK_NEDEN.md`) farklı katman (HyperOS Home), burada kapsam dışı.
+* Önceki bulgularla ilişki: takılı jest sorunu ([HANDOFF.md §4](HANDOFF.md)) farklı katman (HyperOS Home), burada kapsam dışı.
 
 ## Kaynaklar
 * scrcpy — Keyboard: https://github.com/Genymobile/scrcpy/blob/master/doc/keyboard.md

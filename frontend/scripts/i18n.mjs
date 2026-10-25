@@ -4,7 +4,7 @@
 //   npm run i18n:addkeys -- <sozluk.json>    YENİ anahtarlar: { "grup.anahtar": ["Türkçe", "English"] } → tr'ye Türkçe, diğer dillere İngilizce yer tutucu (çeviri sonra: todo/apply)
 //   npm run i18n:todo                        ÇEVİRİ BEKLEYEN anahtarlar (diller ingilizce yer tutucuda kalmış) → i18n-todo.json
 //   npm run i18n:apply -- <dil> <dosya.json> { anahtar: çeviri } dosyasını o dile işler (yer tutucuları denetler, çevrilmişlere dokunmaz)
-//   Akış ve ucuz model (Haiku) komutu: repo kökündeki CEVIRI_MEMORY.md
+//   Akış ve ucuz model (Haiku) komutu: docs/CEVIRI_MEMORY.md
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';

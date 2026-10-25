@@ -145,11 +145,17 @@ python backend/java/build.py            # javac + R8/d8 → backend/vendor/opend
 
 * **Comments and docs in English.** Much of the existing code carries Turkish comments and log messages (the project grew up in
   Turkish); new code and every document in `docs/` is English, and a file you touch may be translated as you go.
-* **The UI is Turkish today.** User-visible strings are literals in the components; there is no i18n layer yet
-  ([ROADMAP.md](ROADMAP.md)). New UI text: keep it short and keep Turkish for now, centralise it if you can.
+* **The UI speaks 20 languages.** User-visible strings are keys: `t('group.key')` from `frontend/src/i18n`, with the text in
+  `frontend/src/locales/<code>.json` (`tr` is the source). For new UI text add the key with Turkish + English text and leave the other
+  languages to the batch translation round ([TRANSLATING.md](TRANSLATING.md), [CEVIRI_MEMORY.md](CEVIRI_MEMORY.md)). Never write a literal.
 * **Root cause, not symptom.** The history is full of "fix the one place it showed"; the reconcilers
   (`windows/density_reconciler.py`, `windows/resize_gate.py`, the app-audio reconcile loop) exist because those fixes did not hold.
   If you find yourself adding a third special case, look for the missing owner of that decision.
+* **Evidence first.** Before changing lifecycle, handoff, touch or window code, read the backend log (`logs/`) and the device output for
+  the failing run and check the hypothesis against it. [design/HANDOFF.md](design/HANDOFF.md) is the worked example: the "edge back gesture
+  dead after handoff" bug was not focus or IME (both disproved in the log) but HyperOS Home never learning the app came to the foreground.
+* **Decide from behaviour, never from a package list.** Which browser owns a DevTools socket, whether an app adapted to a density
+  change, whether it holds a media session — all are read from the device at run time, so every app is treated the same.
 * **No hidden state.** Backend state that the UI shows is derived and pushed as an event, not polled
   (`devices_changed`, `device_*_update`). Add the event to `backend/app/events.py` with a payload comment — the docs pick it up.
 * **Every device command has a fallback.** If a daemon capability is missing, the backend falls back to `adb shell` — see

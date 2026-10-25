@@ -33,7 +33,7 @@ By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md). By cont
 ## Style
 
 * New code, comments, log messages and docs in **English**. Existing Turkish comments may stay; translate a file as you touch it.
-* User-visible UI strings are Turkish for now ([roadmap](docs/ROADMAP.md)): keep new ones short and in one place.
+* User-visible UI strings go through `t('group.key')` (`frontend/src/i18n`), never as literals. Add the key with the Turkish (source) and English text; the other 18 languages are translated later in one batch ([TRANSLATING.md](docs/TRANSLATING.md)). Keep them short.
 * Match the surrounding code: no new dependency, abstraction or framework for a one-off. Comments explain *why*, not *what*.
 * Anything that reaches a shell line or the phone helper's protocol is validated at the API boundary ([SECURITY_MODEL.md](docs/SECURITY_MODEL.md)).
 

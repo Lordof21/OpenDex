@@ -1,3 +1,7 @@
+> **Language note:** Turkish (translation is on the [roadmap](../ROADMAP.md)). Report on phone heat and load protection.
+
+> Durum: rapor (2026-10-13); ısı kademeleri (S0–S4) ve hız sınırlayıcı uygulanmadı. Telefon yükü telemetrisi ayrıca eklendi.
+
 # Telefon Isı ve Yük Koruma Raporu
 
 **Tarih:** 2026-10-13 · **Durum:** yalnızca rapor, bu rapor kapsamında kod değişmedi · **Okuyucu:** ürün sahibi (karar için)
@@ -215,4 +219,4 @@ Toplam yaklaşık 2 hafta (tek geliştirici); P0 tek başına en büyük riski (
 - Komut yürütücü: `backend/app/device/adb.py:150-191` · daemon sınırları: `ShellRunner.java`, `OpenDexDaemon.java:119-144`
 - Telemetri: `backend/app/telemetry/*`, `GET /api/v1/telemetry/load`
 - Ölçüm betikleri: oturum scratchpad `loadstat.py`, `loadstat2.py` (kayıtlardan saatlik/pencere-sayısı dökümü)
-- İlgili raporlar: `GORUNTU_GECIS_KARELERI_ARASTIRMA.md`, `VERIYOLU_GIRISIM_VE_HIZ_ARASTIRMASI.md`
+- İlgili raporlar: [TRANSITION_FRAME_GATE.md](TRANSITION_FRAME_GATE.md), [DATA_PATH_INTERFERENCE.md](DATA_PATH_INTERFERENCE.md)

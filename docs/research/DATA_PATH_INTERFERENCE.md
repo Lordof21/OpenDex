@@ -1,3 +1,7 @@
+> **Language note:** Turkish (translation is on the [roadmap](../ROADMAP.md)). Measurements of how video, audio, touch and file transfer interfere on the shared adb transport.
+
+> Durum: ölçüm raporu (2026-10-12); kod değişmedi. İlke: adb burst modunu paylaşılan taşımada açma.
+
 # Veri yolu: video, ses, dokunma ve dosya aktarımı birbirini etkiliyor mu? Daha iyi yollar var mı?
 
 Tarih: 2026-10-12 · Ortam: POCO X7 Pro hotspot'u (ax **kapalı**, 5 GHz ch149, 866 Mbps) ↔ laptop (MT7921) · **Kod değiştirilmedi**

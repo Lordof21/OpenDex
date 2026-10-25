@@ -1,5 +1,5 @@
 // Medya merkezinin hareket sabitleri — tek ritim. Yalnız transform + opacity canlanır (blur/filter/boyut asla).
-// Değerler ve gerekçeleri: MEDYA_MERKEZI_TASARIM_PLANI.md §5.
+// Değerler ve gerekçeleri: docs/design/MEDIA_CENTER.md §5.
 
 export const EASE_OUT = [0.22, 1, 0.36, 1];
 
