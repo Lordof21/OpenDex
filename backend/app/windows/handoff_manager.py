@@ -684,7 +684,7 @@ class HandoffManager:
 
                 out_start = ""
                 # HyperOS/MIUI: görev WCT ile taşındıysa Home'a gerçek bir ön-plan geçişi verilmeli, yoksa kenar geri jesti
-                # (GestureStub) dokunuşa kapalı kalır — Home → uygulama (kök neden: HANDOFF_GERI_JESTI_KOK_NEDEN.md).
+                # (GestureStub) dokunuşa kapalı kalır — Home → uygulama (kök neden: docs/design/HANDOFF.md §4).
                 # Başlatma komutu hata verirse (çözülemeyen intent) kullanıcı Home'da kalmasın: düz öne getirmeye düşülür.
                 if task_id and await android_shell.is_miui_or_hyperos(self._adb, serial):
                     try:
@@ -738,6 +738,7 @@ class HandoffManager:
                 with contextlib.suppress(Exception):
                     watcher = start_browser_auto_attach_watcher(
                         self._adb, serial, runtime_profile.cdp_socket, pkg, phys_dpi / 160 if phys_dpi else None,
+                        resume=saved_scroll,
                     )
                     await watcher.wait_ready()
                     await watcher.wait_settled()   # the tab in front is reloaded as the other site first; the scroll anchor comes after
@@ -1002,7 +1003,7 @@ class HandoffManager:
                         window_dpi = session.dpi or self._settings.VIRTUAL_DISPLAY_DPI
                         desktop_watcher = start_window_watcher(
                             self._adb, serial, runtime_profile.cdp_socket, pkg,
-                            session.target_display_w, session.target_display_h, window_dpi,
+                            session.target_display_w, session.target_display_h, window_dpi, resume=saved_scroll,
                         )
                         await desktop_watcher.wait_ready()
                         await desktop_watcher.wait_settled()

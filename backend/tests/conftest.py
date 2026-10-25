@@ -53,6 +53,16 @@ def _no_settings_db_outlives_its_test():
 
 
 @pytest.fixture(autouse=True)
+def _no_background_workspace_arrival_check(monkeypatch):
+    """A task that joins the Workspace is re-checked a second or two later by a background task (WindowManager.
+    _guard_workspace_arrival). Tests that do not exercise it must not leave a sleeping task behind; the ones that do set
+    `WORKSPACE_ARRIVAL_CHECKS_S` themselves."""
+    from app.windows.window_manager import WindowManager
+
+    monkeypatch.setattr(WindowManager, "WORKSPACE_ARRIVAL_CHECKS_S", ())
+
+
+@pytest.fixture(autouse=True)
 def _test_client_presents_the_api_token(monkeypatch):
     """Every /api and /ws call needs the bearer token (app/api/auth.py). Tests exercise routes, not the lock — the
     client sends it by default; tests of the lock itself drop it with `client.headers.pop("Authorization")`."""

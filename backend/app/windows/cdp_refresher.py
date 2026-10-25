@@ -17,6 +17,7 @@ import contextlib
 import json
 import logging
 import re
+import time
 import urllib.request
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from typing import TYPE_CHECKING, Any
@@ -49,7 +50,8 @@ _TEXT_DIFF_THRESHOLD = 0.03       # share of visible words that differ (scripts 
 _RESOURCE_DIFF_THRESHOLD = 0.05   # share of loaded script / stylesheet addresses (query removed) that differ (noise 0%)
 _SIZE_DIFF_THRESHOLD = 0.15       # relative difference in response size
 _OVERFLOW_PX = 8              # horizontal overflow (scrollWidth - innerWidth) that counts as "does not fit the phone"
-_FRESH_LOAD_MS = 8000         # a document younger than this was just (re)loaded: its own restore owns the scroll
+_RESUME_WINDOW_S = 25.0       # a tab re-created this soon after a watcher started is the app's rebuild of the page the user was on
+_FRESH_LOAD_MS = 8000        # a document younger than this was just (re)loaded: its own restore owns the scroll
 _FRONT_WAIT_MS = 1500         # how long a hidden tab may wait to become visible: the app comes up on a window a second or so after its task moved
 
 # What Chrome multiplies a device-scale override by on top (measured on the phone, Chrome 155: a desktop-mode tab — `mobile: false` — shows
@@ -275,7 +277,7 @@ def _tab_state_js(want_mobile: bool, *, wait_ms: int = 0, with_fp: bool = False)
   const v = [...document.querySelectorAll('video')].find((x) => x.duration > 0 && isFinite(x.duration));
   const mobile = navigator.userAgentData ? navigator.userAgentData.mobile : /Mobi/.test(navigator.userAgent);
   const out = {{
-    mobile, visible: vis(), t: v ? v.currentTime : null, playing: v ? (!v.paused && !v.ended) : null,
+    mobile, visible: vis(), t: v ? v.currentTime : null, playing: v ? (!v.paused && !v.ended) : null, since: Math.round(performance.now()),
     y: window.scrollY, url: location.href, host: location.hostname, c: odxCapture(),
   }};
   if ({'true' if with_fp else 'false'} && vis() && mobile !== {'true' if want_mobile else 'false'} && /^https?:$/.test(location.protocol)) {{
@@ -581,7 +583,10 @@ async def capture_browser_scroll_state(
                         "  if (midEl) {"
                         "    anchorPath = getCssPath(midEl);"
                         "  }"
+                        "  const vid = Array.from(document.querySelectorAll('video')).find(x => x.duration > 0 && isFinite(x.duration));"
                         "  return JSON.stringify({"
+                        "    t: vid ? vid.currentTime : null, "
+                        "    playing: vid ? (!vid.paused && !vid.ended) : null, "
                         "    targetId: " + json.dumps(target_page.get("id", "")) + ", "
                         "    url: window.location.href, "
                         "    scrollX: scrollX, "
@@ -601,6 +606,7 @@ async def capture_browser_scroll_state(
                         return None
                     val = json.loads(res.get("result", {}).get("result", {}).get("value", "{}"))
                     if isinstance(val, dict):
+                        val["captured_at"] = time.time()     # a playing video has moved on by the time it is put back
                         return val
         except Exception as exc:
             log.debug("[CDP_REFRESH] Scroll durumu okunamadı: %s", exc)
@@ -672,6 +678,20 @@ async def refresh_browser_layout_inplace(
                             req_id=95,
                             timeout_s=remaining,
                         )
+
+                    # 3b. The page may have been reloaded by the APP (Samsung Internet rebuilds its activity on a density change and
+                    # reloads every page — back at the top, the video at 0). The nudge leaves such a page alone (it expects its own
+                    # restore, see `_FRESH_LOAD_MS`); when none ran, what was read before the change goes back now.
+                    resume = _resume_state(saved_scroll)
+                    if resume is not None:
+                        with contextlib.suppress(Exception):
+                            probe = await _send_cdp(ws, "Runtime.evaluate", {"expression": _ADOPT_PROBE_JS, "returnByValue": True},
+                                                    req_id=96, timeout_s=0.4)
+                            if ((probe or {}).get("result") or {}).get("result", {}).get("value") == "fresh":
+                                await _send_cdp(ws, "Runtime.evaluate", {"expression": _restore_script(resume), "userGesture": True},
+                                                req_id=97, timeout_s=0.5)
+                                log.info("♻️ [CDP_REFRESH] Uygulama sayfayı kendisi yeniden yükledi — video (%s sn) ve kaydırma geri konuyor",
+                                         resume.get("t"))
 
                 # 4. Scale factor 1.0 on the background tabs: best effort, in parallel, under one overall budget — a frozen tab
                 # must never hold the caller (a handoff, under the window lifecycle lock) for seconds.
@@ -858,6 +878,31 @@ def _retime_url(url: str, seconds: Any) -> str | None:
     return urlunsplit(parts._replace(query=urlencode(query))) if changed else None
 
 
+def _resume_state(saved: dict[str, Any] | None) -> dict[str, Any] | None:
+    """What ``capture_browser_scroll_state`` read BEFORE the density change, as the state ``_restore_script`` puts back. A playing video
+    has moved on since the capture, so its second is advanced by the time that passed. None: nothing was captured."""
+    if not isinstance(saved, dict) or not saved.get("url"):
+        return None
+    t = saved.get("t")
+    stamp = saved.get("captured_at")
+    if isinstance(t, (int, float)) and not isinstance(t, bool) and saved.get("playing") is True and isinstance(stamp, (int, float)):
+        t = t + max(0.0, time.time() - stamp)
+    containers = saved.get("containers")
+    return {"t": t, "playing": saved.get("playing"), "y": saved.get("scrollY"), "url": saved["url"],
+            "c": containers if isinstance(containers, list) else []}
+
+
+def _same_page(a: str, b: str) -> bool:
+    """The same document address apart from the host variant (m. / www.) and the start-time parameters: path and the video id (``v``)."""
+    pa, pb = urlsplit(a), urlsplit(b)
+    return pa.path == pb.path and dict(parse_qsl(pa.query)).get("v") == dict(parse_qsl(pb.query)).get("v")
+
+
+# Is this document one the APP reloaded by itself (a browser that rebuilds its activity on a density change reloads its pages) and that
+# nobody has put back yet? `__odxRestored` is set by `_restore_script`, so a reload this module made itself is never restored twice.
+_ADOPT_PROBE_JS = f"window.__odxRestored ? 'owned' : (performance.now() < {_FRESH_LOAD_MS} ? 'fresh' : 'settled')"
+
+
 def _restore_script(state: dict[str, Any]) -> str:
     """Runs in the reloaded page: puts back where it scrolled (window and inner containers) and, if it had one, its video at the second
     and play state it had. The two run side by side — a page with no video no longer waits for one — and this is the ONLY writer of
@@ -886,7 +931,7 @@ def _restore_script(state: dict[str, Any]) -> str:
     scroll = (
         "const scroll=async()=>{if(new URL(saved.url).pathname!==location.pathname)return;await odxRestoreAll(saved);};"
     )
-    return "(async (saved)=>{" + _SCROLL_LIB_JS + video + scroll + "await Promise.all([video(),scroll()]);})(" + saved + ")"
+    return "(async (saved)=>{window.__odxRestored=true;" + _SCROLL_LIB_JS + video + scroll + "await Promise.all([video(),scroll()]);})(" + saved + ")"
 
 
 class BrowserTabAutoAttachWatcher:
@@ -928,7 +973,9 @@ class BrowserTabAutoAttachWatcher:
     density hands the new value to ``set_scale``. None: no scale to apply."""
 
     def __init__(self, adb: "Adb", serial: str, socket_name: str, window_id: str, phone_dpr: float | None = None,
-                 mode: str = "mobile", place: str = "phone"):
+                 mode: str = "mobile", place: str = "phone", resume: dict[str, Any] | None = None):
+        self._started = time.monotonic()
+        self._resume = resume                # what the front tab showed BEFORE the change that made the app reload it (`capture_browser_scroll_state`)
         self._place = "window" if place == "window" else "phone"      # whose size this watcher follows: the phone's display or a window's
         self._adb = adb
         self._serial = serial
@@ -945,6 +992,14 @@ class BrowserTabAutoAttachWatcher:
         self._front_done = False             # the tab in front has been handled (mode set, reload decided): settling no longer waits for hidden tabs
         self._page_sessions: set[str] = set()                         # sessions of page tabs only (a worker takes no scale)
         self._apply_scale: Any = None        # set by the running session: an async callable that re-sends the scale to every page tab
+
+    def _resume_for(self, url: str) -> dict[str, Any] | None:
+        """The state to put back into a tab created now at ``url`` — only within ``_RESUME_WINDOW_S`` of the watcher's start (the app's
+        own rebuild follows the density change at once; a tab the user opens later is not one of its re-created ones)."""
+        if self._resume is None or time.monotonic() - self._started > _RESUME_WINDOW_S:
+            return None
+        state = _resume_state(self._resume)
+        return state if state is not None and _same_page(state["url"], url) else None
 
     @property
     def mode(self) -> str:
@@ -1024,6 +1079,7 @@ class BrowserTabAutoAttachWatcher:
                 req_id = 0
                 pending: dict[int, tuple[str, str | None]] = {}
                 reloading: dict[str, dict[str, Any]] = {}      # session -> the state to put back once its reload has loaded
+                resume_on_load: dict[str, dict[str, Any]] = {}  # session -> the state to put back once a tab the APP re-created has loaded
                 attached: dict[str, str] = {}                  # targetId -> session: a tab is handled ONCE (see below)
                 initial: set[str] | None = None                # targetIds of the tabs open at the start that still wait for their turn
                 probes: dict[str, dict[str, Any]] = {}         # session -> tab state, while the "does a reload change anything?" measurement runs
@@ -1113,9 +1169,15 @@ class BrowserTabAutoAttachWatcher:
 
                 async def start_reload(session_id: str, state: dict[str, Any], reason: str) -> None:
                     """Gives the tab in front the right site, with its video / scroll put back once it has loaded."""
+                    url = str(state.get("url", ""))
+                    # A page the APP just reloaded (Samsung Internet, on a density change) reports the video at 0 and the scroll at the top:
+                    # that is not where the user was. What was read before the change is the truth for the same page.
+                    resume = _resume_state(self._resume)
+                    if resume is not None and isinstance(state.get("since"), (int, float)) and state["since"] < _FRESH_LOAD_MS \
+                            and _same_page(resume["url"], url):
+                        state = {**state, **{k: resume[k] for k in ("t", "playing", "y", "c")}}
                     reloading[session_id] = state
                     await send("Page.enable", {}, session_id)
-                    url = str(state.get("url", ""))
                     target_url = _mobile_site_url(url) if want_mobile else None
                     # A site that starts at its address' own `t=` would send the video back to that second after the restore: the address
                     # gets the second the video is at (a different address, so a navigation, not a reload — the cache is not an issue)
@@ -1262,6 +1324,10 @@ class BrowserTabAutoAttachWatcher:
                                        msg["sessionId"])
                             maybe_settled()
                             continue
+                        if method == "Page.loadEventFired" and msg.get("sessionId") in resume_on_load:
+                            await send("Runtime.evaluate", {"expression": _restore_script(resume_on_load.pop(msg["sessionId"])), "userGesture": True},
+                                       msg["sessionId"])
+                            continue
                         if method != "Target.attachedToTarget":
                             continue
                         params = msg.get("params", {})
@@ -1285,6 +1351,12 @@ class BrowserTabAutoAttachWatcher:
                                 await put_in_place(session_id, want_mobile, reload=False, verify=False)
                                 log.info("🆕 [CDP_WATCHER: YENİ SEKME] %s yüklenmeden %s kimliğiyle başlatıldı",
                                          str(info.get("url", ""))[:50], "telefon" if want_mobile else "masaüstü")
+                                # A browser that rebuilds its activity on the density change re-creates its tabs (new targets at the old
+                                # address, loaded from the top): the tab the user was looking at gets what it showed back once it has loaded.
+                                resume = self._resume_for(str(info.get("url", "")))
+                                if resume is not None:
+                                    resume_on_load[session_id] = resume
+                                    await send("Page.enable", {}, session_id)
                             else:
                                 await send("Runtime.evaluate", {
                                     "expression": _tab_state_js(want_mobile, with_fp=_SKIP_REDUNDANT_RELOAD),
@@ -1324,13 +1396,15 @@ def start_browser_auto_attach_watcher(
     phone_dpr: float | None = None,
     mode: str = "mobile",
     place: str = "phone",
+    resume: dict[str, Any] | None = None,
 ) -> BrowserTabAutoAttachWatcher:
     """Spawns or replaces the tab watcher of a browser (``window_id``: its key — the callers pass the package: the browser
     stays on the phone after its window is closed, and so does the watcher). ``mode``: "mobile" | "desktop" — the identity (site) its
     tabs get. ``place``: "phone" (the phone's own display: always mobile) | "window" (a window, whose size decides the mode, see
-    ``window_place``)."""
+    ``window_place``). ``resume``: the front tab's state read before the density change (``capture_browser_scroll_state``), for a
+    browser that reloads its pages by itself when it changes."""
     stop_browser_auto_attach_watcher(window_id)
-    watcher = BrowserTabAutoAttachWatcher(adb, serial, socket_name, window_id, phone_dpr, mode, place)
+    watcher = BrowserTabAutoAttachWatcher(adb, serial, socket_name, window_id, phone_dpr, mode, place, resume)
     _active_watchers[window_id] = watcher
     watcher.start()
     return watcher
@@ -1372,10 +1446,11 @@ def window_place(width: int | None, height: int | None, dpi: int | None, current
 
 
 def start_window_watcher(adb: "Adb", serial: str, socket_name: str, package: str,
-                         width: int | None, height: int | None, dpi: int | None) -> BrowserTabAutoAttachWatcher:
+                         width: int | None, height: int | None, dpi: int | None,
+                         resume: dict[str, Any] | None = None) -> BrowserTabAutoAttachWatcher:
     """The tab watcher of a browser WINDOW: the identity and scale its size needs (``window_place``)."""
     mode, dpr = window_place(width, height, dpi)
-    return start_browser_auto_attach_watcher(adb, serial, socket_name, package, dpr, mode, place="window")
+    return start_browser_auto_attach_watcher(adb, serial, socket_name, package, dpr, mode, place="window", resume=resume)
 
 
 def update_window_place(package: str, width: int | None, height: int | None, dpi: int | None) -> None:

@@ -498,6 +498,18 @@ export function createLifecycleSlice(set, get) {
 
     /** `source`: kapatmayı kim istedi. Günlükte 'close' kategorisiyle backend'e gider: "oyundan attı" olaylarında nedeni kesin gösterir. */
     async closeWindow(id, source = 'unknown') {
+      const container = get().windows.find((w) => w.id === id && w.isEcoWorkspace);
+      if (container) {
+        // The Workspace window exists only in the UI: the backend knows its MEMBERS (each a task on the shared display), not a
+        // window called "eco-workspace". Closing the container used to POST that id (a 404, taken as "already closed"), so every
+        // member stayed alive on the phone and came back at the next sync — each had to be closed by hand. The container goes at
+        // once and every member is closed exactly as its own ✕ does (tombstone + retried until the backend confirms).
+        const members = container.tasks.map((task) => task.windowId);
+        logger.info('close', 'workspace_close_requested', { windowId: id, members: members.length, source });
+        get().forgetWindow(id);
+        await Promise.all(members.map((taskWindowId) => get().closeWorkspaceTask(taskWindowId)));
+        return;
+      }
       const win = get().forgetWindow(id);
       logger.info('close', 'window_close_requested', { windowId: id, package: win?.package, source });
       if (isFrontendOnlyWindow(win)) return; // kırpma / Dosyalar penceresi yalnızca ön yüzdedir (kaynak görev ETKİLENMEZ)

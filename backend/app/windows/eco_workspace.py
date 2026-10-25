@@ -257,6 +257,7 @@ class EcoWorkspaceManager:
         start_video_pump: Callable[["WindowSession"], None],
         broadcasters: BroadcasterRegistry | None = None,
         daemon_client_getter: Callable[[], Any] | None = None,
+        arrival_hook: Callable[[str], None] | None = None,
     ) -> None:
         self._adb = adb
         self._settings = settings
@@ -272,6 +273,9 @@ class EcoWorkspaceManager:
         # WindowManager's daemon client (injected like every other collaborator here; this used to reach for the
         # module-global active-client lookup from two different import sites).
         self._daemon_client_getter = daemon_client_getter or (lambda: None)
+        # Called with the window id once a task has joined (opened, docked, brought back from the phone): the owner re-checks it a
+        # moment later, when Android has finished — and possibly undone — the transition (WindowManager._guard_workspace_arrival).
+        self._arrival_hook = arrival_hook
 
         self._server: ScrcpyServer | None = None
         self._display_id: str | None = None
@@ -727,6 +731,8 @@ class EcoWorkspaceManager:
             density_mode=self._tasks[window_id].density_mode,
         )
 
+        if self._arrival_hook is not None:
+            self._arrival_hook(window_id)
         stream_w, stream_h = self._stream_dims(server)
         return self._ws_url(), stream_w, stream_h, effective_bounds
 

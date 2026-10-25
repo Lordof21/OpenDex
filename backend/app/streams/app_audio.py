@@ -155,6 +155,7 @@ class AppAudioRouter:
         suppress_legacy: Callable[[], Awaitable[None]],
         resume_legacy: Callable[[], Awaitable[None]],
         sync_offset_getter: Callable[[], Awaitable[int]] | None = None,
+        teardown_guard: Callable[[str], Awaitable[Any]] | None = None,
     ) -> None:
         self._broadcasters = broadcasters
         self._events = events
@@ -165,6 +166,9 @@ class AppAudioRouter:
         self._suppress_legacy = suppress_legacy
         self._resume_legacy = resume_legacy
         self._sync_offset_getter = sync_offset_getter      # → the user's fine tune (ms; + delays the phone)
+        # Awaited (bounded by the guard itself) before a live capture is taken apart: ending it kills the app's AudioTrack, which the
+        # app rebuilds — a player caught in a track change can stop for good (playback_continuity.wait_stable).
+        self._teardown_guard = teardown_guard
         self._pc_output_ms: int = self.DEFAULT_PC_OUTPUT_MS
         self._link_ms: float | None = None                 # one-way link latency, from the daemon ping
         self._late_extra_ms = 0                            # jitter margin earned from late chunks the page reported
@@ -430,6 +434,11 @@ class AppAudioRouter:
         if daemon is None or not daemon.is_connected:
             self._set_error(state, "daemon_not_connected", target)
             return
+        if target == "phone" and state.stream_id is not None and self._teardown_guard is not None:
+            # The app's sound is about to go back to the phone's own output: its capture ends and its AudioTrack is invalidated.
+            # Not while its player is mid-way through a track change (a guard that fails or answers late must never block this).
+            with contextlib.suppress(Exception):
+                await self._teardown_guard(state.package)
         old = state.stream_id
         if old is not None:
             self._retiring.add(old)          # the daemon ends it (FLAG_END) — not a lost capture

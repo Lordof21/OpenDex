@@ -207,6 +207,51 @@ describe('closeWorkspaceTask', () => {
   });
 });
 
+describe('closing the Workspace window itself', () => {
+  it('closes every member on the backend — the container is a UI construct and the members must not be left orphaned', async () => {
+    api.post
+      .mockResolvedValueOnce(mockWorkspaceOpenResponse('t1'))
+      .mockResolvedValueOnce(mockWorkspaceOpenResponse('t2'));
+    const store = useWindowStore.getState();
+    await store.openWindowInWorkspace(APP_A);
+    await store.openWindowInWorkspace(APP_B);
+    api.post.mockClear();
+
+    await store.closeWindow('eco-workspace', 'titlebar');
+
+    expect(useWindowStore.getState().windows).toHaveLength(0);
+    const closed = api.post.mock.calls.filter(([path]) => path === '/api/windows/workspace/close-task').map(([, body]) => body.window_id);
+    expect(closed.sort()).toEqual(['t1', 't2']);
+    // not a close of a window called "eco-workspace" (the backend has none: it answered 404 and the members lived on)
+    expect(api.post.mock.calls.some(([path, body]) => path === '/api/windows/close' && body?.window_id === 'eco-workspace')).toBe(false);
+  });
+
+  it('keeps retrying a member whose close did not get through, so a sync cannot bring it back', async () => {
+    api.post.mockResolvedValueOnce(mockWorkspaceOpenResponse('t1'));
+    const store = useWindowStore.getState();
+    await store.openWindowInWorkspace(APP_A);
+    api.post.mockRejectedValueOnce(new Error('network error'));
+
+    await store.closeWindow('eco-workspace', 'titlebar');
+
+    expect(useWindowStore.getState().windows).toHaveLength(0);
+    expect(closeTracker.pending()).toEqual(['t1']);
+    closeTracker.cancel('t1');
+  });
+
+  it('also drops the DeX crop windows of the members', async () => {
+    api.post.mockResolvedValueOnce(mockWorkspaceOpenResponse('t1'));
+    const store = useWindowStore.getState();
+    await store.openWindowInWorkspace(APP_A);
+    store.openWorkspaceCropWindow('t1');
+    expect(useWindowStore.getState().windows).toHaveLength(2);
+
+    await store.closeWindow('eco-workspace', 'titlebar');
+
+    expect(useWindowStore.getState().windows).toHaveLength(0);
+  });
+});
+
 describe('applyWorkspaceEvent', () => {
   it('task_dock_result creates the container if none exists yet', () => {
     useWindowStore.getState().applyWorkspaceEvent({

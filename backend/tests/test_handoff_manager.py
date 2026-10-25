@@ -451,7 +451,7 @@ async def test_browser_with_cdp_triggers_live_nudge_without_restarting_process(m
     daemon_client.restart_task_activity = AsyncMock(return_value=True)
     order: list[str] = []
 
-    def start_watcher(adb, serial, socket, key, phone_dpr=None):
+    def start_watcher(adb, serial, socket, key, phone_dpr=None, resume=None):
         order.append("watcher")
         start_watcher.args = (socket, key, phone_dpr)
         return MagicMock(wait_ready=AsyncMock(return_value=True))

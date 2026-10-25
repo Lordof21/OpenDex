@@ -98,9 +98,11 @@ class FakePhone:
 class FakeDaemon:
     is_connected = True
 
-    def __init__(self, phone: FakePhone, *, handles_density=True, restart_ok=True, reborn=True, media=None):
+    def __init__(self, phone: FakePhone, *, handles_density=True, restart_ok=True, reborn=True, media=False):
         self.phone, self.handles_density, self.restart_ok, self.reborn = phone, handles_density, restart_ok, reborn
-        self.media = media  # does the app hold a media session (playing OR paused)? True / False / None (unknown)
+        # does the app hold a media session (playing OR paused)? True / False / None (the phone could not say — that protects the
+        # process too). The default is "no session": a test that wants the guard says so.
+        self.media = media
         self.restarts: list[str] = []
         self.info_calls: list[str] = []
 

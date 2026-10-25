@@ -90,6 +90,7 @@ class _Harness:
         self.link = MagicMock(start=AsyncMock(), stop=AsyncMock())
         self.suppress = AsyncMock()
         self.resume = AsyncMock()
+        self.guard = AsyncMock(return_value="stable")     # the teardown guard (playback_continuity.wait_stable)
         self.router = AppAudioRouter(
             self.broadcasters,
             self.bus,
@@ -100,6 +101,7 @@ class _Harness:
             suppress_legacy=self.suppress,
             resume_legacy=self.resume,
             sync_offset_getter=self._sync_getter,
+            teardown_guard=lambda package: self.guard(package),
         )
 
     async def _sync_getter(self):
@@ -784,3 +786,46 @@ async def test_a_probe_the_phone_cannot_play_reports_its_own_reason():
     h.daemon.probe_error = "probe_unavailable: IllegalStateException"
     res = await h.router.probe()
     assert res == {"ok": False, "error": "probe_unavailable: IllegalStateException"}
+
+
+# ---------------------------------------------------------------- the capture is taken apart at a steady point
+
+
+async def test_a_live_capture_is_not_taken_apart_before_the_guard_has_answered():
+    h = _Harness()
+    await h.per_app()
+    await h.open("w1", "com.a")
+    h.guard.assert_not_awaited()                                   # opening a capture waits for nothing
+    order: list[str] = []
+    h.guard.side_effect = lambda package: order.append(f"guard:{package}")
+    real = h.daemon.audio_route
+
+    async def route(package, route, target_ms=None):
+        order.append(f"route:{route}")
+        return await real(package, route, target_ms=target_ms)
+
+    h.daemon.audio_route = route
+    h.windows["w1"] = AudioWindow("com.a", on_phone=True)          # HandoffManager sets the flag, then emits
+    await h.bus.emit("app_handoff_to_phone", window_id="w1", package="com.a")
+    await settle(h.router)
+    assert order == ["guard:com.a", "route:phone"]                  # the sound goes back to the phone only AFTER the guard
+
+
+async def test_no_guard_for_routes_that_start_a_capture_or_for_an_app_already_on_the_phone():
+    h = _Harness(default_route="phone")
+    await h.per_app()
+    await h.open("w1", "com.a")                                    # route phone: no capture exists
+    h.guard.assert_not_awaited()
+    h2 = _Harness()
+    await h2.per_app()
+    await h2.open("w1", "com.a")                                   # pc: a capture STARTS
+    h2.guard.assert_not_awaited()
+
+
+async def test_a_guard_that_fails_never_keeps_the_sound_from_going_back_to_the_phone():
+    h = _Harness()
+    await h.per_app()
+    await h.open("w1", "com.a")
+    h.guard.side_effect = RuntimeError("daemon went away")
+    await h.close("w1")
+    assert h.daemon.calls[-1] == ("com.a", "phone")

@@ -204,6 +204,7 @@ class AppContext:
             suppress_legacy=self._suppress_legacy_audio,
             resume_legacy=self._resume_legacy_audio,
             sync_offset_getter=self._audio_sync_offset,
+            teardown_guard=self.window_manager.wait_playback_stable,
         )
         self.window_manager.set_app_audio(self.app_audio)
         # The phone must not fall asleep under open windows (keyguard + the OEM app lock would black them out):

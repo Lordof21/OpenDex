@@ -734,3 +734,56 @@ async def test_with_no_tab_in_front_the_settle_still_waits_for_every_open_tab():
         assert settled is False                                           # nobody is known to be in front: as before
     finally:
         await _stop()
+
+
+# ---- a browser that reloads its pages BY ITSELF on a density change (Samsung Internet, measured 2026-10-24) -------------------
+# Wikipedia scrolled to 4000 px, Samsung Internet on a handoff: the page came back reloaded (marker lost, scrollY 0) and no restore ran,
+# because the nudge leaves a fresh document to "its own restore" and there was none. What was read before the change goes back.
+
+
+def test_resume_state_advances_a_playing_video_by_the_time_that_passed():
+    saved = {"url": "https://m.youtube.com/watch?v=1", "t": 90.0, "playing": True, "scrollY": 120, "containers": [{"p": None, "r": 0.3}],
+             "captured_at": 1000.0}
+    with patch.object(cr.time, "time", return_value=1004.5):
+        state = cr._resume_state(saved)
+    assert state == {"t": 94.5, "playing": True, "y": 120, "url": "https://m.youtube.com/watch?v=1", "c": [{"p": None, "r": 0.3}]}
+
+
+def test_resume_state_leaves_a_paused_video_where_it_was():
+    saved = {"url": "https://a.example/v?v=1", "t": 12.0, "playing": False, "scrollY": 0, "captured_at": 1000.0}
+    with patch.object(cr.time, "time", return_value=1100.0):
+        assert cr._resume_state(saved)["t"] == 12.0
+
+
+def test_resume_state_without_a_capture_is_none():
+    assert cr._resume_state(None) is None
+    assert cr._resume_state({}) is None
+    assert cr._resume_state({"scrollY": 5}) is None
+
+
+def test_same_page_ignores_the_host_variant_and_the_start_time():
+    assert cr._same_page("https://www.youtube.com/watch?v=abc&t=21s", "https://m.youtube.com/watch?v=abc")
+    assert not cr._same_page("https://www.youtube.com/watch?v=abc", "https://www.youtube.com/watch?v=xyz")
+    assert not cr._same_page("https://tr.wikipedia.org/wiki/A", "https://tr.wikipedia.org/wiki/B")
+    assert cr._same_page("https://tr.wikipedia.org/wiki/A", "https://tr.m.wikipedia.org/wiki/A")
+
+
+def test_a_restore_marks_its_document_so_it_is_never_restored_twice():
+    script = _restore_script({"t": None, "playing": None, "y": 5, "url": "https://a.example/x", "c": []})
+    assert "window.__odxRestored=true" in script
+    assert "__odxRestored" in cr._ADOPT_PROBE_JS and "owned" in cr._ADOPT_PROBE_JS
+
+
+def _watcher_with(resume):
+    return cr.BrowserTabAutoAttachWatcher(MagicMock(), "SER", "Terrace_devtools_remote", "pkg", 3.2, "desktop", "window", resume)
+
+
+def test_a_tab_the_app_re_created_gets_its_state_back_only_soon_after_the_watcher_started():
+    saved = {"url": "https://tr.wikipedia.org/wiki/T", "scrollY": 4000, "containers": [], "t": None, "playing": None}
+    w = _watcher_with(saved)
+    got = w._resume_for("https://tr.m.wikipedia.org/wiki/T")
+    assert got is not None and got["y"] == 4000
+    assert w._resume_for("https://tr.wikipedia.org/wiki/OTHER") is None          # another page is not put back
+    with patch.object(cr.time, "monotonic", return_value=w._started + cr._RESUME_WINDOW_S + 1):
+        assert w._resume_for("https://tr.wikipedia.org/wiki/T") is None            # a tab the user opens later is not the app's rebuild
+    assert _watcher_with(None)._resume_for("https://tr.wikipedia.org/wiki/T") is None

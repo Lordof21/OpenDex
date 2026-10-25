@@ -299,6 +299,7 @@ class WindowManager:
             start_video_pump=self._reconfigure.start_video_pump,
             broadcasters=broadcasters,
             daemon_client_getter=lambda: self._daemon_client,
+            arrival_hook=self._guard_workspace_arrival,
         )
         self._teleporter = TaskTeleporter(
             adb, settings, events, self._sessions, self._eco_workspace,
@@ -468,6 +469,11 @@ class WindowManager:
             for wid, s in list(self._sessions.items())
             if s.state.workspace_id != ANCHOR_MARKER
         }
+
+    async def wait_playback_stable(self, package: str) -> str:
+        """The app's audio route is about to be taken apart (app_audio.AppAudioRouter): holds it back, for a few seconds at most,
+        while the app's player is in the middle of a track change (playback_continuity.PlaybackContinuity.wait_stable)."""
+        return await self._handoff.playback.wait_stable(package)
 
     @property
     def active_window_count(self) -> int:
@@ -1326,6 +1332,34 @@ class WindowManager:
             if check.status == "healed":
                 self._sync_task_state(window_id)
             return check
+
+    # Seconds after a task joined the Workspace at which it is checked once more. Android finishes a move/transition ASYNCHRONOUSLY and
+    # may undo it afterwards (a task that came from the phone or from its own window re-asserting FULLSCREEN, an OEM collapsing the
+    # new freeform window): field report 2026-10-24 — the frame stood in the right place but the app filled the whole display until
+    # the user pressed it once (which runs this same check). Empty tuple = no automatic check.
+    WORKSPACE_ARRIVAL_CHECKS_S: tuple[float, ...] = (1.5, 4.0)
+
+    def _guard_workspace_arrival(self, window_id: str) -> None:
+        """A task has just joined the Workspace: put it right without waiting for the user to press it."""
+        if not self.WORKSPACE_ARRIVAL_CHECKS_S:
+            return
+        spawn_background(self._arrival_guard(window_id), name=f"ws-arrival-{window_id}")
+
+    async def _arrival_guard(self, window_id: str) -> None:
+        waited = 0.0
+        for at in self.WORKSPACE_ARRIVAL_CHECKS_S:
+            await asyncio.sleep(max(0.0, at - waited))
+            waited = at
+            task = self._eco_workspace.get_task(window_id)
+            if task is None or task.parked:
+                return                                       # closed, popped out or sent to the phone meanwhile: not ours any more
+            try:
+                check = await self.verify_workspace_task(window_id)
+            except Exception as exc:  # noqa: BLE001 — a background check must never surface as an error
+                window_logger(__name__, window_id).debug("[WS-GUARD] varış denetimi yapılamadı: %s", exc)
+                return
+            if check.status == "healed":
+                window_logger(__name__, window_id).info("🩹 [WS-GUARD] varış sonrası düzeltildi (%s)", check.reason)
 
     async def set_workspace_task_density(self, window_id: str, density: int, mode: str = "manual") -> bool:
         """Eco Workspace içindeki bir görevin (task) densityDpi Configuration override'ını ayarlar.

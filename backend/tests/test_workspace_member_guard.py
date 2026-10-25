@@ -167,6 +167,83 @@ async def test_an_unknown_window_a_parked_member_and_a_failing_read_are_harmless
     assert check.status == "unknown" and "daemon gone" in check.reason
 
 
+# ---------------------------------------------------------------- the check after a task has joined (no press needed)
+
+
+async def _until(predicate, seconds=2.0):
+    import asyncio
+
+    deadline = asyncio.get_running_loop().time() + seconds
+    while not predicate():
+        if asyncio.get_running_loop().time() > deadline:
+            raise AssertionError("condition not reached")
+        await asyncio.sleep(0.01)
+
+
+async def test_a_task_that_arrives_fullscreen_is_put_right_without_a_press(manager):
+    """Field report 2026-10-24: the frame stood in the right place but the app filled the whole display until the user pressed it once."""
+    manager.WORKSPACE_ARRIVAL_CHECKS_S = (0.01,)
+    eco = manager._eco_workspace
+    eco._make_freeform = AsyncMock()
+    eco._settled_effective_bounds = AsyncMock(return_value=(BOX, (1.0, 1.0)))
+    reads = []
+
+    async def read(adb, serial, task_id):
+        reads.append(task_id)
+        return _state(display=eco.display_id, mode=FULLSCREEN if len(reads) == 1 else FREEFORM)
+
+    q = await manager._test_events.subscribe()
+    with patch.object(eco_module, "read_task_windowing", read), patch("app.device.android_shell.bring_to_front", AsyncMock()) as front:
+        handle = await manager.open_window_in_workspace("com.app.a")
+        await _until(lambda: front.await_count == 1)
+
+    eco._make_freeform.assert_awaited_once()
+    assert eco._make_freeform.await_args.kwargs["skip_if_ok"] is False
+    event = next(e for e in await _drain(q) if e.type == "workspace_task_bounds_changed")
+    assert event.payload["window_id"] == handle.window_id and event.payload["bounds"] == list(BOX)
+
+
+async def test_the_arrival_check_leaves_a_healthy_task_alone(manager):
+    manager.WORKSPACE_ARRIVAL_CHECKS_S = (0.01, 0.02)
+    eco = manager._eco_workspace
+    eco._make_freeform = AsyncMock()
+    eco._settled_effective_bounds = AsyncMock(return_value=(BOX, (1.0, 1.0)))
+    reads = []
+
+    async def read(adb, serial, task_id):
+        reads.append(task_id)
+        return _state(display=eco.display_id)
+
+    with patch.object(eco_module, "read_task_windowing", read), patch("app.device.android_shell.bring_to_front", AsyncMock()) as front:
+        await manager.open_window_in_workspace("com.app.a")
+        await _until(lambda: len(reads) >= 2)
+
+    eco._make_freeform.assert_not_awaited()
+    front.assert_not_awaited()
+
+
+async def test_the_arrival_check_stops_when_the_task_is_gone(manager):
+    manager.WORKSPACE_ARRIVAL_CHECKS_S = (0.05,)
+    eco = manager._eco_workspace
+    eco._make_freeform = AsyncMock()
+    eco._settled_effective_bounds = AsyncMock(return_value=(BOX, (1.0, 1.0)))
+    reads = []
+
+    async def read(adb, serial, task_id):
+        reads.append(task_id)
+        return _state(display=eco.display_id, mode=FULLSCREEN)
+
+    with patch.object(eco_module, "read_task_windowing", read), patch("app.device.android_shell.bring_to_front", AsyncMock()):
+        handle = await manager.open_window_in_workspace("com.app.a")
+        eco.get_task(handle.window_id).parked = True      # sent to the phone before the check came due
+        import asyncio
+
+        await asyncio.sleep(0.15)
+
+    assert reads == []
+    eco._make_freeform.assert_not_awaited()
+
+
 async def test_the_endpoint_reports_the_check_and_ok_means_ok_or_healed(manager):
     from types import SimpleNamespace
 

@@ -47,7 +47,9 @@ class _Daemon:
 
 
 def _pc(daemon, **kw) -> PlaybackContinuity:
-    return PlaybackContinuity(lambda: daemon, settle_s=0.1, wait_s=1.0, poll_s=0.01, **kw)
+    opts = dict(settle_s=0.1, wait_s=1.0, poll_s=0.01, lost_after_s=0.05, safe_wait_s=0.3)
+    opts.update(kw)
+    return PlaybackContinuity(lambda: daemon, **opts)
 
 
 async def test_capture_only_for_a_session_that_is_playing():
@@ -398,3 +400,118 @@ async def test_a_deep_link_that_is_refused_gives_up_quietly():
     daemon.assist = _assist(minimized=True)
     daemon.script = [[]]
     assert await pc.repair_page(snap, display_id=41) == "gave_up"
+
+
+# ---- the audio route is taken apart at a steady point, and a session the app lost is brought back ---------------------------
+# Field report 2026-10-24 (YouTube Music): the "İkisi" capture ended 2.9 s into a new track, the app's AudioTrack died, the player stopped
+# and its media session left Android's active list — the restore waited 8 s for a session that never came back.
+
+
+def _track(state: str, position: int, title: str, duration: int = 200_000) -> dict:
+    return {"package": PKG, "state": state, "is_playing": state == "PLAYING", "position": position, "duration": duration, "title": title}
+
+
+async def test_the_route_is_not_taken_apart_while_nothing_plays():
+    assert await _pc(_Daemon([[]])).wait_stable(PKG) == "idle"
+    assert await _pc(_Daemon([[_track("PAUSED", 500, "A")]])).wait_stable(PKG) == "idle"
+    assert await PlaybackContinuity(lambda: None).wait_stable(PKG) == "idle"
+    assert await PlaybackContinuity(lambda: _Daemon([[_track("PLAYING", 1, "A")]]), enabled=False).wait_stable(PKG) == "idle"
+
+
+async def test_a_track_that_has_played_long_enough_is_a_steady_point():
+    assert await _pc(_Daemon([[_track("PLAYING", 14_000, "A")]])).wait_stable(PKG) == "stable"
+    assert await _pc(_Daemon([[_session("PLAYING", 4_000)]])).wait_stable(PKG) == "stable"             # unknown title is fine
+
+
+async def test_a_track_that_has_just_begun_is_waited_for_until_it_is_steady():
+    daemon = _Daemon([[_track("PLAYING", 1_400, "B")], [_track("PLAYING", 2_900, "B")], [_track("PLAYING", 4_300, "B")]])
+    assert await _pc(daemon, safe_wait_s=2.0).wait_stable(PKG) == "stable"
+
+
+async def test_a_track_about_to_end_is_waited_for_too_and_the_wait_is_bounded():
+    daemon = _Daemon([[_track("PLAYING", 198_000, "A")]])                  # 2 s left of 200 s
+    assert await _pc(daemon, safe_wait_s=0.1).wait_stable(PKG) == "timeout"
+    stuck = _Daemon([[_track("PLAYING", 500, "A")]])
+    assert await _pc(stuck, safe_wait_s=0.1).wait_stable(PKG) == "timeout"
+
+
+class _ShellDaemon(_Daemon):
+    """A daemon that also runs shell commands: Android's media-button holder and the key presses."""
+
+    def __init__(self, script, *, owner=PKG, key_ok=True):
+        super().__init__(script)
+        self.owner, self.key_ok = owner, key_ok
+        self.shell: list[str] = []
+        self.on_key = None
+
+    async def run_shell(self, command, *, timeout_s, binary=False):
+        self.shell.append(command)
+        if "Media button session" in command:
+            text = f"  Media button session is {self.owner}/YouTube playerlib/271 (userId=0)" if self.owner else ""
+            return SimpleNamespace(stdout=text.encode(), stderr=b"", exit_code=0)
+        if "keyevent" in command:
+            if self.key_ok and self.on_key:
+                self.on_key()
+            return SimpleNamespace(stdout=b"", stderr=b"", exit_code=0 if self.key_ok else 1)
+        return SimpleNamespace(stdout=b"", stderr=b"", exit_code=0)
+
+
+def _lost(daemon):
+    """The app's session left Android's active list after the move."""
+    daemon.script = [[]]
+
+
+async def test_a_session_the_app_lost_is_brought_back_with_the_play_key_and_put_where_it_was():
+    daemon = _ShellDaemon([[_track("PLAYING", 60_000, "A")]])
+    pc = _pc(daemon)
+    snap = await pc.capture(PKG)
+    assert snap.title == "A"
+    _lost(daemon)
+    daemon.on_key = lambda: daemon.script.__setitem__(0, [_track("PLAYING", 1_000, "A")])   # the player restarts from the top
+    assert await pc.restore(snap) == "resumed"
+    assert "input keyevent 126" in daemon.shell                                  # PLAY (absolute), never the 85 toggle
+    assert any(c[0] == "seek" and 60_000 <= c[1] < 62_000 for c in daemon.calls)      # back at (about) the second it was lost
+
+
+async def test_when_the_track_changed_meanwhile_the_new_one_plays_from_its_start_without_a_seek():
+    daemon = _ShellDaemon([[_track("PLAYING", 133_000, "HOSTILE")]])
+    pc = _pc(daemon)
+    snap = await pc.capture(PKG)
+    _lost(daemon)
+    daemon.on_key = lambda: daemon.script.__setitem__(0, [_track("PLAYING", 300, "Eclipse")])
+    assert await pc.restore(snap) == "resumed"
+    assert not [c for c in daemon.calls if c[0] == "seek"]                       # another track's second is never applied
+
+
+async def test_the_play_key_is_pressed_only_when_android_routes_media_buttons_to_that_app():
+    daemon = _ShellDaemon([[_track("PLAYING", 60_000, "A")]], owner="com.android.chrome")
+    pc = _pc(daemon)
+    snap = await pc.capture(PKG)
+    _lost(daemon)
+    assert await pc.restore(snap) == "gave_up"
+    assert not [c for c in daemon.shell if "keyevent" in c]                      # never plays whatever else holds the buttons
+
+
+async def test_a_refused_key_or_a_session_that_stays_gone_is_given_up_quietly():
+    refused = _ShellDaemon([[_track("PLAYING", 60_000, "A")]], key_ok=False)
+    pc = _pc(refused)
+    snap = await pc.capture(PKG)
+    _lost(refused)
+    assert await pc.restore(snap) == "gave_up"
+
+    silent = _ShellDaemon([[_track("PLAYING", 60_000, "A")]])
+    pc2 = _pc(silent)
+    snap2 = await pc2.capture(PKG)
+    _lost(silent)                                                                # the key is pressed, nothing comes back
+    assert await pc2.restore(snap2) == "gave_up"
+
+
+async def test_a_stopped_session_of_another_track_is_started_without_the_old_second():
+    daemon = _Daemon([[_track("PLAYING", 133_000, "HOSTILE")]])
+    pc = _pc(daemon)
+    snap = await pc.capture(PKG)
+    daemon.script = [[_track("STOPPED", 0, "Eclipse")]]
+    daemon.on_play = lambda: daemon.script.__setitem__(0, [_track("PLAYING", 200, "Eclipse")])
+    assert await pc.restore(snap) == "resumed"
+    assert ("action", "play", PKG) in daemon.calls
+    assert not [c for c in daemon.calls if c[0] == "seek"]
