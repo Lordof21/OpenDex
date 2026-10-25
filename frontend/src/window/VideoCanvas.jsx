@@ -78,12 +78,10 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
   const freezeCanvasRef = useRef(null);
   const [hasFrame, setHasFrame] = useState(false);
   const [isFreezeActive, setIsFreezeActive] = useState(false);
-  const [ambientSnapshot, setAmbientSnapshot] = useState(null);
 
   // Canlı genel ayarlar (tek kaynak: settings/liveSettings) — yüklenene kadar varsayılanlar.
   const liveSettings = useLiveSettings();
   const globalFit = liveSettings?.video_fit_mode || 'contain'; // backend video_fit_mode (contain|fill|cover)
-  const ambientBackdrop = liveSettings?.ambient_backdrop ?? true;
   const enableHybridDom = liveSettings?.enable_hybrid_dom ?? false;
   const sharpeningMode = liveSettings?.sharpening_mode || 'adaptive';
   const pixelPerfectDpr = liveSettings?.pixel_perfect_dpr ?? true;
@@ -176,10 +174,34 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
   }, [win.id, win.focused, win.frozen, win.deviceW, win.deviceH, editorBlocksInput, keymapNodes]);
 
   useEffect(() => {
+    // Refs are already null when this cleanup runs on unmount, so the elements are captured now.
+    const liveCanvas = canvasRef.current;
+    const freezeCanvas = freezeCanvasRef.current;
     return () => {
       if (moveRaf.current) cancelAnimationFrame(moveRaf.current);
+      // A 2D canvas keeps its (GPU) pixels until the garbage collector reaches the element — minutes after the window closed.
+      // Zero size frees the backing store now. Only on unmount: while the window lives, a decoder restart keeps the last frame.
+      for (const canvas of [liveCanvas, freezeCanvas]) {
+        if (canvas) {
+          canvas.width = 0;
+          canvas.height = 0;
+        }
+      }
     };
   }, []);
+
+  // Once the freeze layer has faded out it has no use until the next resolution change; do not keep a second 1080p surface alive.
+  useEffect(() => {
+    if (isFreezeActive) return undefined;
+    const timer = setTimeout(() => {
+      const fc = freezeCanvasRef.current;
+      if (fc && fc.width > 0) {
+        fc.width = 0;
+        fc.height = 0;
+      }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [isFreezeActive]);
 
   // Safety watchdog: ensure stealthPhase automatically clears after timeout if no live event arrives. A phase that knows
   // it takes longer (the handoff's pre-landing rebuilds the app behind this veil) announces its own `deadline_ms`.
@@ -192,18 +214,13 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
     return () => clearTimeout(timer);
   }, [win.stealthPhase, win.id, stealthDeadlineMs]);
 
-  // Keep thumbnail cache & ambient snapshot fresh for zero-latency preview & ambient glow
+  // Keep the thumbnail cache fresh for the zero-latency taskbar preview.
   useEffect(() => {
     if (win.minimized || !hasFrame) return;
 
     const capture = () => {
       if (canvasRef.current && canvasRef.current.width > 0 && canvasRef.current.height > 0) {
         setWindowThumbnail(win.id, canvasRef.current);
-        try {
-          // Low-overhead ambient frame sample
-          const snap = canvasRef.current.toDataURL('image/jpeg', 0.6);
-          setAmbientSnapshot(snap);
-        } catch {}
       }
     };
 
@@ -250,12 +267,6 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
         const w = canvasRef.current?.width || win.deviceW || win.w;
         const h = canvasRef.current?.height || win.deviceH || win.h;
         useWindowStore.getState().onNewResolutionFrameArrived(win.id, { width: w, height: h });
-        try {
-          if (canvasRef.current && canvasRef.current.width > 0) {
-            const snap = canvasRef.current.toDataURL('image/jpeg', 0.7);
-            setAmbientSnapshot(snap);
-          }
-        } catch {}
       },
       onBeforeResolutionChange: (sourceCanvas) => {
         try {
@@ -499,42 +510,14 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
     deps: [win.id, win.deviceW, win.deviceH, effectiveFitMode, zoomScale, editorBlocksInput],
   });
 
-  const activeAmbient = ambientSnapshot;
-
   return (
-    <div className="relative flex-1 h-full w-full overflow-hidden bg-video-backdrop flex flex-col items-center justify-center select-none shadow-[inset_0_0_80px_rgba(0,0,0,0.5)]">
-      {/* Zero-Void Ambient Glassmorphic Aura Backdrop:
-          Permanently fills letterbox/pillarbox areas with rich ambient app colors during orientation shifts */}
-      {ambientBackdrop && (
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 z-0 overflow-hidden select-none"
-        >
-          {activeAmbient ? (
-            <img
-              src={activeAmbient}
-              alt=""
-              className="h-full w-full object-cover blur-3xl scale-150 opacity-75 transition-[opacity,transform] duration-500 will-change-transform"
-            />
-          ) : (
-            <div
-              className="h-full w-full blur-3xl opacity-50 transition-opacity duration-700"
-              style={{
-                background: 'radial-gradient(ellipse at center, color-mix(in oklab, var(--info) 28%, transparent) 0%, color-mix(in oklab, var(--video-backdrop) 55%, transparent) 45%, color-mix(in oklab, var(--video-backdrop) 85%, transparent) 75%, var(--video-backdrop) 100%)',
-              }}
-            />
-          )}
-          {/* Frosted vignette masks for cinema-grade edge softening */}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-black/25 pointer-events-none" />
-          <div className="absolute inset-0 bg-gradient-to-r from-black/35 via-transparent to-black/35 pointer-events-none" />
-        </div>
-      )}
-
-      {/* Floating Canvas Screen Surface with subtle glass border and soft shadow */}
+    // No ambient blur behind the video and no drop shadows: each one is a full-window offscreen layer the GPU re-renders at the stream's
+    // frame rate (measured 2026-10-23: the blurred backdrop alone held ~285 MB of GPU memory, the canvas shadow ~85 MB).
+    <div className="relative flex-1 h-full w-full overflow-hidden bg-video-backdrop flex flex-col items-center justify-center select-none">
       <canvas
         ref={canvasRef}
         data-window-id={win.id}
-        className={`relative z-10 h-full w-full touch-none select-none cursor-default dex-canvas-sharp ${effectiveFitMode} ${activeObjectPosition} shadow-[0_8px_32px_rgba(0,0,0,0.36)] ring-1 ring-white/[0.04]`}
+        className={`relative z-10 h-full w-full touch-none select-none cursor-default dex-canvas-sharp ${effectiveFitMode} ${activeObjectPosition}`}
         style={{
           imageRendering: sharpeningMode === 'off' ? 'auto' : '-webkit-optimize-contrast',
           filter: sharpeningMode === 'ultra'

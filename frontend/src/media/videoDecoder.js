@@ -115,13 +115,30 @@ export class WindowVideoDecoder {
     this._stats = new StreamStatsAccumulator();
     this._pacer = new FramePacer();
     this._lastKeyframeRequestMs = -Infinity;
+    // Çözücüye henüz verilmemiş paketler (sırayla). Bağlanınca arka uç tüm GOP'u TEK SEFERDE yollar (yüzlerce paket): hepsini
+    // çözücünün kendi kuyruğuna yığmak eşiği aşıp çözücüyü sıfırlıyor ve görüntü sonraki anahtar kareye kadar donuk kalıyordu.
+    this._pending = [];
+    this._warnedAt = new Map();
     this._statsInterval = setInterval(() => this._emitStats(), 1000);
   }
 
-  // Çözücü bunun ÜSTÜNDE kare biriktirdiyse gerçekten yetişemiyordur: temiz bir decoder ile
-  // bir sonraki keyframe'ten devam edilir. (Normal tıkanmada kareler ATLANMAZ — hepsi çözülür,
-  // yalnızca eski olanların sunumu atlanır; bkz. framePacer.js.)
-  static MAX_DECODE_BACKLOG = 90;
+  // Çözücüye AYNI ANDA verilen paket sayısı. Gerisi `_pending`'de bekler ve çözücü boşaldıkça (dequeue) akar — hiçbir paket atlanmaz
+  // (delta atmak referans zincirini bozardı), yalnızca eski kareler ekrana basılmaz (bkz. framePacer.js).
+  static MAX_IN_FLIGHT = 16;
+  // Bekleyen paket sayısı bunu aşarsa çözücü gerçekten yetişemiyordur: temiz bir decoder ile bir sonraki keyframe'ten devam edilir.
+  static MAX_PENDING = 2000;
+
+  /** Aynı uyarıyı en çok 2 sn'de bir yazar (kopan bir çözücü saniyede yüzlerce satır üretip günlüğü ve arka ucu boğuyordu). */
+  _warnThrottled(key, ...args) {
+    const now = performance.now();
+    const last = this._warnedAt.get(key);
+    if (last !== undefined && now - last.at < 2000) {
+      last.skipped += 1;
+      return;
+    }
+    console.warn(...args, last?.skipped ? `(+${last.skipped} benzer)` : '');
+    this._warnedAt.set(key, { at: now, skipped: 0 });
+  }
 
   setResizing(resizing) {
     this.isResizing = Boolean(resizing);
@@ -171,13 +188,18 @@ export class WindowVideoDecoder {
     this._streamKey = key;
 
     try {
-      this.decoder = new VideoDecoder({
+      const decoder = new VideoDecoder({
         output: (frame) => this._renderWithSync(frame),
         error: (e) => {
-          console.warn('[VideoDecoder] Hardware decode error, resetting:', e);
+          if (this.decoder !== decoder) return;     // zaten değiştirilmiş/kapatılmış çözücünün gecikmiş hatası
+          this._warnThrottled('decoder-error', '[VideoDecoder] Hardware decode error, resetting:', e);
           this._resyncDecoder('decoder-error');
         },
       });
+      this.decoder = decoder;
+      decoder.ondequeue = () => {
+        if (this.decoder === decoder) this._drain();
+      };
       // HEVC: boyut verilmezse WebView2 1280x720 gibi varsayılan boyutta kare üretiyor (Chrome vermese de doğru çözüyor).
       this.decoder.configure({
         codec: codecString,
@@ -206,10 +228,27 @@ export class WindowVideoDecoder {
     try { this.decoder?.close(); } catch (e) {}
     this.decoder = null;
     this.hasReceivedKeyFrame = false;
+    this._pending.length = 0;
     this._pacer.reset();
     this._stats.onResync();
-    if (reason) console.warn(`[VideoDecoder] resync (${reason}) — keyframe isteniyor`);
+    if (reason) this._warnThrottled(`resync-${reason}`, `[VideoDecoder] resync (${reason}) — keyframe isteniyor`);
     this._requestKeyframe();
+  }
+
+  /** Bekleyen paketleri, çözücünün kuyruğunda yer oldukça verir. */
+  _drain() {
+    const decoder = this.decoder;
+    if (!decoder || decoder.state !== 'configured') return;
+    while (this._pending.length && (decoder.decodeQueueSize || 0) < WindowVideoDecoder.MAX_IN_FLIGHT) {
+      const next = this._pending.shift();
+      try {
+        decoder.decode(new EncodedVideoChunk({ type: next.type, timestamp: next.ptsUs, data: next.data }));
+      } catch (err) {
+        this._warnThrottled('decode-throw', '[VideoDecoder] decode() chunk error, recovering:', err);
+        this._resyncDecoder(null);
+        return;
+      }
+    }
   }
 
   /** Asks the backend for a keyframe now instead of waiting for the encoder's own. Throttled; a no-op while the socket
@@ -245,9 +284,15 @@ export class WindowVideoDecoder {
       return;
     }
 
-    // Ensure decoder exists; if recreated, it strictly requires a keyframe
+    // A decoder is built for a KEYFRAME only. A delta can never start a chain: building (and hardware-initialising) a fresh
+    // VideoDecoder for every delta that arrives while a keyframe is awaited used to churn decoders at the stream's frame rate
+    // — Chrome's hardware decoder then answered "Unsupported configuration" and the picture stayed frozen.
     if (!this.decoder || this.decoder.state === 'closed') {
       this.hasReceivedKeyFrame = false;
+      if (!isKeyFrame) {
+        this._requestKeyframe();
+        return;
+      }
       this._ensureDecoder(this.configData);
       if (!this.decoder || this.decoder.state === 'closed') return;
     }
@@ -259,9 +304,9 @@ export class WindowVideoDecoder {
       return;
     }
 
-    // Acil durum (nadir): çözücü kuyruğu gerçekten yetişilemez boyuta ulaştı. Ortadan kare
+    // Acil durum (nadir): bekleyen paket sayısı gerçekten yetişilemez boyuta ulaştı. Ortadan paket
     // ATMAK referans zincirini bozardı (bozuk/kirli resim); temiz decoder + keyframe beklenir.
-    if ((this.decoder.decodeQueueSize || 0) > WindowVideoDecoder.MAX_DECODE_BACKLOG) {
+    if (this._pending.length > WindowVideoDecoder.MAX_PENDING) {
       this._resyncDecoder('decode-backlog');
       if (!isKeyFrame) return;
       this._ensureDecoder(this.configData);
@@ -280,18 +325,11 @@ export class WindowVideoDecoder {
       }
     }
 
-    try {
-      this.decoder.decode(
-        new EncodedVideoChunk({
-          type: isKeyFrame ? 'key' : 'delta',
-          timestamp: ptsUs,
-          data,
-        }),
-      );
-    } catch (err) {
-      console.warn('[VideoDecoder] decode() chunk error, recovering:', err);
-      this._resyncDecoder(null);
-    }
+    // A keyframe starts a fresh chain: whatever still waits behind it is older and no longer needed — the burst of a reconnect's GOP
+    // replay, or a live stream we lag behind, catches up here instead of decoding every stale delta.
+    if (isKeyFrame) this._pending.length = 0;
+    this._pending.push({ type: isKeyFrame ? 'key' : 'delta', ptsUs, data });
+    this._drain();
   }
 
   _renderWithSync(videoFrame) {
@@ -299,7 +337,7 @@ export class WindowVideoDecoder {
       videoFrame.close();
       return;
     }
-    const pending = this.decoder ? this.decoder.decodeQueueSize || 0 : 0;
+    const pending = (this.decoder ? this.decoder.decodeQueueSize || 0 : 0) + this._pending.length;
     if (!this._pacer.shouldPaint(pending, performance.now())) {
       // Daha yeni kareler çözülmeyi bekliyor: bu eski kareyi ekrana basmak "hızlı sarma"
       // görüntüsü olurdu. Çözme zinciri BOZULMADI (kare zaten çözüldü), yalnızca sunum atlanır.
@@ -447,6 +485,7 @@ export class WindowVideoDecoder {
       this.decoder.close();
     }
     this.decoder = null;
+    this._pending.length = 0;
   }
 
   _emitStats() {

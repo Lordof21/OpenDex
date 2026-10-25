@@ -20,6 +20,7 @@ export const TRACE_STORAGE_KEY = 'opendexTrace';
 export const SHIPPED_CATEGORIES = new Set([
   'handoff', 'reclaim', 'applock', 'teleport', 'power', 'workspace', 'fullscreen', 'transfer', 'close', 'audio',
   'resizedpi',   // one line per resize release: which density went out and why (lock / held / ideal)
+  'webview',     // WebView2 memory level changes (low when idle, normal on activity)
 ]);
 
 const FLUSH_DELAY_MS = 1000;

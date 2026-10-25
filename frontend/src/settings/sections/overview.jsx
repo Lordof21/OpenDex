@@ -11,7 +11,6 @@ import {
   Monitor,
   Radio,
   Scale,
-  ScanSearch,
   Smartphone,
   Sparkles,
   Speaker,
@@ -167,7 +166,6 @@ export function OverviewSection({ ctl, go }) {
       <Group title={t('settings.hizli_ayarlar')}>
         <ToggleRow item="realResolution" icon={Sparkles} checked={v.smartResize} onToggle={() => a.toggle('dynamic_resolution_enabled', v.smartResize)} />
         <ToggleRow item="dimPhone" icon={Monitor} checked={v.dimPhone} onToggle={() => a.toggle('screen_off_while_mirroring', v.dimPhone)} />
-        <ToggleRow item="ambient" icon={ScanSearch} checked={v.ambient} onToggle={() => a.toggle('ambient_backdrop', v.ambient)} />
       </Group>
     </Page>
   );

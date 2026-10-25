@@ -34,6 +34,7 @@ import WorkspacePipApp from './window/workspacePip/WorkspacePipApp.jsx';
 import SnapIndicator from './window/SnapIndicator.jsx';
 import AltTabSwitcher from './window/AltTabSwitcher.jsx';
 import { useHeldTrue } from './ui/useHeldTrue.js';
+import { installWebviewMemoryGovernor } from './lib/webviewMemory.js';
 
 export default function App() {
   const [backendHealthy, setBackendHealthy] = useState(false);
@@ -110,6 +111,11 @@ export default function App() {
   useEffect(() => {
     useAudioMixerStore.getState().setFocusedWindow(focusedAudioWindowId);
   }, [focusedAudioWindowId]);
+
+  // The engine keeps a closed stream window's memory for minutes: lower the WebView2 memory target while nothing is playing.
+  // Main window only: a PiP webview has its own (empty) store and would conclude that nothing is playing while it IS the video.
+  const isMainWindow = !pipWinId && !workspacePipTaskId;
+  useEffect(() => (isMainWindow ? installWebviewMemoryGovernor(useWindowStore) : undefined), [isMainWindow]);
 
   // ---- one-time notices ----------------------------------------------------
   useEffect(() => {

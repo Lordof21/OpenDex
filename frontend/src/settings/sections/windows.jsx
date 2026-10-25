@@ -152,9 +152,6 @@ export function AppearanceSection({ ctl }) {
   return (
     <Page icon={Palette} title={SECTIONS.appearance.label} subtitle={SECTIONS.appearance.subtitle}>
       <ChoiceGroup item="theme" icon={Palette} options={THEME_OPTIONS} optionIcons={THEME_ICONS} value={v.theme} onChange={a.setTheme} columns={2} />
-      <Group>
-        <ToggleRow item="ambient" icon={Sparkles} checked={v.ambient} onToggle={() => a.toggle('ambient_backdrop', v.ambient)} />
-      </Group>
     </Page>
   );
 }

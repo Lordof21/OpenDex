@@ -20,6 +20,11 @@ log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# WebView2 memory target (src/webview_memory.rs). Same versions Tauri/wry already resolve in Cargo.lock, so nothing new is built.
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.38"
+windows = "0.61"
+
 [profile.release]
 codegen-units = 1
 lto = true

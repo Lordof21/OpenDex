@@ -49,7 +49,6 @@ export function useSettingsController() {
     audioRoute: live.audio_output_mode || 'pc',
     audioCodec: live.audio_codec ? (live.audio_codec === 'raw' ? 'pcm' : live.audio_codec) : 'pcm',
     dimPhone: flag('screen_off_while_mirroring', false),
-    ambient: flag('ambient_backdrop', true),
     rememberDevices: flag('remember_devices', true),
     usbStability: flag('usb_stability_guard', true),
     windowingMode: live.windowing_mode ? (live.windowing_mode === 'hybrid_auto' ? 'hybrid' : live.windowing_mode) : 'hybrid',

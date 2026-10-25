@@ -202,12 +202,6 @@ export const SETTING_ITEMS = {
     description: t('settings.arayuzun_genel_temasini_secin_acik_ya'),
     keywords: ['tema', t('settings.karanlik'), 'koyu', t('common.acik'), 'dark', 'light', 'gece'],
   },
-  ambient: {
-    section: 'appearance',
-    title: t('settings.sinematik_arka_plan_ambient_backdrop'),
-    description: t('settings.sigdir_modunda_kenarlardaki_siyah'),
-    keywords: ['arka plan', t('settings.siyah_cubuk'), 'glass', t('settings.bulanik'), 'ambient'],
-  },
   dimPhone: {
     section: 'power',
     title: t('settings.kullanirken_telefon_ekranini_karart'),
@@ -465,7 +459,7 @@ export function sectionSummary(sectionId, live) {
       return `${mode} · ${get('phone_handoff_windowing') === 'freeform' ? t('settings.serbest_aktarim') : t('settings.tam_ekran_aktarim')}`;
     }
     case 'appearance':
-      return live?.ambient_backdrop === false ? t('settings.arka_plan_kapali') : t('settings.sinematik_arka_plan');
+      return SECTIONS.appearance.subtitle;
     case 'power':
       return get('screen_off_while_mirroring') ? t('settings.telefon_ekrani_kararir') : t('settings.telefon_ekrani_acik');
     default:
