@@ -30,6 +30,7 @@ import { useDeviceHubStore } from '../devices/deviceHubStore.js';
 import { DeviceLoadPanel, DeviceLoadTrayButton } from '../telemetry/DeviceLoadPanel.jsx';
 import { MediaWidget } from './MediaWidget.jsx';
 import { MediaCenter } from './media-center/MediaCenter.jsx';
+import MultiFocusNudge from '../audioFocus/MultiFocusNudge.jsx';
 import { AppLauncher } from './AppLauncher.jsx';
 import { QuickSettings } from './QuickSettings.jsx';
 import { usePanelMotion } from '../ui/motion.js';
@@ -63,6 +64,8 @@ import { t as tt } from '../i18n/index.js';
 import { activeLocale } from '../i18n/index.js';
 
 export const BUILTIN_TASKBAR_APPS = [];
+/** Görev çubuğundaki OpenDeX Ayarları girdisinin kimliği (`launchApp('opendex')` ile aynı). */
+export const SETTINGS_TASK_ID = 'opendex';
 
 
 function useClock() {
@@ -100,6 +103,7 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
     restoreSettings,
     minimizeSettings,
     focusSettings,
+    closeSettings,
     batteryInfo,
     hardwareStates,
     toggleHardwareState,
@@ -473,6 +477,10 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
 
   const closeTaskbarApp = (id) => {
     closePreview();
+    if (id === SETTINGS_TASK_ID) {
+      closeSettings();
+      return;
+    }
     const targetWin = windows.find((w) => w.id === id || w.appId === id || w.package === id);
     if (targetWin) closeWindow(targetWin.id, 'taskbar');
   };
@@ -555,7 +563,24 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
     }));
 
   // Sıra = pencere dizisinin sırası (açılış sırası; yalnız kullanıcı sürükleyince değişir). Tümü listelenir: sığmayanlar "+N" listesine gider.
-  const allApps = [...visibleBuiltins, ...dynamicWindowApps];
+  // OpenDeX Ayarları pencere deposunda değil sistem deposundadır (`settingsOpen`): görev çubuğunda yine açık bir görev gibi görünür
+  // (simge, açık/etkin göstergesi, küçültülünce soluk). Başlatıcı/masaüstü simgesi aynı `launchApp('opendex')` yolunu kullanır.
+  const settingsApp = settingsOpen
+    ? {
+        id: SETTINGS_TASK_ID,
+        package: 'com.opendex.settings',
+        name: tt('common.opendex_ayarlari'),
+        category: tt('taskbar.uygulama'),
+        pinned: false,
+        isOpen: true,
+        isActive: settingsFocused && !settingsMinimized,
+        isMinimized: settingsMinimized,
+        onPhone: false,
+        notifyPackage: null,
+        windowTitle: tt('common.opendex_ayarlari'),
+      }
+    : null;
+  const allApps = [...visibleBuiltins, ...dynamicWindowApps, ...(settingsApp ? [settingsApp] : [])];
   const { visible: visibleCount } = splitForOverflow(allApps.length, appSlots);
   const shownApps = allApps.slice(0, visibleCount);
   const hiddenApps = allApps.slice(visibleCount);
@@ -573,7 +598,7 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
     : undefined;
 
   const reorder = useTaskbarReorder({
-    ids: shownApps.map((app) => app.id),
+    ids: shownApps.filter((app) => app.id !== SETTINGS_TASK_ID).map((app) => app.id), // yalnız pencereler yer değiştirir (Ayarlar hep sonda)
     onCommit: (orderedIds) => useWindowStore.getState().reorderWindowsByIds(orderedIds),
     onDragStart: () => {
       closePreview();
@@ -771,10 +796,12 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
                   badge={app.notifyPackage ? unreadByPackage.get(app.notifyPackage) || 0 : 0}
                   menuOpen={surface === 'appmenu' && appMenu?.id === app.id}
                   dragging={reorder.draggingId === app.id}
-                  reorder={reorder.bind(app.id, index)}
-                  style={reorder.styleFor(app.id, index)}
+                  reorder={app.id === SETTINGS_TASK_ID ? undefined : reorder.bind(app.id, index)}
+                  style={app.id === SETTINGS_TASK_ID ? undefined : reorder.styleFor(app.id, index)}
                   onActivate={() => launchApp(app.id)}
-                  onMenu={(el) => openAppMenu(app.id, el)}
+                  onMenu={(el) => {
+                    if (app.id !== SETTINGS_TASK_ID) openAppMenu(app.id, el); // bağlam menüsü bir pencereye bağlıdır; Ayarlar'ın yok
+                  }}
                   onPreview={(el, opts) => showPreview(app.id, el, opts)}
                   onLeave={() => schedulePreviewClose(app.id)}
                 />
@@ -1118,6 +1145,8 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
           )}
         </AnimatePresence>
       </nav>
+      {/* "An app was paused" → multi-app sound? Asked once per run, never takes focus (audioFocus/MultiFocusNudge.jsx). */}
+      <MultiFocusNudge sessions={allSessions} />
     </div>
   );
 }

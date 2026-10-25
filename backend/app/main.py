@@ -48,6 +48,7 @@ from .fs.service import FsService
 from .schemas import AudioRoute, DeviceInfo, DeviceState, KnownDevice, ThermalLevel, default_route_for
 from .startup_state import StartupState
 from .storage import settings_db
+from .device.multi_audio_focus import MultiAudioFocusService
 from .device.phone_awake import PhoneAwakeLease
 from .device.usb_stability import UsbStabilityGuard
 from .streams.app_audio import AppAudioRouter
@@ -211,6 +212,13 @@ class AppContext:
         # held while windows exist, the user's own value is given back afterwards (device/phone_awake.py).
         self.phone_awake = PhoneAwakeLease(self.adb, lambda: self.serial, self.window_manager.has_windows)
         self.window_manager.subscribe_sessions(self.phone_awake.request_sync)
+        # The phone's "several apps play at once" flag: read on demand, set only when the user agreed (or the policy says
+        # "always"), undone with the last window (device/multi_audio_focus.py).
+        self.multi_audio_focus = MultiAudioFocusService(
+            self.adb, lambda: self.serial, lambda: self.daemon_client, self.window_manager.has_windows,
+            self._multi_audio_focus_policy, self.event_bus.emit,
+        )
+        self.window_manager.subscribe_sessions(self.multi_audio_focus.request_sync)
         self.telemetry = TelemetryHub(
             self.adb,
             serial_getter=lambda: self.serial,
@@ -424,6 +432,7 @@ class AppContext:
             await self.startup.update(services="starting")
             profile = await self.window_manager.bind_device(serial, self.android_id)
             self.phone_awake.request_sync()  # also hands back a value a crashed earlier session left behind
+            self.multi_audio_focus.request_sync(refresh=True)  # same for the several-apps flag; and a fresh read for the Sound card
             # Before device_connected: the frontend reads the profile (phone_scale metrics) right after that event.
             await self._optional("telefon ölçüleri", self.capability_probe.refresh_phone_metrics(serial, profile))
             await self._start_services(serial, profile)
@@ -486,8 +495,8 @@ class AppContext:
         if isinstance(exc, Exception):
             log.warning("[BIND] %s bağlanamadı (%s: %s) — oturum temizleniyor", serial, type(exc).__name__, exc)
         await self._stop_services()
-        for cleanup in (self.phone_awake.release(serial), self.app_audio.on_device_unbound(),
-                        self.session_audio.stop_session_audio()):
+        for cleanup in (self.phone_awake.release(serial), self.multi_audio_focus.release(serial),
+                        self.app_audio.on_device_unbound(), self.session_audio.stop_session_audio()):
             try:
                 await cleanup
             except Exception as err:  # noqa: BLE001
@@ -874,6 +883,16 @@ class AppContext:
         project = await settings_db.get_project_settings()
         return default_route_for(project.audio_output_mode, project.enable_audio)
 
+    async def _multi_audio_focus_policy(self) -> str:
+        """"ask" | "always" | "never": what the user chose for the phone's several-apps-at-once flag."""
+        return (await settings_db.get_project_settings()).multi_audio_focus_policy
+
+    async def _release_multi_audio_focus(self, serial: str | None) -> None:
+        """Hands the phone's flag back BEFORE the daemon stops (the daemon is how it is set); a dead link only costs the timeout —
+        the phone keeps the marker and the next bind restores it."""
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(self.multi_audio_focus.release(serial), timeout=3.5)
+
     async def _audio_sync_offset(self) -> int:
         """"İkisi": the user's by-ear fine tune (ms) — read when a capture is (re)established or retuned."""
         return (await settings_db.get_project_settings()).audio_sync_offset_ms
@@ -913,6 +932,7 @@ class AppContext:
         if serial is None:
             return
         log.info("unbinding device: %s (disconnect_adb=%s, reason=%s)", serial, disconnect_adb, reason)
+        await self._release_multi_audio_focus(serial)  # while the daemon still runs
         self.serial = None
         self.android_id = None
         tools_jar.forget(serial)
@@ -1019,6 +1039,7 @@ class AppContext:
                 log.warning("Shutdown step '%s' failed: %s; continuing...", name, exc)
 
         await _safe_step(self.window_manager.close_all(), "window_manager.close_all", timeout=2.5)
+        await _safe_step(self.multi_audio_focus.release(self.serial), "multi_audio_focus.release", timeout=3.5)
         await _safe_step(self.phone_awake.release(self.serial), "phone_awake.release", timeout=1.5)
         await _safe_step(self.app_audio.shutdown(), "app_audio.shutdown", timeout=1.0)
         await _safe_step(self.session_audio.stop_session_audio(), "session_audio.stop_session_audio", timeout=1.5)

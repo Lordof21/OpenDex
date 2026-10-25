@@ -6,7 +6,9 @@ along with SQL entity dataclasses for database persistence.
 from __future__ import annotations
 
 from .apps import AppInfo, AppLayoutEntry, RegistryDiff
-from .audio import AUDIO_ROUTES, AppAudioPatch, AppAudioPref, AudioRoute, AudioSyncReport, default_route_for
+from .audio import (
+    AUDIO_ROUTES, AppAudioPatch, AppAudioPref, AudioRoute, AudioSyncReport, MultiAudioFocusPatch, default_route_for,
+)
 from .devices import (
     DeviceInfo,
     DeviceProfile,
@@ -71,6 +73,7 @@ __all__ = [
     "AppAudioPref",
     "AudioRoute",
     "AudioSyncReport",
+    "MultiAudioFocusPatch",
     "default_route_for",
     # Events
     "ThermalLevel",

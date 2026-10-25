@@ -100,6 +100,7 @@ public final class PureClassesSelfTest {
                 batteryFacts();
                 ptsClock();
                 probeTone();
+                multiFocusFacts();
                 System.out.println("ALL OK (" + checks + " checks)");
         }
     }
@@ -320,6 +321,22 @@ public final class PureClassesSelfTest {
         int crossings = 0;
         for (int i = from + 1; i < to; i++) if ((x[i - 1] < 0) != (x[i] < 0)) crossings++;
         return crossings;
+    }
+
+    // ------------------------------------------------------------------ MultiFocusFacts (the audio dump's multi-focus line)
+
+    private static void multiFocusFacts() {
+        // The line as a real HyperOS 3.0 / Android 16 audio dump prints it (note the space before the colon).
+        String dump = "Audio Focus stack entries (last is top of stack):\n\nNo external focus policy\n\n"
+                + "Multi Audio Focus enabled :false\n\nOther: x\n";
+        eq(Boolean.FALSE, MultiFocusFacts.parseEnabled(dump), "disabled");
+        eq(Boolean.TRUE, MultiFocusFacts.parseEnabled(dump.replace(":false", ":true")), "enabled");
+        eq(Boolean.TRUE, MultiFocusFacts.parseEnabled("Multi Audio Focus enabled: true"), "no space before the colon");
+        eq(Boolean.TRUE, MultiFocusFacts.parseEnabled("Multi Audio Focus enabled   :   true"), "extra spaces");
+        eq(null, MultiFocusFacts.parseEnabled("Multi Audio Focus enabled :maybe"), "garbage value is unknown, not false");
+        eq(null, MultiFocusFacts.parseEnabled("nothing about it here"), "a dump without the line is unknown");
+        eq(null, MultiFocusFacts.parseEnabled(""), "empty dump");
+        eq(null, MultiFocusFacts.parseEnabled(null), "no dump");
     }
 
     private static void probeTone() {

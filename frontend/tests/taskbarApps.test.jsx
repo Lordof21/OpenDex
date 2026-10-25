@@ -18,6 +18,7 @@ vi.mock('../src/notifications/NotificationSound.js', () => ({ playNotificationEa
 import Taskbar from '../src/taskbar/Taskbar.jsx';
 import { useWindowStore } from '../src/window/windowStore.js';
 import { useNotificationStore } from '../src/state/notificationStore.js';
+import { useSystemStore } from '../src/state/systemStore.js';
 import { LONG_PRESS_MS } from '../src/ui/useLongPress.js';
 
 const win = (id, over = {}) => ({
@@ -270,5 +271,54 @@ describe('taşma ve klavye', () => {
     expect(document.activeElement).toBe(appButton('c'));
     fireEvent.keyDown(document.activeElement, { key: 'Home' });
     expect(document.activeElement).toBe(launcher);
+  });
+});
+
+describe('OpenDeX Ayarları görev çubuğunda bir görev gibi görünür', () => {
+  const setSettings = (over) => act(() => useSystemStore.setState({ settingsOpen: true, settingsMinimized: false, settingsFocused: true, ...over }));
+  afterEach(() => act(() => useSystemStore.setState({ settingsOpen: false, settingsMinimized: false, settingsFocused: false })));
+
+  it('kapalıyken düğme yok; açılınca pencerelerden sonra, simgeyle ve "açık/etkin" durumuyla çıkar', () => {
+    setWindows([win('a', { focused: true }), win('b')]);
+    render(<Taskbar />);
+    expect(appButton('opendex')).toBeNull();
+
+    setSettings({});
+    expect(appButtons()).toEqual(['a', 'b', 'opendex']);
+    expect(appButton('opendex')).toHaveAttribute('aria-label', expect.stringContaining('OpenDeX Ayarları'));
+    expect(appButton('opendex')).toHaveAttribute('aria-current', 'true');
+  });
+
+  it('küçültülünce "küçültülmüş" olur ve etkin değildir; tıklama geri yükler', () => {
+    setWindows([]);
+    render(<Taskbar />);
+    setSettings({ settingsMinimized: true, settingsFocused: false });
+    expect(appButton('opendex')).toHaveAttribute('aria-label', expect.stringContaining('küçültülmüş'));
+    expect(appButton('opendex')).not.toHaveAttribute('aria-current', 'true');
+
+    fireEvent.click(appButton('opendex'));
+    expect(useSystemStore.getState()).toMatchObject({ settingsOpen: true, settingsMinimized: false, settingsFocused: true });
+  });
+
+  it('tıklama Windows davranışı: ön plandaysa küçültür, arkadaysa öne getirir', () => {
+    setWindows([]);
+    render(<Taskbar />);
+    setSettings({});
+    fireEvent.click(appButton('opendex'));
+    expect(useSystemStore.getState().settingsMinimized).toBe(true);
+
+    setSettings({ settingsMinimized: false, settingsFocused: false });
+    fireEvent.click(appButton('opendex'));
+    expect(useSystemStore.getState()).toMatchObject({ settingsMinimized: false, settingsFocused: true });
+  });
+
+  it('pencereleri yeniden sıralamak Ayarlar düğmesi açıkken de çalışır (Ayarlar sıraya girmez, sürüklenemez)', () => {
+    setWindows([win('a'), win('b'), win('c')]);
+    render(<Taskbar />);
+    setSettings({});
+    expect(appButtons()).toEqual(['a', 'b', 'c', 'opendex']);
+    fireEvent.contextMenu(appButton('opendex')); // pencereye bağlı menü yok: hata vermez, menü açılmaz
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(order()).toEqual(['a', 'b', 'c']);
   });
 });

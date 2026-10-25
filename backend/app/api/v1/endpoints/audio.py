@@ -5,8 +5,8 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Path
 
-from app.api.deps import AppContextDep
-from app.schemas import PACKAGE_PATTERN, AppAudioPatch, AudioSyncReport
+from app.api.deps import AppContextDep, RequireDevice
+from app.schemas import PACKAGE_PATTERN, AppAudioPatch, AudioSyncReport, MultiAudioFocusPatch
 from app.streams.app_audio import TransferRefused
 
 router = APIRouter()
@@ -21,6 +21,33 @@ async def list_app_audio(ctx: AppContextDep) -> dict[str, Any]:
         "supported": app_audio.supported, "mode": app_audio.mode, "apps": app_audio.list_apps(),
         "sync": await app_audio.sync_info(),
     }
+
+
+@router.get("/audio/multi-focus")
+async def get_multi_focus(ctx: AppContextDep) -> dict[str, Any]:
+    """The phone's "several apps play at once" flag, as last read (no device access): {state: unknown|off|on|unsupported|failed,
+    enabled, owner: opendex|phone|null, checked_at, error, can_set, policy: ask|always|never, session, busy}. It can be stale —
+    `POST /audio/multi-focus/recheck` reads the phone now. The same object is pushed as the `multi_audio_focus_update` event."""
+    return ctx.multi_audio_focus.snapshot()
+
+
+@router.post("/audio/multi-focus/recheck", dependencies=[RequireDevice])
+async def recheck_multi_focus(ctx: AppContextDep) -> dict[str, Any]:
+    """Reads the flag from the phone right now ("Yeniden kontrol et") and returns the snapshot. Changes nothing on the phone."""
+    return await ctx.multi_audio_focus.read()
+
+
+@router.put("/audio/multi-focus", dependencies=[RequireDevice])
+async def put_multi_focus(body: MultiAudioFocusPatch, ctx: AppContextDep) -> dict[str, Any]:
+    """`enabled: true` = the user agrees for this session: the flag is set through the audio service, then READ BACK (a call
+    that returns quietly but changes nothing is not a success) and undone when the last window closes. `enabled: false` turns
+    it off and restores the phone's previous value. 409 `not_supported` (this phone / helper cannot) or `not_applied` (the phone
+    did not take it) — the snapshot, with the reason, is also pushed as `multi_audio_focus_update`."""
+    service = ctx.multi_audio_focus
+    snap = await (service.enable() if body.enabled else service.disable())
+    if body.enabled and snap["state"] in ("unsupported", "failed"):
+        raise HTTPException(status_code=409, detail="not_supported" if snap["state"] == "unsupported" else "not_applied")
+    return snap
 
 
 @router.put("/audio/sync")

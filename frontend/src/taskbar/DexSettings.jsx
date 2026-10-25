@@ -56,6 +56,9 @@ import {
 } from '../window/windowStore.js';
 import { updateSettings, useLiveSettings } from '../settings/liveSettings.js';
 import { openOpenDexSettings } from '../settings/SettingsPanel.jsx';
+import { useAudioFocusStore } from '../state/audioFocusStore.js';
+import { MULTI_FOCUS_TARGET } from '../audioFocus/MultiFocusChip.jsx';
+import { detailText, statusOf } from '../audioFocus/focusText.js';
 import { PrecisionSlider } from '../ui/PrecisionSlider.jsx';
 import { ChoiceMenu } from '../ui/ChoiceMenu.jsx';
 import AppIcon from '../ui/AppIcon.jsx';
@@ -176,6 +179,16 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
   const handleOpenAllSettings = () => {
     openSettings();
     openOpenDexSettings();
+    onClose?.();
+  };
+
+  // Multi-app sound: this panel only shows the state and hands over to the one card that manages it (Settings › Sound).
+  const focusSnap = useAudioFocusStore((s) => s.snap);
+  const focusStatus = statusOf(focusSnap);
+  const focusDetail = detailText(focusSnap);
+  const handleOpenMultiFocus = () => {
+    openSettings();
+    openOpenDexSettings(MULTI_FOCUS_TARGET);
     onClose?.();
   };
 
@@ -744,6 +757,22 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
             <p className="mt-1.5 text-[9px] leading-[12px] text-muted-foreground">
              {tt('taskbar.bu_cihaz')}{' '} <strong className="font-semibold text-foreground">~16</strong> {' '}{tt('taskbar.bagimsiz_pencere_destekliyor')}
             </p>
+          </SettingsGroup>
+
+          <SettingsGroup dense icon={Layers} title={tt('audio_focus.baslik')} value={focusStatus.label}>
+            {focusDetail.text && (
+              <p className="mb-1.5 text-[9px] leading-[12px] text-muted-foreground" data-testid="dex-multi-focus-detail">
+                {focusDetail.text}
+              </p>
+            )}
+            {(focusSnap.state === 'on' || focusSnap.state === 'off') && (
+              <p className="mb-1.5 text-[9px] leading-[12px] text-muted-foreground" data-testid="dex-multi-focus-ram-tip">
+                {tt('audio_focus.ram_ipucu')}
+              </p>
+            )}
+            <Button variant="outline" size="sm" className="w-full text-[10px]" data-testid="dex-multi-focus-open" onClick={handleOpenMultiFocus}>
+              {tt('audio_focus.dex_kisayol')}
+            </Button>
           </SettingsGroup>
 
           <Button variant="outline" size="lg" className="w-full text-[11px]" startIcon={<ExternalLink className="size-3.5" />} onClick={handleOpenAllSettings}>

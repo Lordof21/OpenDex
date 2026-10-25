@@ -122,7 +122,7 @@ The backend gates each feature on the list in the greeting, so a skewed jar (new
 fallback, not a hang. Base list:
 
 <!-- BEGIN GENERATED: capabilities -->
-`ping`, `proc_probe`, `media_get`, `media_action`, `media_seek`, `get_focus`, `set_density`, `set_task_density`, `set_task_windowing`, `get_task_geometry`, `move_task`, `move_task_to_display`, `move_task_wct`, `restart_task_activity`, `task_density_info`, `volumes_get`, `volume_set`, `states_get`, `state_set`, `battery_get`, `battery_health`, `display_power`, `status`, `audio_route`, `audio_stop`, `audio_list`, `audio_playout`, `audio_probe`, `task_events`, `tasks_list`, `display_events`, `bluetooth`, `bt_list`, `bt_connect`, `bt_disconnect`, `bt_forget`, `wifi_connect_saved`, `wifi_disconnect`, `quit`, `exit`, `notification_events`, `notifications_list`, `notif_invoke`, `thermal_events`, `thermal_get`, `event_log`, `load_sample`, `proc_scan`, `find_task`, `task_info`, `top_activities`, `power_get`, `dump`, `assist_content`, `display_get`, `set_task_windowing_bounds`, `task_reorder`, `park_task`
+`ping`, `proc_probe`, `media_get`, `media_action`, `media_seek`, `get_focus`, `set_density`, `set_task_density`, `set_task_windowing`, `get_task_geometry`, `move_task`, `move_task_to_display`, `move_task_wct`, `restart_task_activity`, `task_density_info`, `volumes_get`, `volume_set`, `states_get`, `state_set`, `battery_get`, `battery_health`, `display_power`, `status`, `audio_route`, `audio_stop`, `audio_list`, `audio_playout`, `audio_probe`, `audio_multi_focus`, `task_events`, `tasks_list`, `display_events`, `bluetooth`, `bt_list`, `bt_connect`, `bt_disconnect`, `bt_forget`, `wifi_connect_saved`, `wifi_disconnect`, `quit`, `exit`, `notification_events`, `notifications_list`, `notif_invoke`, `thermal_events`, `thermal_get`, `event_log`, `load_sample`, `proc_scan`, `find_task`, `task_info`, `top_activities`, `power_get`, `dump`, `assist_content`, `display_get`, `set_task_windowing_bounds`, `task_reorder`, `park_task`
 <!-- END GENERATED: capabilities -->
 
 Added only when the daemon was started **with a key**: <!-- BEGIN GENERATED: capabilities-token -->
@@ -139,7 +139,7 @@ All commands of the main dispatch (`handleCommand` in `OpenDexDaemon.java`) — 
 fails if one of them is missing from the tables below:
 
 <!-- BEGIN GENERATED: commands -->
-`ping`, `proc_probe`, `media_get`, `media_action`, `media_seek`, `get_focus`, `set_density`, `set_task_density`, `set_task_windowing`, `get_task_geometry`, `move_task_wct`, `park_task`, `task_reorder`, `move_task_to_display`, `move_task`, `volumes_get`, `volume_set`, `states_get`, `state_set`, `battery_get`, `battery_health`, `notifications_list`, `notif_invoke`, `thermal_get`, `event_log`, `load_sample`, `proc_scan`, `find_task`, `task_info`, `assist_content`, `power_get`, `top_activities`, `dump`, `display_power`, `audio_route`, `audio_target`, `audio_probe`, `audio_stop`, `audio_list`, `tasks_list`, `display_get`, `bt_list`, `bt_connect`, `bt_disconnect`, `bt_forget`, `wifi_connect_saved`, `wifi_disconnect`, `task_density_info`, `restart_task_activity`, `status`
+`ping`, `proc_probe`, `media_get`, `media_action`, `media_seek`, `get_focus`, `set_density`, `set_task_density`, `set_task_windowing`, `get_task_geometry`, `move_task_wct`, `park_task`, `task_reorder`, `move_task_to_display`, `move_task`, `volumes_get`, `volume_set`, `states_get`, `state_set`, `battery_get`, `battery_health`, `notifications_list`, `notif_invoke`, `thermal_get`, `event_log`, `load_sample`, `proc_scan`, `find_task`, `task_info`, `assist_content`, `power_get`, `top_activities`, `dump`, `display_power`, `audio_route`, `audio_target`, `audio_probe`, `audio_stop`, `audio_list`, `audio_multi_focus`, `tasks_list`, `display_get`, `bt_list`, `bt_connect`, `bt_disconnect`, `bt_forget`, `wifi_connect_saved`, `wifi_disconnect`, `task_density_info`, `restart_task_activity`, `status`
 <!-- END GENERATED: commands -->
 
 Besides these: `quit` / `exit` (terminate the process), `shell` (below) and the `fs_*` family (below). Replies below are `type`
@@ -217,6 +217,7 @@ values; every reply also carries `req_id` when the request had one, and `ok` is 
 | `audio_probe` | `<target_ms> [count=6] [spacing_ms=500] [lead_ms=700]` | `audio_result {ok, pts_us[], …}` — plays calibration tones on the phone (see [AUDIO.md](AUDIO.md)). |
 | `audio_stop` | `<package>` | `audio_result`. |
 | `audio_list` | — | `audio_list` — active captures. |
+| `audio_multi_focus` | `get` \| `set <true\|false>` | `audio_multi_focus_result {ok, enabled?, requested?, applied?, error?}` — the phone's "several apps play at once" flag. `get` reads it from the audio service's dump (the service has no getter); `set` calls `IAudioService.setMultiAudioFocusEnabled` and reads the flag back — `applied` is that read-back, not the call's return. Errors: `flag_not_found`, `method_missing`, `permission_denied`, `audio_service_missing`, `bad_request`. See [design/MULTI_APP_SOUND.md](design/MULTI_APP_SOUND.md). |
 
 The PCM itself travels on the separate [audio link](#audio-link).
 

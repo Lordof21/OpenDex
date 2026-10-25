@@ -153,6 +153,8 @@ public class OpenDexDaemon {
             "set_density", "set_task_density", "set_task_windowing", "get_task_geometry", "move_task", "move_task_to_display", "move_task_wct", "restart_task_activity", "task_density_info", "volumes_get", "volume_set",
             "states_get", "state_set", "battery_get", "battery_health", "display_power", "status",
             "audio_route", "audio_stop", "audio_list", "audio_playout", "audio_probe",
+            // the phone's "multi audio focus" (several apps playing at once): read from the audio dump, set through the service
+            "audio_multi_focus",
             "task_events", "tasks_list", "display_events",
             "bluetooth", "bt_list", "bt_connect", "bt_disconnect", "bt_forget", "wifi_connect_saved", "wifi_disconnect", "quit", "exit",
             // 1.2 — what the backend used to fork `dumpsys` / `logcat` / `ps` / app_process for
@@ -2423,6 +2425,17 @@ public class OpenDexDaemon {
                                        : AudioRouter.stop(pkg);
                 }
                 case "audio_list": return AudioRouter.list();
+                case "audio_multi_focus": {
+                    // audio_multi_focus get | audio_multi_focus set <true|false>; replies audio_multi_focus_result
+                    // {ok, enabled?, requested?, applied?, error?} — `applied` is the READ-BACK, not the call's return
+                    String verb = parts.length > 1 ? parts[1].toLowerCase() : "get";
+                    if ("get".equals(verb)) return MultiAudioFocus.get();
+                    if ("set".equals(verb) && parts.length > 2
+                            && ("true".equalsIgnoreCase(parts[2]) || "false".equalsIgnoreCase(parts[2]))) {
+                        return MultiAudioFocus.set(Boolean.parseBoolean(parts[2]));
+                    }
+                    return Json.obj("type", MultiAudioFocus.TYPE, "ok", false, "error", "bad_request");
+                }
                 case "tasks_list": return TaskEvents.snapshotJson();
                 case "display_get": return PhoneDisplay.snapshot(parts.length > 1 ? Integer.parseInt(parts[1]) : 0);
                 case "bt_list": return Bluetooth.list();

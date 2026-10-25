@@ -43,6 +43,7 @@ import { IconTile } from '../ui/Choice.jsx';
 import { PanelHeader } from '../ui/Typography.jsx';
 import { subviewMotion } from '../ui/motion.js';
 import { useConnectivityStore } from '../state/connectivityStore.js';
+import MultiFocusChip from '../audioFocus/MultiFocusChip.jsx';
 import { t as tt } from '../i18n/index.js';
 
 export const QuickSettings = forwardRef(function QuickSettings({
@@ -299,6 +300,7 @@ export const QuickSettings = forwardRef(function QuickSettings({
               onBack={() => setView('main')}
             />
             <div className="dex-scroll min-h-0 flex-1 overflow-y-auto pb-1">
+              <MultiFocusChip className="mb-1.5" />
               <AppAudioSection mode={audioMode} />
               <MixerSection title={tt('taskbar.telefon_android_akislari')}>
                 <MixerRow

@@ -6,6 +6,7 @@ import { logger } from '../lib/logger.js';
 import { ART_RETRY_DELAYS_MS, VERIFY_DELAYS_MS, isStaleMediaEvent, resolveArt, trackIdOf } from './mediaModel.js';
 import { useSystemStore } from './systemStore.js';
 import { t as tt } from '../i18n/index.js';
+import { noteMediaCommand } from '../audioFocus/focusNudge.js';
 
 // Paket başına zamanlayıcılar (store durumu DEĞİL: yalnızca uygulama koruması, arayüz bunlardan render etmez).
 const artRetryTimers = new Map(); // pkg -> { trackId, timers[] }   kapak gelmeyen yeni şarkıda `fresh` okuma merdiveni
@@ -537,6 +538,7 @@ export const useNotificationStore = create((set, get) => ({
   },
 
   sendMediaAction: async (action, pkg) => {
+    noteMediaCommand(); // a pause that follows is the user's own, not Android taking the audio focus away (audioFocus/focusNudge)
     // Read state from the specific package slot (not global)
     const targetPkg = pkg || get().mediaStatus?.package;
     if (!get().isLiveMediaPackage(targetPkg)) {

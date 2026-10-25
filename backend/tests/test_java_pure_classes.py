@@ -23,7 +23,7 @@ from app.device import daemon_auth, proc_cpu
 from app.device.device_daemon_client import _decode_shell_output, shell_request
 
 JAVA = Path(__file__).resolve().parent.parent / "java"
-SOURCES = [JAVA / "src/com/opendex/tools" / f"{name}.java" for name in ("ShellRunner", "ShellWire", "DaemonAuth", "ProcProbe", "FsWire", "FsPolicy", "FsOps", "PlayoutClock", "BatteryFacts", "PtsClock", "ProbeTone")]
+SOURCES = [JAVA / "src/com/opendex/tools" / f"{name}.java" for name in ("ShellRunner", "ShellWire", "DaemonAuth", "ProcProbe", "FsWire", "FsPolicy", "FsOps", "PlayoutClock", "BatteryFacts", "PtsClock", "ProbeTone", "MultiFocusFacts")]
 SELF_TEST = JAVA / "test/com/opendex/tools/PureClassesSelfTest.java"
 MAIN_CLASS = "com.opendex.tools.PureClassesSelfTest"
 

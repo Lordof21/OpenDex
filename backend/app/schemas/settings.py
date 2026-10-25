@@ -35,6 +35,10 @@ class ProjectSettings(BaseModel):
     # "İkisi" rotasında telefon ve DeX aynı anda duyulur (ortak zaman çizgisi, bkz. streams/app_audio.py). Bu, kulakla yapılan
     # İNCE AYARdır: + telefonu geciktirir, − öne alır (ms).
     audio_sync_offset_ms: int = Field(0, ge=-300, le=500)
+    # Telefonun "çoklu uygulama sesi" (birden çok uygulama aynı anda çalar; Android normalde öncekini durdurur) — bkz.
+    # device/multi_audio_focus.py. "ask" (varsayılan): yalnız kullanıcı onayladığında, o oturum için. "always": OpenDeX'in
+    # pencereleri açıkken kendiliğinden. "never": hiç uygulanmaz. Her durumda son pencere kapanınca telefon eski hâline döner.
+    multi_audio_focus_policy: Literal["ask", "always", "never"] = "ask"
     enable_flex_display: bool = False
     video_codec: Literal["auto", "h265", "h264", "av1"] = "auto"
     pixel_perfect_dpr: bool = True

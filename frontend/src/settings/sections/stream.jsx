@@ -3,6 +3,7 @@
 import React from 'react';
 import { Activity, AudioLines, Blocks, Cpu, Radio, Speaker, Volume2 } from 'lucide-react';
 import SyncFineTune from '../../taskbar/SyncFineTune.jsx';
+import MultiFocusCard from '../../audioFocus/MultiFocusCard.jsx';
 import { ROUTE_OPTIONS } from '../../ui/audioRouting.jsx';
 import { ChoiceGroup, Page, useSettingsUi } from '../controls.jsx';
 import { cn } from '../../lib/utils.js';
@@ -46,6 +47,7 @@ export function AudioSection({ ctl }) {
         onChange={a.setAudioRoute}
         columns={3}
       />
+      <MultiFocusCard />
       <div
         data-setting-id="audioSync"
         className={cn('overflow-hidden rounded-xl border border-border/70 bg-muted/30 transition-colors', flashId === 'audioSync' && 'settings-flash')}

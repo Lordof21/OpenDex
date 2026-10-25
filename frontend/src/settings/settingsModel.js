@@ -118,6 +118,12 @@ export const SETTING_ITEMS = {
     description: t('settings.android_seslerinin_nereye_gidecegi'),
     keywords: [t('settings.hoparlor'), 'telefon', 'dex', 'ikisi', t('settings.yonlendirme'), t('settings.kulaklik'), 'ses'],
   },
+  audioMultiFocus: {
+    section: 'audio',
+    title: t('audio_focus.baslik'),
+    description: t('audio_focus.aciklama'),
+    keywords: ['multi', 'focus', 'odak', t('settings.yonlendirme'), 'aynı anda', 'durduruyor', 'çoklu', 'birlikte', 'ses'],
+  },
   audioSync: {
     section: 'audio',
     title: t('common.telefon_dex_ince_ayari'),

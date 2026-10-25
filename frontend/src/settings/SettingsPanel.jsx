@@ -34,6 +34,8 @@ import { IconButton } from '../ui/IconButton.jsx';
 import { pushEscapeHandler } from '../lib/escapeStack.js';
 import { cn } from '../lib/utils.js';
 import { useSystemStore } from '../state/systemStore.js';
+import { useWindowStore } from '../window/windowStore.js';
+import { TASKBAR_H } from '../window/windowMath.js';
 import { Chip, Highlight, SettingsUiProvider } from './controls.jsx';
 import { useSettingsController } from './useSettingsController.js';
 import { useLiveSettings } from './liveSettings.js';
@@ -56,8 +58,9 @@ import { t } from '../i18n/index.js';
 
 export const OPENDEX_SETTINGS_EVENT = 'opendex:open-settings';
 
-export function openOpenDexSettings() {
-  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(OPENDEX_SETTINGS_EVENT));
+/** Opens the settings window; `target` = { section, item? } lands on a section (and flashes one card), e.g. the mixer chip → Sound. */
+export function openOpenDexSettings(target = null) {
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(OPENDEX_SETTINGS_EVENT, { detail: target }));
 }
 
 const SECTION_ICONS = {
@@ -77,9 +80,13 @@ const MIN_H = 340;
 const SHEET_MAX_VIEWPORT_PX = 640;
 const FLASH_MS = 1700;
 
+/** Görev çubuğu görünürken alt şeridi (TASKBAR_H) ayırır; tam ekran bir pencere çubuğu gizleyince ayrılmaz (Taskbar.jsx `hasFullscreenWindow`). */
+const taskbarReserve = () => (useWindowStore.getState().windows.some((w) => w.fullscreen && !w.minimized) ? 0 : TASKBAR_H);
+
+/** Ayar penceresinin kullanabileceği alan = ekran − görev çubuğu: "ekranı kapla" çubuğun ALTINA taşmaz. */
 const viewport = () => ({
   width: typeof window !== 'undefined' ? window.innerWidth : 1200,
-  height: typeof window !== 'undefined' ? window.innerHeight : 800,
+  height: typeof window !== 'undefined' ? Math.max(MIN_H, window.innerHeight - taskbarReserve()) : 800,
 });
 
 /** Başlangıç çerçevesi: küçük ekranda tam ekran sayfa (`sheet`), aksi hâlde ortalanmış yüzen pencere. */
@@ -345,6 +352,7 @@ export default function SettingsPanel() {
     closeSettings,
   } = useSystemStore();
   const connectionState = useSystemStore((s) => s.connectionState);
+  const taskbarHidden = useWindowStore((s) => s.windows.some((w) => w.fullscreen && !w.minimized));
 
   const live = useLiveSettings() || {};
   const tips = useMemo(() => recommendations(live), [live]);
@@ -381,12 +389,6 @@ export default function SettingsPanel() {
     if (settingsOpen && !frame) setFrame(defaultFrame());
   }, [settingsOpen, frame]);
 
-  useEffect(() => {
-    const onOpen = () => openWindow();
-    window.addEventListener(OPENDEX_SETTINGS_EVENT, onOpen);
-    return () => window.removeEventListener(OPENDEX_SETTINGS_EVENT, onOpen);
-  }, [openWindow]);
-
   // Ekran dönünce / yeniden boyutlanınca: tam ekran sayfa ekrana uyar; ekran büyüyünce yüzen pencereye döner.
   useEffect(() => {
     const onResize = () => {
@@ -401,6 +403,20 @@ export default function SettingsPanel() {
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
+
+  // Büyütülmüş pencere sahneyi tam doldurur: ekran yeniden boyutlanınca ya da görev çubuğu belirip kaybolunca (tam ekran uygulama)
+  // sahne değişir; çerçeve eski ölçüde kalmasın.
+  useEffect(() => {
+    if (!settingsMaximized) return undefined;
+    const fit = () => {
+      const stage = stageSize();
+      setFrame((current) => (current && !current.sheet ? { x: 0, y: 0, width: stage.width, height: stage.height } : current));
+    };
+    fit();
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsMaximized, taskbarHidden]);
 
   // Esc yalnız en üstteki katmanı kapatır (lib/escapeStack): önce arama temizlenir, sonra pencere kapanır.
   useEffect(() => {
@@ -459,6 +475,17 @@ export default function SettingsPanel() {
   }, []);
 
   const openResult = useCallback((result) => go(result.section, result.id), [go]);
+
+  // openOpenDexSettings(): the window opens on the overview, or — with a target — lands on that section and flashes one card.
+  useEffect(() => {
+    const onOpen = (event) => {
+      openWindow();
+      const target = event?.detail;
+      if (target && target.section) go(target.section, target.item || null);
+    };
+    window.addEventListener(OPENDEX_SETTINGS_EVENT, onOpen);
+    return () => window.removeEventListener(OPENDEX_SETTINGS_EVENT, onOpen);
+  }, [openWindow, go]);
 
   const startMove = (event) => {
     if (settingsMaximized || sheet || !frame) return;
@@ -534,7 +561,12 @@ export default function SettingsPanel() {
   const connected = connectionState === 'connected';
 
   return (
-    <div ref={stageRef} className="pointer-events-none fixed inset-0 z-[70] overflow-hidden">
+    <div
+      ref={stageRef}
+      data-testid="settings-stage"
+      className="pointer-events-none fixed inset-x-0 top-0 z-[70] overflow-hidden"
+      style={{ bottom: taskbarHidden ? 0 : TASKBAR_H }}
+    >
       <AnimatePresence>
         {settingsOpen && !settingsMinimized && frame && (
           <motion.section

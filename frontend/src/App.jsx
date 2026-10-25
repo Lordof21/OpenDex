@@ -35,6 +35,7 @@ import SnapIndicator from './window/SnapIndicator.jsx';
 import AltTabSwitcher from './window/AltTabSwitcher.jsx';
 import { useHeldTrue } from './ui/useHeldTrue.js';
 import { installWebviewMemoryGovernor } from './lib/webviewMemory.js';
+import { useAudioFocusStore } from './state/audioFocusStore.js';
 
 export default function App() {
   const [backendHealthy, setBackendHealthy] = useState(false);
@@ -116,6 +117,14 @@ export default function App() {
   // Main window only: a PiP webview has its own (empty) store and would conclude that nothing is playing while it IS the video.
   const isMainWindow = !pipWinId && !workspacePipTaskId;
   useEffect(() => (isMainWindow ? installWebviewMemoryGovernor(useWindowStore) : undefined), [isMainWindow]);
+
+  // The phone's "several apps at once" flag: a page that loaded after the phone was bound still learns its last reading; a phone
+  // that is gone leaves nothing behind (the backend pushes every later change as multi_audio_focus_update).
+  useEffect(() => {
+    if (!isMainWindow) return;
+    if (connectionState === 'connected') useAudioFocusStore.getState().load();
+    else if (connectionState === 'disconnected') useAudioFocusStore.getState().reset();
+  }, [isMainWindow, connectionState]);
 
   // ---- one-time notices ----------------------------------------------------
   useEffect(() => {

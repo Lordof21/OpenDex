@@ -289,3 +289,52 @@ describe('ayar davranışı korunur', () => {
     expect(screen.getByText(/piksel‑birebir hesaplanır/)).toBeInTheDocument();
   });
 });
+
+describe('görev çubuğu şeridi (ekranı kapla çubuğun altına taşmaz)', () => {
+  const stage = () => screen.getByTestId('settings-stage');
+  const windowEl = () => screen.getByRole('dialog', { name: 'Tüm OpenDeX ayarları' });
+
+  it('sahne görev çubuğunun üstünde biter (alt 50 px ayrılır)', async () => {
+    setViewport(1400, 900);
+    await mount();
+    expect(stage().style.bottom).toBe('50px');
+  });
+
+  it('tam ekran bir pencere görev çubuğunu gizleyince şerit ayrılmaz', async () => {
+    setViewport(1400, 900);
+    useWindowStore.setState({ windows: [{ id: 'f', package: 'pkg.f', title: 'F', fullscreen: true, minimized: false }] });
+    await mount();
+    expect(stage().style.bottom).toBe('0px');
+  });
+
+  it('"Tam ekran" çerçeveyi sahnenin tamamına (ekran − görev çubuğu) çeker, küçültünce eski ölçü döner', async () => {
+    setViewport(1400, 900);
+    await mount();
+    const before = { top: windowEl().style.top, height: windowEl().style.height, width: windowEl().style.width };
+
+    fireEvent.click(screen.getByRole('button', { name: 'Tam ekran' }));
+    await act(async () => {});
+    expect(windowEl().style.top).toBe('0px');
+    expect(windowEl().style.left).toBe('0px');
+    expect(windowEl().style.width).toBe('1400px');
+    expect(windowEl().style.height).toBe('850px'); // 900 − 50: görev çubuğunun altına inmez
+
+    fireEvent.click(screen.getByRole('button', { name: 'Küçült' }));
+    await act(async () => {});
+    expect({ top: windowEl().style.top, height: windowEl().style.height, width: windowEl().style.width }).toEqual(before);
+  });
+
+  it('büyütülmüşken ekran yeniden boyutlanınca pencere sahneye uyar', async () => {
+    setViewport(1400, 900);
+    await mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Tam ekran' }));
+    await act(async () => {});
+
+    setViewport(1200, 700);
+    await act(async () => {
+      window.dispatchEvent(new Event('resize'));
+    });
+    expect(windowEl().style.width).toBe('1200px');
+    expect(windowEl().style.height).toBe('650px');
+  });
+});

@@ -3020,6 +3020,134 @@
         }
       }
     },
+    "/api/v1/audio/multi-focus": {
+      "get": {
+        "tags": [
+          "audio"
+        ],
+        "summary": "Get Multi Focus",
+        "description": "The phone's \"several apps play at once\" flag, as last read (no device access): {state: unknown|off|on|unsupported|failed,\nenabled, owner: opendex|phone|null, checked_at, error, can_set, policy: ask|always|never, session, busy}. It can be stale —\n`POST /audio/multi-focus/recheck` reads the phone now. The same object is pushed as the `multi_audio_focus_update` event.",
+        "operationId": "get_multi_focus_api_v1_audio_multi_focus_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Multi Focus Api V1 Audio Multi Focus Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForeignOrigin"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "audio"
+        ],
+        "summary": "Put Multi Focus",
+        "description": "`enabled: true` = the user agrees for this session: the flag is set through the audio service, then READ BACK (a call\nthat returns quietly but changes nothing is not a success) and undone when the last window closes. `enabled: false` turns\nit off and restores the phone's previous value. 409 `not_supported` (this phone / helper cannot) or `not_applied` (the phone\ndid not take it) — the snapshot, with the reason, is also pushed as `multi_audio_focus_update`.",
+        "operationId": "put_multi_focus_api_v1_audio_multi_focus_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MultiAudioFocusPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Put Multi Focus Api V1 Audio Multi Focus Put"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "409": {
+            "$ref": "#/components/responses/NoDevice"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForeignOrigin"
+          },
+          "411": {
+            "$ref": "#/components/responses/LengthRequired"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          }
+        },
+        "x-requires-device": true
+      }
+    },
+    "/api/v1/audio/multi-focus/recheck": {
+      "post": {
+        "tags": [
+          "audio"
+        ],
+        "summary": "Recheck Multi Focus",
+        "description": "Reads the flag from the phone right now (\"Yeniden kontrol et\") and returns the snapshot. Changes nothing on the phone.",
+        "operationId": "recheck_multi_focus_api_v1_audio_multi_focus_recheck_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Recheck Multi Focus Api V1 Audio Multi Focus Recheck Post"
+                }
+              }
+            }
+          },
+          "409": {
+            "$ref": "#/components/responses/NoDevice"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForeignOrigin"
+          },
+          "411": {
+            "$ref": "#/components/responses/LengthRequired"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          }
+        },
+        "x-requires-device": true
+      }
+    },
     "/api/v1/audio/sync": {
       "put": {
         "tags": [
@@ -7061,6 +7189,20 @@
         ],
         "title": "ModeRequest"
       },
+      "MultiAudioFocusPatch": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "title": "MultiAudioFocusPatch",
+        "description": "PUT /api/audio/multi-focus: the user's answer. True = \"yes, for this session\" (applied now, read back, undone when the\nlast window closes); False = \"turn it off\" (the phone's previous value is restored). \"Always\" is the setting\n`multi_audio_focus_policy`, not a field here."
+      },
       "OpenNotificationRequest": {
         "properties": {
           "package": {
@@ -7338,6 +7480,16 @@
             "minimum": -300.0,
             "title": "Audio Sync Offset Ms",
             "default": 0
+          },
+          "multi_audio_focus_policy": {
+            "type": "string",
+            "enum": [
+              "ask",
+              "always",
+              "never"
+            ],
+            "title": "Multi Audio Focus Policy",
+            "default": "ask"
           },
           "enable_flex_display": {
             "type": "boolean",

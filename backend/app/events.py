@@ -96,6 +96,7 @@ EventType = Literal[
     # --- Per-app audio ---
     "app_audio_mode",                # {supported, mode: "pending"|"per_app"|"legacy"|"off"}
     "app_audio_state",               # {package, route, live_route, volume, muted, windows, stream_id, error, explicit}
+    "multi_audio_focus_update",      # {state: "unknown"|"off"|"on"|"unsupported"|"failed", enabled, owner: "opendex"|"phone"|null, checked_at, error, can_set, policy, session, busy} — the phone's "several apps at once" flag
     # --- Transport handover (Wi-Fi <-> USB) ---
     "migration_queued",              # {window_id, old_serial, new_serial}
     "migration_started",             # {window_id, new_serial}

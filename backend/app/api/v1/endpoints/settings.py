@@ -64,6 +64,10 @@ async def put_settings(body: ProjectSettings, ctx: AppContextDep):
         # Per-app audio: windows whose app has no saved preference follow the new default route.
         await ctx.app_audio.on_default_route_changed()
 
+    if previous.multi_audio_focus_policy != body.multi_audio_focus_policy:
+        # "ask" / "always" / "never": the lease re-decides at once (and a user's earlier "turn it off" no longer holds).
+        await ctx.multi_audio_focus.on_policy_changed()
+
     if previous.audio_sync_offset_ms != body.audio_sync_offset_ms:
         # "İkisi": the fine tune applies at once (the phone's playout is retuned in place).
         await ctx.app_audio.on_sync_changed()

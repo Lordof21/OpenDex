@@ -37,6 +37,14 @@ class AppAudioPatch(BaseModel):
     standalone: bool | None = None
 
 
+class MultiAudioFocusPatch(BaseModel):
+    """PUT /api/audio/multi-focus: the user's answer. True = "yes, for this session" (applied now, read back, undone when the
+    last window closes); False = "turn it off" (the phone's previous value is restored). "Always" is the setting
+    `multi_audio_focus_policy`, not a field here."""
+
+    enabled: bool
+
+
 class AudioSyncReport(BaseModel):
     """PUT /api/audio/sync: what the DeX page measures about its own audio — both optional, the page sends what changed."""
 

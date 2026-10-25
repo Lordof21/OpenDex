@@ -150,8 +150,8 @@ Errors are JSON. The shape is FastAPI's:
 
 Two things to know when you write a client:
 
-1. **`detail` is for people, and it is Turkish.** The UI of OpenDeX is Turkish today (see the roadmap), and so are most
-   error sentences. Do not parse them. Switch on the **status code**, and — where one exists — on a machine code:
+1. **`detail` is for people, and it is mostly Turkish.** The UI speaks 20 languages, but the backend's error sentences
+   are not part of those translations yet ([TRANSLATING.md](TRANSLATING.md)). Do not parse them. Switch on the **status code**, and — where one exists — on a machine code:
    some endpoints return a snake_case code in `detail` (`not_supported`, `bad_request`, `clock_unavailable`), and the file
    manager returns a structured body:
 
@@ -313,6 +313,7 @@ refused with `bad_request`. Unknown commands are ignored.
 | **Per-app audio** | |
 | `app_audio_mode` | {supported, mode: "pending"\|"per_app"\|"legacy"\|"off"} |
 | `app_audio_state` | {package, route, live_route, volume, muted, windows, stream_id, error, explicit} |
+| `multi_audio_focus_update` | {state: "unknown"\|"off"\|"on"\|"unsupported"\|"failed", enabled, owner: "opendex"\|"phone"\|null, checked_at, error, can_set, policy, session, busy} — the phone's "several apps at once" flag |
 | **Transport handover** | |
 | `migration_queued` | {window_id, old_serial, new_serial} |
 | `migration_started` | {window_id, new_serial} |

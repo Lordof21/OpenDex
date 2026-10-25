@@ -9,6 +9,7 @@ import { applyDeviceState, syncDeviceState } from '../wireless/deviceState.js';
 
 import { useNotificationStore } from '../state/notificationStore.js';
 import { useAudioMixerStore } from '../state/audioMixerStore.js';
+import { useAudioFocusStore } from '../state/audioFocusStore.js';
 import { useConnectivityStore } from '../state/connectivityStore.js';
 import { useDeviceLoadStore } from '../telemetry/deviceLoadStore.js';
 import { useDeviceHubStore } from '../devices/deviceHubStore.js';
@@ -77,6 +78,7 @@ const FLOW_EVENT_CATEGORY = {
   window_app_restored: 'presence',
   app_audio_mode: 'audio',
   app_audio_state: 'audio',
+  multi_audio_focus_update: 'audio',
 };
 
 function logFlowEvent(event) {
@@ -188,6 +190,10 @@ export function handleEvent(event) {
       break;
     case 'app_audio_state':
       useAudioMixerStore.getState().onAppAudioState(event.payload || {});
+      break;
+    // The phone's "several apps play at once" flag: the backend reads / sets it and pushes the snapshot (state/audioFocusStore.js).
+    case 'multi_audio_focus_update':
+      useAudioFocusStore.getState().onUpdate(event.payload || {});
       break;
     case 'device_lost':
       // Windows stay open (frozen frames) — supervisor contract.

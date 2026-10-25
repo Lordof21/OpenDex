@@ -2,7 +2,7 @@
 
 # API reference
 
-All 127 operations of the public OpenAPI document ([`openapi.json`](openapi.json), OpenAPI 3.1.0), grouped by tag. Conventions that apply to every operation — authentication, the Origin/Host guard, limits, error shapes — are in [API.md](../API.md); the WebSocket channels and the event types are there too.
+All 130 operations of the public OpenAPI document ([`openapi.json`](openapi.json), OpenAPI 3.1.0), grouped by tag. Conventions that apply to every operation — authentication, the Origin/Host guard, limits, error shapes — are in [API.md](../API.md); the WebSocket channels and the event types are there too.
 
 Paths are relative to `http://127.0.0.1:8710/api/v1` (every operation is also served under `/api`, unversioned). **Auth** `token` = needs the API token; **Device** = answers `409` while no phone is bound.
 
@@ -14,7 +14,7 @@ Paths are relative to `http://127.0.0.1:8710/api/v1` (every operation is also se
 | [apps](#apps) | 4 |
 | [windows](#windows) | 23 |
 | [settings](#settings) | 4 |
-| [audio](#audio) | 5 |
+| [audio](#audio) | 8 |
 | [input](#input) | 5 |
 | [notifications](#notifications) | 10 |
 | [diagnostics](#diagnostics) | 8 |
@@ -966,6 +966,7 @@ Updates settings and applies live quality/audio reconfigurations.
 | `dp_lock_enabled` | boolean | no | default `false` |
 | `audio_output_mode` | `"pc"` \| `"phone"` \| `"both"` | no | default `"pc"` |
 | `audio_sync_offset_ms` | integer (-300–500) | no | default `0` |
+| `multi_audio_focus_policy` | `"ask"` \| `"always"` \| `"never"` | no | default `"ask"` |
 | `enable_flex_display` | boolean | no | default `false` |
 | `video_codec` | `"auto"` \| `"h265"` \| `"h264"` \| `"av1"` | no | default `"auto"` |
 | `pixel_perfect_dpr` | boolean | no | default `true` |
@@ -1008,6 +1009,9 @@ Per-app audio routing (Phone / DeX / Both), the cross-device sync and its calibr
 | Method | Path | Summary | Auth | Device |
 |---|---|---|---|---|
 | `GET` | `/audio/apps` | {supported, mode, apps, sync}: `supported` is false on Android ≤12 / an old daemon jar (single legacy strea… | token |  |
+| `GET` | `/audio/multi-focus` | The phone's "several apps play at once" flag, as last read (no device access): {state: unknown\|off\|on\|un… | token |  |
+| `PUT` | `/audio/multi-focus` | `enabled: true` = the user agrees for this session: the flag is set through the audio service, then READ BA… | token | yes |
+| `POST` | `/audio/multi-focus/recheck` | Reads the flag from the phone right now ("Yeniden kontrol et") and returns the snapshot. Changes nothing on… | token | yes |
 | `PUT` | `/audio/sync` | The DeX page reports what it measures about its own audio: the output device's latency and how many chunks… | token |  |
 | `POST` | `/audio/clock` | The device's monotonic clock (µs) — the clock of the audio PTS. The page calls this a few times, times each… | token |  |
 | `POST` | `/audio/probe` | The phone's half of the "İkisi" calibration: test tones on the phone at the instants (device-clock PTS) in… | token |  |
@@ -1021,6 +1025,41 @@ Per-app audio routing (Phone / DeX / Both), the cross-device sync and its calibr
 *token required*
 
 **Responses:** `200` Successful Response · `401` token missing/wrong · `403` foreign Origin/Host
+
+### `GET /audio/multi-focus`
+
+The phone's "several apps play at once" flag, as last read (no device access): {state: unknown|off|on|unsupported|failed,
+enabled, owner: opendex|phone|null, checked_at, error, can_set, policy: ask|always|never, session, busy}. It can be stale —
+`POST /audio/multi-focus/recheck` reads the phone now. The same object is pushed as the `multi_audio_focus_update` event.
+
+*token required*
+
+**Responses:** `200` Successful Response · `401` token missing/wrong · `403` foreign Origin/Host
+
+### `PUT /audio/multi-focus`
+
+`enabled: true` = the user agrees for this session: the flag is set through the audio service, then READ BACK (a call
+that returns quietly but changes nothing is not a success) and undone when the last window closes. `enabled: false` turns
+it off and restores the phone's previous value. 409 `not_supported` (this phone / helper cannot) or `not_applied` (the phone
+did not take it) — the snapshot, with the reason, is also pushed as `multi_audio_focus_update`.
+
+*token required; needs a bound device (`409` otherwise)*
+
+**Request body** (JSON, `MultiAudioFocusPatch`)
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `enabled` | boolean | yes |  |
+
+**Responses:** `200` Successful Response · `422` Validation Error · `409` no device bound · `401` token missing/wrong · `403` foreign Origin/Host · `411` chunked body · `413` body too large
+
+### `POST /audio/multi-focus/recheck`
+
+Reads the flag from the phone right now ("Yeniden kontrol et") and returns the snapshot. Changes nothing on the phone.
+
+*token required; needs a bound device (`409` otherwise)*
+
+**Responses:** `200` Successful Response · `409` no device bound · `401` token missing/wrong · `403` foreign Origin/Host · `411` chunked body · `413` body too large
 
 ### `PUT /audio/sync`
 

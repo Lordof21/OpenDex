@@ -1450,6 +1450,24 @@ class DeviceDaemonClient:
         value = resp.get("clock_us") if resp and resp.get("type") == "pong" else None
         return int(value) if isinstance(value, (int, float)) else None
 
+    @property
+    def supports_multi_audio_focus(self) -> bool:
+        """The connected jar can read and set the phone's "multi audio focus" (several apps playing at once)."""
+        return self.is_connected and "audio_multi_focus" in self.daemon_capabilities
+
+    async def multi_audio_focus(self, enabled: bool | None = None) -> dict[str, Any]:
+        """The audio service's multi-focus flag. ``enabled=None`` reads it: {ok, enabled?, error?}. A bool sets it and reads it
+        back: {ok, requested, applied, enabled?, error?} — ``applied`` is whether the read-back equals the request, so a call
+        that returned quietly but changed nothing is not a success (measured on HyperOS: the Settings key does exactly that)."""
+        if not self.is_connected:
+            return {"ok": False, "error": "daemon_not_connected"}
+        if "audio_multi_focus" not in self.daemon_capabilities:
+            return {"ok": False, "error": "daemon_too_old"}
+        line = "audio_multi_focus get" if enabled is None else f"audio_multi_focus set {'true' if enabled else 'false'}"
+        # The read pulls the audio service's dump (~150 KB, ≤ 4 s inside the daemon); the set also reads back.
+        res = await self._send_rpc_full(line, "audio_multi_focus", timeout=8.0)
+        return res or {"ok": False, "error": "timeout"}
+
     async def audio_list(self) -> dict[str, Any]:
         """{ok, supported (API 33+), sdk, streams: [{package, uid, stream_id, route, state}]}."""
         if not self.supports_app_audio:

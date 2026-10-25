@@ -242,3 +242,29 @@ Backend ve arayüz testleri sahte adb / sahte daemon ile koşar; aşağıdakiler
 - [ ] Wi-Fi koptuğunda aktarım `paused` olup bağlantı dönünce kaldığı yerden sürüyor; yarım dosya kalmıyor.
 - [ ] 2 GB'lık video aktarımı ve ortasında iptal; SD kart / USB hacimleri.
 - [ ] Eski bir `opendex-tools.jar` ile (`fs` yeteneği yok) yedek yol çalışıyor; yeni jar ile `caps` içinde `fs` görünüyor.
+
+## 13. Çoklu uygulama sesi — telefon yardımcısı (jar) YENİDEN DERLENMELİ
+
+`py backend/java/build.py`, sonra backend'i **yeniden başlat** (`python -m app.main`; `--reload` yok) ve OpenDeX'i yeniden bağla: yeni `audio_multi_focus` komutu
+için eski jar yeterli değildir. Ayrıntı: [design/MULTI_APP_SOUND.md](design/MULTI_APP_SOUND.md), kullanıcı anlatımı [AUDIO.md](AUDIO.md#several-apps-playing-at-once-multi-app-sound).
+Telefonda ölçülmüş (POCO X7 Pro · HyperOS 3.0 · Android 16): `settings` anahtarı 1 iken servis `Multi Audio Focus enabled :false` diyebilir; yalnız servis çağrısı bayrağı değiştirir.
+
+**Kart ve okuma**
+- [ ] Ayarlar › Ses'te **Çoklu uygulama sesi** kartı açılınca durum ≤ 1 sn'de dolar; "Son kontrol HH:MM" görünür; **Yeniden kontrol et** saati günceller (telefonda bayrağı elle değiştirip düğmeye bas: durum değişir).
+- [ ] Telefon çıkarılınca kart "Bilinmiyor" olur; yeniden takılınca kendiliğinden okunur.
+- [ ] Mikser (Hızlı Ayarlar › Çok Kanallı Mikser) başlığındaki "Çoklu ses kapalı" çipi yalnız bayrak **kapalı okunduğunda** görünür; tıklayınca Ayarlar'da Ses kartına gider ve kart yanıp söner. DeX ayarları › Sistem'deki kısayol da aynı karta gider.
+
+**Uygulama ve geri alma**
+- [ ] **Etkinleştir** → durum "Açık / OpenDeX açtı"; `adb shell dumpsys audio | grep "Multi Audio Focus"` → `true`.
+- [ ] **Aynı anda çalma (F0):** bayrak açıkken Chrome'da video oynarken YT Music'te bir parça çal: ikisi **birlikte** çalıyor mu, hiçbiri durmuyor mu? Bayrak kapalıyken aynı deneme birini durduruyor mu?
+- [ ] **Zil / çağrı (F0):** bayrak açıkken telefon çalınca / gelen çağrıda medya yine geri planda kısılıyor/duruyor mu? (Sonuç onay metnine yazılır; doğrulanmadan "çağrı yine öne geçer" denmez.)
+- [ ] Son pencereyi kapat → `dumpsys` → `false` (eski değer); `adb shell settings get global opendex_multi_focus_original` → `null`.
+- [ ] Telefon bayrağı **zaten açıkken** (önce Etkinleştir, sonra OpenDeX'i yeniden başlatmadan telefonda aç) kart "Telefonda zaten açıktı" der; OpenDeX kapanınca bayrak **açık kalır**.
+- [ ] Backend'i görev yöneticisinden öldür, yeniden başlat, telefonu bağla: bir önceki oturumun bıraktığı bayrak kapatılır (marker temizlenir).
+- [ ] Telefonu yeniden başlat (bayrak sıfırlanır): kart "Kapalı" okur; onay sürüyorsa bir sonraki pencere değişiminde yeniden uygulanır.
+
+**Politika ve soru**
+- [ ] *Her zaman*: ilk pencere açılınca bayrak açılır, son kapanınca kapanır. *Hiçbir zaman*: hiç uygulanmaz. *Hiçbir zaman* iken **Etkinleştir** politikayı *Sor*'a çeker ve uygular.
+- [ ] *Sor* iken Chrome'da video çalarken YT Music'i başlat: "Bir uygulama durdu" kartı **bir kez** çıkar, klavye odağını almaz, 25 sn sonra kendiliğinden kaybolur; **Bu oturum için aç** → bayrak açılır, "açıldı" bildirimi gelir; **Bir daha sorma** → politika *Hiçbir zaman* olur.
+- [ ] Medya Merkezi'nden kendin bir uygulamayı duraklattığında kart **çıkmaz**.
+- [ ] Eski jar ile (`audio_multi_focus` yeteneği yok) kart durumu `dumpsys` yedeğiyle okur, **Etkinleştir** kapalıdır ve "yardımcı desteklemiyor" der.

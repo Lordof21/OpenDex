@@ -96,15 +96,42 @@ never to stay silent afterwards:
 
 A stall longer than the cushion is still one gap — a buffer cannot play sound that has not arrived — but the cushion is larger afterwards.
 
+## Several apps playing at once (multi-app sound)
+
+Android normally lets one app hold the audio focus: when a second app starts, the first is paused (or its focus request is refused). That
+defeats "this app on the PC, that one on the phone". The phone's **multi audio focus** flag lets both play. OpenDeX shows it, checks it and
+(with your consent) sets it — **Settings › Sound › Multi-app sound**:
+
+* **Status** (*On / Off / Not supported / Not applied*) with the time of the last reading and a **Check again** button. Nothing polls the
+  phone: it is read when the card opens, on that button, after a change, and when a phone is bound.
+* **Turn on** sets the flag through the audio service and then **reads it back** — a call that returns quietly but changes nothing is shown
+  as *Not applied*, not as a success. (Measured on HyperOS 3.0 / Android 16: the Settings key `multi_audio_focus_enabled` can read `1`
+  while the service says `Multi Audio Focus enabled :false`, and flipping that key does nothing.)
+* **When to apply**: *Ask* (default — only when you agree, for that session), *Always* (automatically while OpenDeX windows are open),
+  *Never*. Whatever you choose, the phone goes back to its previous value when the last window closes, the phone is unplugged or OpenDeX
+  exits; a flag that was **already on** is never touched.
+* The first time an app is paused because another one started, OpenDeX asks **once per run** whether to turn it on (a small card that never
+  takes the keyboard focus). *Don't ask again* sets the policy to *Never*.
+* The mixer shows a small "Multi-app sound is off" pill while the flag is off; the DeX panel › System tab has a shortcut to the same card.
+
+It changes the behaviour of **all** media apps on the phone while it is on — also when you use the phone directly.
+
+**It is not a guarantee.** The flag is Android's; a phone maker can add its own focus handling on top. Measured on a POCO X7 Pro (HyperOS 3.0,
+Android 16): with the flag on, two apps *did* play together, but starting a second app could still pause the first — the system log shows Xiaomi's
+own focus notifier (`FocusRequesterStubImpl`) telling the first app a few milliseconds before it pauses itself, and Android 16's *audio
+hardening* refusing some apps' focus requests (`AudioFocus DENIED` in their logs). We found no switch for either. What the user reported
+working there: **closing the background apps on the phone to free its memory (RAM)** — the card and the DeX panel say so as a hint ("may fix it");
+the cause is not explained.
+
 ## Settings and API at a glance
 
 | | |
 |---|---|
 | Settings (`PUT /settings`) | `enable_audio` (default on), `audio_output_mode` (`pc` — the default — / `phone` / `both`), `audio_sync_offset_ms` (−300…+500 ms, default 0), `audio_codec` (`raw` PCM is the default; `opus` is reserved) — [CONFIGURATION.md](CONFIGURATION.md) lists the backend-side `OPENDEX_*` variables |
-| REST | `GET /audio/apps`, `PUT /audio/apps/{package}`, `PUT /audio/sync`, `POST /audio/clock`, `POST /audio/probe` — [REFERENCE](api/REFERENCE.md#audio) |
+| REST | `GET /audio/apps`, `PUT /audio/apps/{package}`, `PUT /audio/sync`, `POST /audio/clock`, `POST /audio/probe`, `GET /audio/multi-focus`, `POST /audio/multi-focus/recheck`, `PUT /audio/multi-focus` — [REFERENCE](api/REFERENCE.md#audio) |
 | WebSocket | `/ws/audio`, `/ws/audio/{window_id}` |
-| Events | `app_audio_mode`, `app_audio_state` |
-| Phone helper | `audio_route`, `audio_target`, `audio_probe`, `audio_stop`, `audio_list` + the `opendex_audio` socket — [DAEMON_PROTOCOL.md](DAEMON_PROTOCOL.md#per-app-audio) |
+| Events | `app_audio_mode`, `app_audio_state`, `multi_audio_focus_update` |
+| Phone helper | `audio_route`, `audio_target`, `audio_probe`, `audio_stop`, `audio_list`, `audio_multi_focus` + the `opendex_audio` socket — [DAEMON_PROTOCOL.md](DAEMON_PROTOCOL.md#per-app-audio) |
 
 ## Known limits
 
