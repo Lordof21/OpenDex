@@ -177,3 +177,34 @@ describe('Ctrl+G uygulanışı', () => {
     expect(event.preventDefault).not.toHaveBeenCalled();
   });
 });
+
+describe('Win+Ok / Alt+Shift+Ok yerleştirme', () => {
+  it.each(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'])('%s: Win ile de Alt+Shift ile de tanınır, telefona gitmez', (key) => {
+    expect(matchWmShortcut(ev({ metaKey: true, key }))).toBe(WM_ACTIONS.snapArrow);
+    expect(matchWmShortcut(ev({ altKey: true, shiftKey: true, key }))).toBe(WM_ACTIONS.snapArrow);
+    expect(isWindowManagerShortcut(ev({ metaKey: true, key }))).toBe(true);
+  });
+
+  it('düz ok, Ctrl/Shift/Alt tek başına ve Ctrl+Alt+Ok (Workspace) karışmaz; oyun kipinde Alt+Shift+Ok oyunundur', () => {
+    for (const props of [{}, { ctrlKey: true }, { shiftKey: true }, { altKey: true }, { ctrlKey: true, shiftKey: true }]) {
+      expect(matchWmShortcut(ev({ key: 'ArrowUp', ...props }))).not.toBe(WM_ACTIONS.snapArrow);
+    }
+    expect(matchWmShortcut(ev({ ctrlKey: true, altKey: true, key: 'ArrowUp' }))).toBe(WM_ACTIONS.workspaceArrow);
+    expect(matchWmShortcut(ev({ altKey: true, shiftKey: true, key: 'ArrowLeft' }), { game: true })).toBeNull();
+    expect(matchWmShortcut(ev({ metaKey: true, key: 'ArrowLeft' }), { game: true })).toBe(WM_ACTIONS.snapArrow);
+  });
+
+  it('odaktaki pencereyi yerleştirir (sol yarı → sol-üst), odaklı pencere yoksa tuşu yine de tüketir', () => {
+    const moveWindowByArrow = vi.fn();
+    useWindowStore.setState({ windows: [{ id: 'w1', package: 'a', focused: true, minimized: false }], moveWindowByArrow });
+    const e = ev({ metaKey: true, key: 'ArrowLeft' });
+    expect(useWindowStore.getState().handleWindowManagerShortcut(e)).toBe(true);
+    expect(e.preventDefault).toHaveBeenCalled();
+    expect(moveWindowByArrow).toHaveBeenCalledWith('w1', 'ArrowLeft');
+
+    moveWindowByArrow.mockClear();
+    useWindowStore.setState({ windows: [] });
+    expect(useWindowStore.getState().handleWindowManagerShortcut(ev({ metaKey: true, key: 'ArrowUp' }))).toBe(true);
+    expect(moveWindowByArrow).not.toHaveBeenCalled();
+  });
+});

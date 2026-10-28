@@ -360,3 +360,42 @@ export function fixedOrientationFlip({ boxW, boxH, deviceW, deviceH }) {
   if (wantPortrait === devicePortrait) return null;
   return wantPortrait ? 'portrait' : 'landscape';
 }
+
+// ───────────────────────────────────────────────────────────────── Ok tuşlarıyla yerleştirme (Windows Win+Ok)
+/**
+ * Win+Sol/Sağ/Yukarı/Aşağı'nın Windows davranışı; durum = pencerenin kipi (+ bölgesi). `null` = o tuş orada bir şey yapmaz.
+ * Değer: bölge adı (yerleş), 'max' (kapla), 'restore' (kaplamadan/yapışmadan çık), 'minimize' ya da 'exit-fullscreen'.
+ *
+ *   normal      ←sol yarı  →sağ yarı  ↑kapla  ↓küçült
+ *   kaplanmış   ←sol yarı  →sağ yarı  ↑—      ↓eski kip (normal ya da geldiği yapışma)
+ *   sol yarı    ←—  →eski boyut  ↑sol-üst  ↓sol-alt        (sağ yarı: aynalı)
+ *   köşe        ←→ yandaki köşe (kenarda —)  ↑üstte kapla, altta üst köşe  ↓üstte alt köşe, altta küçült
+ *   tam ekran   ↓çık
+ *
+ * Kaynak: Microsoft Snap belgesi + Windows 10/11 deneyi anlatan rehberler; köşe durumlarının aşağı/yukarı geçişleri Windows'ta
+ * belgelenmemiştir, yarım→köşe geçişinin simetrisiyle tamamlandı.
+ */
+const ARROW_MOVES = {
+  normal: { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'max', ArrowDown: 'minimize' },
+  maximized: { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: null, ArrowDown: 'restore' },
+  fullscreen: { ArrowLeft: null, ArrowRight: null, ArrowUp: null, ArrowDown: 'exit-fullscreen' },
+  left: { ArrowLeft: null, ArrowRight: 'restore', ArrowUp: 'tl', ArrowDown: 'bl' },
+  right: { ArrowLeft: 'restore', ArrowRight: null, ArrowUp: 'tr', ArrowDown: 'br' },
+  tl: { ArrowLeft: null, ArrowRight: 'tr', ArrowUp: 'max', ArrowDown: 'bl' },
+  tr: { ArrowLeft: 'tl', ArrowRight: null, ArrowUp: 'max', ArrowDown: 'br' },
+  bl: { ArrowLeft: null, ArrowRight: 'br', ArrowUp: 'tl', ArrowDown: 'minimize' },
+  br: { ArrowLeft: 'bl', ArrowRight: null, ArrowUp: 'tr', ArrowDown: 'minimize' },
+};
+
+/** Ok tuşunun sonucu: bir kip planı, 'minimize' ya da (bir şey yapmıyorsa) null. */
+export function planArrowMove(win, arrow, ctx) {
+  const mode = modeOf(win);
+  const move = ARROW_MOVES[mode === 'snapped' ? win.snapZone : mode]?.[arrow];
+  if (!move) return null;
+  if (move === 'minimize') return 'minimize';
+  if (move === 'exit-fullscreen') return planFullscreenToggle(win, ctx);
+  if (move === 'restore') {
+    return mode === 'maximized' ? planMaximizeToggle(win, ctx) : build(win, { mode: 'normal' }, ctx, { modeStack: [] });
+  }
+  return planSnap(win, move, ctx);
+}

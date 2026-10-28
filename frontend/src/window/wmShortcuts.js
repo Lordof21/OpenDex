@@ -6,6 +6,8 @@
 // Eskiden enjeksiyon katmanı yalnız Alt+Tab ve Ctrl+W'yi biliyordu; Ctrl+M / Ctrl+Shift+F / Ctrl+Alt+Ok /
 // Win+D hem uygulanıyor hem de telefona "Ctrl+M" olarak gönderiliyordu.
 
+const ARROWS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']);
+
 export const WM_ACTIONS = Object.freeze({
   altTab: 'alt-tab',
   closeWindow: 'close-window',
@@ -16,6 +18,7 @@ export const WM_ACTIONS = Object.freeze({
   showDesktop: 'show-desktop',
   openFiles: 'open-files',
   toggleKeymap: 'toggle-keymap',
+  snapArrow: 'snap-arrow',
 });
 
 /**
@@ -42,6 +45,12 @@ export function matchWmShortcut(e, { game = false, layout = false } = {}) {
   if (layout && e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && key === 'g') return WM_ACTIONS.toggleKeymap;
   // Ctrl+Shift+F → mutlak tam ekran
   if (e.ctrlKey && e.shiftKey && key === 'f') return WM_ACTIONS.fullscreen;
+  // Win+Ok → Windows'un yerleştirme tuşları (sol/sağ yarı, köşe, kapla, geri al, küçült). Windows kabuğu Win+Ok'u çoğu zaman
+  // uygulamaya HİÇ iletmez (OpenDeX'in kendi penceresini yerleştirir); aynısı Alt+Shift+Ok ile de yapılır. Oyun kipinde yalnız Win'li.
+  if (ARROWS.has(e.key) && !e.ctrlKey) {
+    if (e.metaKey && !e.altKey && !e.shiftKey) return WM_ACTIONS.snapArrow;
+    if (!game && e.altKey && e.shiftKey && !e.metaKey) return WM_ACTIONS.snapArrow;
+  }
   // Ctrl+Alt+Yukarı/Aşağı → Workspace görevini tomurcukla / çalışma alanına geri gönder
   // (Win+Shift+Ok'un OS pencere-taşıma kısayoluyla çakışmaması için özellikle bu kombinasyon)
   if (e.ctrlKey && e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) return WM_ACTIONS.workspaceArrow;

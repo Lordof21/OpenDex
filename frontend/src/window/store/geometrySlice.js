@@ -38,6 +38,7 @@ import {
   normalizeDpiPolicy,
   normalizeHeaderMode,
   normalizeWindowOverrides,
+  planArrowMove,
   planDragRestore,
   planFullscreenToggle,
   planMaximizeToggle,
@@ -99,6 +100,8 @@ export function createGeometrySlice(set, get) {
 
   // Hedef geometriye anında (yaylı) geçiş — çözünürlük değişmiyorsa ya da yeniden müzakere başarısızsa.
   const applyPlanNow = (id, plan, fromGeo, toGeo) => {
+    const existingTimeoutId = get().windows.find((w) => w.id === id)?.pendingResizeTransition?.timeoutId;
+    if (existingTimeoutId) clearTimeout(existingTimeoutId);
     set((s) => ({
       windows: s.windows.map((w) =>
         w.id === id
@@ -233,6 +236,15 @@ export function createGeometrySlice(set, get) {
       return runBoxTransition(id, plan);
     },
 
+    /** Win+Ok (Windows'un yerleştirme tuşları, bkz. windowModel.planArrowMove): sol/sağ yarı, köşe, kapla, geri al, küçült. */
+    async moveWindowByArrow(id, arrow) {
+      const win = get().windows.find((w) => w.id === id);
+      if (!win) return;
+      const next = planArrowMove(win, arrow, viewportCtx());
+      if (next === 'minimize') return get().minimizeWindow(id);
+      if (next) return runBoxTransition(id, next);
+    },
+
     async toggleMaximize(id) {
       const win = get().windows.find((w) => w.id === id);
       if (!win) return;
@@ -250,6 +262,9 @@ export function createGeometrySlice(set, get) {
       const plan = planDragRestore(win, pointer, viewportCtx());
       if (!plan) return null;
       nextSeq(id); // sürüklemek, yolda olan kip geçişini geçersiz kılar
+      if (win.pendingResizeTransition?.timeoutId) {
+        clearTimeout(win.pendingResizeTransition.timeoutId);
+      }
       patchWindow(id, { ...plan.patch, isSnapSettling: false, pendingResizeTransition: null });
       saveAppGeometry(win.package, { maximized: false, snapZone: null, x: plan.box.x, y: plan.box.y, w: plan.box.w, h: plan.box.h });
       if (!isFrontendOnlyWindow(win)) {
@@ -404,7 +419,7 @@ export function createGeometrySlice(set, get) {
       const timeoutId = setTimeout(() => {
         const cur = get().windows.find((w) => w.id === id);
         const pending = cur?.pendingResizeTransition;
-        if (pending?.isAwaitingFirstFrame) {
+        if (pending?.isAwaitingFirstFrame && pending.timeoutId === timeoutId) {
           logger.warn('resize', `yeniden boyutlandırma zaman aşımı (5 sn) win=${id} (${cur.package})`);
           useSystemStore.getState().pushToast?.(t('window.yeniden_boyutlandirma_zaman_asimina'));
           // An instant transition already showed the window in its new box: it stays there (the stream keeps fitting

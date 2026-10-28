@@ -22,6 +22,7 @@ import {
   nextHeaderMode,
   normalizeDpiPolicy,
   planDragRestore,
+  planArrowMove,
   planFullscreenToggle,
   planMaximizeToggle,
   planSnap,
@@ -409,5 +410,81 @@ describe('dynamicDpStatusOf: karo gerçekte etkin mi', () => {
     expect(win.dpiPolicy).toEqual({ mode: 'custom', dpi: 200 });
     expect(dynamicDpStatusOf(win, { dynamic_resolution_enabled: true }).active).toBe(false);
     expect(dynamicDpStatusOf({ dpiPolicy: { mode: 'auto' } }, { dynamic_resolution_enabled: true }).active).toBe(true);
+  });
+});
+
+describe('planArrowMove — Windows Win+Ok yerleştirme tuşları', () => {
+  const L = 'ArrowLeft';
+  const R = 'ArrowRight';
+  const U = 'ArrowUp';
+  const D = 'ArrowDown';
+  /** Pencereyi tuş dizisiyle gezdirir; her adımda planı uygular ('minimize' yakalanır). */
+  const walk = (start, keys) => keys.reduce((w, key) => {
+    const plan = planArrowMove(w, key, CTX);
+    if (plan === 'minimize') return { ...w, minimizedBy: key };
+    return plan ? apply(w, plan) : w;
+  }, start);
+  const zoneOf = (w) => (modeOf(w) === 'snapped' ? w.snapZone : modeOf(w));
+
+  it('normal: ← sol yarı, → sağ yarı, ↑ kapla, ↓ küçült', () => {
+    expect(zoneOf(walk(win(), [L]))).toBe('left');
+    expect(zoneOf(walk(win(), [R]))).toBe('right');
+    expect(zoneOf(walk(win(), [U]))).toBe('maximized');
+    expect(planArrowMove(win(), D, CTX)).toBe('minimize');
+  });
+
+  it('kaplanmış: ↓ eski boyuta döner, ↑ bir şey yapmaz, ←/→ yarım ekrana alır', () => {
+    const start = win();
+    const max = walk(start, [U]);
+    expect(planArrowMove(max, U, CTX)).toBeNull();
+    expect(box(walk(max, [D]))).toEqual(box(start));
+    expect(zoneOf(walk(max, [L]))).toBe('left');
+    expect(zoneOf(walk(max, [R]))).toBe('right');
+  });
+
+  it('yarım ekrandan köşelere: sol yarı ↑ sol-üst, ↓ sol-alt; sağ yarı aynalı', () => {
+    expect(zoneOf(walk(win(), [L, U]))).toBe('tl');
+    expect(zoneOf(walk(win(), [L, D]))).toBe('bl');
+    expect(zoneOf(walk(win(), [R, U]))).toBe('tr');
+    expect(zoneOf(walk(win(), [R, D]))).toBe('br');
+    expect(box(walk(win(), [L, U]))).toEqual(snapBoxFor('tl', WORK));
+  });
+
+  it('yarım ekranda karşı yöndeki ok yapışmayı geri alır (eski boyut); kendi yönündeki ok bir şey yapmaz', () => {
+    const start = win();
+    expect(box(walk(start, [L, R]))).toEqual(box(start));
+    expect(modeOf(walk(start, [L, R]))).toBe('normal');
+    expect(box(walk(start, [R, L]))).toEqual(box(start));
+    expect(planArrowMove(walk(start, [L]), L, CTX)).toBeNull();
+    expect(planArrowMove(walk(start, [R]), R, CTX)).toBeNull();
+  });
+
+  it('köşe: yandaki köşeye geçer, üstte ↑ kaplar (↓ ile köşeye döner), altta ↓ küçültür', () => {
+    expect(zoneOf(walk(win(), [L, U, R]))).toBe('tr');
+    expect(zoneOf(walk(win(), [L, D, R]))).toBe('br');
+    expect(zoneOf(walk(win(), [R, U, L]))).toBe('tl');
+    expect(zoneOf(walk(win(), [L, U, D]))).toBe('bl');
+    expect(zoneOf(walk(win(), [L, D, U]))).toBe('tl');
+    const topLeft = walk(win(), [L, U]);
+    expect(zoneOf(walk(topLeft, [U]))).toBe('maximized');
+    expect(zoneOf(walk(walk(topLeft, [U]), [D]))).toBe('tl'); // kaplamadan geldiği köşeye döner
+    expect(planArrowMove(topLeft, L, CTX)).toBeNull(); // kenarda ← bir şey yapmaz
+    expect(planArrowMove(walk(win(), [L, D]), D, CTX)).toBe('minimize');
+    expect(planArrowMove(walk(win(), [R, D]), D, CTX)).toBe('minimize');
+  });
+
+  it('tam ekran: ↓ çıkar, diğer oklar bir şey yapmaz', () => {
+    const start = win();
+    const full = apply(start, planFullscreenToggle(start, CTX));
+    expect(modeOf(full)).toBe('fullscreen');
+    for (const key of [L, R, U]) expect(planArrowMove(full, key, CTX)).toBeNull();
+    expect(modeOf(walk(full, [D]))).toBe('normal');
+  });
+
+  it('yapışma sırasında eski (normal) kutu kaybolmaz: köşe → geri alma zinciri başlangıca döner', () => {
+    const start = win();
+    expect(box(walk(start, [L, U, R, L, R]))).not.toEqual(box(start)); // hâlâ köşede
+    expect(box(walk(start, [L, R]))).toEqual(box(start));
+    expect(restoreBoxOf(walk(start, [L, U, R, D]))).toEqual(box(start));
   });
 });

@@ -75,6 +75,13 @@ export function createShortcutsSlice(set, get) {
           return true;
         }
 
+        case WM_ACTIONS.snapArrow: {
+          domEvent.preventDefault();
+          const focused = focusedWindow();
+          if (focused) get().moveWindowByArrow(focused.id, domEvent.key);
+          return true;
+        }
+
         case WM_ACTIONS.workspaceArrow: {
           // Ctrl+Alt+Yukarı/Aşağı Ok → odaktaki Eco Workspace görevini tomurcukla / bağımsız pencereyi
           // çalışma alanına geri gönder (Karar: Hibrit Pencereleme Faz 2 §5.1).
