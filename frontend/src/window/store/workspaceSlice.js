@@ -21,6 +21,7 @@ import { t as tt } from '../../i18n/index.js';
 /** Aynı görev için iki doğrulama isteği arasındaki en kısa süre (her basışta istek gitmesin). */
 export const VERIFY_MIN_INTERVAL_MS = 1000;
 const verifyState = new Map(); // taskWindowId -> { at, inflight }
+const openingWorkspaceInFlight = new Map(); // packageName -> Promise<windowId>
 
 export function createWorkspaceSlice(set, get) {
   return {
@@ -53,11 +54,26 @@ export function createWorkspaceSlice(set, get) {
         return existingTask.windowId;
       }
 
-      logger.trace(`[OpenDeX:WORKSPACE 🌱] ${app.package} paylaşımlı Eco Workspace'te açılıyor...`);
-      const handle = await api.post('/api/windows/workspace/open', { package: app.package });
-      closeTracker.cancel(handle.window_id);
-      logger.trace(`[OpenDeX:WORKSPACE 🌱] ${app.package} açıldı (window_id=${handle.window_id}, wsUrl=${handle.ws_url})`);
-      return get()._insertWorkspaceTask(handle, app.package, app.display_name || resolveAppDisplayName(app.package, app.package));
+      const inflight = openingWorkspaceInFlight.get(app.package);
+      if (inflight) {
+        logger.trace(`[OpenDeX:WORKSPACE 🌱] ${app.package} açılış isteği zaten yolda, mevcut promise bekleniyor`);
+        return inflight;
+      }
+
+      const promise = (async () => {
+        logger.trace(`[OpenDeX:WORKSPACE 🌱] ${app.package} paylaşımlı Eco Workspace'te açılıyor...`);
+        const handle = await api.post('/api/windows/workspace/open', { package: app.package });
+        closeTracker.cancel(handle.window_id);
+        logger.trace(`[OpenDeX:WORKSPACE 🌱] ${app.package} açıldı (window_id=${handle.window_id}, wsUrl=${handle.ws_url})`);
+        return get()._insertWorkspaceTask(handle, app.package, app.display_name || resolveAppDisplayName(app.package, app.package));
+      })();
+
+      openingWorkspaceInFlight.set(app.package, promise);
+      try {
+        return await promise;
+      } finally {
+        openingWorkspaceInFlight.delete(app.package);
+      }
     },
 
     /** "Buraya Yolla": telefonda şu an çalışan bir uygulamayı Workspace'e alır. */
@@ -91,7 +107,14 @@ export function createWorkspaceSlice(set, get) {
           return {
             windows: s.windows.map((w) =>
               w.isEcoWorkspace
-                ? { ...w, tasks: [...w.tasks, newTask], focused: true, minimized: false }
+                ? {
+                    ...w,
+                    tasks: w.tasks.some((t) => t.windowId === newTask.windowId)
+                      ? w.tasks.map((t) => (t.windowId === newTask.windowId ? { ...t, ...newTask } : t))
+                      : [...w.tasks, newTask],
+                    focused: true,
+                    minimized: false,
+                  }
                 : { ...w, focused: false },
             ),
           };
@@ -375,6 +398,7 @@ export function createWorkspaceSlice(set, get) {
     },
 
     _removeWorkspaceTaskLocally(taskWindowId) {
+      verifyState.delete(taskWindowId);
       set((s) => ({
         windows: s.windows
           .map((w) => (w.isEcoWorkspace ? { ...w, tasks: w.tasks.filter((t) => t.windowId !== taskWindowId) } : w))
@@ -385,6 +409,7 @@ export function createWorkspaceSlice(set, get) {
     },
 
     _applyPopoutResult(taskWindowId, wsUrl, deviceW = 0, deviceH = 0) {
+      verifyState.delete(taskWindowId);
       set((s) => {
         const container = s.windows.find((w) => w.isEcoWorkspace);
         const task = container?.tasks.find((t) => t.windowId === taskWindowId);

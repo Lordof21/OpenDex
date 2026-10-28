@@ -470,8 +470,6 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
     } catch (captureErr) {
       console.warn('[OpenDeX:TOUCH ⚠️] setPointerCapture warning:', captureErr);
     }
-    const rect = canvasRef.current?.getBoundingClientRect();
-    const isInsidePiP = typeof window !== 'undefined' && canvasRef.current?.ownerDocument !== document;
     const ownerWin = canvasRef.current?.ownerDocument?.defaultView || window;
     const p = toDevice(e);
 

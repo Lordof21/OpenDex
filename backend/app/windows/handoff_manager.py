@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import logging
 import time
 from dataclasses import dataclass
@@ -500,6 +501,19 @@ class HandoffManager:
             await asyncio.sleep(self._FREEFORM_ENTRY_POLL_S)
         return False
 
+    async def _task_top_component(self, task_id: str | int | None) -> str | None:
+        if not task_id:
+            return None
+        daemon = self._daemon_client_getter() if callable(self._daemon_client_getter) else None
+        if daemon is None or not hasattr(daemon, "task_info"):
+            return None
+        with contextlib.suppress(Exception):
+            t_call = daemon.task_info(task_id)
+            t_info = await t_call if inspect.isawaitable(t_call) else t_call
+            if isinstance(t_info, dict) and isinstance(t_info.get("top"), str):
+                return t_info["top"]
+        return None
+
     async def _enter_freeform_via_shell(self, pkg: str, task_id: str | int, serial: str) -> None:
         """Tam ekrandaki görevi serbest kipe HyperOS'un KENDİ geçişiyle alır: `am start --windowingMode 5` Shell'de
         FULLSCREEN_TO_FREEFORM geçişini (MiuiFreeformModeAnimation) çalıştırır ve SystemUI görevi kaydeder.
@@ -509,15 +523,7 @@ class HandoffManager:
             current = await read_task_windowing(self._adb, serial, str(task_id))
             if current.found and current.windowing_mode == 5:
                 return
-        top_component = None
-        daemon = self._daemon_client_getter() if callable(self._daemon_client_getter) else None
-        if daemon is not None:
-            with contextlib.suppress(Exception):
-                import inspect
-                t_call = daemon.task_info(task_id) if hasattr(daemon, "task_info") else None
-                t_info = await t_call if inspect.isawaitable(t_call) else t_call
-                if isinstance(t_info, dict) and isinstance(t_info.get("top"), str):
-                    top_component = t_info["top"]
+        top_component = await self._task_top_component(task_id)
         try:
             await android_shell.bring_to_front(
                 self._adb, serial, pkg, "0", reorder_only=True, component=top_component, windowing_mode=5,
@@ -702,15 +708,8 @@ class HandoffManager:
             # 2. Android'in tam ekran yığınına oturmasını sağla & HyperOS Jest Kilidini Çöz
             launch_mode = None
             try:
-                top_component = None
                 daemon = self._daemon_client_getter() if callable(self._daemon_client_getter) else None
-                if daemon and task_id:
-                    with contextlib.suppress(Exception):
-                        import inspect
-                        t_call = daemon.task_info(task_id) if hasattr(daemon, "task_info") else None
-                        t_info = await t_call if inspect.isawaitable(t_call) else t_call
-                        if isinstance(t_info, dict) and isinstance(t_info.get("top"), str):
-                            top_component = t_info["top"]
+                top_component = await self._task_top_component(task_id)
 
                 target_windowing = windowing or "fullscreen"
                 if windowing is None:
@@ -779,14 +778,9 @@ class HandoffManager:
                     )
                     await watcher.wait_ready()
                     await watcher.wait_settled()   # the tab in front is reloaded as the other site first; the scroll anchor comes after
-                if saved_scroll is not None:
-                    cdp_ok = await refresh_browser_layout_inplace(
-                        self._adb, serial, runtime_profile.cdp_socket, saved_scroll=saved_scroll,
-                    )
-                else:
-                    cdp_ok = await refresh_browser_layout_inplace(
-                        self._adb, serial, runtime_profile.cdp_socket,
-                    )
+                cdp_ok = await refresh_browser_layout_inplace(
+                    self._adb, serial, runtime_profile.cdp_socket, saved_scroll=saved_scroll,
+                )
                 if cdp_ok:
                     log.info(
                         "✨ [HANDOFF: CANLI DÜRTME] %s web sitesi layout'u CDP ile canlı tazelendi — süreç ve sekmeler korundu",
@@ -852,7 +846,7 @@ class HandoffManager:
         (reclaim) görev aynı ekrana, aynı yoğunluğa döner."""
         serial = self._serial_getter()
         session = self._sessions.get(window_id)
-        if not session or not serial:
+        if not session or not serial or getattr(session, "closing", False) is True:
             return False
 
         if window_id in self._active_transitions:
@@ -900,7 +894,7 @@ class HandoffManager:
         """Android brought the app back onto its virtual display (not our reclaim): the display returns to the window's
         geometry and the app lands fullscreen there — under the lifecycle lock, like every other display change."""
         async with self._locked():
-            if self._sessions.get(session.state.window_id) is not session:
+            if self._sessions.get(session.state.window_id) is not session or getattr(session, "closing", False) is True:
                 return
             if session.state.handoff_to_phone or session.state.window_id in self._active_transitions or self.is_package_held(session.state.package):
                 return
@@ -923,7 +917,7 @@ class HandoffManager:
         """
         serial = self._serial_getter()
         session = self._sessions.get(window_id)
-        if not session or not serial:
+        if not session or not serial or getattr(session, "closing", False) is True:
             return False
 
         if window_id in self._active_transitions:
@@ -1044,14 +1038,9 @@ class HandoffManager:
                         )
                         await desktop_watcher.wait_ready()
                         await desktop_watcher.wait_settled()
-                    if saved_scroll is not None:
-                        cdp_ok = await refresh_browser_layout_inplace(
-                            self._adb, serial, runtime_profile.cdp_socket, saved_scroll=saved_scroll,
-                        )
-                    else:
-                        cdp_ok = await refresh_browser_layout_inplace(
-                            self._adb, serial, runtime_profile.cdp_socket,
-                        )
+                    cdp_ok = await refresh_browser_layout_inplace(
+                        self._adb, serial, runtime_profile.cdp_socket, saved_scroll=saved_scroll,
+                    )
                     if cdp_ok:
                         wlog.info("✨ [RECLAIM: CANLI DÜRTME] %s web sitesi layout'u ve (0,0) çıpası CDP ile tazelendi", pkg)
 
@@ -1135,11 +1124,7 @@ class HandoffManager:
                 await asyncio.sleep(self._REBIRTH_POLL_S)
             if before.identity is not None and now.identity == before.identity:
                 return                                       # the same process is still there: nothing was killed
-            component = None
-            with contextlib.suppress(Exception):
-                info = await daemon.task_info(task_id) if hasattr(daemon, "task_info") else None
-                if isinstance(info, dict) and isinstance(info.get("top"), str):
-                    component = info["top"]
+            component = await self._task_top_component(task_id)
             log.warning("⚠️ [HANDOFF: REINFLATE] %s süreci öldürüldü ama geri gelmedi (siyah ekran riski) — telefonda yeniden başlatılıyor", pkg)
             await android_shell.bring_to_front(self._adb, serial, pkg, "0", reorder_only=False, component=component)
         except asyncio.CancelledError:
@@ -1149,12 +1134,12 @@ class HandoffManager:
 
     def _watched_sessions(self) -> list["WindowSession"]:
         """Windows whose app can wander to the phone: real apps (not our pseudo-windows, not a launcher), streaming.
-        A frozen window (minimized, or waiting to be rebuilt after a link drop) has no display, so its app being on the
-        phone is not a handoff."""
+        A frozen window (minimized, or waiting to be rebuilt after a link drop) or a closing window has no live display,
+        so its app being on the phone is not a handoff."""
         return [
             s for s in list(self._sessions.values())
             if not (is_internal_package(s.state.package) or is_launcher_package(s.state.package))
-            and not s.state.minimized and not s.state.frozen
+            and not s.state.minimized and not s.state.frozen and getattr(s, "closing", False) is not True
         ]
 
     async def _observe(
@@ -1207,7 +1192,7 @@ class HandoffManager:
         """The event-driven handoff's display work, under the lifecycle lock: skipped when the window was closed or
         reclaimed (handoff_to_phone cleared) while it waited."""
         async with self._locked():
-            if self._sessions.get(s.state.window_id) is not s or not s.state.handoff_to_phone:
+            if self._sessions.get(s.state.window_id) is not s or not s.state.handoff_to_phone or getattr(s, "closing", False) is True:
                 return
             if s.state.window_id in self._active_transitions or self.is_package_held(s.state.package):
                 log.debug("🛡️ [_to_phone_locked IGNORED] %s için geçiş aktif veya paket kilitli", s.state.package)
@@ -1232,6 +1217,7 @@ class HandoffManager:
         serial = self._serial_getter()
         if (
             self.paused
+            or getattr(s, "closing", False) is True
             or self.is_package_held(s.state.package)
             or s.state.window_id in self._active_transitions
             or not serial
@@ -1246,7 +1232,7 @@ class HandoffManager:
         from app.device.deep_navigator import find_task_id_for_package
         if not await find_task_id_for_package(self._adb, s.state.package, display_id="0", serial=serial):
             return
-        if s.state.handoff_to_phone:  # a focus event got there during the lookup
+        if s.state.handoff_to_phone or getattr(s, "closing", False) is True:
             return
         s.state.handoff_to_phone = True
         window_logger(__name__, s.state.window_id).info(

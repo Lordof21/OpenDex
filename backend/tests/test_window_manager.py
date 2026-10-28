@@ -1088,7 +1088,6 @@ async def test_a_workspace_task_resize_overtaken_at_the_gate_applies_nothing(man
         return bounds
 
     monkeypatch.setattr(manager._eco_workspace, "resize_task", resize_task)
-    monkeypatch.setattr(manager, "_workspace_density_snapshot", AsyncMock(return_value=None))
     monkeypatch.setattr(manager, "_sync_task_state", lambda wid: None)
     await manager.resize_workspace_task("t1", (0, 0, 100, 100))
 

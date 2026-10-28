@@ -21,7 +21,6 @@ import { hevcSizeFromAnnexB } from './hevcSps.js';
 import { AV1_CODEC, isAnnexB } from './av1.js';
 
 const HEADER_SIZE = 12;
-const HOLD_RETRY_MS = 8;
 
 // Text message to the backend's video socket: "my decoder cannot continue without a keyframe". The encoder's own keyframe
 // is up to 10 s away (scrcpy's I-frame interval); the backend turns this into RESET_VIDEO and one follows in a few
@@ -104,12 +103,9 @@ export class WindowVideoDecoder {
     this.currentFrameWidth = 0;
     this.currentFrameHeight = 0;
     this.firstFrameSeen = false;
-    this.holdTimer = null;
-    this.pendingHoldFrame = null;
     this.destroyed = false;
     this.reconnectTimer = null;
     this.path = null;
-    this.isResizing = false;
     this._statsListeners = new Set();
     // GERÇEK ölçümler (streamStats.js) ve sunum hızlandırıcı (framePacer.js).
     this._stats = new StreamStatsAccumulator();
@@ -138,10 +134,6 @@ export class WindowVideoDecoder {
     }
     console.warn(...args, last?.skipped ? `(+${last.skipped} benzer)` : '');
     this._warnedAt.set(key, { at: now, skipped: 0 });
-  }
-
-  setResizing(resizing) {
-    this.isResizing = Boolean(resizing);
   }
 
   connect(path) {
@@ -459,14 +451,6 @@ export class WindowVideoDecoder {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
-    }
-    if (this.holdTimer) {
-      clearTimeout(this.holdTimer);
-      this.holdTimer = null;
-    }
-    if (this.pendingHoldFrame) {
-      this.pendingHoldFrame.close();
-      this.pendingHoldFrame = null;
     }
     if (this.ws) {
       this.ws.onopen = null;

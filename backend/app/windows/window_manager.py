@@ -1385,18 +1385,6 @@ class WindowManager:
                 self._sync_task_state(window_id)
             return ok
 
-    async def _workspace_density_snapshot(
-        self, window_id: str, new_density: int | None,
-    ) -> tuple[Snapshot | None, float | None]:
-        """Geriye dönük uyumluluk: Freeform görevler in-place adapte olduğu için
-        reconciler snapshot'ı alınmaz."""
-        return None, None
-
-    def _schedule_workspace_settle(self, window_id: str, before: Snapshot | None, changed_at: float | None) -> None:
-        """Geriye dönük uyumluluk: Freeform görevler Android WCT ve ConfigurationChanged ile
-        in-place adapte olur; DensityReconciler'ın süreci öldürmesi engellenmiştir."""
-        return
-
     async def close_workspace_task(self, window_id: str) -> None:
         await self.close_window(window_id)  # _close_window_locked already branches on workspace_id
 
