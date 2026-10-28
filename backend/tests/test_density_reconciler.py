@@ -249,6 +249,22 @@ async def test_a_paused_video_is_protected_like_a_playing_one(tasks):
     assert (phone.pid, phone.ticks) == (4000, 90_000)
 
 
+async def test_a_media_app_is_not_held_for_the_adaptation_window(tasks):
+    """Field log 2026-10-27 22:58:53.5 → 55.1: a playing YouTube handoff waited the whole DENSITY_ADAPT_WAIT_S for a rebuild proof
+    that could not change anything (the media guard keeps the process either way). One look, then the verdict."""
+    phone = FakePhone("com.google.android.youtube")
+    daemon = FakeDaemon(phone, media=True)
+    rec = make(phone, daemon, adapt=5.0)
+    before = await rec.snapshot("com.google.android.youtube")
+    changed_at = await rec.mark()
+
+    started = time.monotonic()
+    outcome = await rec.settle("com.google.android.youtube", before=before, display="9", reason="pre_landing", changed_at=changed_at)
+
+    assert outcome.action == KEPT_PLAYING and daemon.restarts == []
+    assert time.monotonic() - started < 1.0
+
+
 async def test_the_users_explicit_restart_is_not_second_guessed_by_the_playback_guard(tasks):
     phone = FakePhone()
     daemon = FakeDaemon(phone, media=True)

@@ -193,7 +193,10 @@ async def test_the_bootstrap_retries_a_failed_bind_with_growing_pauses_and_succe
     in_bootstrap = {"on": False}
 
     async def spy(awaitable, timeout):
-        if in_bootstrap["on"] and timeout is not None and timeout != 5:
+        # `app.main.asyncio` IS the asyncio module: this patch sees every wait_for in the process, e.g. a 2 s adb timeout while a
+        # failed bind is undone. Only the bootstrap's own pause — waiting on `_device_list_changed` (an Event) — is recorded.
+        is_pause = getattr(awaitable, "__qualname__", "") == "Event.wait"
+        if in_bootstrap["on"] and is_pause and timeout is not None:
             pauses.append(timeout)
             timeout = 0.001  # do not actually wait
         return await real_wait_for(awaitable, timeout)

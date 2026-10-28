@@ -37,6 +37,12 @@ import { logger } from '../../lib/logger.js';
 import { applyVisibleOrder } from '../../taskbar/taskbarModel.js';
 import { t as tt } from '../../i18n/index.js';
 
+// One click reaches focusWindow twice (the frame's pointerdown and the canvas' own): the backend was told twice, and
+// each focus asks the phone whether the app is still there (find_task, 2 per click in the 2026-10-27 log). The second
+// call for the same window within this window of time only bumps the local z-order. Not store state: no render needed.
+const FOCUS_POST_DEDUPE_MS = 300;
+let lastFocusPost = { id: null, at: 0 };
+
 // Package -> in-flight openWindow() promise. Not store state on purpose: it's
 // an implementation guard, not something a component should ever render from.
 //
@@ -253,6 +259,7 @@ export function createLifecycleSlice(set, get) {
                 appLockMessage: s.appLockMap[app.package]?.message || '',
                 appLockPhase: s.appLockMap[app.package]?.phase || 'waiting',
                 appLockSince: s.appLockMap[app.package]?.since || 0,
+                appLockDynamic: Boolean(s.appLockMap[app.package]?.dynamic),
                 handoffToPhone: Boolean(s.handoffMap[app.package]?.isHandoff || s.handoffMap[handle.window_id]?.isHandoff),
                 handoffMessage: s.handoffMap[app.package]?.message || s.handoffMap[handle.window_id]?.message || '',
                 stealthPhase: Boolean(handle.stealth_phase),
@@ -274,6 +281,9 @@ export function createLifecycleSlice(set, get) {
 
     async syncWindowsWithBackend() {
       try {
+        // Windows the UI had BEFORE asking: only those can be "gone from the backend". One opened while the request is in
+        // flight is not in this set and is never dropped by a listing that predates it.
+        const askedAbout = new Set(get().windows.map((w) => w.id));
         // GET /api/windows responds with a bare JSON array (FastAPI
         // response_model=list[WindowState]) — api.get() already returns the
         // parsed body itself (frontend/src/lib/api.js does `res.json()`
@@ -321,9 +331,24 @@ export function createLifecycleSlice(set, get) {
           // The container itself is rebuilt separately as finalContainer
           // below (step 2/3) — must NOT also pass through here, or it gets
           // appended twice into the final windows[] array.
+          // A backend window the backend no longer lists is GONE (closed elsewhere, or the backend restarted — its sessions died
+          // with it): it is dropped. It used to stay forever, its video and input sockets reconnecting to a window that does not
+          // exist ("Window broadcaster bulunamadı", 757 times in one evening). UI-only windows (crop, Files) have no backend side.
+          const listedIds = new Set(listed.map((bw) => bw.window_id));
+          const gone = currentWindows.filter(
+            (w) => !w.isEcoWorkspace && !isFrontendOnlyWindow(w) && askedAbout.has(w.id) && !listedIds.has(w.id),
+          );
+          if (gone.length) {
+            logger.info('sync', 'backend_gone_windows_dropped', { windowIds: gone.map((w) => w.id) });
+            for (const w of gone) {
+              clearResizeBucket(w.id);
+              clearWindowThumbnail(w.id);
+            }
+          }
+          const goneIds = new Set(gone.map((w) => w.id));
           const updated = currentWindows
             .filter((w) => {
-              if (w.isEcoWorkspace) return false;
+              if (w.isEcoWorkspace || goneIds.has(w.id)) return false;
               const bw = backendWindows.find((b) => b.window_id === w.id);
               if (bw && isEcoBackendWindow(bw)) return false;
               return true;
@@ -462,6 +487,7 @@ export function createLifecycleSlice(set, get) {
               appLockMessage: s.appLockMap[bw.package]?.message || s.appLockMap[bw.window_id]?.message || '',
               appLockPhase: s.appLockMap[bw.package]?.phase || s.appLockMap[bw.window_id]?.phase || 'waiting',
               appLockSince: s.appLockMap[bw.package]?.since || s.appLockMap[bw.window_id]?.since || 0,
+              appLockDynamic: Boolean(s.appLockMap[bw.package]?.dynamic || s.appLockMap[bw.window_id]?.dynamic),
               handoffToPhone: Boolean(bw.handoff_to_phone),
               handoffMessage: '',
               stealthPhase: Boolean(bw.stealth_phase),
@@ -564,6 +590,9 @@ export function createLifecycleSlice(set, get) {
       // Kırpma penceresi: arka uçta oturumu yok — odak yalnızca ön yüz durumudur (backend focus = uygulamayı
       // yeniden başlatma niyetli olduğundan görev de rahatsız edilmez).
       if (isFrontendOnlyWindow(win)) return;
+      const now = Date.now();
+      if (lastFocusPost.id === id && now - lastFocusPost.at < FOCUS_POST_DEDUPE_MS) return;
+      lastFocusPost = { id, at: now };
       // Fire-and-forget: backend uses focus for MRU budget ordering.
       // Each window runs on its own isolated virtual display — focus NEVER
       // recalculates or equalizes DPI/resolution with other windows.

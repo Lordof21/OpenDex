@@ -4,7 +4,7 @@
 
 Every tunable of the backend is an environment variable with the prefix `OPENDEX_` (a `.env` file next to where the backend starts is read too). Nothing is hard-coded at call sites. Values are validated at start-up; an invalid value stops the backend with a message instead of running half-configured.
 
-84 settings, generated from [`backend/app/config.py`](../backend/app/config.py) — the comment above each setting there is the description below.
+85 settings, generated from [`backend/app/config.py`](../backend/app/config.py) — the comment above each setting there is the description below.
 
 
 ## ADB / scrcpy
@@ -156,6 +156,7 @@ Every tunable of the backend is an environment variable with the prefix `OPENDEX
 | `OPENDEX_DENSITY_ADAPT_WAIT_S` | `float` | `1.5` | How long after the last density change the event log is watched for the app rebuilding ITSELF (Chrome recreates its activity on every density change; a move that changes the screen size makes Android relaunch many apps). Such an app is left alone — refreshing it again was the needless second refresh. |
 | `OPENDEX_DENSITY_SELF_RECREATE_ESCALATE` | `bool` | `false` | OPT-IN. An app that "adapted" only by recreating its OWN activity (proof "app:") is still restarted (state preserving, i.e. an onDestroy + cold start) when it crossed between the phone's and the window's density (handoff / reclaim / open). Measured: Chrome switches its page scale to x1.2 in the PC window's config and never switches back in-process (devicePixelRatio 3.8475 instead of 3.206 on the phone); only a process restart resets it. |
 | `OPENDEX_HANDOFF_PRELANDING_STABILIZE_S` | `float` | `0.8` | After the handoff pre-landing the task is moved only after this much quiet, so the rebuilt app (Chrome: a NEW renderer process) draws its first frame at the new density first — moved mid-rebuild, the phone showed a black surface. |
+| `OPENDEX_HANDOFF_PRELANDING_QUIET_STABILIZE_S` | `float` | `0.3` | …and only this much when the app provably was NOT rebuilt (size-only landing, a media app whose process was kept): it just re-lays itself out (field log 2026-10-25: the full 0.8 s on every YouTube handoff). |
 
 ## Encoder capacity stress test
 

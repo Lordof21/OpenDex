@@ -43,6 +43,7 @@ from .display_ids import known_display_id
 from .dpi_policy import negotiate_dpi
 from .eco_workspace import ANCHOR_MARKER
 from .mirror_packages import is_mirror_package
+from .display_limits import cap_display_size
 from .scrcpy_launcher import (
     ScrcpyServer,
     flex_constrained_size,
@@ -590,6 +591,9 @@ class SessionReconfigurer:
         """A user-driven resize (``settle=True``) runs with the phone's transition animations held off, so the display-change
         snapshot never reaches the phone's own screen (transition_gate.py). The handoff's pre-landing (``settle=False``) is on
         its way to that screen anyway and keeps the system's animations."""
+        # The window's target is what the phone can be asked for (display_limits): the session's own record then matches the
+        # display, instead of a size the last line before the phone would cut anyway.
+        width, height = cap_display_size(width, height)
         gate = self._transition_gate if settle else None
         if gate is None:
             return await self._resize(window_id, width, height, dpi, project=project, settle=settle)

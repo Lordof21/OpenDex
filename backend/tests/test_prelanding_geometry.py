@@ -211,6 +211,29 @@ async def test_the_move_waits_until_the_app_has_taken_the_new_size(tasks):
     assert order == ["read", "read", "read", "move"]
 
 
+async def test_a_letterboxed_app_that_settled_where_android_put_it_does_not_hold_the_move_up(tasks):
+    """YouTube has a maximum aspect ratio: on a 1080x2400 display its task is letterboxed and NEVER fills the screen. Field log
+    2026-10-25: the wait ran its whole budget (1.55 s) on every handoff. Moved and holding still = Android is done."""
+    phone = Phone()
+    daemon = FakeDaemon(phone)
+    rec, cfg = _reconciler(phone, daemon)
+    session = _window_session(phone, dpi=520)
+    handoff = _wired(phone, daemon, rec, cfg, session)
+    handoff._GEOMETRY_POLL_S = 0.01
+    handoff._GEOMETRY_WAIT_S = 5.0
+    order: list[str] = []
+    boxes = iter([(0, 0, 1920, 1080), (0, 300, 1080, 2100), (0, 300, 1080, 2100)])  # before, moved, still
+
+    async def read(adb, serial, task_id):
+        order.append("read")
+        return TaskWindowingState(task_id=str(task_id), found=True, windowing_mode=1, bounds=next(boxes))
+
+    with patch.object(hm_module, "read_task_windowing", read):
+        await asyncio.wait_for(_to_phone(handoff, order), 2.0)
+
+    assert order == ["read", "read", "read", "move"]
+
+
 async def test_a_geometry_that_cannot_be_read_does_not_hold_the_move_up(tasks):
     phone = Phone()
     daemon = FakeDaemon(phone)

@@ -39,6 +39,7 @@ from .cdp_refresher import (
 from .display_ids import is_virtual_display_id, known_display_id
 from .mirror_packages import is_internal_package, is_launcher_package, is_mirror_package
 from .playback_continuity import PlaybackContinuity
+from .density_reconciler import DISABLED, KEPT_PLAYING, NO_PROCESS
 from .task_movement import move_task_to_display
 from .task_windowing import land_fullscreen, read_task_windowing, settle_task_windowing
 from .web_inspector import inspect_app_runtime
@@ -86,6 +87,10 @@ class Landing:
 
     window: Geometry
     landed: Geometry
+
+
+# Pre-landing outcomes after which the app was NOT rebuilt: no new first frame to wait for.
+_NOT_REBUILT = (KEPT_PLAYING, DISABLED, NO_PROCESS)
 
 
 def _fits_display(bounds: tuple[int, int, int, int], size: tuple[int, int], tolerance: float = 0.06) -> bool:
@@ -317,29 +322,49 @@ class HandoffManager:
         )
         return True
 
-    async def _await_task_geometry(self, task_id: str | int, size: tuple[int, int], serial: str) -> bool:
+    async def _await_task_geometry(
+        self, task_id: str | int, size: tuple[int, int], serial: str, before: tuple[int, int, int, int] | None = None,
+    ) -> bool:
         """Waits briefly until the task's window has taken the display's new size: Android lays the app out asynchronously
-        after a display change. Unreadable geometry returns at once (nothing to wait for); the move never depends on it."""
+        after a display change. Unreadable geometry returns at once (nothing to wait for); the move never depends on it.
+
+        Done when the box fills the display — or when it has MOVED from ``before`` and holds still for two readings: an app
+        with a maximum aspect ratio (YouTube) is letterboxed and never fills a 1220x2712 phone screen, and waiting for it to
+        do so spent the whole budget on every handoff (field log 2026-10-25: 1.55 s of each 3.8 s "Telefona aktar")."""
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + self._GEOMETRY_WAIT_S
+        started = loop.time()
+        deadline = started + self._GEOMETRY_WAIT_S
+        previous: tuple[int, int, int, int] | None = None
         while True:
             state = await read_task_windowing(self._adb, serial, str(task_id))
             if not state.found or state.bounds is None:
                 return False
-            if _fits_display(state.bounds, size):
-                return True
-            if loop.time() >= deadline:
-                return False
-            await asyncio.sleep(self._GEOMETRY_POLL_S)
+            bounds = tuple(state.bounds)
+            if _fits_display(bounds, size):
+                verdict = "fills"
+            elif previous is not None and bounds == previous and before is not None and bounds != tuple(before):
+                verdict = "settled"
+            elif loop.time() >= deadline:
+                verdict = "timeout"
+            else:
+                previous = bounds
+                await asyncio.sleep(self._GEOMETRY_POLL_S)
+                continue
+            log.info(
+                "🛬 [HANDOFF: ÖN-İNİŞ] task=%s geometri %s: %s (önce=%s, ekran=%s) %d ms",
+                task_id, verdict, bounds, before, size, int((loop.time() - started) * 1000),
+            )
+            return verdict != "timeout"
 
     async def _prelanding(
         self, session: "WindowSession", pkg: str, disp_id: str, window_dpi: int, phys_dpi: int,
         phone_size: tuple[int, int] | None, task_id: str | int | None, serial: str,
-    ) -> tuple[bool, Any, float | None]:
+    ) -> tuple[bool, Any, float | None, bool]:
         """Settles the app under the PHONE's size and density while it is still on its virtual display (behind the PC
         window's veil), so the move onto display 0 changes neither.
 
-        Returns (done, snapshot, changed_at). ``done``: nothing is left for the move to answer — the display now has the
+        Returns (done, snapshot, changed_at, rebuilt). ``rebuilt``: the app was (or may have been) rebuilt under the new
+        density — its first frame needs a moment before the move; False when it provably was not (size only, media kept). ``done``: nothing is left for the move to answer — the display now has the
         phone's geometry and, where the density changed, the app was proven to rebuild under it (it did by itself,
         Android did, or a verified relaunch/restart). Not done (the reconciler could not prove it, or the budget ran out):
         the snapshot/mark are handed back so the settle that runs after the move finishes the job, exactly as before.
@@ -353,18 +378,25 @@ class HandoffManager:
 
         before, changed_at = await self._density_bracket_open(pkg, window_dpi, phys_dpi) if needs_dpi else (None, None)
 
+        # The task's box BEFORE the resize: "it moved and holds still" ends the wait below. Unreadable now = unreadable then:
+        # nothing to wait for.
+        readable, box_before = False, None
+        if needs_size and task_id:
+            with contextlib.suppress(Exception):
+                state_before = await read_task_windowing(self._adb, serial, str(task_id))
+                readable, box_before = state_before.found and state_before.bounds is not None, state_before.bounds
         landed = needs_size and await self._land_size(session, phone_size, phys_dpi, wlog)
-        if landed:
-            await self._await_task_geometry(task_id, phone_size, serial)
+        if landed and readable:
+            await self._await_task_geometry(task_id, phone_size, serial, before=box_before)
         if needs_dpi and not (landed and session.dpi == phys_dpi):  # the resize carried the density when it could
             if not await self._set_density(disp_id, phys_dpi, serial):
-                return False, None, None
+                return False, None, None, False
             log.info("🛬 [HANDOFF: ÖN-İNİŞ] %s: sanal ekran %d → %d DPI (telefon); taşıma öncesi uzlaştırılıyor", pkg, window_dpi, phys_dpi)
 
         if not needs_dpi:
-            return landed, None, None  # size only: the app has nothing to rebuild for a density it does not change
+            return landed, None, None, False  # size only: the app has nothing to rebuild for a density it does not change
         if before is None:
-            return landed, None, None
+            return landed, None, None, True
         try:
             outcome = await asyncio.wait_for(
                 self._density.settle(pkg, before=before, display=disp_id, reason="pre_landing", changed_at=changed_at),
@@ -373,11 +405,11 @@ class HandoffManager:
         except asyncio.TimeoutError:
             log.warning("⚠️ [HANDOFF: ÖN-İNİŞ] %s: %.0f sn bütçesi doldu — taşıma sonrası uzlaştırmaya bırakıldı",
                         pkg, self._PRELANDING_BUDGET_S)
-            return False, before, changed_at
+            return False, before, changed_at, True
         if not outcome.ok:
             log.warning("⚠️ [HANDOFF: ÖN-İNİŞ] %s: uzlaştırma doğrulanamadı (%s) — taşıma sonrası yeniden denenecek",
                         pkg, outcome.action)
-        return outcome.ok, before, changed_at
+        return outcome.ok, before, changed_at, outcome.action not in _NOT_REBUILT
 
     async def _restore_window_geometry(
         self, session: "WindowSession", wlog: logging.Logger, requested: "Geometry | None" = None,
@@ -623,13 +655,18 @@ class HandoffManager:
             density_before, changed_at = None, None
             if await self._prelanding_wanted(session, pkg, disp_id, task_id, window_dpi, phys_dpi, phone_size, source):
                 veiled = True
-                prelanded, density_before, changed_at = await self._prelanding(
+                prelanded, density_before, changed_at, rebuilt = await self._prelanding(
                     session, pkg, disp_id, window_dpi, phys_dpi, phone_size, task_id, serial,
                 )
                 # Yeniden kurulan uygulama (Chrome: yeni render süreci) ilk karesini yeni yoğunlukta çizmeden görev
                 # taşınırsa telefon siyah kalır ve yazılar eski yoğunluğa göre dizilir. 13 Eylül akışı 0,3 sn bekliyordu;
-                # uzlaştırıcının "adapted" kanıtı ~0,1 sn'de gelip taşımayı erkene çekiyordu. Perde hâlâ açık.
-                await asyncio.sleep(self._settings.HANDOFF_PRELANDING_STABILIZE_S)
+                # uzlaştırıcının "adapted" kanıtı ~0,1 sn'de gelip taşımayı erkene çekiyordu. Perde hâlâ açık. Yeniden
+                # KURULMAYAN uygulama (yalnız boyut, medya oturumu korunan) yalnız yerleşimini yeniler: kısa bekleme yeter —
+                # 0,8 sn her aktarımda (oynayan YouTube dahil) boşa gidiyordu.
+                await asyncio.sleep(
+                    self._settings.HANDOFF_PRELANDING_STABILIZE_S if rebuilt
+                    else self._settings.HANDOFF_PRELANDING_QUIET_STABILIZE_S
+                )
                 if prelanded:
                     density_before, changed_at = None, None  # nothing left for the move to answer
             if not prelanded and density_before is None:
@@ -830,11 +867,11 @@ class HandoffManager:
             wlog = window_logger(__name__, window_id)
             wlog.info("📱 [HANDOFF TO PHONE] %s telefona aktarılıyor (disp_id=%s)...", pkg, disp_id)
 
-            playing = await self._playback.capture(pkg)
+            playing, paused_page = await self._capture_continuity(pkg)
             await self._execute_to_phone(session, pkg, disp_id, serial, source="pc", windowing=windowing)
             session.state.handoff_to_phone = True
             load_markers.record("handoff", package=pkg)
-            self._resume_playback(playing, "0")
+            self._resume_continuity(playing, paused_page, "0")
 
             await self._events.emit(
                 "app_handoff_to_phone",
@@ -902,7 +939,7 @@ class HandoffManager:
             wlog.info("📲 [RECLAIM WINDOW] %s PC penceresine geri alınıyor (disp_id=%s)...", pkg, disp_id)
 
             started = time.monotonic()
-            playing = await self._playback.capture(pkg)
+            playing, paused_page = await self._capture_continuity(pkg)
             from app.device.deep_navigator import find_task_id_for_package
             task_id = await find_task_id_for_package(self._adb, pkg, display_id="0", serial=serial)
             task_source = "display0"
@@ -1032,10 +1069,23 @@ class HandoffManager:
             await self._events.emit("app_handoff_resolved", window_id=window_id, package=pkg)
             await self._events.emit("app_reclaim_result", window_id=window_id, package=pkg, outcome=outcome)
             wlog.info("✅ [RECLAIM: TAMAM] %s -> %s (süre=%dms)", pkg, outcome, (time.monotonic() - started) * 1000)
-            self._resume_playback(playing, disp_id)
+            self._resume_continuity(playing, paused_page, disp_id)
             return True
         finally:
             self._active_transitions.discard(window_id)
+
+    async def _capture_continuity(self, pkg: str) -> tuple[Any, Any]:
+        """(playing snapshot, paused page) before a user's move. A PAUSED watch page is lost by the move like a playing one (device
+        test 2026-10-27: a paused YouTube video handed to the phone fell to the home feed, the video shrunk into a black mini player),
+        so its page is kept too — only when nothing plays (a playing one is `capture`'s, and restore reopens its page itself)."""
+        playing = await self._playback.capture(pkg)
+        return playing, (await self._playback.capture_page(pkg) if playing is None else None)
+
+    def _resume_continuity(self, playing, paused_page, display_id=None) -> None:
+        """After the move: the playing video goes on (restore), the paused page is reopened paused at its second if it was lost."""
+        self._resume_playback(playing, display_id)
+        if paused_page is not None:
+            spawn_background(self._playback.repair_page(paused_page, display_id), f"repair-page-{paused_page.package}")
 
     def _resume_playback(self, snapshot, display_id=None) -> None:
         """The move is done: a video that was playing and is now stopped by the activity rebuild goes on from where it stopped.

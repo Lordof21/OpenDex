@@ -322,6 +322,9 @@ class Settings(BaseSettings):
     # After the handoff pre-landing the task is moved only after this much quiet, so the rebuilt app (Chrome: a NEW renderer
     # process) draws its first frame at the new density first — moved mid-rebuild, the phone showed a black surface.
     HANDOFF_PRELANDING_STABILIZE_S: float = 0.8
+    # …and only this much when the app provably was NOT rebuilt (size-only landing, a media app whose process was kept): it
+    # just re-lays itself out (field log 2026-10-25: the full 0.8 s on every YouTube handoff).
+    HANDOFF_PRELANDING_QUIET_STABILIZE_S: float = 0.3
 
     # --- Encoder capacity stress test (capability_probe.py tier-2 follow-up) ---
     # Empirically opens throwaway, app-less virtual displays until one fails,

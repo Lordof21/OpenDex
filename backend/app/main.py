@@ -50,6 +50,7 @@ from .startup_state import StartupState
 from .storage import settings_db
 from .device.multi_audio_focus import MultiAudioFocusService
 from .device.phone_awake import PhoneAwakeLease
+from .device.freeform_caption import FreeformCaptionLease
 from .device.usb_stability import UsbStabilityGuard
 from .streams.app_audio import AppAudioRouter
 from .device.battery_health import BatteryHealthService
@@ -57,6 +58,8 @@ from .streams.app_audio_link import AppAudioLink
 from .streams.audio_stream import SessionAudio
 from .streams.broadcaster import BroadcasterRegistry, report_stream_health
 from .telemetry import TelemetryHub
+from .telemetry.hub import phone_foreground_packages
+from .windows.applock_watcher import AppLockWatcher
 from .windows.display_ids import display_event_log
 from .telemetry import markers as load_markers
 from .telemetry.load_monitor import DeviceLoadMonitor
@@ -125,9 +128,11 @@ class AppContext:
             emit=self.event_bus.emit,
             streams_getter=self.window_manager.stream_inventory,
             packages_getter=self.window_manager.open_packages,
+            phone_packages_getter=lambda: phone_foreground_packages(self._phone_tasks()),
             record_dir_getter=logging_config.log_dir,
             temps_getter=self.thermal_monitor.fresh_temperatures,
             battery_getter=lambda: self.daemon_client.last_battery_state if self.daemon_client.is_connected else None,
+            thermal_level_getter=lambda: str(self.thermal_monitor.level) if self.thermal_monitor.running else None,
             daemon_getter=lambda: self.daemon_client,
         )
         # The Battery page (health, charger, ETA, temperatures) — facts from the daemon, meaning from device/battery_health.
@@ -212,6 +217,13 @@ class AppContext:
         # held while windows exist, the user's own value is given back afterwards (device/phone_awake.py).
         self.phone_awake = PhoneAwakeLease(self.adb, lambda: self.serial, self.window_manager.has_windows)
         self.window_manager.subscribe_sessions(self.phone_awake.request_sync)
+        # HyperOS draws a caption pill and a bottom handle on every freeform task (grey bars in the Workspace picture): hidden
+        # while windows are open, the user's own value given back afterwards (device/freeform_caption.py). A handoff to the
+        # phone in freeform mode gives them back meanwhile — the phone's small window needs its handle to be moved.
+        self.freeform_caption = FreeformCaptionLease(self.adb, lambda: self.serial, self._freeform_caption_wanted)
+        self.window_manager.subscribe_sessions(self.freeform_caption.request_sync)
+        for event in ("app_handoff_to_phone", "app_handoff_resolved", "app_reclaim_result"):
+            self.event_bus.on(event, self.freeform_caption.request_sync)
         # The phone's "several apps play at once" flag: read on demand, set only when the user agreed (or the policy says
         # "always"), undone with the last window (device/multi_audio_focus.py).
         self.multi_audio_focus = MultiAudioFocusService(
@@ -242,6 +254,10 @@ class AppContext:
         # Second source for a window's virtual display id.
         self.event_bus.on("device_display_added", display_event_log.on_added)
         self.event_bus.on("device_display_removed", display_event_log.on_removed)
+        # An OEM app lock asked AGAIN while a window is open (the app was recreated, the phone slept): the overlay follows the
+        # daemon's pushed focus events — no polling (windows/applock_watcher.py).
+        self.applock_watcher = AppLockWatcher(self.event_bus, self.window_manager._sessions)
+        self.applock_watcher.start()
         self.android_id: str | None = None
         self.bootstrap_task: asyncio.Task | None = None
         self.pairing_listener_task: asyncio.Task | None = None
@@ -432,6 +448,7 @@ class AppContext:
             await self.startup.update(services="starting")
             profile = await self.window_manager.bind_device(serial, self.android_id)
             self.phone_awake.request_sync()  # also hands back a value a crashed earlier session left behind
+            self.freeform_caption.request_sync()  # same for the HyperOS caption flag
             self.multi_audio_focus.request_sync(refresh=True)  # same for the several-apps flag; and a fresh read for the Sound card
             # Before device_connected: the frontend reads the profile (phone_scale metrics) right after that event.
             await self._optional("telefon ölçüleri", self.capability_probe.refresh_phone_metrics(serial, profile))
@@ -495,7 +512,7 @@ class AppContext:
         if isinstance(exc, Exception):
             log.warning("[BIND] %s bağlanamadı (%s: %s) — oturum temizleniyor", serial, type(exc).__name__, exc)
         await self._stop_services()
-        for cleanup in (self.phone_awake.release(serial), self.multi_audio_focus.release(serial),
+        for cleanup in (self.phone_awake.release(serial), self.freeform_caption.release(serial), self.multi_audio_focus.release(serial),
                         self.app_audio.on_device_unbound(), self.session_audio.stop_session_audio()):
             try:
                 await cleanup
@@ -883,6 +900,15 @@ class AppContext:
         project = await settings_db.get_project_settings()
         return default_route_for(project.audio_output_mode, project.enable_audio)
 
+    async def _freeform_caption_wanted(self) -> bool:
+        """Hide HyperOS' freeform caption while OpenDex windows are open — unless an app was handed to the phone as HyperOS'
+        own small window ("Serbest pencere" handoff mode): that window is moved and resized by the very handle we would hide."""
+        if not self.window_manager.has_windows():
+            return False
+        if not self.window_manager.has_phone_handoff():
+            return True
+        return (await settings_db.get_project_settings()).phone_handoff_windowing != "freeform"
+
     async def _multi_audio_focus_policy(self) -> str:
         """"ask" | "always" | "never": what the user chose for the phone's several-apps-at-once flag."""
         return (await settings_db.get_project_settings()).multi_audio_focus_policy
@@ -933,6 +959,8 @@ class AppContext:
             return
         log.info("unbinding device: %s (disconnect_adb=%s, reason=%s)", serial, disconnect_adb, reason)
         await self._release_multi_audio_focus(serial)  # while the daemon still runs
+        with contextlib.suppress(Exception):
+            await self.freeform_caption.release(serial)
         self.serial = None
         self.android_id = None
         tools_jar.forget(serial)
@@ -1041,6 +1069,7 @@ class AppContext:
         await _safe_step(self.window_manager.close_all(), "window_manager.close_all", timeout=2.5)
         await _safe_step(self.multi_audio_focus.release(self.serial), "multi_audio_focus.release", timeout=3.5)
         await _safe_step(self.phone_awake.release(self.serial), "phone_awake.release", timeout=1.5)
+        await _safe_step(self.freeform_caption.release(self.serial), "freeform_caption.release", timeout=1.5)
         await _safe_step(self.app_audio.shutdown(), "app_audio.shutdown", timeout=1.0)
         await _safe_step(self.session_audio.stop_session_audio(), "session_audio.stop_session_audio", timeout=1.5)
         await _safe_step(self.thermal_monitor.stop(), "thermal_monitor.stop", timeout=1.0)

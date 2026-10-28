@@ -64,6 +64,28 @@ describe('✕ ve eşitleme', () => {
     expect(useWindowStore.getState().windows.map((w) => w.id)).toEqual(['other']);
   });
 
+  it('arka ucun artık tanımadığı pencere (arka uç yeniden başladı) arayüzden düşer; arayüze özel pencereler kalır', async () => {
+    const id = await useWindowStore.getState().openWindow(APP);
+    useWindowStore.setState((s) => ({ windows: [...s.windows, { id: 'files-1', kind: 'files', package: 'com.opendex.files' }] }));
+    api.get.mockResolvedValue([]);                             // yeni arka uç süreci: oturum yok
+
+    await useWindowStore.getState().syncWindowsWithBackend();
+
+    expect(useWindowStore.getState().windows.map((w) => w.id)).toEqual(['files-1']);
+    expect(id).toBe('w1');
+  });
+
+  it('istek sürerken açılan pencere, ondan ÖNCE alınmış bir listede yok diye düşürülmez', async () => {
+    let answer;
+    api.get.mockImplementation(() => new Promise((resolve) => { answer = resolve; }));
+    const syncing = useWindowStore.getState().syncWindowsWithBackend();
+    await useWindowStore.getState().openWindow(APP);          // liste istendikten SONRA açıldı
+    answer([]);
+    await syncing;
+
+    expect(useWindowStore.getState().windows.map((w) => w.id)).toEqual(['w1']);
+  });
+
   it('aynı kimlikle yeniden açılan pencere mezar taşını kaldırır: eşitleme onu tutar, yeniden denemeler onu kapatmaz', async () => {
     const id = await useWindowStore.getState().openWindow(APP);
     api.post.mockRejectedValueOnce(new Error('network down'));

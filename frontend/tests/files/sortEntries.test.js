@@ -85,9 +85,15 @@ describe('performans bütçesi', () => {
     let seed = 1;
     const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
     const big = Array.from({ length: 50_000 }, (_, i) => ({ name: `IMG_${Math.floor(rnd() * 1e7)}${i % 9 ? '.jpg' : ' Şarkı.mp3'}`, kind: i % 40 ? 'file' : 'dir', size: i, mtime: i }));
-    const t0 = performance.now();
-    const sorted = sortEntries(big, { key: 'name' });
-    const ms = performance.now() - t0;
+    // Best of 3: the whole suite runs files in parallel, and one run that a busy CPU delayed is not the code getting slower
+    // (it failed only in full runs, never alone). A real regression (e.g. quadratic) is slow on EVERY run and still fails.
+    let sorted;
+    let ms = Infinity;
+    for (let run = 0; run < 3; run += 1) {
+      const t0 = performance.now();
+      sorted = sortEntries(big, { key: 'name' });
+      ms = Math.min(ms, performance.now() - t0);
+    }
     expect(sorted).toHaveLength(50_000);
     expect(sorted[0].kind).toBe('dir');
     expect(ms).toBeLessThan(700);

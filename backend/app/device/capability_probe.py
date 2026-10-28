@@ -20,6 +20,7 @@ import re
 from ..config import Settings
 from ..schemas import DeviceProfile
 from ..storage import settings_db
+from ..windows import display_limits
 from . import android_shell
 from .adb import Adb, AdbError
 from .device_manager import DeviceManager
@@ -106,6 +107,7 @@ class CapabilityProbe:
     async def apply_phone_display(self, profile: DeviceProfile, display: android_shell.PhoneDisplay) -> bool:
         """Writes the phone panel into ``profile`` (in place) and persists it. True when anything changed."""
         short, long_ = sorted((display.width, display.height))
+        display_limits.note_phone_screen(short, long_)  # a display of the phone's own size is always allowed
         metrics = (short, long_, display.density)
         if (profile.phone_width, profile.phone_height, profile.phone_density) == metrics:
             return False

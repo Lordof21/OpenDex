@@ -37,6 +37,7 @@ from ..device import android_shell
 from ..device.adb import Adb
 from ..streams import video_stream
 from .display_ids import display_event_log, is_virtual_display_id
+from .display_limits import cap_display_size, cap_display_spec
 
 log = logging.getLogger(__name__)
 
@@ -113,6 +114,36 @@ def live_servers() -> list["ScrcpyServer"]:
     return [s for s in list(_LIVE_SERVERS) if s.is_alive]
 
 
+# The scrcpy socket names this process holds an adb forward for — from `start_forward` (BEFORE the server is spawned and
+# counted live) until `stop` removes it. `reap_stale_forwards` never touches one of these.
+_FORWARDED: set[str] = set()
+_SCRCPY_FORWARD = re.compile(r"^(\S+)\s+(tcp:\d+)\s+localabstract:(scrcpy_[0-9a-f]+)\s*$")
+
+
+async def reap_stale_forwards(adb: Adb, serial: str) -> list[str]:
+    """Removes the adb forwards to scrcpy sockets that no server of THIS backend owns — one by one, never
+    `--remove-all` (the daemon's, the audio's and Chrome's forwards are left alone). A backend that was killed or crashed
+    left its servers' forwards behind (the servers themselves exit with their sockets): each one kept a PC port listening
+    for a socket that is gone, and every forced restart added more. Host-side only (`adb forward`), nothing runs on the
+    phone. Returns the removed socket names; never raises."""
+    try:
+        listing = await adb.run("forward", "--list", timeout_s=5.0)
+    except Exception as exc:  # noqa: BLE001 — a housekeeping sweep
+        log.debug("forward --list okunamadı: %s", exc)
+        return []
+    removed: list[str] = []
+    for line in listing.splitlines():
+        m = _SCRCPY_FORWARD.match(line.strip())
+        if not m or m.group(1) != serial or m.group(3) in _FORWARDED:
+            continue
+        with contextlib.suppress(Exception):
+            await adb.forward_remove(m.group(2), serial=serial)
+            removed.append(m.group(3))
+    if removed:
+        log.info("🧹 [ForwardReaper] ölü scrcpy sunucularının adb yönlendirmeleri kaldırıldı: %s", ", ".join(removed))
+    return removed
+
+
 def serialize_start_app(package: str) -> bytes:
     raw = package.encode("utf-8")
     if len(raw) > 255:
@@ -156,6 +187,7 @@ def serialize_resize_display(width: int, height: int) -> bytes:
     """
     if not (0 <= width <= 0xFFFF and 0 <= height <= 0xFFFF):
         raise ValueError(f"resize dimensions must fit in u16: got {width}x{height}")
+    width, height = cap_display_size(width, height)  # the last line before the phone: display_limits
     return struct.pack("!BHH", _TYPE_RESIZE_DISPLAY, width, height)
 
 
@@ -183,6 +215,7 @@ def serialize_opendex_resize(width: int, height: int, dpi: int = 0, bit_rate: in
         raise ValueError(f"resize fields must fit in u16: got {width}x{height}/{dpi}")
     if not 0 <= bit_rate < 2**31:  # the server reads a Java int
         raise ValueError(f"bit rate out of range: {bit_rate}")
+    width, height = cap_display_size(width, height)  # the last line before the phone: display_limits
     return struct.pack("!BHHHI", _TYPE_OPENDEX_RESIZE, width, height, dpi, bit_rate)
 
 
@@ -260,6 +293,7 @@ class ScrcpyServer:
 
     async def start_forward(self) -> int:
         self.local_port = _find_free_port()
+        _FORWARDED.add(self.socket_name)
         await self._adb.forward(self.local_port, self.socket_name, serial=self._serial)
         return self.local_port
 
@@ -312,7 +346,7 @@ class ScrcpyServer:
             # WxH/dpi: an explicit density is required to control the resulting
             # dp size deterministically — see Settings.VIRTUAL_DISPLAY_DPI.
             suffix = f"/{dpi}" if dpi else ""
-            opts.append(f"new_display={new_display}{suffix}")
+            opts.append(f"new_display={cap_display_spec(new_display)}{suffix}")
             # display_ime_policy defaults to UNDEFINED, which AOSP resolves by
             # falling back to the PHYSICAL/primary display for the on-screen
             # keyboard — so focusing a text field in a mirrored app popped the
@@ -640,6 +674,7 @@ class ScrcpyServer:
         if self.local_port is not None:
             await self._adb.forward_remove(self.local_port, serial=self._serial)
             self.local_port = None
+        _FORWARDED.discard(self.socket_name)
         if self.display_id:
             # The display dies with the server: its density target (android_shell's single-writer ledger) must not
             # outlive it — a reused display id, or a rebooted phone, would otherwise have its first ('initial') write

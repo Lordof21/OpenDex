@@ -1462,13 +1462,15 @@ async def test_a_big_enlargement_stays_in_place_and_takes_its_bitrate_along(flex
     handle = await _open_flex_window(flex_manager)
     server = await _announce_opendex(flex_manager, handle.window_id, features=("opendex_resize", "bitrate_on_reset"))
     session = flex_manager.get_session(handle.window_id)
-    floor = _floor(flex_manager, 3840, 2160)
+    # The biggest display allowed is 2.5K (display_limits): its floor outgrows a LOW bit rate (the user's 4 Mbps), not the default.
+    session.video_bit_rate = 4_000_000
+    floor = _floor(flex_manager, 2560, 1600)
     assert floor > session.video_bit_rate * reconfigure_module.FLEX_RESIZE_BITRATE_FLOOR_SLACK   # "outgrown"
 
-    await flex_manager.resize_window(handle.window_id, 3840, 2160)
+    await flex_manager.resize_window(handle.window_id, 2560, 1600)
 
     assert session.server is server                                     # no legacy rebuild for the bitrate
-    assert _messages(server) == [(200, 3840, 2160, 0, floor)]
+    assert _messages(server) == [(200, 2560, 1600, 0, floor)]
     assert session.video_bit_rate == floor
 
 
@@ -1488,12 +1490,13 @@ async def test_without_bitrate_on_reset_an_outgrown_bitrate_still_takes_the_rebu
     handle = await _open_flex_window(flex_manager)
     server = flex_manager.get_session(handle.window_id).server
     server.features = frozenset(features)
+    flex_manager.get_session(handle.window_id).video_bit_rate = 4_000_000  # a low bit rate the 2.5K floor outgrows
 
-    await flex_manager.resize_window(handle.window_id, 3840, 2160)
+    await flex_manager.resize_window(handle.window_id, 2560, 1600)
 
     session = flex_manager.get_session(handle.window_id)
     assert session.server is not server                                 # today's FLEX_SKIP -> legacy
-    assert session.video_bit_rate == _floor(flex_manager, 3840, 2160)
+    assert session.video_bit_rate == _floor(flex_manager, 2560, 1600)
 
 
 # ---------------------------------------------------------------------------

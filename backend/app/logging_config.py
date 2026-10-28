@@ -113,12 +113,13 @@ TRACE_CATEGORIES: dict[str, tuple[str, ...]] = {
         "app.windows.task_teleporter", "app.windows.task_windowing", "app.windows.task_movement",
         "app.windows.surfaceflinger_probe",
     ),
-    "applock": ("app.windows.window_lifecycle_coordinator", "app.device.deep_navigator"),
-    "workspace": ("app.windows.eco_workspace", "app.windows.workspace_slots"),
+    "applock": ("app.windows.window_lifecycle_coordinator", "app.windows.applock_watcher", "app.device.deep_navigator"),
+    "workspace": ("app.windows.eco_workspace", "app.windows.workspace_slots", "app.device.freeform_caption"),
     "windows": (
         "app.windows.window_manager", "app.windows.session_reconfigure", "app.windows.budget_reallocator",
         "app.windows.transition_gate",
         "app.windows.session_table", "app.windows.encoder_stress_test", "app.windows.display_ids",
+        "app.windows.display_limits",
     ),
     "density": ("app.windows.density_reconciler", "app.windows.app_restart", "app.windows.parked_apps"),
     "continuity": ("app.windows.app_continuity", "app.windows.app_presence"),
@@ -135,6 +136,7 @@ TRACE_CATEGORIES: dict[str, tuple[str, ...]] = {
         "app.streams.audio_stream",
         "app.streams.app_audio",
         "app.streams.app_audio_link",
+        "app.device.multi_audio_focus",
     ),
     "video": ("app.streams.video_stream", "app.streams.broadcaster"),
     "adb": (

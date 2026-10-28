@@ -268,3 +268,19 @@ Telefonda ölçülmüş (POCO X7 Pro · HyperOS 3.0 · Android 16): `settings` a
 - [ ] *Sor* iken Chrome'da video çalarken YT Music'i başlat: "Bir uygulama durdu" kartı **bir kez** çıkar, klavye odağını almaz, 25 sn sonra kendiliğinden kaybolur; **Bu oturum için aç** → bayrak açılır, "açıldı" bildirimi gelir; **Bir daha sorma** → politika *Hiçbir zaman* olur.
 - [ ] Medya Merkezi'nden kendin bir uygulamayı duraklattığında kart **çıkmaz**.
 - [ ] Eski jar ile (`audio_multi_focus` yeteneği yok) kart durumu `dumpsys` yedeğiyle okur, **Etkinleştir** kapalıdır ve "yardımcı desteklemiyor" der.
+
+## 14. HyperOS serbest pencere başlığı (Miui Caption + alt tutamaç) — yalnız Xiaomi
+
+`settings secure disable_decoration_dot 1`: OpenDeX pencereleri açıkken HyperOS'un serbest pencerelere çizdiği başlık hapı ve alt tutamaç
+kalkar (MiuiSystemUI `MulWinSwitchSettingsObserver`). Ayrıntı: [research/XIAOMI_FREEFORM_CAPTION_SUPPRESSION.md](research/XIAOMI_FREEFORM_CAPTION_SUPPRESSION.md).
+Kod: `backend/app/device/freeform_caption.py` (kira; özgün değer `opendex_decoration_dot_original`'da yedeklenir).
+
+- [ ] Workspace'te bir uygulama aç: üstte gri hap, altta gri çizgi **yok**; uygulama kenardan kenara, dokunma ve kaydırma en üst/en alt piksele kadar çalışıyor.
+  `adb shell dumpsys SurfaceFlinger --list | grep -i caption` → boş. Günlük: `[FreeformCaption] … gizlendi`.
+- [ ] Son pencereyi kapat → `adb shell settings get secure disable_decoration_dot` → bağlanmadan önceki değer (çoğunlukla `null`);
+  `adb shell settings get secure opendex_decoration_dot_original` → `null`. Telefonun kendi küçük pencerelerinde tutamaç geri geldi.
+- [ ] Ayarlar › Pencereler & Geçiş › Telefona aktarma kipi = **Serbest pencere** iken bir uygulamayı telefona aktar: telefondaki küçük
+  pencerenin tutamacı **var** (taşınabiliyor). DeX'e geri al: Workspace'te başlık yine **yok**.
+- [ ] Backend'i görev yöneticisinden öldür (pencereler açıkken), yeniden başlat, telefonu bağla, pencere açmadan bekle: bayrak kullanıcının
+  değerine döner, yedek anahtar silinir.
+- [ ] Xiaomi olmayan telefonda hiçbir `disable_decoration_dot` komutu gönderilmez (günlükte `FreeformCaption` satırı yok).

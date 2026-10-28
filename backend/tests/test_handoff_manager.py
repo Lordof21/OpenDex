@@ -838,6 +838,37 @@ async def test_a_video_playing_when_the_user_launches_the_app_on_the_phone_is_re
     handoff._playback.restore.assert_awaited_once_with(snapshot, "0")
 
 
+@pytest.mark.asyncio
+async def test_a_paused_watch_page_handed_to_the_phone_is_repaired_there(mock_adb, events, settings):
+    """Device test 2026-10-27: a PAUSED YouTube video handed to the phone fell to the home feed (the video shrunk into a black mini
+    player). Nothing plays, so `capture` has nothing — the page itself is kept and repaired on display 0."""
+    handoff, session, _density, _log, _phases, patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=False)
+    page = PlaybackSnapshot(package=session.state.package, position_ms=26_052, taken_at=0.0, url="https://youtu.be/x", paused=True)
+    handoff._playback.capture = AsyncMock(return_value=None)
+    handoff._playback.capture_page = AsyncMock(return_value=page)
+    handoff._playback.repair_page = AsyncMock(return_value="reopened")
+    with patches[0], patches[1], patches[2], patch.object(handoff, "_execute_to_phone", AsyncMock()):
+        assert await handoff.handoff_to_phone("win-3") is True
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    handoff._playback.repair_page.assert_awaited_once_with(page, "0")
+
+
+@pytest.mark.asyncio
+async def test_a_playing_video_is_not_also_page_repaired(mock_adb, events, settings):
+    handoff, session, _density, _log, _phases, patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=False)
+    snapshot = PlaybackSnapshot(package=session.state.package, position_ms=5000, taken_at=0.0)
+    handoff._playback.capture = AsyncMock(return_value=snapshot)
+    handoff._playback.capture_page = AsyncMock()
+    handoff._playback.restore = AsyncMock(return_value="resumed")
+    with patches[0], patches[1], patches[2], patch.object(handoff, "_execute_to_phone", AsyncMock()):
+        await handoff.handoff_to_phone("win-3")
+        await asyncio.sleep(0)
+
+    handoff._playback.capture_page.assert_not_awaited()
+
+
 def _landed_session(*, size=(1220, 2712), dpi=513):
     from types import SimpleNamespace
     from app.windows.handoff_manager import Geometry, Landing

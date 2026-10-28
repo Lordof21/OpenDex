@@ -90,7 +90,7 @@ from .window_lifecycle_coordinator import (
     coordinate_window_lifecycle,
     wait_for_app_lock_unlock,
 )
-from .scrcpy_launcher import ControlSocket, ScrcpyServer, live_servers, serialize_start_app
+from .scrcpy_launcher import ControlSocket, ScrcpyServer, live_servers, reap_stale_forwards, serialize_start_app
 
 log = logging.getLogger(__name__)
 
@@ -217,6 +217,7 @@ class WindowManager:
         self._lock = asyncio.Lock()
         # package -> monotonic deadline: while it runs, focusing that app's window does NOT send the launcher START_APP (see hold_launch).
         self._launch_held: dict[str, float] = {}
+        self._launch_checks: set[str] = set()  # windows whose focus "is the app still there?" check is running
         # window_id -> its teardown task, from the moment the user closed it (close_window) until it is gone.
         self._closers: dict[str, asyncio.Task] = {}
         # heal_links runs one window at a time under `_lock` (so a close/open can interleave between windows); this keeps
@@ -427,6 +428,10 @@ class WindowManager:
     def has_windows(self) -> bool:
         return any(s.state.workspace_id != ANCHOR_MARKER for s in list(self._sessions.values()))
 
+    def has_phone_handoff(self) -> bool:
+        """A window whose app was handed over to the phone's own screen (it is used there, not in OpenDex, right now)."""
+        return any(s.state.handoff_to_phone and not s.closing for s in list(self._sessions.values()))
+
     def set_app_audio(self, app_audio: Any) -> None:
         """Per-window audio (streams/app_audio.py) follows the open windows: every session added or dropped — by
         any component sharing the table — requests one coalesced reconcile. Never awaited here: a daemon RPC must
@@ -452,6 +457,7 @@ class WindowManager:
                 "w": s.stream_w, "h": s.stream_h, "target_fps": s.max_fps or s.state.fps, "dpi": s.dpi or None,
                 "paused": bool(s.state.frozen),
                 "bytes": stats.get("bytes_total", 0), "packets": stats.get("packets_total", 0),
+                "counting_s": stats.get("counting_s"),
             })
         return out
 
@@ -1073,10 +1079,15 @@ class WindowManager:
         return reaped
 
     async def _run_orphan_reaper(self) -> None:
+        # Once at once: a backend that was killed left its servers' adb forwards on this PC (scrcpy_launcher.reap_stale_forwards).
+        if self._serial:
+            await reap_stale_forwards(self._adb, self._serial)
         while True:
             try:
                 await asyncio.sleep(self.ORPHAN_SWEEP_INTERVAL_S)
                 await self.reap_orphan_servers()
+                if self._serial:
+                    await reap_stale_forwards(self._adb, self._serial)
             except asyncio.CancelledError:
                 break
             except Exception as exc:
@@ -1565,16 +1576,37 @@ class WindowManager:
         told (the display id is not known yet), the old behaviour stays. A held package (hold_launch) is never launched."""
         if self._launch_is_held(session.state.package):
             return
-        display = known_display_id(session)
-        if display and self._adb and self._serial:
-            with contextlib.suppress(Exception):
-                from app.device.deep_navigator import find_task_id_for_package
+        window_id = session.state.window_id
+        if window_id in self._launch_checks:
+            return  # the same click's other focus call is already asking (one click arrived as two focus requests)
+        self._launch_checks.add(window_id)
+        try:
+            display = known_display_id(session)
+            if display and self._task_listed(session.state.package, display):
+                return  # the daemon's pushed task list already shows it there: nothing to ask the phone
+            if display and self._adb and self._serial:
+                with contextlib.suppress(Exception):
+                    from app.device.deep_navigator import find_task_id_for_package
 
-                if await find_task_id_for_package(self._adb, session.state.package, display_id=display, serial=self._serial):
-                    return
-        with contextlib.suppress(Exception):
-            if session.control is not None:
-                await session.control.send(serialize_start_app(session.state.package))
+                    if await find_task_id_for_package(self._adb, session.state.package, display_id=display, serial=self._serial):
+                        return
+            with contextlib.suppress(Exception):
+                if session.control is not None:
+                    await session.control.send(serialize_start_app(session.state.package))
+        finally:
+            self._launch_checks.discard(window_id)
+
+    def _task_listed(self, package: str, display: str | int) -> bool:
+        """`package` has a task on `display` in the daemon's live task list (TaskStackListener push — the same root task
+        list find_task reads). Only a PRESENT answer is trusted: a task whose name the platform reports as "unknown" is
+        in the list without a package, so "not listed" still asks find_task (which also checks the top activity)."""
+        daemon = self._daemon_client
+        if daemon is None or not getattr(daemon, "task_push", False) or not daemon.serves(self._serial or ""):
+            return False
+        tasks = (daemon.last_tasks_state or {}).get("tasks") or []
+        return any(
+            isinstance(t, dict) and t.get("package") == package and str(t.get("display")) == str(display) for t in tasks
+        )
 
     async def reallocate(self) -> None:
         """Runs the budget algorithm and applies the result."""

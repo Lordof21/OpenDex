@@ -6,6 +6,7 @@ was still in, the Wi-Fi link still up) — the session came straight back. On US
 windows onto it. These tests pin what replaced that (docs/design/DEVICE_MANAGER.md, K1/K3/K4).
 """
 import asyncio
+import contextlib
 from unittest.mock import AsyncMock
 
 import pytest
@@ -22,13 +23,17 @@ OTHER_PHONE = "R9XY999"
 
 
 @pytest.fixture
-def h(monkeypatch):
+async def h(monkeypatch):
+    # Async on purpose: the bootstrap task the test left running is cancelled INSIDE the test's event loop and awaited. A sync
+    # fixture tore down after that loop had closed, and `task.cancel()` raised "Event loop is closed" (8 teardown errors).
     harness = Harness(monkeypatch)
     harness.ctx.adb.disconnect = AsyncMock()
     yield harness
     task = harness.ctx.bootstrap_task
     if task is not None and not task.done():
         task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
 
 
 async def _bound(h, serial=SERIAL, *listed):

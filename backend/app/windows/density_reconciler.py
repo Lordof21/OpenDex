@@ -541,7 +541,13 @@ class DensityReconciler:
         # yalnız kendini yeniden kurmayan uygulamalarda işe yarıyordu).
         hard = force or (await self._policy())[1]
         if not hard and changed_at is not None:
-            adapted = await self._await_adaptation(package, after.pid, changed_at)
+            # An app that holds a media session is never restarted, whatever the proof says (_keep_media below): the proof only
+            # tells "it rebuilt" from "it kept going", so ONE look is enough. Waiting DENSITY_ADAPT_WAIT_S for it held every
+            # handoff of a playing/paused YouTube or YT Music for 1.5 s (field log 2026-10-27 22:58:53.5 → 55.1).
+            if not force and await self.media_protected(package):
+                adapted = await self._rebuild_proof(package, changed_at - self._MARK_SLACK_S, after.pid)
+            else:
+                adapted = await self._await_adaptation(package, after.pid, changed_at)
             # İsteğe bağlı (DENSITY_SELF_RECREATE_ESCALATE): etkinliğini KENDİ yeniden kuran uygulama (kanıt "app:") telefon ⇄
             # pencere geçişinde süreç düzeyinde durum taşıyabilir (Chrome sayfa ölçeğini ×1,2 tutuyor); Android'in yeniden
             # kurduğu ("system:") uygulamaya ve küçük adımlara (resize) güvenilir.
