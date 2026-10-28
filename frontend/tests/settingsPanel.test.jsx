@@ -14,6 +14,7 @@ import SettingsPanel from '../src/settings/SettingsPanel.jsx';
 import { ThemeProvider } from '../src/state/ThemeContext.jsx';
 import { useSystemStore } from '../src/state/systemStore.js';
 import { useWindowStore } from '../src/window/windowStore.js';
+import { Z_INDEX } from '../src/ui/zIndex.js';
 import { getSettings, saveSettings } from '../src/settings/settingsApi.js';
 import { resetLiveSettingsForTests } from '../src/settings/liveSettings.js';
 import { PROFILES } from '../src/settings/settingsModel.js';
@@ -246,6 +247,20 @@ describe('arama', () => {
     expect(document.activeElement).not.toBe(screen.getByRole('searchbox'));
     fireEvent.pointerDown(screen.getByRole('dialog', { name: 'Tüm OpenDeX ayarları' }));
     expect(useSystemStore.getState().settingsFocused).toBe(true);
+  });
+
+  it('istif: odaktayken pencerelerle aynı sayaçtan en öne geçer ve pinli pencerenin de önündedir; odak gidince normal sıraya iner', async () => {
+    useWindowStore.setState({ nextZ: 120 }); // eskiden sabit z-70: 70'ten sonra odaklanan her pencerenin arkasında kalıyordu
+    await mount();
+    const stage = () => screen.getByTestId('settings-stage');
+    const focusedZ = Number(stage().style.zIndex);
+    expect(useWindowStore.getState().nextZ).toBe(121);
+    expect(focusedZ).toBe(Z_INDEX.windowPinnedBase + 121);
+    expect(focusedZ).toBeGreaterThan(Z_INDEX.windowPinnedBase + 120); // pinli bir pencerenin (z=120) önünde
+    act(() => useWindowStore.setState({ nextZ: 122 })); // bir uygulama penceresi odaklandı
+    expect(useSystemStore.getState().settingsFocused).toBe(false);
+    expect(Number(stage().style.zIndex)).toBe(121); // sıradan pencere gibi: yeni odaklı pencere (122) onun üstünde
+    expect(useWindowStore.getState().nextZ).toBe(122); // kendi artışı odağı bırakmadı, sayaç sızdırılmadı
   });
 
   it('pencere dışına (masaüstü) tıklamak odağı bırakır; görev çubuğu tıklaması bırakmaz', async () => {

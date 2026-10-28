@@ -177,3 +177,18 @@ export function cardLeft(anchorX, cardW, viewportW, margin = 16) {
   const centered = anchorX === null || anchorX === undefined ? (viewportW - cardW) / 2 : anchorX - cardW / 2;
   return Math.max(margin, Math.min(viewportW - cardW - margin, Math.round(centered)));
 }
+
+/** Görev çubuğunda tıklanınca bir şey YAPAN öğeler (düğme, bağlantı, giriş, kaydırıcı) ve açık panellerin kendisi. */
+const TASKBAR_CONTROL = 'button, a, input, select, textarea, label, summary, [role="button"], [role="slider"], [role="menuitem"], [data-taskbar-panel], [data-taskbar-portal]';
+
+/**
+ * Basış, görev çubuğunun BOŞ yerine mi düştü (çubuğun kendisi ya da yalnız yerleşim saran öğeler)? Boş yere basmak açık
+ * paneli kapatır; düğmelere ve panelin içine basmak kapatmaz (düğme paneli kendisi açıp kapatır: basışta kapatmak onu tık'ta
+ * yeniden açardı). Tıklanabilir görünen (imleç `pointer`) öğe de denetim sayılır.
+ */
+export function isBareTaskbarTarget(target, nav) {
+  if (!(target instanceof Element) || !nav?.contains(target)) return false;
+  if (target.closest(TASKBAR_CONTROL)) return false;
+  const view = target.ownerDocument?.defaultView;
+  return view?.getComputedStyle?.(target)?.cursor !== 'pointer';
+}

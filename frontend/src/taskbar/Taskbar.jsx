@@ -22,7 +22,7 @@ import { useSystemStore } from '../state/systemStore.js';
 import { useNotificationStore } from '../state/notificationStore.js';
 import { useMediaPlaybackController } from '../state/useMediaPlaybackController.js';
 import { assembleMediaSessions, pickActiveSessionId } from '../state/mediaSessions.js';
-import { fetchAppList, STATIC_APPS } from '../desktop/appRegistry.js';
+import { fetchAppList, refreshAppList, STATIC_APPS } from '../desktop/appRegistry.js';
 import { cn } from '../lib/utils.js';
 
 import { DeviceCenter, DeviceTrayButton } from './DeviceCenter.jsx';
@@ -47,6 +47,7 @@ import {
   TASKBAR_GAP_PX,
   appMenuModel,
   appSlotsAvailable,
+  isBareTaskbarTarget,
   isWindowActive,
   notificationCounts,
   previewOpenDelay,
@@ -325,20 +326,19 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
   // Outside click & Escape to close popovers
   useEffect(() => {
     if (!surface && !launchpadOpen) return;
+    // A panel closes on a press anywhere that is not the panel or its own button: the desktop, a WINDOW (its frame or its
+    // stream — also when that stops the event, hence the capture phase) and the empty part of the taskbar. The one panel that
+    // must survive a touch on a window — the DeX quick settings, to watch the effect of a setting — lives in
+    // DexQuickPanelHost and keeps its own rule.
     const close = (event) => {
       const target = event.target;
-      if (
-        target instanceof Node &&
-        !rootRef.current?.contains(target) &&
-        !(target instanceof HTMLElement && target.closest('[data-taskbar-portal]')) &&
-        // Touching or resizing a window (e.g. to tweak it while a quick
-        // settings panel is open) must not dismiss the panel — only clicking
-        // the desktop background or anywhere else still does.
-        !(target instanceof HTMLElement && target.closest('[data-window-frame-id]'))
-      ) {
-        setSurface(null);
-        setLaunchpadOpen(false);
-      }
+      if (!(target instanceof Node)) return;
+      // `Element`, `HTMLElement` değil: panel içindeki bir SVG simgesine (çekmecenin ızgara/liste, yenile, kapat düğmelerinin ikonu) basış
+      // da panele basıştır — SVG bir HTMLElement değildir, eskiden bu basışlar paneli kapatıyordu.
+      if (target instanceof Element && target.closest('[data-taskbar-portal]')) return;
+      if (rootRef.current?.contains(target) && !isBareTaskbarTarget(target, navRef.current)) return;
+      setSurface(null);
+      setLaunchpadOpen(false);
     };
     const escape = (event) => {
       if (event.key === 'Escape') {
@@ -346,10 +346,10 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
         setLaunchpadOpen(false);
       }
     };
-    document.addEventListener('pointerdown', close);
+    document.addEventListener('pointerdown', close, true);
     document.addEventListener('keydown', escape);
     return () => {
-      document.removeEventListener('pointerdown', close);
+      document.removeEventListener('pointerdown', close, true);
       document.removeEventListener('keydown', escape);
     };
   }, [surface, launchpadOpen, setLaunchpadOpen]);
@@ -421,6 +421,25 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
     setLaunchpadOpen(false);
     setQuickView(view);
     setSurface((current) => (current === 'quick' && quickView === view ? null : 'quick'));
+  };
+
+  // Çekmecenin bağlam menüsü: uygulamanın pencerelerini (ve Çalışma Alanı üyesini) kapatır.
+  const closeAppEverywhere = (app) => {
+    const pkg = app?.package || app?.id;
+    if (!pkg) return;
+    windows.filter((w) => !w.isEcoWorkspace && w.package === pkg).forEach((w) => closeWindow(w.id, 'launcher'));
+    windows
+      .filter((w) => w.isEcoWorkspace)
+      .flatMap((w) => w.tasks || [])
+      .filter((task) => task.package === pkg)
+      .forEach((task) => useWindowStore.getState().closeWorkspaceTask?.(task.windowId));
+  };
+
+  // Çekmecenin "yenile" düğmesi: yeni ve kaldırılan uygulamaları tek geçişte yakalar (RegistryDiff).
+  const refreshApps = async () => {
+    const diff = await refreshAppList();
+    if (diff?.all_apps?.length) setAppsRegistry(diff.all_apps);
+    return diff;
   };
 
   const launchApp = async (appOrId) => {
@@ -533,6 +552,16 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
 
   // Combine builtin pinned apps + running window apps
   const openAppIds = windows.map((w) => w.appId || w.package || w.id);
+  // Çekmece için: Çalışma Alanı üyeleri de açık sayılır, Ayarlar kendi paket adıyla, telefona devredilenler ayrıca.
+  const launcherOpenIds = [
+    ...windows.filter((w) => !w.isEcoWorkspace).map((w) => w.appId || w.package || w.id),
+    ...windows.flatMap((w) => (w.isEcoWorkspace ? (w.tasks || []).map((task) => task.package) : [])),
+    ...(settingsOpen ? ['com.opendex.settings'] : []),
+  ].filter(Boolean);
+  const launcherHandoffIds = [
+    ...windows.filter((w) => w.handoffToPhone).map((w) => w.package),
+    ...windows.flatMap((w) => (w.isEcoWorkspace ? (w.tasks || []).filter((task) => task.handoffToPhone).map((task) => task.package) : [])),
+  ].filter(Boolean);
   if (settingsOpen) openAppIds.push('opendex');
 
   const visibleBuiltins = BUILTIN_TASKBAR_APPS.filter(
@@ -1007,12 +1036,16 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
               apps={appsRegistry && appsRegistry.length > 0 ? appsRegistry : STATIC_APPS}
               query={query}
               onQuery={setQuery}
+              appsLoaded={appsRegistry.length > 0}
               onLaunch={launchApp}
               onClose={() => {
                 setSurface(null);
                 setLaunchpadOpen(false);
               }}
-              openAppIds={openAppIds}
+              onCloseApp={closeAppEverywhere}
+              onRefresh={refreshApps}
+              openAppIds={launcherOpenIds}
+              handoffAppIds={launcherHandoffIds}
             />
           )}
 

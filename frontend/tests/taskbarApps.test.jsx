@@ -322,3 +322,94 @@ describe('OpenDeX Ayarları görev çubuğunda bir görev gibi görünür', () =
     expect(order()).toEqual(['a', 'b', 'c']);
   });
 });
+
+describe('açık görev çubuğu paneli: nereye basınca kapanır', () => {
+  const withNarrowBar = async (run) => {
+    const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 300 });
+    try {
+      setWindows(Array.from({ length: 8 }, (_, i) => win(`w${i}`)));
+      render(<Taskbar />);
+      await waitFor(() => expect(screen.getByRole('button', { name: '4 pencere daha' })).toBeInTheDocument());
+      const open = async () => {
+        fireEvent.click(screen.getByRole('button', { name: '4 pencere daha' }));
+        await screen.findByRole('menu', { name: 'Diğer pencereler' });
+      };
+      const isOpen = () => screen.queryByRole('menu', { name: 'Diğer pencereler' }) !== null;
+      await run({ open, isOpen });
+    } finally {
+      if (original) Object.defineProperty(HTMLElement.prototype, 'clientWidth', original);
+      else delete HTMLElement.prototype.clientWidth;
+    }
+  };
+
+  it('bir pencereye (çerçeve ya da akış) basmak paneli kapatır — olayı durdursa bile', async () => {
+    await withNarrowBar(async ({ open, isOpen }) => {
+      await open();
+      const frame = document.createElement('div');
+      frame.setAttribute('data-window-frame-id', 'w0');
+      const stream = document.createElement('canvas');
+      stream.addEventListener('pointerdown', (e) => e.stopPropagation()); // VideoCanvas gibi
+      frame.append(stream);
+      document.body.append(frame);
+      try {
+        fireEvent.pointerDown(stream, { pointerId: 1, button: 0 });
+        await waitFor(() => expect(isOpen()).toBe(false));
+      } finally {
+        frame.remove();
+      }
+    });
+  });
+
+  it('görev çubuğunun boş yerine basmak kapatır; panelin içine ve kendi düğmesine basmak kapatmaz', async () => {
+    await withNarrowBar(async ({ open, isOpen }) => {
+      await open();
+      const list = screen.getByRole('menu', { name: 'Diğer pencereler' });
+      fireEvent.pointerDown(list, { pointerId: 1, button: 0 });
+      fireEvent.pointerDown(screen.getByRole('button', { name: '4 pencere daha' }), { pointerId: 1, button: 0 });
+      expect(isOpen()).toBe(true);
+      fireEvent.pointerDown(screen.getByRole('navigation'), { pointerId: 1, button: 0 });
+      await waitFor(() => expect(isOpen()).toBe(false));
+    });
+  });
+});
+
+describe('uygulama çekmecesi görev çubuğunda', () => {
+  const launcherButton = () => document.querySelector('[data-taskbar-launcher]');
+
+  it('başlatıcı düğmesi çekmeceyi açar; Esc kapatır ve odak düğmeye döner', async () => {
+    setWindows([]);
+    render(<Taskbar />);
+    const button = launcherButton();
+    button.focus();
+    fireEvent.click(button);
+    expect(await screen.findByRole('dialog', { name: 'Uygulamalar' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox')).toHaveFocus();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Uygulamalar' })).toBeNull());
+    await waitFor(() => expect(button).toHaveFocus());
+  });
+
+  it('çekmecenin içindeki bir SVG simgesine (ızgara/liste, yenile, kapat) basmak çekmeceyi kapatmaz', async () => {
+    setWindows([]);
+    render(<Taskbar />);
+    fireEvent.click(launcherButton());
+    const dialog = await screen.findByRole('dialog', { name: 'Uygulamalar' });
+    const icon = within(dialog).getByRole('button', { name: 'Liste görünümü' }).querySelector('svg');
+    fireEvent.pointerDown(icon, { pointerId: 1, button: 0 });     // SVG bir HTMLElement değildir: eskiden dışarı basış sayılırdı
+    fireEvent.click(icon);
+    expect(screen.getByRole('dialog', { name: 'Uygulamalar' })).toBeInTheDocument();
+    expect(within(screen.getByRole('dialog', { name: 'Uygulamalar' })).getByRole('button', { name: 'Liste görünümü' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('açık pencereler çekmecede "Açık" sayılır; telefona devredilen "Telefonda" etiketi taşır', async () => {
+    setWindows([win('a', { package: 'com.android.chrome', handoffToPhone: true })]);
+    render(<Taskbar />);
+    fireEvent.click(launcherButton());
+    const dialog = await screen.findByRole('dialog', { name: 'Uygulamalar' });
+    const nav = within(dialog).getByRole('navigation', { name: 'Görünümler' });
+    expect(within(nav).getByRole('button', { name: /^Açık/ })).toHaveTextContent('1');
+    fireEvent.click(within(nav).getByRole('button', { name: /^Açık/ }));
+    expect(within(dialog).getAllByRole('option').some((el) => /Telefonda/.test(el.getAttribute('aria-label')))).toBe(true);
+  });
+});

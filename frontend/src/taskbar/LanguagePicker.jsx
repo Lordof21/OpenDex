@@ -111,7 +111,7 @@ export function LanguageView() {
         ref={listRef}
         role="listbox"
         aria-label={t('taskbar.dil')}
-        className="-mr-1 max-h-[min(18rem,calc(100vh-260px))] space-y-0.5 overflow-y-auto overscroll-contain pr-1"
+        className="dex-scroll -mr-1 max-h-[min(18rem,calc(100vh-260px))] space-y-0.5 overflow-y-auto overscroll-contain pr-1"
       >
         {visible.map(({ code, name, label }) => {
           const isActive = code === active;

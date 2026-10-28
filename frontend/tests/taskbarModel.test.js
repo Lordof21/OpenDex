@@ -1,6 +1,6 @@
 // Görev çubuğunun saf mantığı: aktiflik, tıklama eylemi, önizleme kutusu/konumu; tuval küçültme adımları; küçük resim boyutu; Çalışma Alanı ikon anahtarı.
 import { describe, expect, it } from 'vitest';
-import { ACTION_LABEL, cardLeft, cardWidthFor, clampAspect, fitBox, isWindowActive, toggleActionFor } from '../src/taskbar/taskbarModel.js';
+import { ACTION_LABEL, cardLeft, cardWidthFor, clampAspect, fitBox, isBareTaskbarTarget, isWindowActive, toggleActionFor } from '../src/taskbar/taskbarModel.js';
 import { downscaleSteps } from '../src/lib/downscale.js';
 import { thumbSize } from '../src/state/windowThumbnailCache.js';
 import { WORKSPACE_ICON_PACKAGE, iconPackageOf, isWorkspacePackage } from '../src/window/workspacePackage.js';
@@ -172,5 +172,31 @@ describe('hover niyeti: kart yanıp sönmez, komşuya geçiş anında', () => {
     expect(previewOpenDelay({ closedAgoMs: HOVER_SWITCH_GRACE_MS - 1 })).toBe(0);
     expect(previewOpenDelay({ closedAgoMs: HOVER_SWITCH_GRACE_MS + 1 })).toBe(HOVER_OPEN_DELAY_MS);
     expect(previewOpenDelay({ closedAgoMs: null })).toBe(HOVER_OPEN_DELAY_MS);
+  });
+});
+
+describe('isBareTaskbarTarget — boş yere basmak paneli kapatır, düğmeye/panele basmak kapatmaz', () => {
+  const build = () => {
+    const nav = document.createElement('nav');
+    nav.innerHTML = `<div id="wrap"><button id="btn"><span id="icon"></span></button></div>
+      <section data-taskbar-panel=""><div id="inside"></div></section>`;
+    const outside = document.createElement('div');
+    document.body.append(nav, outside);
+    return { nav, outside, q: (id) => nav.querySelector(`#${id}`) };
+  };
+
+  it('boş yerleşim öğesi ve çubuğun kendisi boştur; düğme, içindeki simge ve panel içi değildir', () => {
+    const { nav, q, outside } = build();
+    try {
+      expect(isBareTaskbarTarget(nav, nav)).toBe(true);
+      expect(isBareTaskbarTarget(q('wrap'), nav)).toBe(true);
+      expect(isBareTaskbarTarget(q('btn'), nav)).toBe(false);
+      expect(isBareTaskbarTarget(q('icon'), nav)).toBe(false);
+      expect(isBareTaskbarTarget(q('inside'), nav)).toBe(false);
+      expect(isBareTaskbarTarget(outside, nav)).toBe(false); // çubuğun dışı bu işin konusu değil
+    } finally {
+      nav.remove();
+      outside.remove();
+    }
   });
 });

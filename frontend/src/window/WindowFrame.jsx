@@ -42,7 +42,7 @@ import {
 import { getSettings } from '../settings/settingsApi.js';
 import { useLiveSettings } from '../settings/liveSettings.js';
 import { windowVariants } from '../ui/motion.js';
-import { Z_INDEX } from '../ui/zIndex.js';
+import { windowStackZ } from '../ui/zIndex.js';
 import { logger } from '../lib/logger.js';
 import { t } from '../i18n/index.js';
 
@@ -520,11 +520,14 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
   }, []);
 
   const isPip = !!pipWindow;
-  const effectiveZIndex = win.fullscreen
-    ? Z_INDEX.windowFullscreen
-    : win.pinned
-      ? Z_INDEX.windowPinnedBase + win.zIndex
-      : win.zIndex;
+  // Dosyalar penceresi OpenDeX'in kendi aracıdır: odaktayken sabitlenmiş (pinli) bir videonun da önüne çıkar (windowStackZ).
+  const effectiveZIndex = windowStackZ({
+    z: win.zIndex,
+    fullscreen: win.fullscreen,
+    pinned: win.pinned,
+    focused: win.focused,
+    raisedWhenFocused: isFilesWindow(win),
+  });
 
   const trans = win.pendingResizeTransition;
   const isAwaitingFrame = Boolean(trans?.isAwaitingFirstFrame);

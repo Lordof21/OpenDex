@@ -33,6 +33,7 @@ import {
 import { IconButton } from '../ui/IconButton.jsx';
 import { pushEscapeHandler } from '../lib/escapeStack.js';
 import { cn } from '../lib/utils.js';
+import { windowStackZ } from '../ui/zIndex.js';
 import { useSystemStore } from '../state/systemStore.js';
 import { useWindowStore } from '../window/windowStore.js';
 import { TASKBAR_H } from '../window/windowMath.js';
@@ -478,13 +479,28 @@ export default function SettingsPanel() {
     };
     window.addEventListener('pointerdown', onPointerDown, true);
     const unsubscribe = useWindowStore.subscribe((state, prev) => {
-      if (state.nextZ !== prev.nextZ) blur();
+      if (state.nextZ !== prev.nextZ && !claimingZ.current) blur();
     });
     return () => {
       window.removeEventListener('pointerdown', onPointerDown, true);
       unsubscribe();
     };
   }, [settingsOpen, settingsMinimized, blurSettings]);
+
+  // Pencere odağı alınca z sırasının en önüne geçer (pencerelerle AYNI sayaç): eskiden sabit z-[70] idi ve ilk birkaç
+  // pencere odaklamasından sonra videoların arkasında kalıyordu. Odaktayken sabitlenmiş (pinli) pencerenin de önündedir
+  // (windowStackZ); odak başka pencereye geçince normal sıraya, pinli pencerenin arkasına döner.
+  const claimingZ = useRef(false);
+  const [stackZ, setStackZ] = useState(1);
+  useEffect(() => {
+    if (!settingsOpen || settingsMinimized || !settingsFocused) return;
+    claimingZ.current = true; // kendi sayaç artışımız odağı bırakma sayılmaz
+    try {
+      setStackZ(useWindowStore.getState().claimZ());
+    } finally {
+      claimingZ.current = false;
+    }
+  }, [settingsOpen, settingsMinimized, settingsFocused]);
 
   const layout = layoutForWidth(frame?.width ?? 1200);
   const sheet = Boolean(frame?.sheet);
@@ -623,8 +639,11 @@ export default function SettingsPanel() {
     <div
       ref={stageRef}
       data-testid="settings-stage"
-      className="pointer-events-none fixed inset-x-0 top-0 z-[70] overflow-hidden"
-      style={{ bottom: taskbarHidden ? 0 : TASKBAR_H }}
+      className="pointer-events-none fixed inset-x-0 top-0 overflow-hidden"
+      style={{
+        bottom: taskbarHidden ? 0 : TASKBAR_H,
+        zIndex: windowStackZ({ z: stackZ, focused: settingsFocused, raisedWhenFocused: true }),
+      }}
     >
       <AnimatePresence>
         {settingsOpen && !settingsMinimized && frame && (

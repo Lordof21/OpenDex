@@ -29,3 +29,13 @@ export const Z_INDEX = {
   flyoutNested: 100070, // a flyout opened from within a window's own title bar (Quick Hub) — deliberately above modals
   dragGhost: 999999, // resize-ghost-frame overlay — always topmost
 };
+
+/**
+ * Stacking of an ordinary window (z = its place in the shared focus order, lifecycleSlice.nextZ). Pinned windows sit above the
+ * unfocused ones; a tool of OpenDeX itself (Settings, Files: `raisedWhenFocused`) also rises into that band WHILE it has focus,
+ * so a pinned video cannot hide the tool the user is working in. Once focus moves on, the tool drops back behind the pinned one.
+ */
+export function windowStackZ({ z, fullscreen = false, pinned = false, focused = false, raisedWhenFocused = false }) {
+  if (fullscreen) return Z_INDEX.windowFullscreen;
+  return pinned || (raisedWhenFocused && focused) ? Z_INDEX.windowPinnedBase + z : z;
+}

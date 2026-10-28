@@ -35,6 +35,7 @@ import { resolveAppDisplayName } from '../../desktop/appRegistry.js';
 import { clearWindowThumbnail } from '../../state/windowThumbnailCache.js';
 import { logger } from '../../lib/logger.js';
 import { applyVisibleOrder } from '../../taskbar/taskbarModel.js';
+import { useLauncherStore } from '../../taskbar/launcher/launcherStore.js';
 import { t as tt } from '../../i18n/index.js';
 
 // One click reaches focusWindow twice (the frame's pointerdown and the canvas' own): the backend was told twice, and
@@ -98,6 +99,8 @@ export function createLifecycleSlice(set, get) {
     },
 
     async openWindow(app, options = {}) {
+      // Uygulama çekmecesinin "sık kullanılanlar"ı: her açma isteği (masaüstü simgesi, çekmece, bildirim …) kullanım sayılır.
+      useLauncherStore.getState().recordLaunch(app?.package);
       if (isFilesPackage(app.package)) return get().openFilesWindow(options);
       const existing = get().windows.find((w) => w.package === app.package);
       if (existing) {
@@ -341,6 +344,7 @@ export function createLifecycleSlice(set, get) {
           if (gone.length) {
             logger.info('sync', 'backend_gone_windows_dropped', { windowIds: gone.map((w) => w.id) });
             for (const w of gone) {
+              if (w.pendingResizeTransition?.timeoutId) clearTimeout(w.pendingResizeTransition.timeoutId);
               clearResizeBucket(w.id);
               clearWindowThumbnail(w.id);
             }
@@ -505,6 +509,9 @@ export function createLifecycleSlice(set, get) {
     },
 
     closeAllWindows() {
+      for (const w of get().windows) {
+        if (w.pendingResizeTransition?.timeoutId) clearTimeout(w.pendingResizeTransition.timeoutId);
+      }
       set({ windows: [] });
     },
 
@@ -512,6 +519,7 @@ export function createLifecycleSlice(set, get) {
     forgetWindow(id) {
       const win = get().windows.find((w) => w.id === id);
       if (win) {
+        if (win.pendingResizeTransition?.timeoutId) clearTimeout(win.pendingResizeTransition.timeoutId);
         // Kaplanmış/snap'li/tam ekran pencerenin kutusu ekran boyutudur; kalıcı geometri her zaman NORMAL kutudur.
         const normalBox = modeOf(win) === 'normal' ? { x: win.x, y: win.y, w: win.w, h: win.h } : restoreBoxOf(win);
         saveAppGeometry(win.package, { ...normalBox, maximized: win.maximized ?? false });
@@ -597,6 +605,13 @@ export function createLifecycleSlice(set, get) {
       // Each window runs on its own isolated virtual display — focus NEVER
       // recalculates or equalizes DPI/resolution with other windows.
       api.post('/api/windows/focus', { window_id: id }).catch(() => {});
+    },
+
+    /** A place at the front of the shared focus order for something that is not in `windows` (the Settings window). */
+    claimZ() {
+      const z = get().nextZ + 1;
+      set({ nextZ: z });
+      return z;
     },
 
     _bumpFocus(id, extra = {}) {

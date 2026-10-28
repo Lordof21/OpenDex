@@ -150,7 +150,7 @@ export const ClockCalendar = forwardRef(function ClockCalendar({
 
   return (
     <motion.section
-      ref={ref} {...slide}
+      ref={ref} data-taskbar-panel="" {...slide}
       transition={
         reduced
           ? { duration: 0.12 }

@@ -7,6 +7,7 @@ export const PanelShell = forwardRef(function PanelShell({ children, className, 
   return (
     <motion.section
       ref={ref}
+      data-taskbar-panel=""
       {...motionProps}
       transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
       style={{ zIndex: Z_INDEX.flyout, ...style }}
