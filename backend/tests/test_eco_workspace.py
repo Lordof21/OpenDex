@@ -1,5 +1,7 @@
+import logging
 import asyncio
 
+import logging
 import pytest
 
 from app.windows.eco_workspace import ANCHOR_MARKER, EcoWorkspaceManager
@@ -414,3 +416,34 @@ async def test_the_shared_display_server_writes_its_first_density_through_the_da
     await mgr.open_in_workspace("com.app.one", "win-1")
 
     assert mgr.server.daemon is daemon
+
+
+@pytest.mark.asyncio
+async def test_an_am_that_does_not_know_launch_bounds_is_remembered_and_the_start_repeated_without_it():
+    """HyperOS / Android 16 (field log 2026-10-27): `am start … --activity-launch-bounds` fails WHOLE with "Unknown option" on
+    every dock, a Java stack trace in the terminal each time. Once is enough: the profile remembers it, the start is repeated
+    without the flag."""
+    class _RejectingAdb(_FakeAdb):
+        async def shell(self, cmd, *, serial, timeout_s=3.0):
+            if "--activity-launch-bounds" in cmd:
+                self.shell_calls.append(cmd)
+                raise RuntimeError("java.lang.IllegalArgumentException: Unknown option: --activity-launch-bounds")
+            return await super().shell(cmd, serial=serial, timeout_s=timeout_s)
+
+    class _FakeProfile:
+        android_id = "AID1"
+        supports_launch_bounds = None
+        freeform_scale = None
+
+    adb, profile = _RejectingAdb(), _FakeProfile()
+    mgr = EcoWorkspaceManager(
+        adb, settings=_FakeSettings(), events=_FakeEvents(), sessions={},
+        serial_getter=lambda: "SERIAL1", profile_getter=lambda: profile, start_video_pump=_FakePumpTracker(),
+    )
+    mgr._display_id = "42"
+    log = logging.getLogger("test")
+
+    assert await mgr._start_freeform("SERIAL1", "com.app/.Main", (0, 0, 100, 100), log) is False
+    assert profile.supports_launch_bounds is False
+    starts = [c for c in adb.shell_calls if c.startswith("am start")]
+    assert len(starts) == 2 and "--activity-launch-bounds" not in starts[1]

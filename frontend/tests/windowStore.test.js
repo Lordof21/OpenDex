@@ -909,6 +909,12 @@ describe('exactFitDisplaySize ceiling (Task 4B: sharper large/4K-adjacent panels
     expect(FIT_MAX_AREA).toBeGreaterThan(2560 * 1440);
   });
 
+  it('never asks for more pixels than a 2.5K screen (the backend\'s hard ceiling)', () => {
+    expect(FIT_MAX_AREA).toBe(2560 * 1600);
+    const fit = exactFitDisplaySize(3840, 2160, { supersample: 1 });  // a 4K-class box
+    expect(fit.w * fit.h).toBeLessThanOrEqual(2560 * 1600);
+  });
+
   it('a large maximized-class box can exceed the OLD 2560x1440 ceiling', () => {
     // supersample: 1 isolates the ceiling itself — this box's raw side
     // (3000) and area (5.1M) both clear the OLD 2560/3,686,400 ceiling but

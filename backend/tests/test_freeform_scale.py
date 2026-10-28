@@ -108,6 +108,64 @@ async def test_a_scale_that_was_not_read_from_a_transform_is_not_remembered(monk
     assert profile.freeform_scale == 0.70
 
 
+async def test_a_surface_that_has_not_caught_up_with_a_resize_does_not_win_over_window_manager(monkeypatch):
+    """Field log 2026-10-25 12:29:20: right after `task resize`, WM already had the new box while SurfaceFlinger still drew
+    the previous one; trusting SF published the OLD box and the frame in the UI jumped back to it."""
+    monkeypatch.setattr(eco_workspace.settings_db, "save_device_profile", AsyncMock())
+    profile = _Profile()
+    profile.freeform_scale = 0.70
+    mgr, _ = manager(profile)
+    mgr.SF_CATCHUP_STEP_S = 0
+    stale = TaskGeometry(render_bounds=(264, 96, 1704, 996), logical_bounds=(264, 96, 1704, 996), scale_x=0.7, scale_y=0.7, scale_measured=True)
+    probe = AsyncMock(return_value=stale)
+    monkeypatch.setattr(eco_workspace.surfaceflinger_probe, "probe_omni_geometry", probe)
+    monkeypatch.setattr(mgr, "_get_task_actual_bounds", AsyncMock(return_value=(209, 75, 1649, 975)))
+
+    bounds, scale = await mgr._get_task_effective_bounds("SER", "5", (209, 75, 1649, 975))
+
+    assert bounds == (209, 75, 1649, 975)
+    assert scale == (0.7, 0.7)
+    assert probe.await_count == 1 + mgr.SF_CATCHUP_TRIES
+
+
+async def test_a_mini_window_is_taken_from_surfaceflinger_as_one_consistent_pair(monkeypatch):
+    """HyperOS mini window (the phone's home button on a freeform window): the window really IS drawn at 0.2269 — that surface is
+    not lagging behind a resize, it is the truth. Box and scale both come from SF. Field log 2026-10-27 23:44:46: the WM box
+    paired with this scale made every later visible→Android conversion 3× too big, and the Workspace guard grew Chrome to
+    106450×75844 px."""
+    monkeypatch.setattr(eco_workspace.settings_db, "save_device_profile", AsyncMock())
+    profile = _Profile()
+    profile.freeform_scale = 0.70
+    mgr, _ = manager(profile)
+    mgr.SF_CATCHUP_STEP_S = 0
+    mini = TaskGeometry(render_bounds=(374, 77, 679, 302), logical_bounds=(374, 77, 679, 302), scale_x=0.2269, scale_y=0.2269, scale_measured=True)
+    probe = AsyncMock(return_value=mini)
+    monkeypatch.setattr(eco_workspace.surfaceflinger_probe, "probe_omni_geometry", probe)
+    monkeypatch.setattr(mgr, "_get_task_actual_bounds", AsyncMock(return_value=(374, 77, 1315, 772)))
+
+    bounds, scale = await mgr._get_task_effective_bounds("SER", "5", (374, 77, 1315, 772))
+
+    assert bounds == (374, 77, 679, 302) and scale == (0.2269, 0.2269)
+    assert probe.await_count == 1, "not lagging: no catch-up wait"
+    assert profile.freeform_scale == 0.70, "one low reading never becomes the device's value"
+
+
+async def test_a_surface_that_catches_up_is_used(monkeypatch):
+    monkeypatch.setattr(eco_workspace.settings_db, "save_device_profile", AsyncMock())
+    profile = _Profile()
+    profile.freeform_scale = 0.70
+    mgr, _ = manager(profile)
+    mgr.SF_CATCHUP_STEP_S = 0
+    stale = TaskGeometry(render_bounds=(264, 96, 1704, 996), logical_bounds=(264, 96, 1704, 996), scale_x=0.7, scale_y=0.7, scale_measured=True)
+    fresh = TaskGeometry(render_bounds=(210, 75, 1650, 975), logical_bounds=(210, 75, 1650, 975), scale_x=0.7, scale_y=0.7, scale_measured=True)
+    monkeypatch.setattr(eco_workspace.surfaceflinger_probe, "probe_omni_geometry", AsyncMock(side_effect=[stale, fresh]))
+    monkeypatch.setattr(mgr, "_get_task_actual_bounds", AsyncMock(return_value=(209, 75, 1649, 975)))
+
+    bounds, _scale = await mgr._get_task_effective_bounds("SER", "5", (209, 75, 1649, 975))
+
+    assert bounds == (210, 75, 1650, 975), "the exact drawn box once SF agrees with WM"
+
+
 # ------------------------------------------------------------- the SF parser
 def test_the_parser_tells_a_read_scale_from_a_default():
     with_transform = (

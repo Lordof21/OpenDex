@@ -42,6 +42,7 @@ import {
 import { useSystemStore } from '../state/systemStore.js';
 import { getSettings } from '../settings/settingsApi.js';
 import { isMirrorPackage } from './mirrorPackage.js';
+import { isCropWindow } from './cropWindow.js';
 import { logger } from '../lib/logger.js';
 import { t } from '../i18n/index.js';
 
@@ -556,6 +557,14 @@ function Grip({ id, className, win, isHeaderOpen = false, onHoverChange, onResiz
       edgeId: id, snapZone: null, instant: Boolean(d.settings?.resize_instant_apply),
     });
     onResizeEnd?.(finalGeo);
+
+    // Workspace kırpma penceresi: akış çözünürlüğü yok, içerik GÖREVİN kutusudur — görev hemen istenir, çerçeve Android'in
+    // verdiği kutuya ancak o gelince (hayalet hedefteyken) oturur.
+    if (isCropWindow(win)) {
+      saveAppGeometry(win.package, { w: finalGeo.w, h: finalGeo.h, x: finalGeo.x, y: finalGeo.y });
+      await useWindowStore.getState().commitCropWindowResize(win.id, finalGeo, d.chrome);
+      return;
+    }
 
     const settings = await d.settingsPromise;
     const isFixed = isFixedMode(settings?.resolution_mode);

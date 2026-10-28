@@ -465,6 +465,22 @@ export function createGeometrySlice(set, get) {
       }));
     },
 
+    /**
+     * A pending resize whose final box is decided only once the content is ready (a Workspace crop window: the task gets the
+     * size Android grants, which may differ from where the drag ended): the ghost's target becomes `box`, then the frame
+     * grows/shrinks to it in the same spring as a real first frame.
+     */
+    settlePendingResize(id, box) {
+      const win = get().windows.find((w) => w.id === id);
+      const trans = win?.pendingResizeTransition;
+      if (!trans?.isAwaitingFirstFrame) return;
+      const to = { ...trans.to, w: Math.round(box.w), h: Math.round(box.h), x: Math.round(box.x), y: Math.round(box.y) };
+      set((s) => ({
+        windows: s.windows.map((w) => (w.id === id ? { ...w, pendingResizeTransition: { ...trans, to } } : w)),
+      }));
+      get().onNewResolutionFrameArrived(id, { width: to.w, height: to.h, force: true });
+    },
+
     onNewResolutionFrameArrived(id, { width, height, force = false }) {
       const win = get().windows.find((w) => w.id === id);
       if (!win) return;

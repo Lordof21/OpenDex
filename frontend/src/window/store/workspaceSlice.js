@@ -12,8 +12,10 @@ import { closeTracker } from './closeTracker.js';
 import { resolveAppDisplayName } from '../../desktop/appRegistry.js';
 import { useSystemStore } from '../../state/systemStore.js';
 import { logger } from '../../lib/logger.js';
-import { cascadePosition } from '../windowMath.js';
+import { appViewportBox, cascadePosition, resolveTaskDensity } from '../windowMath.js';
 import { buildCropWindow, cropWindowId, isCropWindow } from '../cropWindow.js';
+import { frameForBounds, planCropResize, referenceScale } from '../workspacePip/cropMath.js';
+import { newOpId } from '../../lib/opId.js';
 import { t as tt } from '../../i18n/index.js';
 
 /** Aynı görev için iki doğrulama isteği arasındaki en kısa süre (her basışta istek gitmesin). */
@@ -210,20 +212,19 @@ export function createWorkspaceSlice(set, get) {
     // konuma geri sıçrıyordu. boundsPendingCount, bu istek sonuçlanana kadar
     // lifecycleSlice'taki senkronizasyona "bu görevin kutusuna dokunma" der
     // (handoffToPhone'un park senaryosu için zaten yaptığı korumanın genelleştirilmiş hali).
-    async commitWorkspaceTaskBounds(taskWindowId, bounds, { density, densityMode } = {}) {
+    // Dönüş: Android'in verdiği kutu (yanıt), istek gölgelendiyse / başarısızsa null.
+    async commitWorkspaceTaskBounds(taskWindowId, bounds, { density, densityMode, opId } = {}) {
       get()._bumpBoundsPending(taskWindowId, 1);
       try {
-        const res = await api.post('/api/windows/workspace/resize-task', {
-          window_id: taskWindowId,
-          bounds,
-          density,
-          density_mode: densityMode,
-        });
+        const body = { window_id: taskWindowId, bounds, density, density_mode: densityMode };
+        const res = await (opId
+          ? api.post('/api/windows/workspace/resize-task', body, { opId })
+          : api.post('/api/windows/workspace/resize-task', body));
         // Backend, ResizeGate'te "en yeni kazanır" kuralıyla bu isteği
         // gölgelenmiş (superseded) bulduysa bounds:null döner — kazanan
         // isteğin kendi yanıtı/olayı state'i zaten güncelleyecek, burada
         // hiçbir şey uygulamıyoruz.
-        if (!res || res.superseded || !Array.isArray(res.bounds)) return;
+        if (!res || res.superseded || !Array.isArray(res.bounds)) return null;
         set((s) => ({
           windows: s.windows.map((w) =>
             w.isEcoWorkspace
@@ -238,11 +239,59 @@ export function createWorkspaceSlice(set, get) {
               : w,
           ),
         }));
+        return res.bounds;
       } catch (err) {
         logger.warn('workspace', 'resize-task commit başarısız', err);
+        return null;
       } finally {
         get()._bumpBoundsPending(taskWindowId, -1);
       }
+    },
+
+    /**
+     * DeX-içi kırpma penceresi bırakıldı (ResizeHandle): pencere ESKİ kutusunda, hayalet hedefte bekler; görev HEMEN (durgunluk
+     * beklemeden) yeni boyuta istenir, Android'in verdiği kutu gelince çerçeve ona büyür/küçülür — normal pencerenin "yeni kare
+     * gelince otur" sözleşmesiyle aynı. Eskiden çerçeve bırakınca hemen büyüyor (içerik siyah kenarlıklı eski kırpma), görev
+     * 250 ms sonra isteniyor, sonra çerçeve bir kez daha Android'in kutusuna oturuyordu: üç ayrı sıçrama.
+     */
+    async commitCropWindowResize(id, finalGeo, chrome) {
+      const win = get().windows.find((w) => w.id === id);
+      const container = get().windows.find((w) => w.isEcoWorkspace);
+      const task = container?.tasks.find((t) => t.windowId === win?.sourceTaskId);
+      const settle = (box) => get().settlePendingResize(id, box);
+      if (!win || !task || task.handoffToPhone) {
+        settle(finalGeo);
+        return;
+      }
+      const vd = { w: container.vdW || 1920, h: container.vdH || 1080 };
+      const viewport = appViewportBox();
+      const scale = referenceScale(viewport, vd);
+      const edge = win.pendingResizeTransition?.edgeId || '';
+      // Sürüklenen kenarın KARŞISI yerinde kalır (sol/üst kenardan boyutlandırmada sağ/alt kenar sabit).
+      const boxFor = (bounds) => {
+        const size = frameForBounds(bounds, scale, chrome, viewport);
+        return {
+          w: size.w,
+          h: size.h,
+          x: edge.includes('w') ? finalGeo.x + finalGeo.w - size.w : finalGeo.x,
+          y: edge.includes('n') ? finalGeo.y + finalGeo.h - size.h : finalGeo.y,
+        };
+      };
+      const plan = planCropResize({
+        canvas: { w: finalGeo.w - chrome.dw, h: finalGeo.h - chrome.dh }, scale, bounds: task.bounds, vd,
+      });
+      if (!plan || !plan.changed) {
+        settle(plan ? boxFor(task.bounds) : finalGeo); // VD sınırı / asgari boyut: görev zaten bu kutuda
+        return;
+      }
+      const [l, top, r, b] = plan.bounds;
+      const { density, mode } = resolveTaskDensity(task, r - l, b - top, vd.h, { scale });
+      const opId = newOpId();
+      logger.withOp(opId).info('crop', 'window_resize_commit', {
+        taskWindowId: task.windowId, from: task.bounds, to: plan.bounds, density, mode, atVdLimit: plan.atVdLimit,
+      });
+      const granted = await get().commitWorkspaceTaskBounds(task.windowId, plan.bounds, { density, densityMode: mode, opId });
+      settle(boxFor(granted || get().windows.find((w) => w.isEcoWorkspace)?.tasks.find((t) => t.windowId === task.windowId)?.bounds || plan.bounds));
     },
 
     /**

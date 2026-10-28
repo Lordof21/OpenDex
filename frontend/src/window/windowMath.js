@@ -349,9 +349,37 @@ export function appViewportBox() {
 export const FIT_ALIGN = 8;
 export const FIT_SUPERSAMPLE = 1.0; // 1:1 Native Pixel-Perfect (eliminates ~98% encoder bloat, H.264 QP spikes, and bilinear downscale jitter)
 export const FIT_MAX_SIDE = 3200;
-export const FIT_MAX_AREA = 5_760_000; // 3200 x 1800
+// A 2.5K screen's pixel count — the backend's hard ceiling for any display (backend/app/windows/display_limits.py: most
+// phones cannot encode more). Asking above it would only get a smaller stream than the window waits for.
+export const FIT_MAX_AREA = 2560 * 1600;
 export const FIT_MIN_SIDE = 240;
 export const FIT_MAX_U16 = 65535;
+
+/** Akış, kutunun fiziksel boyutundan en çok bu kadar küçükse ölçeklenmeden (1:1) çizilir; fark ince bir kenar olarak kalır. */
+export const PIXEL_EXACT_SLACK_PX = 12;
+
+/**
+ * Akışı 1:1 (bir akış pikseli = bir ekran pikseli) gösterecek canvas kutusu, kapsayıcıya göre CSS px; uymuyorsa null.
+ *
+ * Akış 8'in katıdır (kodlayıcı hizası), pencerenin fiziksel boyutu değil: 800 px'lik akış 801 px'lik kutuya `object-fit` ile
+ * %0,1 büyütülünce TÜM kare yeniden örneklenir ve metin bulanıklaşır (PiP'te en belirgin: OS penceresi her boyutu alabilir).
+ * Windows ölçeklemesinde (1,25) kutunun kenarı yarım fiziksel piksele de düşebilir; o da her pikseli iki komşuya böler. Burada
+ * akış, kutuya `slack` pikselden yakınsa kendi boyutunda (CSS = akış / dpr) ve sol-üst köşesi TAM fiziksel piksele oturacak
+ * şekilde ortalanır. Akış kutudan büyükse (kırpılırdı) ya da çok küçükse (gerçek ölçekleme isteniyor) null: object-fit sürer.
+ *
+ * @param rect   kapsayıcının getBoundingClientRect'i (CSS px, görünüm alanına göre)
+ */
+export function pixelExactBox(rect, dpr, streamW, streamH, slack = PIXEL_EXACT_SLACK_PX) {
+  if (!(dpr > 0 && streamW > 0 && streamH > 0 && rect?.width > 0 && rect?.height > 0)) return null;
+  const physW = rect.width * dpr;
+  const physH = rect.height * dpr;
+  const slackW = physW - streamW;
+  const slackH = physH - streamH;
+  if (slackW < -0.5 || slackH < -0.5 || slackW > slack || slackH > slack) return null;
+  const left = Math.round(rect.left * dpr + Math.max(0, slackW) / 2) / dpr - rect.left;
+  const top = Math.round(rect.top * dpr + Math.max(0, slackH) / 2) / dpr - rect.top;
+  return { left, top, width: streamW / dpr, height: streamH / dpr };
+}
 
 export function devicePixelRatioSafe(pixelPerfect = true) {
   if (pixelPerfect === false) return 1;

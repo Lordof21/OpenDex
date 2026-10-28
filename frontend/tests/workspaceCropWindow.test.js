@@ -238,3 +238,58 @@ describe('store: kaynak görev kalkınca kırpma penceresi de kalkar', () => {
     expect(cropIds().sort()).toEqual(['crop-task-1', 'crop-task-2']);
   });
 });
+
+describe('store: kırpma penceresi bırakılınca (commitCropWindowResize)', () => {
+  const CHROME = { dw: FRAME_BORDER_PX, dh: FRAME_CHROME_H_PX };
+  const ID = 'crop-task-1';
+  const win = () => useWindowStore.getState().windows.find((w) => w.id === ID);
+
+  beforeEach(() => {
+    localStorage.clear();
+    window.innerWidth = 960;
+    window.innerHeight = 590; // görünüm alanı 960×540 → ölçek 0.5 (VD 1920×1080)
+    api.post.mockReset();
+    useWindowStore.setState({ windows: [{ ...ECO, vdW: 1920, vdH: 1080, tasks: [{ ...TASK }] }], nextZ: 5 });
+    useWindowStore.getState().openWorkspaceCropWindow('task-1');
+  });
+
+  const release = (finalGeo, edgeId = 'se') => {
+    const start = { x: win().x, y: win().y, w: win().w, h: win().h };
+    useWindowStore.getState().setPendingResizeTransition(ID, start, finalGeo, { edgeId });
+    return start;
+  };
+
+  it('görev HEMEN istenir; çerçeve yanıt gelene dek eski kutuda bekler, sonra Android’in kutusuna oturur', async () => {
+    let resolve;
+    api.post.mockImplementation(() => new Promise((r) => { resolve = r; }));
+    const start = release({ x: 40, y: 30, w: 500 + CHROME.dw, h: 400 + CHROME.dh });
+    const done = useWindowStore.getState().commitCropWindowResize(ID, { x: 40, y: 30, w: 500 + CHROME.dw, h: 400 + CHROME.dh }, CHROME);
+    expect(api.post).toHaveBeenCalledTimes(1);
+    const [url, body] = api.post.mock.calls[0];
+    expect(url).toBe('/api/windows/workspace/resize-task');
+    expect(body.bounds).toEqual([100, 50, 1100, 850]); // 500×400 canvas / 0.5
+    expect(win().pendingResizeTransition.isAwaitingFirstFrame).toBe(true);
+    expect(win().w).toBe(start.w); // henüz büyümedi
+    resolve({ bounds: [100, 50, 1080, 850] }); // Android 20 px dar verdi
+    await done;
+    expect(win().w).toBe(490 + CHROME.dw);
+    expect(win().h).toBe(400 + CHROME.dh);
+    expect(win().pendingResizeTransition.isAnimating).toBe(true);
+  });
+
+  it('sol kenardan boyutlandırmada sağ kenar yerinde kalır', async () => {
+    api.post.mockResolvedValue({ bounds: [100, 50, 1080, 850] });
+    const final = { x: 0, y: 30, w: 500 + CHROME.dw, h: 400 + CHROME.dh };
+    release(final, 'w');
+    await useWindowStore.getState().commitCropWindowResize(ID, final, CHROME);
+    expect(win().x + win().w).toBe(final.x + final.w);
+  });
+
+  it('istek başarısızsa çerçeve görevin bildiği kutuya oturur (eski boyut), hayalet takılı kalmaz', async () => {
+    api.post.mockRejectedValue(new Error('boom'));
+    const start = release({ x: 40, y: 30, w: 700, h: 500 });
+    await useWindowStore.getState().commitCropWindowResize(ID, { x: 40, y: 30, w: 700, h: 500 }, CHROME);
+    expect(win().w).toBe(start.w);
+    expect(win().pendingResizeTransition.isAwaitingFirstFrame).toBe(false);
+  });
+});

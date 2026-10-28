@@ -98,6 +98,23 @@ async def test_a_healthy_member_costs_one_read_and_no_command(manager):
     front.assert_not_awaited()
 
 
+async def test_a_ledger_box_bigger_than_the_workspace_is_never_healed_towards(manager):
+    """Field log 2026-10-27: a bad scale reading left a ledger box far bigger than the Workspace; the guard took the real (smaller)
+    task for "collapsed" and grew it ~3× per side every round, up to 106450×75844 px. Such a ledger is our error: it takes the box
+    Android really has, and nothing is resized."""
+    window_id, eco, task = await _member(manager)
+    display = eco.display_id
+    task.bounds = (374, 77, 34821, 24798)
+    eco._get_task_effective_bounds = AsyncMock(return_value=(BOX, (0.7, 0.7)))
+    with _reads(_state(display=display)), patch("app.device.android_shell.bring_to_front", AsyncMock()) as front:
+        check = await manager.verify_workspace_task(window_id)
+
+    assert check.status == "unknown" and check.reason == "ledger_implausible"
+    assert task.bounds == BOX and task.render_scale == (0.7, 0.7)
+    eco._make_freeform.assert_not_awaited()
+    front.assert_not_awaited()
+
+
 async def test_a_collapsed_member_is_put_back_freeform_in_its_box_and_brought_to_the_front(manager):
     window_id, eco, task = await _member(manager)
     display = eco.display_id

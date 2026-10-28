@@ -39,6 +39,7 @@ import { useSystemStore } from '../state/systemStore.js';
 import { logger } from '../lib/logger.js';
 import { newOpId } from '../lib/opId.js';
 import { resolveFit } from './fitModes.js';
+import { pixelExactBox } from './windowMath.js';
 import { t } from '../i18n/index.js';
 
 const DRAG_MIN_PX = 8;
@@ -76,8 +77,11 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
   const gestureRef = useRef(null);
   const moveRaf = useRef(null);
   const freezeCanvasRef = useRef(null);
+  const surfaceRef = useRef(null);
   const [hasFrame, setHasFrame] = useState(false);
   const [isFreezeActive, setIsFreezeActive] = useState(false);
+  const [streamSize, setStreamSize] = useState(null); // çözülen karenin boyutu: 1:1 kutusu (pixelExactBox) buna göre
+  const [exactBox, setExactBox] = useState(null);
 
   // Canlı genel ayarlar (tek kaynak: settings/liveSettings) — yüklenene kadar varsayılanlar.
   const liveSettings = useLiveSettings();
@@ -233,9 +237,41 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
     };
   }, [win.id, win.minimized, hasFrame]);
 
-  // The video box measurement & ResizeObserver
+  // 1:1 sunum (windowMath.pixelExactBox): akış kutuya birkaç piksel yakınsa ölçeklenmez, fiziksel piksel ızgarasına oturur.
+  // Geçişlerde (boyutlandırma, yeni kare bekleme, yay animasyonu) kapalı: o sırada kenara sabitlenmiş object-fit doğru olandır.
+  const winX = win.x;
+  const winY = win.y;
   useEffect(() => {
-    const el = canvasRef.current;
+    const surface = surfaceRef.current;
+    if (!surface || isTransitioning || !streamSize || zoomScale !== 1) {
+      setExactBox(null);
+      return undefined;
+    }
+    const view = surface.ownerDocument?.defaultView || window;
+    const recompute = () => {
+      const dpr = pixelPerfectDpr && view.devicePixelRatio > 0 ? view.devicePixelRatio : 1;
+      const next = pixelExactBox(surface.getBoundingClientRect(), dpr, streamSize.w, streamSize.h);
+      setExactBox((prev) => (
+        prev && next && prev.left === next.left && prev.top === next.top && prev.width === next.width && prev.height === next.height
+          ? prev
+          : next
+      ));
+    };
+    recompute();
+    const RO = view.ResizeObserver || (typeof ResizeObserver !== 'undefined' ? ResizeObserver : undefined);
+    const observer = RO ? new RO(recompute) : null;
+    observer?.observe(surface);
+    view.addEventListener('resize', recompute); // ekran ölçeği (dpr) değişti / pencere başka monitöre geçti
+    return () => {
+      observer?.disconnect();
+      view.removeEventListener('resize', recompute);
+    };
+  }, [streamSize, isTransitioning, zoomScale, pixelPerfectDpr, winX, winY]);
+
+  // The video box measurement & ResizeObserver. The SURFACE (the box the video may fill) is measured, not the canvas: a 1:1
+  // canvas is the stream's own size, and measuring it would feed the few-pixel slack back into the next stream request.
+  useEffect(() => {
+    const el = surfaceRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return undefined;
     let raf = null;
     const observer = new ResizeObserver((entries) => {
@@ -285,6 +321,7 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
         }
       },
       onFrameResolutionChanged: ({ width, height }) => {
+        setStreamSize((prev) => (prev?.w === width && prev?.h === height ? prev : { w: width, h: height }));
         useWindowStore.getState().onNewResolutionFrameArrived(win.id, { width, height });
         // New matching frame rendered to live canvas: smoothly fade out the freeze layer
         setIsFreezeActive(false);
@@ -302,6 +339,7 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
         );
       },
       onFrameRendered: ({ width, height, sizeChanged }) => {
+        if (sizeChanged) setStreamSize((prev) => (prev?.w === width && prev?.h === height ? prev : { w: width, h: height }));
         const store = useWindowStore.getState();
         const currentWin = store.windows.find((w) => w.id === win.id);
         const trans = currentWin?.pendingResizeTransition;
@@ -513,12 +551,14 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
   return (
     // No ambient blur behind the video and no drop shadows: each one is a full-window offscreen layer the GPU re-renders at the stream's
     // frame rate (measured 2026-10-23: the blurred backdrop alone held ~285 MB of GPU memory, the canvas shadow ~85 MB).
-    <div className="relative flex-1 h-full w-full overflow-hidden bg-video-backdrop flex flex-col items-center justify-center select-none">
+    <div ref={surfaceRef} className="relative flex-1 h-full w-full overflow-hidden bg-video-backdrop flex flex-col items-center justify-center select-none">
       <canvas
         ref={canvasRef}
         data-window-id={win.id}
-        className={`relative z-10 h-full w-full touch-none select-none cursor-default dex-canvas-sharp ${effectiveFitMode} ${activeObjectPosition}`}
+        data-pixel-exact={exactBox ? '' : undefined}
+        className={`${exactBox ? 'absolute' : 'relative h-full w-full'} z-10 touch-none select-none cursor-default dex-canvas-sharp ${effectiveFitMode} ${activeObjectPosition}`}
         style={{
+          ...(exactBox ? { left: exactBox.left, top: exactBox.top, width: exactBox.width, height: exactBox.height } : null),
           imageRendering: sharpeningMode === 'off' ? 'auto' : '-webkit-optimize-contrast',
           filter: sharpeningMode === 'ultra'
             ? 'url(#dex-sharpen-ultra) contrast(1.04)'
@@ -597,6 +637,7 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
             key="applock-overlay"
             phase={win.appLockPhase || 'waiting'}
             since={win.appLockSince}
+            dynamic={Boolean(win.appLockDynamic)}
             pkg={win.package}
             title={win.title}
             onReclaim={async () => {

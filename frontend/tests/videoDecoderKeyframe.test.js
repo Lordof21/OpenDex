@@ -83,10 +83,14 @@ describe('keyframe on demand', () => {
   });
 
   it('a decode backlog resync asks too', () => {
+    // The backlog is the packets WAITING for the decoder (dff0895: the decoder's own queue is capped at MAX_IN_FLIGHT, the
+    // rest waits in _pending): past MAX_PENDING the chain is restarted from a fresh keyframe.
     const decoder = make();
     decoder._onWireChunk(chunk({ config: true }));
     decoder._onWireChunk(chunk({ key: true }));
-    decoderInstances[0].decodeQueueSize = WindowVideoDecoder.MAX_DECODE_BACKLOG + 1;
+    decoderInstances[0].decodeQueueSize = WindowVideoDecoder.MAX_IN_FLIGHT; // the decoder is full: nothing drains
+    for (let i = 0; i <= WindowVideoDecoder.MAX_PENDING; i += 1) decoder._onWireChunk(chunk());
+    expect(decoder.ws.sent).toEqual([]);
     decoder._onWireChunk(chunk());
 
     expect(decoder.hasReceivedKeyFrame).toBe(false);

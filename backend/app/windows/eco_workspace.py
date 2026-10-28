@@ -244,6 +244,8 @@ class EcoWorkspaceManager:
     SETTLE_STEP_S = 0.12
     SETTLE_TRIES = 5
     SETTLE_NEAR_PX = 24      # "where we asked": the same slack the launch-bounds probe allows for system insets
+    SF_CATCHUP_TRIES = 3     # SurfaceFlinger still drawing the old surface after a resize: re-read it this often…
+    SF_CATCHUP_STEP_S = 0.08  # …this far apart, then trust WindowManager's box
 
     def __init__(
         self,
@@ -329,6 +331,13 @@ class EcoWorkspaceManager:
     @property
     def display_id(self) -> str | None:
         return self._display_id
+
+    # A visible task box may run a little past the Workspace (dragged half off-screen), never this far.
+    LEDGER_MAX_VD_FACTOR = 1.5
+
+    def _ledger_box_plausible(self, bounds: TaskBounds) -> bool:
+        width, height = bounds[2] - bounds[0], bounds[3] - bounds[1]
+        return width <= self.vd_w * self.LEDGER_MAX_VD_FACTOR and height <= self.vd_h * self.LEDGER_MAX_VD_FACTOR
 
     @property
     def vd_w(self) -> int:
@@ -628,8 +637,35 @@ class EcoWorkspaceManager:
         freeform_scale = await self._get_freeform_scale(serial)
         wm_bounds = await self._get_task_actual_bounds(serial, task_id, wlog, freeform_scale=freeform_scale)
 
-        # Öncelik 1: SurfaceFlinger Omni-Adapter (GPU gerçeği, OEM leashing/scale'i çözen tek yer)
+        # Öncelik 1: SurfaceFlinger Omni-Adapter (GPU gerçeği, OEM leashing/scale'i çözen tek yer). TEK istisna: resize'dan hemen
+        # sonra SF'nin GERİDE kalması. WM yeni kutuyu söyler, SF ise uygulama yeni boyutta çizene dek ESKİ yüzeyi gösterir — ölçeği
+        # cihazınki (0,70) olduğu halde kutusu WM'den farklıdır. Eskiden SF'ye körü körüne güvenilip bir önceki kutu "gerçek" diye
+        # yayınlanıyordu ve UI'daki çerçeve, doğru boyuta gelmiş uygulamayı bırakıp eski boyuta geri sıçrıyordu (günlük 2026-10-25
+        # 12:29:20: WM=(209,75,1649,975), SF=(264,96,1704,996) = bir önceki istek). Böyle bir SF kısa bir süre daha beklenir;
+        # yetişmezse WM kutusu CİHAZIN ölçeğiyle kullanılır.
+        # SF ölçeği cihazınkinden belirgin farklıysa SF geride DEĞİLDİR, pencere gerçekten öyle çizilir: HyperOS mini pencere
+        # (telefonda orta tuş → 0,2269). O zaman kutu VE ölçek birlikte SF'den gelir (tutarlı çift). WM kutusunu SF'nin mini
+        # ölçeğiyle karıştırmak (günlük 2026-10-27 23:44:46) her görünür→Android dönüşümünü 3 kat büyütmüş, Workspace koruması
+        # pencereyi dört turda 106450×75844 px'e "onarmıştı".
+        def lagging(g: Any) -> bool:
+            if not (g and g.render_bounds and wm_bounds) or _same_box(g.render_bounds, wm_bounds, self.SETTLE_NEAR_PX):
+                return False
+            rescaled = g.scale_measured and abs(g.scale_x - freeform_scale) > _SCALE_EPSILON
+            return not rescaled
+
         geom = await surfaceflinger_probe.probe_omni_geometry(self._adb, serial, task_id)
+        for _ in range(self.SF_CATCHUP_TRIES):
+            if not lagging(geom):
+                break
+            await asyncio.sleep(self.SF_CATCHUP_STEP_S)
+            geom = await surfaceflinger_probe.probe_omni_geometry(self._adb, serial, task_id)
+        if lagging(geom):
+            if wlog:
+                wlog.info(
+                    "⏳ [OMNI-ADAPTER] task=%s SF yüzeyi WM'ye yetişmedi (SF=%s, WM=%s): WM kutusu kullanılıyor",
+                    task_id, geom.render_bounds, wm_bounds,
+                )
+            return wm_bounds, (freeform_scale, freeform_scale)
         if geom and geom.render_bounds:
             # A scale not READ from a transform line is the parser's default, not evidence: the device's value stands in.
             measured = geom.scale_measured and geom.scale_x > 0.1 and geom.scale_y > 0.1
@@ -767,17 +803,10 @@ class EcoWorkspaceManager:
         wlog.info("🌱 [ECO WORKSPACE:OPEN_REQ] %s -> Hedef Bounds: %s (Android: %s, Scale: %.2f), Component: %s, Display: %s",
                   package, target_bounds, android_target, freeform_scale, component, self._display_id)
 
-        launched = False
-        if try_bounds_flag:
-            with contextlib.suppress(Exception):
-                await self._adb.shell(
-                    freeform_start_command(self._display_id, component, android_target), serial=serial, timeout_s=3.0,
-                )
-                launched = True
-                wlog.info("🌱 [ECO WORKSPACE:LAUNCHED] am start --activity-launch-bounds ile çalıştırıldı.")
-        if not launched:
-            await self._adb.shell(freeform_start_command(self._display_id, component), serial=serial, timeout_s=3.0)
-            wlog.info("🌱 [ECO WORKSPACE:LAUNCHED] am start (bounds bayrağı olmadan) çalıştırıldı.")
+        with_bounds = await self._start_freeform(serial, component, android_target if try_bounds_flag else None, wlog, raise_errors=True)
+        try_bounds_flag = try_bounds_flag and with_bounds
+        wlog.info("🌱 [ECO WORKSPACE:LAUNCHED] am start %s çalıştırıldı.",
+                  "--activity-launch-bounds ile" if with_bounds else "(bounds bayrağı olmadan)")
 
         moved = False
         task_id = await find_task_id_for_package(self._adb, package, display_id=self._display_id, serial=serial)
@@ -863,13 +892,9 @@ class EcoWorkspaceManager:
         freeform_scale = await self._get_freeform_scale(serial)
         android_target = visible_to_android_bounds(target_bounds, freeform_scale)
 
-        try:
-            res_start = await self._adb.shell(
-                freeform_start_command(self._display_id, component, android_target), serial=serial, timeout_s=3.0,
-            )
-            wlog.info("🏠 [ECO WORKSPACE:AM_START_DOCK] %s res=%r", component, res_start.strip())
-        except Exception as exc:
-            wlog.warning("⚠️ [ECO WORKSPACE:AM_START_DOCK_ERR] %s", exc)
+        profile = self._profile_getter()
+        bounds_ok = profile is None or profile.supports_launch_bounds is not False
+        await self._start_freeform(serial, component, android_target if bounds_ok else None, wlog)
 
         wlog.info("🔬 [ECO WORKSPACE:DOCK_REQ] %s (task=%s) -> Hedef Bounds: %s (Android: %s, Scale: %.2f)",
                   package, task_id, target_bounds, android_target, freeform_scale)
@@ -884,6 +909,41 @@ class EcoWorkspaceManager:
         )
         wlog.info("🌱 [ECO WORKSPACE] %s dock ile katıldı (task=%s, bounds=%s, freeform_coerced=%s)", package, task_id, effective_bounds, component)
         return ws_url, stream_w, stream_h, effective_bounds
+
+    async def _start_freeform(
+        self, serial: str, component: str, android_bounds: TaskBounds | None, wlog, *, raise_errors: bool = False,
+    ) -> bool:
+        """`am start` of `component` as a freeform task on the Workspace display, at `android_bounds` when given. A build
+        whose `am` does not know `--activity-launch-bounds` (HyperOS / Android 16: "Unknown option", the WHOLE start fails)
+        is remembered in the device profile and the start is repeated without it — it used to fail on every dock, with a
+        Java stack trace in the terminal. Returns whether the bounds went with a successful start. `raise_errors`: a start
+        that fails even without the flag raises (opening a window needs the start; a dock only brings the task forward)."""
+        assert self._display_id
+        if android_bounds is not None:
+            try:
+                await self._adb.shell(freeform_start_command(self._display_id, component, android_bounds), serial=serial, timeout_s=3.0)
+                return True
+            except Exception as exc:  # noqa: BLE001
+                if "--activity-launch-bounds" in str(exc):
+                    await self._remember_no_launch_bounds()
+                    wlog.info("🌱 [ECO WORKSPACE] bu Android `--activity-launch-bounds` bilmiyor — bayraksız başlatılıyor (cihaz profiline yazıldı)")
+                else:
+                    wlog.warning("⚠️ [ECO WORKSPACE:AM_START_ERR] %s — bayraksız yeniden deneniyor", str(exc).splitlines()[0][:200])
+        try:
+            await self._adb.shell(freeform_start_command(self._display_id, component), serial=serial, timeout_s=3.0)
+        except Exception as exc:  # noqa: BLE001
+            if raise_errors:
+                raise
+            wlog.warning("⚠️ [ECO WORKSPACE:AM_START_ERR] %s", str(exc).splitlines()[0][:200])
+        return False
+
+    async def _remember_no_launch_bounds(self) -> None:
+        profile = self._profile_getter()
+        if profile is None or profile.supports_launch_bounds is False:
+            return
+        profile.supports_launch_bounds = False
+        with contextlib.suppress(Exception):
+            await settings_db.save_device_profile(profile.android_id, profile)
 
     async def _make_freeform(
         self, serial: str, task_id: str, package: str, android_bounds: TaskBounds, wlog, *, skip_if_ok: bool, via: str = "",
@@ -960,6 +1020,18 @@ class EcoWorkspaceManager:
         wlog = window_logger(__name__, window_id)
         try:
             state = await read_task_windowing(self._adb, serial, task.task_id)
+            if not self._ledger_box_plausible(task.bounds):
+                # A ledger box far bigger than the Workspace itself is OUR error (a bad scale reading), never the task's
+                # collapse: "healing" towards it grew Chrome to 106450×75844 px in four rounds (field log 2026-10-27). The
+                # ledger takes the box Android really has instead.
+                effective, new_scale = await self._get_task_effective_bounds(serial, task.task_id, task.bounds, wlog)
+                wlog.warning("🩹 [WS-GUARD] %s defter kutusu Workspace'ten büyük (%s, VD=%dx%d) — onarılmadı, gerçek kutu alındı: %s",
+                             task.package, task.bounds, self.vd_w, self.vd_h, effective)
+                task.bounds, task.render_scale = effective, new_scale
+                await self._events.emit(
+                    "workspace_task_bounds_changed", window_id=window_id, bounds=list(effective), render_scale=list(new_scale),
+                )
+                return MemberCheck("unknown", "ledger_implausible", effective)
             scale = task.render_scale[0] if task.render_scale[0] > 0.1 else 1.0
             android_box = visible_to_android_bounds(task.bounds, scale)
             reason = collapse_reason(state, android_box, self._display_id)

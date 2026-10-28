@@ -20,7 +20,8 @@ export default function WorkspaceCropCanvas({ win }) {
   // Kaplanmış / yapışık / tam ekran pencerenin kutusunu kip belirler; yalnız serbest pencere görevin kutusuna uyar.
   const onAdopt = useCallback((bounds, scale) => {
     const current = useWindowStore.getState().windows.find((w) => w.id === win.id);
-    if (!current || current.minimized || modeOf(current) !== 'normal') return;
+    // Bırakılmış bir boyutlandırma sürerken çerçeveyi o yönetir (commitCropWindowResize: Android'in kutusu gelince oturur).
+    if (!current || current.minimized || modeOf(current) !== 'normal' || current.pendingResizeTransition) return;
     const frame = frameForBounds(bounds, scale, chromeForMode('normal', isHeaderHidden(current, settings)), appViewportBox());
     if (frame.w !== current.w || frame.h !== current.h) setLocalGeometry(win.id, frame);
   }, [win.id, settings, setLocalGeometry]);
