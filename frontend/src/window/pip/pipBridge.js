@@ -12,6 +12,21 @@ export const PIP_COMMAND_EVENT = 'opendex:pip-command';
 export const isTauriHost = () =>
   typeof window !== 'undefined' && !!(window.__TAURI__ || window.__TAURI_INTERNALS__ || window.__TAURI_IPC__);
 
+/**
+ * Birincil fare düğmesi şu an basılı mı? İşletim sistemi çerçevesiz pencereyi boyutlandırırken (`startResizeDragging`) kendi döngüsünü
+ * çalıştırır: sayfa resize olayı alır ama İMLEÇ olayı almaz, yani düğmenin bırakıldığını kendisi göremez — kabuktan (src-tauri/src/pointer.rs)
+ * sorar. Tauri dışında, komutu olmayan eski bir kabukta ya da hata olursa `false` (eski davranış: sakin kalınca hemen uygula).
+ */
+export async function isPrimaryButtonDown() {
+  if (!isTauriHost()) return false;
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return Boolean(await invoke('primary_button_down'));
+  } catch {
+    return false;
+  }
+}
+
 /** Bu sayfa Tauri'nin açtığı PiP penceresi mi (`/?pip=<id>`)? */
 export const isPipWebview = () =>
   typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('pip');

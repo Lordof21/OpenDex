@@ -23,7 +23,8 @@ serde_json = "1"
 # WebView2 memory target (src/webview_memory.rs). Same versions Tauri/wry already resolve in Cargo.lock, so nothing new is built.
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.38"
-windows = "0.61"
+# Win32_UI_*: the PiP asks whether the mouse button is still down (src/pointer.rs); tao already enables both, so nothing new is built.
+windows = { version = "0.61", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 
 [profile.release]
 codegen-units = 1

@@ -8,6 +8,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod files;
+mod pointer;
 mod sidecar;
 mod tray;
 mod webview_memory;
@@ -29,6 +30,7 @@ fn main() {
         // File manager: the shell token + native pickers (files.rs) — the only way a PC path outside the roots is vouched for.
         .invoke_handler(tauri::generate_handler![
             webview_memory::webview_memory_level,
+            pointer::primary_button_down,
             sidecar::api_token,
             files::fs_shell_token,
             files::fs_pick_folder,

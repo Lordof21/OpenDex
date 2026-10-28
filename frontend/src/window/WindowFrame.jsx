@@ -22,7 +22,7 @@ import HubPanel from './titlebar/HubPanel.jsx';
 import { useOsWindowController } from './titlebar/useOsWindowController.js';
 import { useWindowHub } from './titlebar/useWindowHub.js';
 import { usePipHost } from './pip/usePipHost.js';
-import { useFastEdgeIntent } from './pip/useFastEdgeReveal.js';
+import { REVEAL_HOLD_MS, useFastEdgeIntent } from './pip/useFastEdgeReveal.js';
 import {
   TASKBAR_H,
   awaitingFrameBox,
@@ -676,7 +676,7 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
       headerTimerRef.current = setTimeout(() => {
         headerTimerRef.current = null;
         setIsHeaderHovered(false);
-      }, 700);
+      }, REVEAL_HOLD_MS);   // en az 1 sn açık kalır (imlecin başlığa inmesine zaman); girilirse mouseenter bu sayacı iptal eder
     },
   });
 

@@ -10,19 +10,25 @@ import { connectEventStream } from '../events/eventStream.js';
 import BootSplash from '../startup/BootSplash.jsx';
 import TitleBar from './TitleBar.jsx';
 import VideoCanvas from './VideoCanvas.jsx';
+import SharpenFilters from './SharpenFilters.jsx';
 import HubPanel from './titlebar/HubPanel.jsx';
 import { useWindowHub } from './titlebar/useWindowHub.js';
 import { closeThisTauriWindow } from './titlebar/useOsWindowController.js';
 import PipResizeGrips from './pip/PipResizeGrips.jsx';
 import { useFastEdgeReveal } from './pip/useFastEdgeReveal.js';
 import { usePipOsWindow } from './pip/usePipOsWindow.js';
-import { pickPipState, sendPipCommand } from './pip/pipBridge.js';
+import { isPrimaryButtonDown, pickPipState, sendPipCommand } from './pip/pipBridge.js';
+import { isHeaderHidden } from './windowModel.js';
 import { getSettings } from '../settings/settingsApi.js';
 import { useLiveSettings } from '../settings/liveSettings.js';
 import { api } from '../lib/api.js';
 import { logger } from '../lib/logger.js';
 import { cn } from '../lib/utils.js';
 import { t } from '../i18n/index.js';
+
+const RESIZE_SETTLE_MS = 300;       // son resize olayından bu kadar sonra "durdu mu?" bakılır
+const RELEASE_POLL_MS = 100;        // düğme hâlâ basılıysa bu aralıkla yeniden sorulur
+const RELEASE_GIVE_UP_MS = 15_000;  // düğme bu kadar basılı görünürse (takılı durum) yine de uygulanır
 
 export default function PipApp({ winId }) {
   const [backendHealthy, setBackendHealthy] = useState(false);
@@ -128,14 +134,28 @@ export default function PipApp({ winId }) {
 
     triggerPipResize();
 
+    // Kenardan boyutlandırırken akış boyutu SADECE fare bırakılınca istenir: eli durdurup basılı tutmak "bitti" demek değildir (her duraksamada
+    // yeniden boyutlandırma, telefondaki ekranı ve kodlayıcıyı boşuna oynatır). İşletim sisteminin boyutlandırma döngüsü sayfaya imleç
+    // olayı vermez; düğmenin durumu kabuktan sorulur (isPrimaryButtonDown). Yeni bir resize olayı bekleyen yoklamayı iptal eder.
     let resizeTimeout;
+    let alive = true;
+    const settleThenCommit = async (startedAt) => {
+      if (!alive) return;
+      if (performance.now() - startedAt < RELEASE_GIVE_UP_MS && (await isPrimaryButtonDown())) {
+        if (alive) resizeTimeout = setTimeout(() => settleThenCommit(startedAt), RELEASE_POLL_MS);
+        return;
+      }
+      if (alive) triggerPipResize();
+    };
     const onResize = () => {
       clearTimeout(resizeTimeout);
-      resizeTimeout = setTimeout(triggerPipResize, 300);
+      const startedAt = performance.now();
+      resizeTimeout = setTimeout(() => settleThenCommit(startedAt), RESIZE_SETTLE_MS);
     };
 
     window.addEventListener('resize', onResize);
     return () => {
+      alive = false;
       clearTimeout(resizeTimeout);
       window.removeEventListener('resize', onResize);
     };
@@ -180,7 +200,11 @@ export default function PipApp({ winId }) {
     onAlwaysOnTop: toggleAlwaysOnTop,
     onSend: sendToWorkspace,
   });
-  const headerRevealed = useFastEdgeReveal({ enabled: os.fullscreen, holdOpen: hub.hubOpen });
+  // Başlık görüntünün ÜSTÜNE biner mi? Tam ekranda her zaman; aksi hâlde DeX penceresiyle AYNI karar (windowModel.isHeaderHidden:
+  // pencerenin başlık kipi → genel ayar). PiP'in kendi store'unda `maximized: true` "tüm alanı kapla" demektir, "başlığı gizle" değil.
+  // Gizliyken başlık akışta yer tutmaz: görüntü kutunun tamamını kullanır (başlığın 32 px'i yüzünden akış küçük istenmez / ölçeklenmez).
+  const headerOverlay = os.fullscreen || (win ? isHeaderHidden({ ...win, maximized: false, fullscreen: false }, effectiveSettings) : false);
+  const headerRevealed = useFastEdgeReveal({ enabled: headerOverlay, holdOpen: hub.hubOpen });
 
   if (!backendHealthy) {
     return <BootSplash onReady={() => setBackendHealthy(true)} />;
@@ -224,9 +248,10 @@ export default function PipApp({ winId }) {
         !os.maximized && !os.fullscreen && 'border border-frame-border',
       )}
     >
-      {/* Tam ekranda başlık görüntünün ÜSTÜNE biner: görüntü pencerenin tamamını kaplar ve tam ekrandan çıkış düğmesi erişilebilir kalır.
-          Yalnız imleç üst kenara HIZLICA çarpınca iner (useFastEdgeReveal); yavaşça gidince açılmaz, orada uygulamanın kendi öğesi olabilir. */}
-      {os.fullscreen ? (
+      {/* Tam ekranda (ve başlık kipi "hover" / genel ayar "gizli" iken) başlık görüntünün ÜSTÜNE biner: görüntü kutunun tamamını kaplar ve
+          tam ekrandan çıkış düğmesi erişilebilir kalır. Yalnız imleç üst kenara HIZLICA çarpınca iner (useFastEdgeReveal); yavaşça
+          gidince açılmaz, orada uygulamanın kendi öğesi olabilir. */}
+      {headerOverlay ? (
         <div className="absolute inset-x-0 top-0 z-[150]" data-pip-fullscreen-header>
           <div
             className={cn(
@@ -238,6 +263,8 @@ export default function PipApp({ winId }) {
           </div>
         </div>
       ) : titleBar}
+      {/* Keskinleştirme çekirdekleri BU belgede de olmalı (PiP ayrı bir webview): yoksa `url(#dex-sharpen-…)` sessizce yok sayılır. */}
+      <SharpenFilters />
       <VideoCanvas win={win} settings={effectiveSettings} />
 
       <AnimatePresence>{hub.hubOpen && <HubPanel {...hub.panelProps} />}</AnimatePresence>

@@ -16,6 +16,12 @@ import { logger } from '../../lib/logger.js';
 import { newOpId } from '../../lib/opId.js';
 import { appViewportBox, resolveTaskDensity } from '../windowMath.js';
 import { CROP_RESIZE_DEBOUNCE_MS, isViewInSync, planCropResize, referenceScale } from './cropMath.js';
+import { isPrimaryButtonDown } from '../pip/pipBridge.js';
+
+/** PiP: düğme bırakılınca bu kadar sonra istek gider (sürüklerken zaten gitmez: düğme denetlenir). */
+const PIP_RELEASE_DEBOUNCE_MS = 100;
+/** PiP: düğme hâlâ basılıyken bırakılması bu aralıkla yeniden denetlenir. */
+const RELEASE_POLL_MS = 80;
 
 const measure = (canvas) => {
   const rect = canvas.getBoundingClientRect();
@@ -73,6 +79,18 @@ export function useWorkspaceCropResize({ canvasRef, task, enabled, embedded = fa
     // pencere → görev
     const flush = async () => {
       s.timer = null;
+      if (!live.current.embedded) {
+        // PiP OS penceresi: işletim sistemi boyutlandırırken sayfa imleç olayı almaz; düğme hâlâ basılıysa kullanıcı sürüklüyor
+        // (yalnız duraksadı) — ara boyut gönderilmez, bırakılınca TEK istek gider.
+        s.inflight += 1;
+        const held = await isPrimaryButtonDown();
+        s.inflight -= 1;
+        if (s.disposed || s.timer) return; // bu arada yeni bir boyut geldi: onun turu devraldı
+        if (held) {
+          s.timer = setTimeout(flush, RELEASE_POLL_MS);
+          return;
+        }
+      }
       const { t, scale, size } = read();
       const plan = t && !s.disposed
         ? planCropResize({ canvas: size, scale, bounds: t.bounds, vd: { w: t.vdW, h: t.vdH } })
@@ -111,7 +129,7 @@ export function useWorkspaceCropResize({ canvasRef, task, enabled, embedded = fa
     const onResize = () => {
       if (s.disposed) return;
       if (s.timer) clearTimeout(s.timer);
-      s.timer = setTimeout(flush, debounceMs);
+      s.timer = setTimeout(flush, live.current.embedded ? debounceMs : Math.min(debounceMs, PIP_RELEASE_DEBOUNCE_MS));
     };
 
     // Açılışta (ya da görev telefondan dönünce) GÖREV esastır: pencere onun kutusuna uydurulur. Uydurulamıyorsa (yüzeye

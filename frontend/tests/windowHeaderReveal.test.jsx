@@ -17,7 +17,7 @@ vi.mock('../src/window/WorkspaceCanvas.jsx', () => ({ default: () => <div data-t
 vi.mock('../src/window/ResizeHandle.jsx', () => ({ default: () => null }));
 
 import WindowFrame from '../src/window/WindowFrame.jsx';
-import { REVEAL_MIN_SPEED } from '../src/window/pip/useFastEdgeReveal.js';
+import { REVEAL_HOLD_MS, REVEAL_MIN_SPEED } from '../src/window/pip/useFastEdgeReveal.js';
 import { useWindowStore } from '../src/window/windowStore.js';
 
 const ECO = {
@@ -65,8 +65,19 @@ describe('büyütülmüş pencerede başlık', () => {
 
     flick();
     expect(isShown(slidingHeader(container))).toBe(true);
-    act(() => { vi.advanceTimersByTime(800); });
+    // En az 1 sn açık kalır (imlecin başlığa inmesine zaman tanır), sonra kapanır.
+    act(() => { vi.advanceTimersByTime(REVEAL_HOLD_MS - 100); });
+    expect(isShown(slidingHeader(container))).toBe(true);
+    act(() => { vi.advanceTimersByTime(200); });
     expect(isShown(slidingHeader(container))).toBe(false);
+  });
+
+  it('kenarı ATLAYAN hızlı hamle de açar (örnekler seyrek: şeritte hiç örnek olmayabilir)', () => {
+    const { container } = render(<WindowFrame win={{ ...ECO, maximized: true }} settings={{}} />);
+    move(120, 0);
+    move(60, 16);
+    move(-40, 16);     // şeridin (6 px) çok üstüne atladı; aradaki hiçbir örnek şeritte değil
+    expect(isShown(slidingHeader(container))).toBe(true);
   });
 
   it('üst kenara YAVAŞÇA gidilirse açılmaz', () => {
