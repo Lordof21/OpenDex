@@ -22,6 +22,9 @@ from .adb_meter import meter as default_meter
 
 log = logging.getLogger(__name__)
 
+MAX_PROCS = 40  # a safety bound only: discovery tracks ~12 fixed processes plus the apps open in windows
+MIN_COUNTING_S = 0.5  # a counter younger than this is too short to average (a stream opened a moment ago)
+
 StreamsGetter = Callable[[], list[dict[str, Any]]]
 PackagesGetter = Callable[[], list[str]]
 
@@ -35,10 +38,12 @@ class DeviceLoadMonitor:
         emit: Callable[..., Awaitable[None]] | None = None,
         streams_getter: StreamsGetter | None = None,
         packages_getter: PackagesGetter | None = None,
+        phone_packages_getter: PackagesGetter | None = None,
         meter: Any = None,
         record_dir_getter: Callable[[], Any] | None = None,
         temps_getter: Callable[[], dict[str, float]] | None = None,
         battery_getter: Callable[[], dict[str, Any] | None] | None = None,
+        thermal_level_getter: Callable[[], str | None] | None = None,
         daemon_getter: Callable[[], Any] | None = None,
         clock: Callable[[], float] = time.monotonic,
         wallclock: Callable[[], float] = time.time,
@@ -50,10 +55,17 @@ class DeviceLoadMonitor:
         self.source: str | None = None  # "daemon" | "shell": where the last tick came from
         self._streams_getter = streams_getter or (lambda: [])
         self._packages_getter = packages_getter or (lambda: [])
+        # Apps open on the phone's OWN screen (not in an OpenDeX window): they load the phone just the same, and
+        # without them their CPU fell into "other". Tracked like window apps, marked `where: "phone"`.
+        self._phone_packages_getter = phone_packages_getter or (lambda: [])
+        self._phone_only: frozenset[str] = frozenset()
         # Fallbacks for phones whose sysfs is SELinux-denied to shell (HyperOS): the HAL temperatures the thermal
         # monitor already reads, and the daemon's BatteryManager snapshot. Neither costs an extra command.
         self._temps_getter = temps_getter or (lambda: {})
         self._battery_getter = battery_getter or (lambda: None)
+        # Android's own thermal status (PowerManager.THERMAL_STATUS_*, as the thermal monitor last saw it): the platform's
+        # verdict on whether it is throttling — None while the monitor is not running (unknown, not "none").
+        self._thermal_level_getter = thermal_level_getter or (lambda: None)
         self.last_error: str | None = None
         self._meter = meter or default_meter
         self._record_dir_getter = record_dir_getter
@@ -165,8 +177,10 @@ class DeviceLoadMonitor:
     async def tick(self) -> dict[str, Any] | None:
         if not self._serial:
             return None
-        packages = sorted({p for p in self._packages_getter() if p})
-        stale = self._clock() - self._discovered_at >= self._num("TELEMETRY_DISCOVERY_S", 30.0)
+        windowed = {p for p in self._packages_getter() if p}
+        self._phone_only = frozenset(p for p in (self._safe(self._phone_packages_getter) or []) if p and p not in windowed)
+        packages = sorted(windowed | self._phone_only)
+        stale =self._clock() - self._discovered_at >= self._num("TELEMETRY_DISCOVERY_S", 30.0)
         if self._discovery is None or stale or tuple(packages) != self._discovered_packages:
             await self._discover(packages)
         assert self._discovery is not None
@@ -241,6 +255,8 @@ class DeviceLoadMonitor:
                 share = max(0.0, (now_ticks - before) / capacity_ticks * 100.0)
                 row = by_key.setdefault(proc.key, {"key": proc.key, "label": proc.label, "group": proc.group,
                                                    "cpu": 0.0, "pids": 0})
+                if proc.group == probe.GROUP_APPS:
+                    row["where"] = "phone" if proc.key in self._phone_only else "window"
                 row["cpu"] += share
                 row["pids"] += 1
         groups = {g: 0.0 for g in probe.GROUPS}
@@ -300,14 +316,21 @@ class DeviceLoadMonitor:
             "temp": temps,
             "cpu": {"total": round(total_pct, 1) if total_pct is not None else None,
                     "groups": {g: round(v, 2) for g, v in groups.items()}},
-            "procs": procs[:12],
+            # Every tracked process (discovery bounds them: the fixed markers + the open apps). A top-N cut dropped the
+            # idle open apps first and biased the panel's range averages.
+            "procs": procs[:MAX_PROCS],
             "battery": {**battery, "power_w": power_w, "charging": status in ("charging", "full")},
             "freq_mhz": [round(k / 1000) for k in cur.cpu_freq_khz],
             "gpu": cur.gpu_util,
             "streams": self._stream_rates(now),
             "probe_ms": round(probe_ms, 1),
             "sources": sources,
+            "thermal": self._thermal_level(),
         }
+
+    def _thermal_level(self) -> str | None:
+        level = self._safe(self._thermal_level_getter)
+        return str(level) if level else None
 
     @staticmethod
     def _safe(getter: Callable[[], Any]) -> Any:
@@ -327,10 +350,17 @@ class DeviceLoadMonitor:
             nbytes, npackets = int(s.get("bytes") or 0), int(s.get("packets") or 0)
             prev = self._prev_streams.get(wid)
             mbps = fps = None
+            counting_s = s.get("counting_s")
             if prev is not None and now > prev[0] and nbytes >= prev[1] and npackets >= prev[2]:
                 span = now - prev[0]
                 mbps = round((nbytes - prev[1]) * 8 / span / 1e6, 2)
                 fps = round((npackets - prev[2]) / span, 1)
+            elif isinstance(counting_s, (int, float)) and counting_s >= MIN_COUNTING_S:
+                # No earlier reading of THIS counter (the window just opened, or its broadcaster was replaced and the
+                # counters restarted): they have run from zero for `counting_s`, so their average over that time is a
+                # real rate — the first tick after every window open used to be "unknown" and broke the encoder chart.
+                mbps = round(nbytes * 8 / counting_s / 1e6, 2)
+                fps = round(npackets / counting_s, 1)
             self._prev_streams[wid] = (now, nbytes, npackets)
             out.append({
                 "window_id": wid, "package": s.get("package"), "w": s.get("w"), "h": s.get("h"),
@@ -355,9 +385,13 @@ class DeviceLoadMonitor:
         except OSError as exc:
             log.debug("[LOAD] kayıt yazılamadı: %s", exc)
 
-    def snapshot(self, minutes: float = 15.0) -> dict[str, Any]:
+    def snapshot(self, minutes: float = 15.0, since: float | None = None) -> dict[str, Any]:
+        """`since`: only what is newer than the client's last sample (a panel reopening asks for the few samples it
+        missed, not the whole hour again — ~1 MB of JSON at 5 s ticks)."""
         now = self._wallclock()
         start = now - max(1.0, minutes) * 60.0
+        if since is not None:
+            start = max(start, since + 1e-3)
         samples = [s for s in self._samples if s["t"] >= start]
         disc = self._discovery
         return {

@@ -59,6 +59,25 @@ class _App:
     window_ids: list[str] = field(default_factory=list)
 
 
+def phone_foreground_packages(tasks: list[dict[str, Any]], skip: Any = ()) -> list[str]:
+    """The user apps visible on the phone's OWN display (display 0), from the daemon's task snapshot — no command on
+    the phone. Launchers, System UI and OpenDeX's own packages are not apps the user opened; `skip`: already counted
+    (shown in a window). At most MAX_PHONE_APPS (split screen / pop-ups), in the snapshot's order."""
+    out: list[str] = []
+    for task in tasks:
+        package = task.get("package") or ""
+        if (
+            str(task.get("display")) != "0" or not task.get("visible") or package in skip or package in out
+            or not is_package_name(package) or is_internal_package(package) or is_launcher_package(package)
+            or package.startswith(_SYSTEM_UI_PREFIX)
+        ):
+            continue
+        if len(out) >= MAX_PHONE_APPS:
+            break
+        out.append(package)
+    return out
+
+
 def _stream_id(window_id: str, ws_url: str | None) -> str:
     """The broadcaster a window's frames come from: its own id, or — for an Eco Workspace member — its anchor's."""
     return (ws_url or "").rsplit("/", 1)[-1] or window_id
@@ -135,19 +154,8 @@ class TelemetryHub:
             app = apps.setdefault(w.package, _App(w.package, str(w.locus)))
             app.window_ids.append(w.window_id)
 
-        phone = 0
-        for task in self._phone_tasks_getter():
-            package = task.get("package") or ""
-            if (
-                str(task.get("display")) != "0" or not task.get("visible") or package in apps
-                or not is_package_name(package) or is_internal_package(package) or is_launcher_package(package)
-                or package.startswith(_SYSTEM_UI_PREFIX)
-            ):
-                continue
-            if phone >= MAX_PHONE_APPS:
-                break
+        for package in phone_foreground_packages(self._phone_tasks_getter(), skip=apps):
             apps[package] = _App(package, PHONE)
-            phone += 1
         return list(apps.values()), windows, list(stream_ids)
 
     # ------------------------------------------------------------------ reading

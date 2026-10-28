@@ -92,6 +92,8 @@ class FrameBroadcaster:
         self.frames_total = 0  # config paketleri HARİÇ kare sayısı
         self.packets_total = 0 # alias for telemetry / Telefon Yükü
         self.bytes_total = 0   # config dahil tüm baytlar
+        # Sayaçların başladığı an: bir okumanın öncesi olmasa da (pencere yeni açıldı) hız = sayaç / geçen süre.
+        self._counting_since = time.monotonic()
         # Keyframe on demand: the video pump of the window wires this to its scrcpy server (RESET_VIDEO). Without it a
         # client that needs a keyframe waits for the encoder's own — up to 60 s away (10 s upstream).
         self.keyframe_requester: Callable[[str], None] | None = None
@@ -282,6 +284,7 @@ class FrameBroadcaster:
             "frames_total": self.frames_total,
             "packets_total": self.packets_total,
             "bytes_total": self.bytes_total,
+            "counting_s": round(time.monotonic() - self._counting_since, 3),  # how long the *_total counters have run
             "keyframe_requests": self.keyframe_requests,
         }
 

@@ -18,6 +18,9 @@ HEAVY_POLL_INFO_PER_MIN = 8.0
 ENCODE_WARN_MPX_S = 1920 * 1080 * 60 / 1e6   # one 1080p60 stream
 ENCODE_INFO_MPX_S = ENCODE_WARN_MPX_S / 2
 CPU_WARN_PCT = 60.0
+# ThermalLevel values (schemas/events.py) at which Android throttles; "light" only signals.
+THROTTLING_LEVELS = ("moderate", "severe", "critical")
+THERMAL_LEVEL_LABELS = {"light": "hafif", "moderate": "orta", "severe": "şiddetli", "critical": "kritik"}
 
 _SEVERITY_ORDER = {"critical": 0, "warning": 1, "info": 2, "good": 3}
 
@@ -76,6 +79,14 @@ def compute(
         else:
             out.append({"id": "temp", "severity": "good", "title": f"Sıcaklık normal: {_fmt(temp)} °C",
                         "detail": f"S{change[1:]}." if change else "Isınma eğilimi yok."})
+
+    # 1b. Android's own verdict: from MODERATE on, the platform caps CPU/GPU clocks (the phone gets slower, not only
+    # warmer) — stated as the platform's reading, never inferred from a temperature.
+    level = latest.get("thermal")
+    if level in THROTTLING_LEVELS:
+        out.append({"id": "throttle", "severity": "critical" if level in ("severe", "critical") else "warning",
+                    "title": f"Android telefonu yavaşlatıyor (termal durum: {THERMAL_LEVEL_LABELS[level]})",
+                    "detail": "Platformun kendi kararı: işlemci/GPU hızı sınırlanır, görüntü akışı takılabilir."})
 
     # 2. Charging while the battery still drains = load above what USB supplies; charging adds heat of its own.
     battery = latest.get("battery") or {}

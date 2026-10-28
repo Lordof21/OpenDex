@@ -75,6 +75,11 @@ class ThermalMonitor:
         """Android's own thermal status as last seen (what the Battery page calls "the platform's verdict")."""
         return self._last_level
 
+    @property
+    def running(self) -> bool:
+        """Watching a phone: `level` is a reading, not just the initial NONE."""
+        return self._task is not None and not self._task.done()
+
     def fresh_temperatures(self, max_age_s: float | None = None) -> dict[str, float]:
         """Role → °C from the last reading, or {} when older than ~3 poll intervals (a stale value must not look live)."""
         limit = max_age_s if max_age_s is not None else self._settings.THERMAL_POLL_INTERVAL_S * 3

@@ -324,6 +324,24 @@ async def test_two_ticks_give_cpu_shares_attribution_power_and_stream_rates(tmp_
     assert sum("echo @ZONES" in c for c in adb.commands) == 1 and sum("echo @STAT" in c for c in adb.commands) == 2
 
 
+async def test_a_stream_is_measured_from_its_first_tick_by_how_long_its_counters_ran(tmp_path):
+    """2026-10-27: the tick right after every window open had no earlier reading → fps/Mbps unknown → a hole in the
+    encoder chart at each "+" marker. The broadcaster's counters start at zero: their average since then is a rate."""
+    mon, clock, wall = _monitor(ScriptedAdb([]), tmp_path)
+    stream = {"window_id": "w1", "package": "p", "w": 1000, "h": 800, "target_fps": 60, "paused": False,
+              "bytes": 2_500_000, "packets": 150, "counting_s": 2.5}
+    mon._streams_getter = lambda: [stream]
+    first = mon._stream_rates(wall[0])[0]
+    assert first["mbps"] == 8.0 and first["fps"] == 60.0
+    # a counter only just started is too short to average: unknown, as before
+    stream.update(window_id="w2", bytes=10_000, packets=1, counting_s=0.1)
+    assert mon._stream_rates(wall[0] + 5)[0]["fps"] is None
+    # a broadcaster replaced between ticks (counters restarted) is measured the same way, not left unknown
+    stream.update(window_id="w1", bytes=1_250_000, packets=75, counting_s=1.25)
+    replaced = mon._stream_rates(wall[0] + 10)[0]
+    assert replaced["mbps"] == 8.0 and replaced["fps"] == 60.0
+
+
 async def test_a_process_that_disappears_triggers_rediscovery_but_an_unreadable_one_does_not(tmp_path):
     ticks = [
         _sample_out(total=10_000, idle=5_000, procs={9001: (10, 0, 1), 7001: (10, 0, 2)}),
@@ -375,6 +393,108 @@ async def test_snapshot_and_endpoint_return_the_window_with_markers(tmp_path):
     assert [m["kind"] for m in snap["markers"]] == ["app_restart"]
     assert {z["role"] for z in snap["meta"]["zones"]} == {"soc", "battery", "gpu", "skin"}
     assert snap["meta"]["ncpu"] == 8
+
+
+async def test_a_reopening_panel_gets_only_the_samples_it_missed(tmp_path):
+    markers.clear()
+    ticks = [_sample_out(total=10_000 + i * 1_000, idle=5_000 + i * 500, procs={}) for i in range(3)]
+    mon, clock, wall = _monitor(ScriptedAdb(ticks), tmp_path)
+    for i in range(3):
+        if i == 2:
+            markers.record("dpi_change", wallclock=lambda: wall[0])
+        await mon.tick()
+        wall[0] += 5
+    full = await telemetry_ep.get_device_load(SimpleNamespace(load_monitor=mon), minutes=15)
+    held = full["samples"][1]["t"]
+    newer = await telemetry_ep.get_device_load(SimpleNamespace(load_monitor=mon), minutes=15, since=held)
+    assert [s["t"] for s in newer["samples"]] == [full["samples"][2]["t"]]
+    assert [m["kind"] for m in newer["markers"]] == ["dpi_change"]
+    latest = await telemetry_ep.get_device_load(SimpleNamespace(load_monitor=mon), minutes=15, since=full["samples"][2]["t"])
+    assert latest["samples"] == [] and latest["markers"] == []
+
+
+async def test_every_tracked_process_is_reported_not_only_the_busiest_dozen(tmp_path):
+    mon, clock, wall = _monitor(ScriptedAdb([]), tmp_path)
+    mon._discovery = probe.Discovery(processes=[
+        probe.TrackedProcess(1000 + i, "apps", f"com.app.n{i}", f"com.app.n{i}") for i in range(16)
+    ])
+    first = probe.RawSample(cpu_total=10_000, cpu_idle=5_000, proc_ticks={1000 + i: 0 for i in range(16)},
+                            proc_start={1000 + i: 1 for i in range(16)})
+    second = probe.RawSample(cpu_total=11_000, cpu_idle=5_500, proc_ticks={1000 + i: i for i in range(16)},
+                             proc_start={1000 + i: 1 for i in range(16)})
+    mon._prev, mon._prev_t = first, wall[0]
+    wall[0] += 5
+    sample = mon._build_sample(second, wall[0], 10.0)
+    assert len(sample["procs"]) == 16 and sample["procs"][-1]["cpu"] == 0.0  # the idle app is still listed
+
+
+async def test_an_app_open_on_the_phones_own_screen_is_tracked_and_marked(tmp_path):
+    """2026-10-27: Play Store opened on the phone itself never appeared (only window apps were discovered)."""
+    adb = ScriptedAdb([])
+    mon, clock, wall = _monitor(adb, tmp_path)
+    mon._phone_packages_getter = lambda: ["com.android.vending", "com.google.android.youtube"]  # YouTube is also windowed
+    seen = {}
+
+    async def discover(packages):
+        seen["packages"] = packages
+        mon._discovery = probe.Discovery(processes=[
+            probe.TrackedProcess(7001, "apps", "com.google.android.youtube", "com.google.android.youtube"),
+            probe.TrackedProcess(7101, "apps", "com.android.vending", "com.android.vending"),
+        ])
+        mon._discovered_at, mon._discovered_packages = clock[0], tuple(sorted(packages))
+
+    raws = iter([
+        probe.RawSample(cpu_total=10_000, cpu_idle=5_000, proc_ticks={7001: 0, 7101: 0}, proc_start={7001: 1, 7101: 1}),
+        probe.RawSample(cpu_total=11_000, cpu_idle=5_500, proc_ticks={7001: 50, 7101: 100}, proc_start={7001: 1, 7101: 1}),
+    ])
+
+    async def read():
+        return next(raws)
+
+    mon._discover, mon._read_sample = discover, read
+    await mon.tick()
+    wall[0] += 5
+    sample = await mon.tick()
+    assert seen["packages"] == ["com.android.vending", "com.google.android.youtube"]
+    where = {p["key"]: p["where"] for p in sample["procs"]}
+    assert where == {"com.android.vending": "phone", "com.google.android.youtube": "window"}
+    assert sample["cpu"]["groups"]["apps"] == 15.0  # 10 % Play Store + 5 % YouTube, no longer in "other"
+
+
+def test_phone_foreground_apps_skip_launchers_systemui_other_displays_and_windowed_ones():
+    from app.telemetry.hub import phone_foreground_packages
+    tasks = [
+        {"display": 0, "visible": True, "package": "com.android.vending"},
+        {"display": 0, "visible": True, "package": "com.android.systemui"},
+        {"display": 0, "visible": False, "package": "com.whatsapp"},
+        {"display": 7, "visible": True, "package": "com.instagram.android"},
+        {"display": 0, "visible": True, "package": "com.google.android.youtube"},
+        {"display": 0, "visible": True, "package": "com.android.vending"},
+    ]
+    assert phone_foreground_packages(tasks) == ["com.android.vending", "com.google.android.youtube"]
+    assert phone_foreground_packages(tasks, skip={"com.google.android.youtube"}) == ["com.android.vending"]
+
+
+async def test_android_thermal_status_rides_along_and_unknown_is_not_none(tmp_path):
+    level = ["moderate"]
+    mon, clock, wall = _monitor(ScriptedAdb([]), tmp_path)
+    mon._thermal_level_getter = lambda: level[0]
+    raw = probe.RawSample(cpu_total=10_000, cpu_idle=5_000)
+    assert mon._build_sample(raw, wall[0], 1.0)["thermal"] == "moderate"
+    level[0] = None  # the thermal monitor is not running: unknown
+    assert mon._build_sample(raw, wall[0], 1.0)["thermal"] is None
+
+
+@pytest.mark.parametrize("level, severity", [("light", None), ("moderate", "warning"), ("severe", "critical")])
+def test_platform_throttling_is_reported_as_the_platforms_verdict(level, severity):
+    now = 5_000.0
+    samples = [{"t": now - 60 + i * 5, "temp": {"battery": 38.0}, "cpu": {"total": 20.0, "groups": {}},
+                "battery": {"charging": False}, "streams": [], "thermal": level} for i in range(13)]
+    found = {f["id"]: f for f in insights.compute(samples, [], [], now)}
+    if severity is None:
+        assert "throttle" not in found
+    else:
+        assert found["throttle"]["severity"] == severity and "termal durum" in found["throttle"]["title"]
 
 
 def _denied_sample_out(*, total, idle, procs):

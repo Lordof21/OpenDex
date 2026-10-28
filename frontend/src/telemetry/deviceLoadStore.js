@@ -4,9 +4,48 @@
 import { create } from 'zustand';
 import { api } from '../lib/api.js';
 import { t } from '../i18n/index.js';
+import { gapSeconds } from './loadModel.js';
 
 const KEEP_S = 2 * 60 * 60; // matches the backend's TELEMETRY_HISTORY_S
 const MAX_MARKERS = 1000;
+const HISTORY_MINUTES = 120; // the widest range the panel offers (= the backend's TELEMETRY_HISTORY_S)
+const PREFS_KEY = 'opendex.load-panel'; // the viewer's own choices: range and table view (per browser, best effort)
+
+function readPrefs() {
+  try {
+    const prefs = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}');
+    return {
+      rangeMinutes: [5, 15, 60, 120].includes(prefs.rangeMinutes) ? prefs.rangeMinutes : 15,
+      tableView: prefs.tableView === true,
+    };
+  } catch {
+    return { rangeMinutes: 15, tableView: false };
+  }
+}
+
+function writePrefs(state) {
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify({ rangeMinutes: state.rangeMinutes, tableView: state.tableView }));
+  } catch {
+    // storage unavailable (private window, blocked): the choice simply is not remembered
+  }
+}
+
+/** Where the history request may start (`since`), or null for the whole window. Live samples keep arriving while the
+ *  panel is closed, so a reopen normally needs only the last few seconds (the full hour is ~1 MB of JSON). A hole in
+ *  what the store holds — the event socket dropped for a while — is asked for again from its start. `coveredFrom`:
+ *  the window start of the last full load (the store holds everything the backend had since then, even when that
+ *  history begins later than the window — a session younger than an hour). */
+export function historyCursor(samples, intervalS, nowS, coveredFrom = null) {
+  const windowStart = nowS - HISTORY_MINUTES * 60;
+  const held = samples.filter((s) => s.t >= windowStart);
+  const covered = coveredFrom != null && coveredFrom <= windowStart + gapSeconds(intervalS);
+  if (!held.length || (!covered && held[0].t - windowStart > gapSeconds(intervalS))) return null;
+  for (let i = 1; i < held.length; i += 1) {
+    if (held[i].t - held[i - 1].t > gapSeconds(intervalS)) return held[i - 1].t;
+  }
+  return held[held.length - 1].t;
+}
 
 function mergeMarkers(current, incoming) {
   if (!incoming?.length) return current;
@@ -28,18 +67,29 @@ export const useDeviceLoadStore = create((set, get) => ({
   loadedOnce: false,
   error: null,
   lastError: null, // the backend's last probe failure (the panel says why there is no data)
-  rangeMinutes: 15,
+  ...readPrefs(), // rangeMinutes, tableView — remembered across openings
+  coveredFrom: null, // see historyCursor
 
   setRange(minutes) {
     set({ rangeMinutes: minutes });
+    writePrefs(get());
   },
 
-  /** History for the widest range (the range control only slices it client-side). */
+  setTableView(on) {
+    set({ tableView: Boolean(on) });
+    writePrefs(get());
+  },
+
+  /** History for the widest range (the range control only slices it client-side). Only what this store does not
+   *  already hold is asked for — see historyCursor. */
   async load() {
     set({ loading: true, error: null });
     try {
-      const snap = await api.get('/api/telemetry/load?minutes=60');
+      const nowS = Date.now() / 1000;
+      const cursor = historyCursor(get().samples, get().intervalS, nowS, get().coveredFrom);
+      const snap = await api.get(`/api/telemetry/load?minutes=${HISTORY_MINUTES}${cursor != null ? `&since=${cursor}` : ''}`);
       set((state) => {
+        const coveredFrom = cursor == null ? nowS - HISTORY_MINUTES * 60 : state.coveredFrom;
         const byT = new Map(state.samples.map((s) => [s.t, s]));
         (snap.samples || []).forEach((s) => byT.set(s.t, s));
         const samples = [...byT.values()].sort((a, b) => a.t - b.t);
@@ -55,6 +105,7 @@ export const useDeviceLoadStore = create((set, get) => ({
           lastError: snap.last_error || null,
           loading: false,
           loadedOnce: true,
+          coveredFrom,
         };
       });
     } catch (err) {
@@ -84,6 +135,6 @@ export const useDeviceLoadStore = create((set, get) => ({
   },
 
   reset() {
-    set({ samples: [], markers: [], insights: [], adb: [], adbTop: [], meta: null, active: false, loadedOnce: false, error: null, lastError: null });
+    set({ samples: [], markers: [], insights: [], adb: [], adbTop: [], meta: null, active: false, loadedOnce: false, error: null, lastError: null, coveredFrom: null });
   },
 }));

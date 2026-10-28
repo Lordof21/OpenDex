@@ -1467,13 +1467,15 @@ A figure that could not be measured is `null`, never 0.
 ### `GET /telemetry/load`
 
 Samples of the last `minutes`, the markers on the same timeline, current findings and background command
-rates. `active` is False while no phone is bound (the history of the last session is still returned).
+rates. `active` is False while no phone is bound (the history of the last session is still returned). `since`
+(a sample's `t`): only what is newer — an incremental refresh for a client that already holds the rest.
 
 *token required*
 
 | Parameter | In | Type | Required | Notes |
 |---|---|---|---|---|
 | `minutes` | query | number (1–120) | no | default `15.0` |
+| `since` | query | number (≥ 0) (nullable) | no |  |
 
 **Responses:** `200` Successful Response · `422` Validation Error · `401` token missing/wrong · `403` foreign Origin/Host
 
