@@ -39,6 +39,7 @@ MISSES_TO_CONFIRM = 3
 MIN_CONFIRM_S = 1.5
 CONFIRM_INTERVAL_S = 0.8
 PLACEMENT_GRACE_S = 5.0
+RECHECK_SLACK_S = 0.1              # a window whose grace ends is looked at this long after
 
 Behavior = Literal["close", "badge"]
 
@@ -83,6 +84,8 @@ class AppPresenceMonitor:
         self._reported: set[str] = set()                       # badge mode: already told the user
         self._lock = asyncio.Lock()
         self._confirm_task: asyncio.Task | None = None
+        self._recheck_in: float | None = None                  # shortest grace still running after the last evaluation
+        self._recheck_task: asyncio.Task | None = None
         events.on("device_tasks_update", self._on_tasks)
 
     # ------------------------------------------------------------------ evaluation
@@ -116,7 +119,10 @@ class AppPresenceMonitor:
         if spawned is not None and s.state.workspace_id != "eco":
             since = max(since, spawned)                      # a new server for the same display (unfreeze, popout)
         self._placement[window_id] = (display, since)
-        return now - since < PLACEMENT_GRACE_S
+        left = PLACEMENT_GRACE_S - (now - since)
+        if left > 0:
+            self._recheck_in = left if self._recheck_in is None else min(self._recheck_in, left)
+        return left > 0
 
     async def _on_tasks(self, ok: bool = True, tasks: list[dict[str, Any]] | None = None, **_: Any) -> None:
         # A failed read is NEVER "every app is gone"; neither is an empty list (a device always has a home task).
@@ -130,8 +136,27 @@ class AppPresenceMonitor:
             await self._app_gone(window_id, package, eco)
         if self._misses:
             self._ensure_confirming()
+        if self._recheck_in is not None:
+            self._schedule_recheck(self._recheck_in)
+
+    def _schedule_recheck(self, delay: float) -> None:
+        """A window still in its placement grace is not judged, and the phone pushes a task snapshot only on a CHANGE: an app
+        closed DURING the grace was noticed at the next unrelated change instead (field log 2026-10-28: 5–17 s after the
+        swipe in the phone's recents, 1.8 s when it came after the grace). Ask again when the grace ends."""
+        if _running(self._recheck_task):
+            return
+        with contextlib.suppress(RuntimeError):
+            self._recheck_task = asyncio.get_running_loop().create_task(self._recheck(delay), name="app-presence-recheck")
+
+    async def _recheck(self, delay: float) -> None:
+        await asyncio.sleep(delay + RECHECK_SLACK_S)
+        try:
+            await self._request_snapshot()          # its answer is a device_tasks_update: _on_tasks judges again
+        except Exception as exc:  # noqa: BLE001 — the next pushed snapshot continues the evaluation
+            log.debug("[AppPresence] recheck snapshot failed: %s", exc)
 
     def _evaluate(self, tasks: list[dict[str, Any]]) -> tuple[list, list]:
+        self._recheck_in = None
         now = self._clock()
         gone: list[tuple[str, str, bool]] = []
         restored: list[tuple[str, str]] = []
@@ -218,4 +243,6 @@ class AppPresenceMonitor:
 
     async def shutdown(self) -> None:
         task, self._confirm_task = self._confirm_task, None
+        await cancel_and_wait(task)
+        task, self._recheck_task = self._recheck_task, None
         await cancel_and_wait(task)

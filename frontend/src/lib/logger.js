@@ -19,6 +19,7 @@ export const TRACE_STORAGE_KEY = 'opendexTrace';
 // Backend'e giden akış kategorileri (info ve üstü). Gürültülü kategoriler (hizalama, resize…) yalnızca halka tamponda kalır.
 export const SHIPPED_CATEGORIES = new Set([
   'handoff', 'reclaim', 'applock', 'teleport', 'power', 'workspace', 'fullscreen', 'transfer', 'close', 'audio',
+  'presence',    // the app was closed ON THE PHONE (window_app_closed / restored): proves the event reached this page
   'resizedpi',   // one line per resize release: which density went out and why (lock / held / ideal)
   'webview',     // WebView2 memory level changes (low when idle, normal on activity)
 ]);

@@ -119,9 +119,15 @@ export function createContinuitySlice(set, get) {
         set((s) => ({ windows: patchWindowOrTask(s.windows, windowId, { appClosedOnPhone: true }) }));
         return;
       }
-      // Workspace members leave through `workspace_task_removed`; a top-level window is dropped here.
-      if (win) get().forgetWindow(windowId);
+      // The user is told FIRST: whatever dropping the window runs into, the message is not lost with it. Workspace members
+      // leave through `workspace_task_removed`; a top-level window is dropped here.
       useSystemStore.getState().pushToast?.(tt('window.name_telefonda_kapatildi_pencere', { name }));
+      try {
+        if (win) get().forgetWindow(windowId);
+        logger.info('presence', 'window_dropped', { windowId, found: Boolean(win) });
+      } catch (err) {
+        logger.error('presence', 'window_drop_failed', err);
+      }
     },
 
     /** `window_app_restored`: the app runs again (reopened here or on the phone). */

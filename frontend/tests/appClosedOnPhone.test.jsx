@@ -65,3 +65,14 @@ describe('AppClosedOverlay', () => {
     expect(onClose).toHaveBeenCalled();
   });
 });
+
+describe('window_app_closed on a window that was handed to the phone', () => {
+  it('the window leaves AND the user is told, also after the handoff events (the real order of a "closed in recents")', () => {
+    handleEvent({ type: 'app_handoff_to_phone', payload: { window_id: 'w1', package: 'com.a', display_id: '0', message: 'aktarıldı' } });
+    expect(win('w1').handoffToPhone).toBe(true);
+    handleEvent({ type: 'window_app_closed', payload: { window_id: 'w1', package: 'com.a', action: 'close' } });
+    handleEvent({ type: 'app_audio_state', payload: { package: 'com.a', windows: [], route: 'pc', live_route: 'phone' } });
+    expect(win('w1')).toBeUndefined();
+    expect(useSystemStore.getState().toasts.map((t) => t.message)).toEqual(['Uygulama A telefonda kapatıldı; pencere kapandı.']);
+  });
+});

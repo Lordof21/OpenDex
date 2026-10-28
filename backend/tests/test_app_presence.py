@@ -53,6 +53,7 @@ class Harness:
         if not confirm:
             # The confirm loop sleeps between requests; most tests drive snapshots explicitly.
             self.monitor._ensure_confirming = lambda: None
+            self.monitor._schedule_recheck = lambda delay: None        # nor does the after-grace recheck sleep in the background
 
     async def snapshot(self, tasks=(), *, ok=True, advance=0.8):
         await self.monitor._on_tasks(ok=ok, tasks=list(tasks))
@@ -212,4 +213,36 @@ async def test_a_first_miss_asks_for_fresh_snapshots(monkeypatch):
             break
     h.close.assert_awaited_once_with("w1")
     assert h.snapshots.await_count >= 2
+    await h.monitor.shutdown()
+
+
+async def test_an_app_closed_during_the_grace_is_looked_for_again_when_the_grace_ends(monkeypatch):
+    """The user swipes the app away in the phone's recents a few seconds after its window opened: the one pushed snapshot
+    comes inside the grace (not judged), and the phone pushes nothing more on its own. Field log 2026-10-28: the close was
+    noticed 5–17 s late (at the next unrelated change); now a snapshot is asked for when the grace ends."""
+    monkeypatch.setattr(app_presence, "PLACEMENT_GRACE_S", 0.05)
+    monkeypatch.setattr(app_presence, "RECHECK_SLACK_S", 0.0)
+    monkeypatch.setattr(app_presence, "CONFIRM_INTERVAL_S", 0.0)
+    h = Harness({"w1": _session()}, confirm=True)
+    h.snapshots.side_effect = lambda: asyncio.sleep(0, result=True)   # the daemon answers (below: by pushing the list)
+
+    answered = []
+
+    async def daemon_replies():
+        h.clock.t += 0.8
+        answered.append(h.clock.t)
+        await h.events.emit("device_tasks_update", ok=True, push=True, tasks=[HOME])
+        return True
+
+    h.snapshots.side_effect = daemon_replies
+    await h.monitor._on_tasks(ok=True, tasks=[HOME])        # the app is gone, in the grace: nothing is judged yet
+    h.close.assert_not_awaited()
+    assert h.monitor._recheck_in is not None
+
+    for _ in range(300):                                    # the recheck waits out the grace, asks, and the answers confirm
+        await asyncio.sleep(0.01)
+        if h.close.await_count:
+            break
+    h.close.assert_awaited_once_with("w1")
+    assert answered, "no snapshot was asked for after the grace"
     await h.monitor.shutdown()
