@@ -28,10 +28,13 @@ import {
 /** backend wait_for_app_lock_unlock `timeout_s` — sayaç halkası bu süreye göre boşalır. */
 export const APPLOCK_WAIT_S = 15;
 
-function Body({ phase, pkg, title, since, onReclaim, onWakeDevice, onRetryPrompt, onDismiss }) {
+function Body({ phase, pkg, title, since, dynamic, onReclaim, onWakeDevice, onRetryPrompt, onDismiss }) {
   const size = useOverlaySize();
   const app = resolveAppDisplayName(pkg, title) || t('overlay.bu_uygulama');
   const left = useCountdown(APPLOCK_WAIT_S, since);
+  // `dynamic`: pencere AÇIKKEN yeniden sorulan kilit. Backend süre aşımı beklemiyor (olay güdümlü izleyici): geri sayım ve "aktarılıyor"
+  // adımları olmaz; kilit açılınca ya da iptal edilince katman kendiliğinden kapanır / "iptal" hâline geçer.
+  const counting = !dynamic;
   const [wake, waking] = useBusyAction(onWakeDevice, 800);
   const [retry, retrying] = useBusyAction(onRetryPrompt, 800);
   const [reclaim, reclaiming] = useBusyAction(onReclaim);
@@ -47,8 +50,10 @@ function Body({ phase, pkg, title, since, onReclaim, onWakeDevice, onRetryPrompt
 
   return (
     <OverlayPanel labelledBy="applock-title" describedBy="applock-text">
-      {waiting ? (
+      {waiting && counting ? (
         <CountdownGlyph icon={Fingerprint} seconds={APPLOCK_WAIT_S} runKey={since} tone="ok" />
+      ) : waiting ? (
+        <OverlayGlyph icon={Fingerprint} tone="ok" pulse />
       ) : (
         <OverlayGlyph icon={phase === 'timeout' ? TimerOff : LockKeyhole} tone="warn" />
       )}
@@ -62,17 +67,19 @@ function Body({ phase, pkg, title, since, onReclaim, onWakeDevice, onRetryPrompt
         <>
           <OverlayStatus>
             {t('overlay.kilit_durum_bekleniyor')}
-            <span aria-hidden="true" className="ml-1.5 text-foreground">· {t('overlay.kilit_kalan_sure', { seconds: left })}</span>
+            {counting && <span aria-hidden="true" className="ml-1.5 text-foreground">· {t('overlay.kilit_kalan_sure', { seconds: left })}</span>}
           </OverlayStatus>
-          <StepTracker
-            label={t('overlay.kilit_adimlar')}
-            current={0}
-            steps={[
-              { id: 'wait', label: t('overlay.kilit_adim_bekleniyor') },
-              { id: 'verify', label: t('overlay.kilit_adim_dogrulandi') },
-              { id: 'move', label: t('overlay.kilit_adim_aktariliyor') },
-            ]}
-          />
+          {counting && (
+            <StepTracker
+              label={t('overlay.kilit_adimlar')}
+              current={0}
+              steps={[
+                { id: 'wait', label: t('overlay.kilit_adim_bekleniyor') },
+                { id: 'verify', label: t('overlay.kilit_adim_dogrulandi') },
+                { id: 'move', label: t('overlay.kilit_adim_aktariliyor') },
+              ]}
+            />
+          )}
         </>
       )}
 
@@ -105,10 +112,10 @@ function Body({ phase, pkg, title, since, onReclaim, onWakeDevice, onRetryPrompt
   );
 }
 
-export default function AppLockOverlay({ phase = 'waiting', pkg, title, since, ...handlers }) {
+export default function AppLockOverlay({ phase = 'waiting', pkg, title, since, dynamic = false, ...handlers }) {
   return (
-    <OverlayLayer tone="veil" data-testid="applock-overlay" data-phase={phase}>
-      <Body phase={phase} pkg={pkg} title={title} since={since} {...handlers} />
+    <OverlayLayer tone="veil" data-testid="applock-overlay" data-phase={phase} data-dynamic={dynamic ? 'true' : undefined}>
+      <Body phase={phase} pkg={pkg} title={title} since={since} dynamic={dynamic} {...handlers} />
     </OverlayLayer>
   );
 }

@@ -83,6 +83,16 @@ describe('AppLockOverlay', () => {
     expect(screen.getByTestId('applock-overlay').dataset.phase).toBe('waiting');
   });
 
+  it('pencere açıkken yeniden sorulan kilit (dynamic): geri sayım ve aktarım adımları yoktur, eylemler durur', () => {
+    render(<AppLockOverlay phase="waiting" dynamic pkg="com.a" title="Uygulama A" since={1} {...handlers()} />);
+    expect(screen.getByRole('alertdialog')).toHaveAccessibleName('Kilidi telefonunda aç');
+    expect(screen.queryByText(new RegExp(`${APPLOCK_WAIT_S} sn`))).toBeNull();                  // backend süre aşımı beklemiyor: sayaç yalan olurdu
+    expect(screen.queryByRole('list', { name: 'Kilit açma adımları' })).toBeNull();            // "aktarılıyor" yok: uygulama zaten kendi ekranında
+    expect(screen.getByRole('button', { name: /Ekranı Uyandır/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Kilidi Açtım/ })).toBeTruthy();
+    expect(screen.getByTestId('applock-overlay').dataset.dynamic).toBe('true');
+  });
+
   it('bekleme: ekranı uyandır / açtım-devam et / kapat eylemleri bağlıdır', async () => {
     const h = handlers();
     render(<AppLockOverlay phase="waiting" pkg="com.a" since={1} {...h} />);
@@ -276,5 +286,24 @@ describe('kilit evresi olaylardan store\'a geçer', () => {
 
     handleEvent({ type: 'app_lock_resolved', payload: { window_id: 'w1', package: 'com.a' } });
     expect(win().appLockPending).toBe(false);
+  });
+
+  it('dynamic kilit: katman geri sayımsız açılır; açılınca "pencereye aktarılıyor" bildirimi çıkmaz', () => {
+    const toasts = [];
+    const spy = vi.spyOn(useSystemStore.getState(), 'pushToast').mockImplementation((m) => toasts.push(m));
+    handleEvent({ type: 'app_lock_pending', payload: { window_id: 'w1', package: 'com.a', message: 'kilit', dynamic: true } });
+    expect(win()).toMatchObject({ appLockPending: true, appLockPhase: 'waiting', appLockDynamic: true });
+
+    const before = toasts.length;
+    handleEvent({ type: 'app_lock_resolved', payload: { window_id: 'w1', package: 'com.a', dynamic: true } });
+    expect(win().appLockPending).toBe(false);
+    expect(win().appLockDynamic).toBe(false);
+    expect(toasts.length).toBe(before);                               // aktarılacak bir şey yok
+    spy.mockRestore();
+  });
+
+  it('açılıştaki (dynamic olmayan) kilit eskisi gibi sayaçlıdır', () => {
+    handleEvent({ type: 'app_lock_pending', payload: { window_id: 'w1', package: 'com.a', message: 'x' } });
+    expect(win().appLockDynamic).toBe(false);
   });
 });

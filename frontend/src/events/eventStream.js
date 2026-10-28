@@ -263,11 +263,13 @@ export function handleEvent(event) {
       );
       break;
     case 'app_lock_pending': {
+      // `dynamic`: pencere açıkken yeniden sorulan kilit (backend/app/windows/applock_watcher.py) — geri sayım yok.
+      const dynamic = Boolean(event.payload?.dynamic);
       const target = event.payload?.window_id || event.payload?.package;
       if (target) {
-        windowStore.setAppLock(target, true, event.payload.message);
+        windowStore.setAppLock(target, true, event.payload.message, 'waiting', dynamic);
         if (event.payload?.package && target !== event.payload.package) {
-          windowStore.setAppLock(event.payload.package, true, event.payload.message);
+          windowStore.setAppLock(event.payload.package, true, event.payload.message, 'waiting', dynamic);
         }
       }
       systemStore.pushToast(event.payload.message || t('events.uygulama_kilitli_lutfen'));
@@ -281,7 +283,8 @@ export function handleEvent(event) {
           windowStore.setAppLock(event.payload.package, false);
         }
       }
-      systemStore.pushToast(t('events.kilit_acildi_pencereye_aktariliyor'));
+      // Pencere açıkken açılan kilitte aktarılacak bir şey yok (uygulama zaten kendi ekranında): "aktarılıyor" denmez.
+      if (!event.payload?.dynamic) systemStore.pushToast(t('events.kilit_acildi_pencereye_aktariliyor'));
       break;
     }
     case 'app_lock_timeout': {

@@ -55,16 +55,17 @@ export function createContinuitySlice(set, get) {
      * Uygulama kilidi durumu. `phase`: 'waiting' (kilit telefonda soruldu) | 'cancelled' (jestle iptal edildi) | 'timeout' (süre doldu);
      * `since`: bu evrenin başladığı an (katmanın geri sayımı buradan başlar, "tekrar dene" yeni bir `since` verir).
      */
-    setAppLock(packageOrId, isPending, message = '', phase = 'waiting') {
+    setAppLock(packageOrId, isPending, message = '', phase = 'waiting', dynamic = false) {
       const since = Date.now();
+      // `dynamic`: pencere AÇIKKEN yeniden sorulan kilit — backend süre aşımı beklemiyor, katmanda geri sayım olmaz.
       set((s) => ({
         appLockMap: {
           ...s.appLockMap,
-          [packageOrId]: isPending ? { isPending: true, message, phase, since } : null,
+          [packageOrId]: isPending ? { isPending: true, message, phase, since, dynamic } : null,
         },
         windows: s.windows.map((w) =>
           w.package === packageOrId || w.id === packageOrId
-            ? { ...w, appLockPending: isPending, appLockMessage: message, appLockPhase: phase, appLockSince: since }
+            ? { ...w, appLockPending: isPending, appLockMessage: message, appLockPhase: phase, appLockSince: since, appLockDynamic: Boolean(isPending && dynamic) }
             : w,
         ),
       }));

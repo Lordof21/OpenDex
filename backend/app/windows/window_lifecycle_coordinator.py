@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from ..device import android_shell, device_queries
 from ..device.adb import Adb
 from ..events import EventBus
+from .applock_watcher import CANCELLED_MESSAGE, PENDING_MESSAGE
 from .scrcpy_launcher import ScrcpyServer, ScrcpySockets, serialize_start_app
 from .display_ids import is_virtual_display_id
 from .task_movement import move_task_to_display
@@ -142,7 +143,7 @@ async def wait_for_app_lock_unlock(
         package=pkg_name,
         window_id=win_id,
         display_id=str(disp_id),
-        message="Uygulama Kilitli: Lütfen telefonunuzdan parmak izinizi okutun veya şifrenizi girin.",
+        message=PENDING_MESSAGE,
     )
 
     # (Re)launch on Display 0 so AppLock definitely owns Display 0
@@ -267,7 +268,7 @@ async def wait_for_app_lock_unlock(
         wlog.info("🚫 [KİLİT İPTAL EDİLDİ] %s için kilit ekranı kapatıldı ama uygulama açılmadı (jest/ana ekran)", pkg_name)
         await events.emit(
             "app_lock_cancelled", package=pkg_name, window_id=win_id, display_id=str(disp_id),
-            message='Kilit iptal edildi. Uygulamayı açmak için "Tekrar Dene"ye basın — kilit yeniden sorulacak.',
+            message=CANCELLED_MESSAGE,
         )
         return False
 

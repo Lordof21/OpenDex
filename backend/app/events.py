@@ -61,8 +61,8 @@ EventType = Literal[
     "notification_received", # {id, package, title, text, post_time, app_name}
     "notification_updated",  # {id, package, title, text, post_time, app_name} (silent in-place state update)
     "notification_cleared",  # {id}
-    "app_lock_pending",      # {package, display_id, message}
-    "app_lock_resolved",     # {package, display_id}
+    "app_lock_pending",      # {package, display_id, message, window_id?, dynamic?} — dynamic: asked again while the window is open (no timeout)
+    "app_lock_resolved",     # {package, display_id, window_id?, dynamic?}
     "app_lock_timeout",      # {package, display_id, message}
     "app_lock_cancelled",    # {package, window_id, display_id, message} — the user cancelled the lock (gesture / home)
     "app_handoff_to_phone",  # {window_id, package, display_id, message}
