@@ -50,10 +50,6 @@ Geliştirirken buraya satır ekle; çeviri turundan sonra sil. (`npm run i18n:to
 
 | Anahtar(lar) | Nerede (dosya / ekran) | Not |
 |---|---|---|
-| `telemetry.olcum_yok`, `veri_gelmiyor`, `sure_sn`, `sure_dk`, `termal_*` (5), `android_termal*` (3), `goruntu_kodlama`, `kodlanan_piksel`, `ref_1080p60`, `akis_detay`, `akis_yok`, `kodlama_aciklama`, `grafik_kodlama_aria`, `kodlama_mpx` (20) | `src/telemetry/*` — Telefon Yükü paneli | 2026-10-27: ölçülmeyen aralıklar, bayat veri, Android termal durumu, görüntü kodlama grafiği |
-| `telemetry.telefonda`, `telefonda_ipucu` (2) | `src/telemetry/DeviceLoadPanel.jsx` | 2026-10-27: telefonun kendi ekranında açık uygulama etiketi |
-| `settings.eslesen_secenekler` (1) | `src/settings/SettingsPanel.jsx` — arama sonuçları | 2026-10-27: kartın içindeki seçeneklerde arama (eşleşen seçenek çipleri) |
-| `telemetry.gosterge_ipucu`, `bolume_git`, `daralt`, `tumunu_goster`, `daha_fazla_goster`, `secili_an`, `secili_ozet`, `secili_kodlama`, `canliya_don`, `o_an`, `o_an_saat`, `an_sec_ipucu`, `bu_ani_sec`, `olay_ipucu`, `toplam`, `2_sa` (16) | `src/telemetry/DeviceLoadPanel.jsx`, `TimeChart.jsx`, `loadModel.js` | 2026-10-27: vurgu, seçili an, Tümünü göster/Daralt, 2 sa aralık |
 
 ## Metni değişenler (çeviri eskidi, otomatik bulunamaz)
 
@@ -61,8 +57,6 @@ Var olan anahtarın **Türkçe metni değiştiğinde** ekle; çeviri turunda o a
 
 | Anahtar | Eski → yeni (özet) | Tarih |
 |---|---|---|
-| `telemetry.opendex_pencerelerindeki_uygulamalar` | "OpenDeX pencerelerindeki uygulamalar" → "… pencerelerinde ve telefonun kendi ekranında açık uygulamalar" | 2026-10-27 |
-| `telemetry.aralik_ortalamasi` | "aralık ortalaması" → "izlendiği sürenin ortalaması" (süreç ortalaması artık yalnız ölçüldüğü örneklerden) | 2026-10-27 |
 
 ## Son çeviri turları
 
@@ -70,6 +64,7 @@ Var olan anahtarın **Türkçe metni değiştiğinde** ekle; çeviri turunda o a
 |---|---|---|
 | 2026-10-16 | 222 anahtar × 18 dil: tuş düzeni (keymapper.*), kilit/aktarım örtüleri (overlay.*), otomatik yoğunluk (taskbar.oto_*), kablosuz doğrulama hatası, ortak kısa metinler | Sonnet 5.5 (elle, dil dil); sonraki turlar için Haiku önerilir |
 | 2026-10-25 | 57 anahtar × 18 dil (1026 metin): çoklu uygulama sesi (audio_focus.*, 41) + tuş düzenleyici "Oyna" / paneller / tuş tanı ve Ctrl+G bildirimleri (keymapper.*, window.tus_duzeni_*, 16); `i18n:todo` boş | Sonnet 5.5 (elle, dil dil; yer tutucular betikle doğrulandı) |
+| 2026-10-28 | 88 anahtar × 18 dil (1584 metin): Telefon Yükü paneli (telemetry.*, 40), arama içi seçenek eşleşmesi (settings.eslesen_secenekler), uygulama çekmecesi (launcher.*, 50); metni değişen 2 telemetry anahtarı yeniden çevrildi; `i18n:todo` boş | Haiku (dil başına bir ajan, paralel; yer tutucular `i18n:apply` ile doğrulandı) |
 
 ## Notlar
 
