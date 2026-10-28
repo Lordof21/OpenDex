@@ -237,6 +237,44 @@ async def test_while_the_handshake_is_pending_the_socket_is_not_yet_usable():
 @pytest.fixture
 def quick_grace(monkeypatch):
     monkeypatch.setattr(ddc, "_SHELL_REPLY_GRACE_S", 0.02)
+    monkeypatch.setattr(ddc, "_PING_TIMEOUT_S", 0.02)
+
+
+async def test_a_lost_reply_from_a_daemon_that_still_answers_ping_pauses_nothing(quick_grace):
+    """Only that command was slow (2026-10-27 19:24: one slow reply sent settings and pkill through adb for 5 s)."""
+    clock = Ticking()
+    client = make_client(lambda body: {"type": "pong"} if body == "ping" else None, clock=clock)
+    assert await client.run_shell("slow", timeout_s=0.02) is None   # this one goes to adb, once
+    assert client.serves_shell(SERIAL) is True, "the daemon answered a ping: the next commands still go to it"
+    assert client._shell_losses == 0
+
+
+async def test_shell_commands_wait_for_a_daemon_that_is_reconnecting():
+    client = make_client(lambda body: None)
+    client._running = True
+    client._writer = None                       # reconnecting: started for this phone, socket not up yet
+    assert client.coming_for(SERIAL) and not client.serves_shell(SERIAL)
+
+    async def comes_back():
+        await asyncio.sleep(0.1)
+        client._writer = client.link
+
+    asyncio.ensure_future(comes_back())
+    assert await client.wait_shell(SERIAL, 2.0) is True
+
+
+async def test_nothing_waits_for_a_daemon_that_is_not_coming():
+    client = make_client(lambda body: None)
+    client._writer = None
+    client._running = False                     # no session: nothing will connect
+    assert await client.wait_shell(SERIAL, 5.0) is False
+    client._running = True
+    assert await client.wait_shell("ANOTHER", 5.0) is False, "a daemon for another phone is no reason to wait"
+    clock = Ticking()
+    late = make_client(lambda body: None, clock=clock)
+    late._running, late._writer = True, None
+    clock.now += 0.0
+    assert await late.wait_shell(SERIAL, 0.0) is False, "the wait is bounded"
 
 
 class Ticking:

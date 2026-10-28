@@ -234,6 +234,25 @@ async def test_a_stopped_or_empty_session_is_not_held(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_session_that_just_stopped_while_its_app_moves_display_is_still_held(monkeypatch):
+    """2026-10-27 19:51: YouTube played in the background; its window opened, the task moved to the new display and the
+    player read STOPPED 0.7 s after PLAYING — the guard saw "no session" and the density restart killed the video."""
+    now = [100.0]
+    stopped = {"active": True, "sessions": [{"package": "com.google.android.youtube", "is_playing": False, "state": "STOPPED"},
+                                            {"package": "com.google.android.apps.youtube.music", "is_playing": True, "state": "PLAYING"}]}
+    client = _connected_client(monkeypatch, stopped)
+    client._clock = lambda: now[0]
+    playing = {"active": True, "package": "com.google.android.youtube", "is_playing": True, "state": "PLAYING",
+               "sessions": [{"package": "com.google.android.youtube", "is_playing": True, "state": "PLAYING"}]}
+    await client._ingest_media_update(playing)
+
+    now[0] += 0.7
+    assert await client.holds_media_session("com.google.android.youtube") is True
+    now[0] += 60
+    assert await client.holds_media_session("com.google.android.youtube") is False, "stopped for long: no longer held"
+
+
+@pytest.mark.asyncio
 async def test_unreadable_sessions_are_unknown_not_silence(monkeypatch):
     client = _connected_client(monkeypatch, {"active": False, "error": "sessions_unavailable"})
 

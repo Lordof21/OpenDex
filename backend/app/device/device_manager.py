@@ -53,6 +53,7 @@ class DeviceManager:
         self._identities: dict[str, tuple[int | None, str]] = {}
         self._identity_failed: dict[tuple[str, int | None], float] = {}   # (serial, transport_id) → when a read failed
         self._identity_tasks: dict[tuple[str, int | None], asyncio.Task] = {}
+        self._android_id_reads: dict[str, asyncio.Future[str]] = {}   # serial → the read in flight (shared)
         self._resolve_identities = False
 
     def attach_tracker(self, tracker: DeviceTracker) -> None:
@@ -231,7 +232,26 @@ class DeviceManager:
 
     async def get_android_id(self, serial: str) -> str:
         """Device identity key — stable across USB vs Wireless Debugging,
-        unlike the ADB transport serial. Primary key for all per-device SQLite rows."""
+        unlike the ADB transport serial. Primary key for all per-device SQLite rows.
+
+        Callers that ask at the same moment share ONE read: a phone coming back was identified twice within 15 ms
+        (the device list's identity resolution and the session bind) — two adb shells, since no daemon is up yet then.
+        A caller's own timeout / cancellation does not cancel the shared read."""
+        pending = self._android_id_reads.get(serial)
+        if pending is None:
+            pending = asyncio.ensure_future(self._read_android_id(serial))
+            self._android_id_reads[serial] = pending
+
+            def _done(fut: asyncio.Future, key: str = serial) -> None:
+                if self._android_id_reads.get(key) is fut:
+                    del self._android_id_reads[key]
+                if not fut.cancelled():
+                    fut.exception()  # retrieved: a failure every waiter already got must not warn "never retrieved"
+
+            pending.add_done_callback(_done)
+        return await asyncio.shield(pending)
+
+    async def _read_android_id(self, serial: str) -> str:
         out = await self._adb.shell("settings get secure android_id", serial=serial)
         android_id = out.strip()
         if not android_id or android_id == "null":

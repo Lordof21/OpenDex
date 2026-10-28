@@ -23,6 +23,7 @@ from app.schemas.settings import ProjectSettings
 from app.windows.cdp_refresher import (
     _build_nudge_script,
     _find_active_page_target,
+    _landed_on_stale_page,
     _mobile_site_url,
     _send_cdp,
     capture_browser_scroll_state,
@@ -294,6 +295,75 @@ async def test_refresh_browser_layout_inplace_command_sequence():
     assert "Emulation.setPageScaleFactor" in bg_methods
     assert "Emulation.resetPageScaleFactor" in bg_methods
     assert "Page.addScriptToEvaluateOnNewDocument" not in bg_methods
+
+
+@pytest.mark.parametrize("saved, landed, stale", [
+    # measured 2026-10-26 on Samsung Internet: the tab came back on the address of its last real page load
+    ("https://m.youtube.com/watch?v=TVSkw5jQL8Y&pp=x", "https://m.youtube.com/watch?v=RfuTild14F0", True),     # next video
+    ("https://m.youtube.com/watch?v=RfuTild14F0", "https://m.youtube.com/", True),                             # home -> a video
+    ("https://www.youtube.com/watch?v=A", "https://m.youtube.com/watch?v=B", True),                           # host variants fold together
+    ("https://claude.ai/chat/abc", "https://claude.ai/new", True),                                             # not site specific
+    # the same page: nothing to put back
+    ("https://m.youtube.com/watch?v=A&t=10s", "https://www.youtube.com/watch?app=desktop&v=A", False),
+    ("https://www.google.com/search?q=a", "https://www.google.com/search?q=b", False),                        # same path: left alone
+    # never overwrite another site's tab, never touch non-web pages
+    ("https://m.youtube.com/watch?v=A", "https://tr.wikipedia.org/wiki/T%C3%BCrkiye", False),
+    ("https://m.youtube.com/watch?v=A", "chrome://newtab/", False),
+    ("", "https://m.youtube.com/", False),
+])
+def test_a_tab_the_app_rebuilt_from_an_older_address_is_recognised(saved, landed, stale):
+    assert _landed_on_stale_page(saved, landed) is stale
+
+
+class _NavigatingWebSocket(FakeWebSocket):
+    """An active tab that was rebuilt by the app: it answers the freshness probe with 'fresh' and fires the load event after a navigation."""
+
+    def __init__(self, tab_id: str):
+        super().__init__(tab_id, is_visible=True)
+        self._events: list[str] = []
+
+    async def send(self, data: str):
+        await super().send(data)
+        if json.loads(data).get("method") == "Page.navigate":
+            self._events.append(json.dumps({"method": "Page.loadEventFired", "params": {}}))
+
+    async def recv(self) -> str:
+        last = self.sent_messages[-1]
+        if last.get("method") == "Page.navigate" and not getattr(self, "_answered", False):
+            self._answered = True
+            return json.dumps({"id": last["id"], "result": {"frameId": "f"}})
+        if self._events:
+            return self._events.pop(0)
+        if last.get("method") == "Runtime.evaluate" and "__odxRestored" in last["params"]["expression"]:
+            return json.dumps({"id": last["id"], "result": {"result": {"value": "fresh"}}})
+        return await super().recv()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("landed_url, expect_navigation", [
+    ("https://m.youtube.com/watch?v=RfuTild14F0", True),      # rebuilt from the previous video
+    ("https://m.youtube.com/watch?v=TVSkw5jQL8Y", False),     # already the right page: only the restore runs
+])
+async def test_the_tab_is_taken_back_to_the_address_it_was_on_after_the_app_rebuilt_it(landed_url, expect_navigation):
+    fake_adb = FakeCdpAdb()
+    tabs_json = json.dumps([{
+        "id": "front", "title": "YouTube", "type": "page", "url": landed_url,
+        "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/page/front",
+    }])
+    ws = _NavigatingWebSocket("front")
+    saved = {"url": "https://m.youtube.com/watch?v=TVSkw5jQL8Y&pp=x", "t": 55.0, "playing": True, "scrollY": 0, "captured_at": 0}
+    with (
+        patch("urllib.request.urlopen", return_value=MagicMock(read=lambda: tabs_json.encode())),
+        patch("websockets.connect", return_value=ws),
+    ):
+        assert await refresh_browser_layout_inplace(fake_adb, "SERIAL_123", "chrome_devtools_remote", saved_scroll=saved) is True
+    navigations = [m for m in ws.sent_messages if m.get("method") == "Page.navigate"]
+    restores = [m for m in ws.sent_messages if m.get("method") == "Runtime.evaluate" and m["params"]["expression"].startswith("(async (saved)=>")]
+    if expect_navigation:
+        assert [m["params"]["url"] for m in navigations] == ["https://m.youtube.com/watch?v=TVSkw5jQL8Y&pp=x"]
+    else:
+        assert navigations == []
+    assert len(restores) == 1 and restores[0]["params"].get("userGesture") is True   # the video is put back either way
 
 
 def test_build_nudge_script_element_anchoring_and_text_size_adjust():

@@ -2628,6 +2628,16 @@ public class OpenDexDaemon {
 
                 new Thread(() -> {
                     ClientConnection conn = null;
+                    // The commands that keep their order (everything not pooled / shell / fs) run here, one at a time —
+                    // NOT on this reader thread: a command stuck in a binder call (display_get while a virtual display
+                    // is torn down) used to stop the reader, so the shell commands behind it were never even read and
+                    // the backend sent everything through adb. The reader now only reads and dispatches; ping is
+                    // answered on the spot, so "is the daemon alive?" has a true answer.
+                    final ExecutorService ordered = Executors.newSingleThreadExecutor(r -> {
+                        Thread t = new Thread(r, "OpenDex-Cmd");
+                        t.setDaemon(true);
+                        return t;
+                    });
                     try {
                         BufferedReader in = new BufferedReader(new InputStreamReader(client.getInputStream(), StandardCharsets.UTF_8));
                         PrintWriter out = new PrintWriter(new OutputStreamWriter(client.getOutputStream(), StandardCharsets.UTF_8), false);
@@ -2711,11 +2721,14 @@ public class OpenDexDaemon {
                                 if (id != null) Json.put(resp, "req_id", id);
                                 caller.enqueueResponse(resp.toString());
                             };
-                            if (POOLED_COMMANDS.contains(parts[0].toLowerCase())) rpcPool.execute(reply);
-                            else reply.run();
+                            String verb = parts[0].toLowerCase();
+                            if ("ping".equals(verb)) reply.run();
+                            else if (POOLED_COMMANDS.contains(verb)) rpcPool.execute(reply);
+                            else ordered.execute(reply);
                         }
                     } catch (Throwable ignored) {
                     } finally {
+                        ordered.shutdownNow();
                         if (conn != null) conn.close();
                         else try { client.close(); } catch (Throwable ignoredToo) {} // never authenticated: no connection object
                         Log.info("Daemon", "Client disconnected.");

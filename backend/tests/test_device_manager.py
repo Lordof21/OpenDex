@@ -57,3 +57,34 @@ async def test_wait_for_device_returns_ready_device():
     device = await manager.wait_for_device(timeout_s=1)
     assert device.serial == "ABC"
     assert device.model == "Pixel_8"
+
+
+async def test_callers_asking_for_the_identity_at_once_share_one_read():
+    """2026-10-27: a phone coming back was identified twice within 15 ms (the list's identity resolution and the session
+    bind) — two adb shells, since no daemon is up at that moment."""
+    import asyncio
+
+    from app.device.device_manager import DeviceManager
+
+    class SlowAdb:
+        def __init__(self):
+            self.calls = 0
+
+        async def shell(self, command, serial=None, timeout_s=None):
+            self.calls += 1
+            await asyncio.sleep(0.05)
+            return "a18a32f7bf692e9f\n"
+
+    adb = SlowAdb()
+    manager = DeviceManager(adb)
+    first, second = await asyncio.gather(manager.get_android_id("SER"), manager.get_android_id("SER"))
+    assert first == second == "a18a32f7bf692e9f" and adb.calls == 1
+    # a caller that gives up early does not cancel the read the others wait on
+    waiting = asyncio.ensure_future(manager.get_android_id("SER"))
+    impatient = asyncio.ensure_future(manager.get_android_id("SER"))
+    await asyncio.sleep(0.01)
+    impatient.cancel()
+    assert await waiting == "a18a32f7bf692e9f" and adb.calls == 2
+    # later on (nothing in flight) the phone is asked again: the supervisor's liveness probe relies on that
+    await manager.get_android_id("SER")
+    assert adb.calls == 3

@@ -35,6 +35,10 @@ _fallback_log_limiter = BackoffLogLimiter(intervals=(5.0, 30.0, 120.0), max_inte
 # The daemon enforces a command's deadline itself, up to this long (ShellWire.MAX_TIMEOUT_MS on the device). A caller
 # that asks for more is not silently cut short: that command goes to adb, which has no such cap.
 DAEMON_SHELL_MAX_TIMEOUT_S = 120.0
+# How long a shell command waits for a daemon that is starting / reconnecting for its phone before it uses adb after
+# all. A reconnect greets within ~0.5 s of the phone being back; while the phone stays away a command waits this long
+# and then meets adb's own "device offline" — the same answer, without an adb process per poll in the meantime.
+DAEMON_COMEBACK_WAIT_S = 4.0
 
 
 @dataclass(frozen=True)
@@ -56,6 +60,10 @@ class ShellTransport(Protocol):
     async def run_shell(self, command: str, *, timeout_s: float, binary: bool) -> ShellOutcome | None:
         """The command's outcome, or None when it could not be taken or its answer was lost: nothing is known about
         whether it ran, and the caller uses adb. Never raises for such a failure."""
+
+    async def wait_shell(self, serial: str, timeout_s: float) -> bool:
+        """When the transport is on its way for `serial` (starting / reconnecting), wait until it serves shell commands
+        (True) — at most `timeout_s`; False at once when it is not coming. Optional: a transport without it never waits."""
 
 
 # Shell sub-commands whose trailing arguments are secrets: `cmd wifi connect-network <ssid> <kind> <passphrase>`.
@@ -249,8 +257,15 @@ class Adb:
         it is bound to: a command for any other serial (the USB twin of a Wi-Fi session, a second phone) goes to adb."""
         transport = self._shell_transport
         target = serial or self._default_serial
-        if transport is None or not target or timeout_s > DAEMON_SHELL_MAX_TIMEOUT_S or not transport.serves_shell(target):
+        if transport is None or not target or timeout_s > DAEMON_SHELL_MAX_TIMEOUT_S:
             return None
+        if not transport.serves_shell(target):
+            # The daemon is on its way for this phone (a session start, or the reconnect after adbd came back): wait for
+            # it instead of starting an adb shell — the 2026-10-27 log showed a whole burst (battery, power, volumes,
+            # settings, notifications, a MediaBridge JVM) fired through adb 0.5 s before the daemon greeted us.
+            wait = getattr(transport, "wait_shell", None)
+            if wait is None or not await wait(target, min(DAEMON_COMEBACK_WAIT_S, timeout_s)):
+                return None
         if log.isEnabledFor(logging.DEBUG):
             log.debug("exec(daemon): %s", redact_command(command)[:200])
         try:

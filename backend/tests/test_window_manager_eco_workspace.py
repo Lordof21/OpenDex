@@ -842,6 +842,46 @@ async def test_focus_does_not_relaunch_an_app_that_is_already_on_its_display(man
     assert sent == [serialize_start_app("com.app.a")]
 
 
+class _TaskPushDaemon:
+    """The daemon client as far as the focus check needs it: a live (pushed) task list."""
+
+    task_push = True
+
+    def __init__(self, tasks):
+        self.last_tasks_state = {"ok": True, "push": True, "tasks": tasks}
+
+    def serves(self, serial):
+        return True
+
+
+async def test_focus_answers_from_the_pushed_task_list_without_asking_the_phone(manager, monkeypatch):
+    """2026-10-27: every click asked the phone (RPC find_task) whether the app was still there — twice, since one click
+    arrives as two focus calls. The daemon pushes that very list on every change."""
+    import app.device.deep_navigator as nav
+    from app.windows.display_ids import known_display_id
+
+    sent = await _record_control_sends(monkeypatch)
+    a = await manager.open_window_in_workspace("com.app.a")
+    session = manager.get_session(a.window_id)
+    display = known_display_id(session)
+    asked = []
+
+    async def _counting(adb, pkg, display_id=None, serial=None):
+        asked.append(pkg)
+        return None
+
+    monkeypatch.setattr(nav, "find_task_id_for_package", _counting)
+    manager._daemon_client = _TaskPushDaemon([{"id": 7, "display": int(display), "visible": True, "package": "com.app.a"}])
+    sent.clear()
+    await asyncio.gather(manager.focus_window(a.window_id), manager.focus_window(a.window_id))
+    assert asked == [] and sent == []                     # listed there: no RPC, no START_APP
+
+    # Not listed (or listed without a package — a task named "unknown"): the phone is asked, as before.
+    manager._daemon_client = _TaskPushDaemon([{"id": 7, "display": int(display), "visible": True}])
+    await manager.focus_window(a.window_id)
+    assert asked == ["com.app.a"]
+
+
 async def test_a_held_launch_keeps_focus_from_starting_the_app_on_top_of_a_notification_target(manager, monkeypatch):
     """A tapped notification fires its own PendingIntent into the window; a focus landing first (no task on the display yet)
     must not start the app's LAUNCHER page — it arrived last and left Gmail on its inbox instead of the mail."""

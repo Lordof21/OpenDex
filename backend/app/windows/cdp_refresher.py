@@ -688,8 +688,22 @@ async def refresh_browser_layout_inplace(
                             probe = await _send_cdp(ws, "Runtime.evaluate", {"expression": _ADOPT_PROBE_JS, "returnByValue": True},
                                                     req_id=96, timeout_s=0.4)
                             if ((probe or {}).get("result") or {}).get("result", {}).get("value") == "fresh":
-                                await _send_cdp(ws, "Runtime.evaluate", {"expression": _restore_script(resume), "userGesture": True},
-                                                req_id=97, timeout_s=0.5)
+                                # The app may have rebuilt the tab from an OLDER address (a page the user reached without a page load: home -> a
+                                # video, a video -> the next). The page is then taken back to the address it was on; the restore follows its load.
+                                landed_url = str(target_page.get("url", ""))
+                                back_to = _retime_url(resume["url"], resume.get("t")) or resume["url"]
+                                navigated = False
+                                if _landed_on_stale_page(resume["url"], landed_url):
+                                    await _send_cdp(ws, "Page.enable", req_id=88, timeout_s=0.3)
+                                    nav = await _send_cdp(ws, "Page.navigate", {"url": back_to}, req_id=89, timeout_s=1.0)
+                                    navigated = bool(nav) and "error" not in nav
+                                    if navigated:
+                                        log.info("↩️ [CDP_REFRESH] Uygulama sekmeyi eski adresten kurdu (%s) — kaldığı adrese (%s) dönülüyor",
+                                                 landed_url[:80], str(resume["url"])[:80])
+                                        await _restore_after_load(ws, resume, timeout_s=4.0, user_gesture=True)
+                                if not navigated:
+                                    await _send_cdp(ws, "Runtime.evaluate", {"expression": _restore_script(resume), "userGesture": True},
+                                                    req_id=97, timeout_s=0.5)
                                 log.info("♻️ [CDP_REFRESH] Uygulama sayfayı kendisi yeniden yükledi — video (%s sn) ve kaydırma geri konuyor",
                                          resume.get("t"))
 
@@ -723,16 +737,19 @@ async def _capture_scroll_over(ws: Any) -> dict[str, Any] | None:
     return None
 
 
-async def _restore_after_load(ws: Any, state: dict[str, Any], *, timeout_s: float = 5.0) -> None:
+async def _restore_after_load(ws: Any, state: dict[str, Any], *, timeout_s: float = 5.0, user_gesture: bool = False) -> None:
     """The reload was sent over ``ws`` (Page domain enabled): once the page has loaded, its scroll goes back — the same single-writer
-    restore the tab watcher uses. Never raises."""
+    restore the tab watcher uses. ``user_gesture``: the restore may start a video (the page was loaded by us, nobody touched it). Never raises."""
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout_s
     with contextlib.suppress(Exception):
         while loop.time() < deadline:
             msg = json.loads(await asyncio.wait_for(ws.recv(), max(0.05, deadline - loop.time())))
             if msg.get("method") == "Page.loadEventFired":
-                await _send_cdp(ws, "Runtime.evaluate", {"expression": _restore_script(state)}, req_id=33, timeout_s=0.5)
+                params: dict[str, Any] = {"expression": _restore_script(state)}
+                if user_gesture:
+                    params["userGesture"] = True
+                await _send_cdp(ws, "Runtime.evaluate", params, req_id=33, timeout_s=0.5)
                 return
 
 
@@ -896,6 +913,31 @@ def _same_page(a: str, b: str) -> bool:
     """The same document address apart from the host variant (m. / www.) and the start-time parameters: path and the video id (``v``)."""
     pa, pb = urlsplit(a), urlsplit(b)
     return pa.path == pb.path and dict(parse_qsl(pa.query)).get("v") == dict(parse_qsl(pb.query)).get("v")
+
+
+def _site_key(url: str) -> str:
+    """The site an address belongs to, host variants (www. / m. / mobile. / touch.) folded together."""
+    host = (urlsplit(url).hostname or "").lower()
+    for prefix in _MOBILE_HOSTS + ("www.",):
+        if host.startswith(prefix):
+            return host[len(prefix):]
+    return host
+
+
+def _landed_on_stale_page(saved_url: str, landed_url: str) -> bool:
+    """The browser rebuilt the tab (the app recreates its activity on a density change) from an OLDER address than the one the user was on.
+    Measured on Samsung Internet (2026-10-26): on a site that moves between pages without a page load (YouTube: home -> a video, a video -> the
+    next) the address read from the live page was right (``saved_url``) but the tab came back on the address of its last real load
+    (``landed_url``) — the home page, the previous video.
+
+    True only when both are web addresses of the SAME site and not the same page (path / video id differ). A different site is never "put back":
+    the tab in front may then be another tab, and a page is never overwritten on a guess. Nothing here is site specific."""
+    a, b = urlsplit(saved_url), urlsplit(landed_url)
+    if a.scheme not in ("http", "https") or b.scheme not in ("http", "https"):
+        return False
+    if not a.hostname or _site_key(saved_url) != _site_key(landed_url):
+        return False
+    return not _same_page(saved_url, landed_url)
 
 
 # Is this document one the APP reloaded by itself (a browser that rebuilds its activity on a density change reloads its pages) and that

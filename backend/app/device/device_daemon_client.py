@@ -66,6 +66,11 @@ _SHELL_REPLY_GRACE_S = 3.0
 # instead of each waiting out its own timeout first. Doubles per consecutive loss, up to the cap; one answer resets it.
 _SHELL_SUSPEND_S = 5.0
 _SHELL_SUSPEND_MAX_S = 60.0
+# Media sessions that hold an app's video / music state in its process (density_reconciler never kills those).
+_LIVE_MEDIA_STATES = ("PLAYING", "BUFFERING", "PAUSED")
+# …and how long a session that turned STOPPED still counts: a task moved to another display stops its player for an
+# instant while the activity re-attaches (YouTube: PLAYING → STOPPED within 0.7 s of its window opening).
+_RECENT_MEDIA_S = 30.0
 # Telemetry reads: a poll that is not answered this fast is skipped (the caller falls back), never queued behind.
 _PING_TIMEOUT_S = 2.0
 _PROC_PROBE_TIMEOUT_S = 4.0
@@ -189,6 +194,8 @@ class DeviceDaemonClient:
         # The phone panel (display 0) as its apps see it — density/size, PhoneDisplay.java. Refreshed by every
         # `display_get` reply and by the daemon's push when the user changes "Display size" / "Smallest width".
         self.last_display_state: dict[str, Any] = {"ok": False}
+        # package (lower case) → when it was last seen playing / buffering / paused (holds_media_session)
+        self._media_live_at: dict[str, float] = {}
 
         # Set to True after first successful spawn to skip pgrep on reconnects
         self._daemon_known_running: bool = False
@@ -638,6 +645,7 @@ class DeviceDaemonClient:
         """Medya anlık görüntüsünü önbelleğe alır ve tüm istemcilere yayar. Kapak yalnızca AYNI şarkı için taşınır
         (media_state.carry_over_art): yeni şarkının kapağı gelmediyse boş kalır ve `art_ready=false` ile bildirilir."""
         carry_over_art(self.last_media_state, data)
+        self._note_media_activity(data)
 
         # ── Medya Debug Logları ───────────────────────────────────────────
         prev = self.last_media_state
@@ -699,13 +707,30 @@ class DeviceDaemonClient:
         wanted = package.lower()
         return [s for s in sessions if isinstance(s, dict) and str(s.get("package", "")).lower() == wanted]
 
+    def _note_media_activity(self, data: dict[str, Any]) -> None:
+        """Remembers when each package was last seen playing / buffering / paused, from every snapshot (pushed or read)."""
+        sessions = data.get("sessions")
+        if not isinstance(sessions, list):
+            sessions = [data] if data.get("active") else []
+        now = self._clock()
+        for s in sessions:
+            if isinstance(s, dict) and s.get("package") and (s.get("is_playing") is True or s.get("state") in _LIVE_MEDIA_STATES):
+                self._media_live_at[str(s["package"]).lower()] = now
+
     async def holds_media_session(self, package: str) -> bool | None:
         """Does ``package`` hold a live media session — playing, buffering or PAUSED? A paused video is still a session: its page,
-        position and queue live in the app's process. None: unknown."""
+        position and queue live in the app's process. None: unknown.
+
+        A session that reads STOPPED but was playing / paused a moment ago counts too: an app moving to another display
+        stops its player for an instant (2026-10-27 19:51: YouTube, playing in the background, read STOPPED 0.7 s after
+        PLAYING while its window opened — the guard saw "no session" and the density restart killed the video)."""
         sessions = await self._sessions_of(package)
         if sessions is None:
             return None
-        return any(s.get("is_playing") is True or s.get("state") in ("PLAYING", "BUFFERING", "PAUSED") for s in sessions)
+        if any(s.get("is_playing") is True or s.get("state") in _LIVE_MEDIA_STATES for s in sessions):
+            return True
+        live_at = self._media_live_at.get(package.lower())
+        return bool(sessions) and live_at is not None and self._clock() - live_at <= _RECENT_MEDIA_S
 
     # =========================================================================
     # Fast RPC Command Dispatcher (< 1ms execution)
@@ -1042,6 +1067,22 @@ class DeviceDaemonClient:
         us, offers `shell` (a token-started daemon of a current jar), and has not just lost a reply."""
         return self.serves(serial) and self.supports("shell") and self._clock() >= self._shell_suspended_until
 
+    def coming_for(self, serial: str) -> bool:
+        """Started for `serial` but not connected (yet / again): the start-up spawn or the supervisor's reconnect is
+        under way. Shell commands for that phone wait for it (wait_shell) instead of starting adb processes."""
+        return self._running and self._serial == serial and not self.is_connected
+
+    async def wait_shell(self, serial: str, timeout_s: float) -> bool:
+        """True once a shell command for `serial` can go through the daemon — waiting at most `timeout_s`, and only
+        while the daemon is coming for that phone. False at once when it is not (no session, another phone, a daemon
+        that just lost a reply: that one is known to be silent, adb answers now)."""
+        deadline = self._clock() + max(0.0, timeout_s)
+        while not self.serves_shell(serial):
+            if not self.coming_for(serial) or self._clock() >= deadline:
+                return False
+            await asyncio.sleep(0.05)
+        return True
+
     async def run_shell(self, command: str, *, timeout_s: float, binary: bool = False) -> ShellOutcome | None:
         """Runs `command` on the phone through the daemon (``sh -c``, stdin closed, stdout and stderr apart), the way
         `adb shell` would, and returns what happened — or None when the daemon did not take it, in which case NOTHING is
@@ -1061,7 +1102,10 @@ class DeviceDaemonClient:
             body, "shell", timeout=timeout_s + _SHELL_REPLY_GRACE_S, quiet=True, metered=False,
         )
         if resp is None:
-            if self.is_connected:  # still connected: the daemon is alive but silent — stop waiting on it for a while
+            # Still connected but this reply did not come: is the daemon silent, or was only this command slow? A ping
+            # tells (it does not queue behind a shell command). Only a silent daemon sends the next commands to adb —
+            # one slow command used to divert EVERY command for 5 s (2026-10-27 19:24: settings and pkill over adb).
+            if self.is_connected and await self.ping() is None:
                 self._suspend_shell()
             return None
         self._shell_losses = 0

@@ -363,3 +363,48 @@ async def test_a_failing_daemon_command_is_still_counted_with_its_carrier(spawne
     with pytest.raises(AdbError):
         await adb_with(FakeTransport(ok(exit_code=1))).shell("settings get global wifi_on", serial=SERIAL)
     assert meter.top()[0]["via"] == "daemon"
+
+
+# ---------------------------------------------------------------- a daemon on its way is waited for, not bypassed
+
+
+class ComingTransport(FakeTransport):
+    """A daemon that is (re)connecting: not serving yet; wait_shell says whether it arrived within the wait."""
+
+    def __init__(self, outcome=None, *, arrives: bool):
+        super().__init__(outcome, serves=False)
+        self.arrives = arrives
+        self.waits: list[tuple[str, float]] = []
+
+    async def wait_shell(self, serial, timeout_s):
+        self.waits.append((serial, timeout_s))
+        if self.arrives:
+            self.serves = True
+        return self.arrives
+
+
+async def test_a_command_waits_for_a_reconnecting_daemon_instead_of_starting_adb(spawned):
+    """2026-10-27 17:07:31: the phone came back and nine commands (battery, power, volumes, settings, notifications, a
+    MediaBridge JVM) went through adb half a second before the daemon greeted us."""
+    transport = ComingTransport(ok(b"Battery: 34\n"), arrives=True)
+    out = await adb_with(transport).shell("dumpsys battery", serial=SERIAL, timeout_s=5.0)
+    assert out == "Battery: 34\n"
+    assert transport.waits == [(SERIAL, adb_module.DAEMON_COMEBACK_WAIT_S)]
+    assert spawned == []
+
+
+async def test_the_wait_is_bounded_by_the_commands_own_timeout(spawned):
+    transport = ComingTransport(ok(b""), arrives=True)
+    await adb_with(transport).shell("true", serial=SERIAL, timeout_s=1.5)
+    assert transport.waits == [(SERIAL, 1.5)]
+
+
+async def test_a_daemon_that_does_not_arrive_leaves_the_command_to_adb(spawned):
+    transport = ComingTransport(arrives=False)
+    out = await adb_with(transport).shell("dumpsys battery", serial=SERIAL, timeout_s=5.0)
+    assert out == "adb-out" and len(spawned) == 1 and transport.calls == []
+
+
+async def test_a_transport_without_wait_shell_is_not_waited_for(spawned):
+    out = await adb_with(FakeTransport(serves=False)).shell("true", serial=SERIAL, timeout_s=5.0)
+    assert out == "adb-out" and len(spawned) == 1
