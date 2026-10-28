@@ -95,6 +95,7 @@ class AppAudioState:
     explicit: bool = False        # route/volume/mute come from a saved preference, not the default
     windows: set[str] = field(default_factory=set)
     on_phone: bool = False        # the app is showing on the phone right now (handoff / parked member)
+    phone_pick: AudioRoute | None = None   # what the user chose WHILE it is on the phone; gone when it is back (not saved)
     stream_id: int | None = None
     live_route: AudioRoute = "phone"   # what the phone is ACTUALLY doing
     error: str | None = None
@@ -107,13 +108,17 @@ class AppAudioState:
     phone_ms: int | None = None   # … and the phone's own (the same plus the user's fine tune)
 
     def target_route(self) -> AudioRoute:
-        return "phone" if (not self.windows or self.on_phone) else self.route
+        """Handed to the phone, the sound follows the app there — unless the user picked another route since (the mixer, the
+        Media Center chip): the capture works on the app's UID, whichever screen it is shown on."""
+        if not self.windows:
+            return "phone"
+        return (self.phone_pick or "phone") if self.on_phone else self.route
 
     def public(self) -> dict[str, Any]:
         return {
             "package": self.package, "route": self.route, "live_route": self.live_route,
             "volume": self.volume, "muted": self.muted, "explicit": self.explicit,
-            "windows": sorted(self.windows), "on_phone": self.on_phone,
+            "windows": sorted(self.windows), "on_phone": self.on_phone, "phone_pick": self.phone_pick,
             "stream_id": self.stream_id, "error": self.error, "standalone": self.standalone,
             "synced": self.synced, "target_ms": self.target_ms, "phone_ms": self.phone_ms,
         }
@@ -270,6 +275,8 @@ class AppAudioRouter:
             if route is not None:
                 state.route = route
                 state.restarts = 0
+                if state.on_phone:
+                    state.phone_pick = route          # the pick holds while the app stays on the phone
             if volume is not None:
                 state.volume = max(0.0, min(1.0, float(volume)))
             if muted is not None:
@@ -384,6 +391,8 @@ class AppAudioRouter:
             for new in windows - state.windows:
                 self._broadcasters.get_or_create(audio_key(new), queue_size=AUDIO_QUEUE_CHUNKS, gop_aware=False)
             state.windows, state.on_phone = set(windows), on_phone
+            if not on_phone:
+                state.phone_pick = None
             state.standalone = package in self._standalone
             await self._apply_locked(state)
 

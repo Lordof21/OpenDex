@@ -220,6 +220,40 @@ async def test_handoff_sends_the_sound_to_the_phone_and_reclaim_brings_it_back()
     assert h.daemon.calls[-1] == ("com.a", "pc")
 
 
+async def test_a_handed_off_app_can_be_sent_to_the_pc_and_back_by_the_user():
+    """The capture works on the app's UID, whichever screen shows it: the user's pick holds while the app is on the phone,
+    and ends with its stay there (the sound is on the phone again after a next handoff)."""
+    h = _Harness()
+    await h.per_app()
+    await h.open("w1", "com.a")
+    h.windows["w1"] = AudioWindow("com.a", on_phone=True)
+    await h.bus.emit("app_handoff_to_phone", window_id="w1", package="com.a")
+    await settle(h.router)
+    assert h.daemon.calls[-1] == ("com.a", "phone")           # by default the sound follows the app
+
+    app = await h.router.set_prefs("com.a", route="pc")       # the user: "DeX'e al" (the saved route is 'pc' already)
+    assert (app["live_route"], app["phone_pick"], app["on_phone"]) == ("pc", "pc", True)
+    assert h.daemon.calls[-1] == ("com.a", "pc")
+
+    app = await h.router.set_prefs("com.a", route="both")
+    assert (app["live_route"], app["phone_pick"]) == ("both", "both")
+    app = await h.router.set_prefs("com.a", route="phone")
+    assert (app["live_route"], app["phone_pick"]) == ("phone", "phone")
+
+    await h.router.set_prefs("com.a", route="pc")
+    h.windows["w1"] = AudioWindow("com.a", on_phone=False)    # reclaimed: the pick ends, the saved route rules again
+    await h.bus.emit("app_handoff_resolved", window_id="w1", package="com.a")
+    await settle(h.router)
+    app = h.router.list_apps()[0]
+    assert (app["live_route"], app["phone_pick"], app["on_phone"]) == ("pc", None, False)
+
+    h.windows["w1"] = AudioWindow("com.a", on_phone=True)     # a NEW handoff: the sound goes to the phone again
+    await h.bus.emit("app_handoff_to_phone", window_id="w1", package="com.a")
+    await settle(h.router)
+    assert h.daemon.calls[-1] == ("com.a", "phone")
+    assert h.router.list_apps()[0]["live_route"] == "phone"
+
+
 async def test_closing_a_handed_off_window_does_not_leave_the_package_stuck_on_the_phone():
     """Plan bug: a package-keyed `_handed_off` set outlived the window, so the app's NEXT window never got PC audio."""
     h = _Harness()

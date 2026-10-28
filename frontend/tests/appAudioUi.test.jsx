@@ -87,6 +87,21 @@ describe('mixer: DeX\'teki uygulamalar', () => {
     expect(screen.queryByRole('slider', { name: 'YouTube ses düzeyi' })).toBeNull();
   });
 
+  it('a handed-off app whose sound the user took to DeX gets its level control back, and the selector shows the pick', () => {
+    seed([app({ on_phone: true, phone_pick: 'pc', live_route: 'pc' })]);
+    renderMixer();
+    expect(screen.queryByText(/telefona devredildi/)).toBeNull();
+    expect(screen.getByRole('slider', { name: 'YouTube ses düzeyi' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /DeX/, checked: true })).toBeInTheDocument();
+  });
+
+  it('a handed-off app: picking DeX in the mixer sends the route (the selector showed Telefon although the saved route is DeX)', () => {
+    seed([app({ on_phone: true, live_route: 'phone' })]);
+    renderMixer();
+    fireEvent.click(screen.getByRole('radio', { name: /DeX/ }));
+    expect(api.put).toHaveBeenCalledWith('/api/audio/apps/com.google.android.youtube', { route: 'pc' });
+  });
+
   it('Android 12 and older: explains the single stream', () => {
     seed([], 'legacy');
     renderMixer();
@@ -125,10 +140,13 @@ describe('Media Center RouteChip', () => {
     expect(api.put).toHaveBeenCalledWith('/api/audio/apps/com.google.android.youtube', { route: 'phone' });
   });
 
-  it('is disabled while the app is handed off to the phone', () => {
+  it('a handed-off app can still be taken to DeX from the chip (its saved route is DeX already: the pick is what counts)', () => {
     seed([app({ on_phone: true, live_route: 'phone' })]);
     render(<RouteChip pkg="com.google.android.youtube" />);
-    expect(screen.getByRole('button', { name: 'Ses: Telefon' })).toBeDisabled();
+    const chip = screen.getByRole('button', { name: 'Ses: Telefon' });
+    expect(chip).not.toBeDisabled();
+    fireEvent.click(chip);
+    expect(api.put).toHaveBeenCalledWith('/api/audio/apps/com.google.android.youtube', { route: 'pc' });
   });
 });
 
@@ -199,11 +217,11 @@ describe('Media Center RouteChip — press & hold opens Telefon / DeX / İkisi',
     expect(screen.getByRole('menu')).toBeInTheDocument();
   });
 
-  it('a handed-off app has no menu (its sound follows it to the phone)', async () => {
+  it('a handed-off app has the menu too: Telefon / DeX / İkisi', async () => {
     seed([app({ on_phone: true, live_route: 'phone' })]);
     render(<RouteChip pkg="com.google.android.youtube" />);
     fireEvent.contextMenu(screen.getByRole('button', { name: 'Ses: Telefon' }));
-    expect(screen.queryByRole('menu')).toBeNull();
+    expect(screen.getByRole('menu')).toBeInTheDocument();
   });
 
   it('İkisi that could not be aligned says so in the menu', async () => {

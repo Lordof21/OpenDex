@@ -3,7 +3,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { Smartphone, Volume2, VolumeX } from 'lucide-react';
-import { selectAppForWindow, useAudioMixerStore } from '../../state/audioMixerStore.js';
+import { effectiveRoute, selectAppForWindow, useAudioMixerStore } from '../../state/audioMixerStore.js';
 import { RouteSelector, audioErrorText } from '../../ui/audioRouting.jsx';
 import { MixerRow } from '../../taskbar/MixerRow.jsx';
 import { pushEscapeHandler } from '../../lib/escapeStack.js';
@@ -33,7 +33,8 @@ export default function AudioButton({ windowId, compact = false }) {
 
   if (!app) return null;          // no own channel (Android ≤12, mirror window, or not tracked yet)
 
-  const onPhone = app.on_phone || app.route === 'phone';
+  const route = effectiveRoute(app);
+  const onPhone = route === 'phone';
   const Icon = onPhone ? Smartphone : app.muted ? VolumeX : Volume2;
   const label = onPhone ? t('window.ses_telefonda_ses_ayarlari') : app.muted ? t('common.sesi_ac') : t('window.sessize_al');
   const errorText = audioErrorText(app.error);
@@ -75,8 +76,8 @@ export default function AudioButton({ windowId, compact = false }) {
         >
           <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('window.ses_cikisi')}</p>
           <RouteSelector
-            value={app.route}
-            onChange={(route) => setRoute(app.package, route)}
+            value={route}
+            onChange={(next) => setRoute(app.package, next)}
             label={t('window.bu_pencerenin_ses_cikisi')}
             className="w-full justify-between"
           />

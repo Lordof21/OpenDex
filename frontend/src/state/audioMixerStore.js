@@ -55,6 +55,9 @@ export function isLegacyAudioMode(mode) {
   return mode !== 'per_app' && mode !== 'pending';
 }
 
+/** The route an app really has for the user: handed to the phone, its sound is there unless they picked another since (not saved). */
+export const effectiveRoute = (app) => (app?.on_phone ? app.phone_pick || 'phone' : app?.route);
+
 function withPending(app) {
   const edit = pending[app.package];
   return edit ? { ...app, ...edit } : app;
@@ -166,14 +169,15 @@ export const useAudioMixerStore = create((set, get) => ({
 
   async setRoute(pkg, route) {
     const prev = get().apps[pkg];
-    if (!prev || prev.route === route) return;
-    set((s) => ({ apps: { ...s.apps, [pkg]: { ...prev, route } } }));          // optimistic
+    if (!prev || effectiveRoute(prev) === route) return;
+    // Optimistic. Handed to the phone, the pick is the app's `phone_pick` (the backend keeps it until the app is back).
+    set((s) => ({ apps: { ...s.apps, [pkg]: { ...prev, route, ...(prev.on_phone ? { phone_pick: route } : {}) } } }));
     try {
       const saved = await api.put(endpoint(pkg), { route });
       // live_route/error as the phone applied it; `windows: []` (a transferred app sent back to the phone) removes it
       if (saved?.package) get().onAppAudioState(saved);
     } catch {
-      set((s) => (s.apps[pkg] ? { apps: { ...s.apps, [pkg]: { ...s.apps[pkg], route: prev.route } } } : {}));
+      set((s) => (s.apps[pkg] ? { apps: { ...s.apps, [pkg]: { ...s.apps[pkg], route: prev.route, phone_pick: prev.phone_pick } } } : {}));
     }
   },
 

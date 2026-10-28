@@ -284,6 +284,7 @@
           "win-clips"
         ],
         "on_phone": false,
+        "phone_pick": null,
         "stream_id": 1,
         "error": null,
         "standalone": false,
@@ -302,6 +303,7 @@
           "win-notes"
         ],
         "on_phone": false,
+        "phone_pick": null,
         "stream_id": 2,
         "error": null,
         "standalone": false,
@@ -320,6 +322,7 @@
           "win-chat"
         ],
         "on_phone": false,
+        "phone_pick": null,
         "stream_id": null,
         "error": null,
         "standalone": false,

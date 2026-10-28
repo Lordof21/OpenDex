@@ -29,7 +29,6 @@ export default function RouteChip({ pkg, className, tooltipPosition, tooltipAlig
 
   const hasWindow = Boolean(app?.windows?.length);
   const live = (hasWindow && app.live_route) || 'phone';
-  const handedOff = hasWindow && Boolean(app.on_phone);
 
   /** Moves the app to `route`; an app without a window is first brought over (it needs a channel of its own). */
   const moveTo = async (route) => {
@@ -47,7 +46,8 @@ export default function RouteChip({ pkg, className, tooltipPosition, tooltipAlig
     }
   };
 
-  const disabled = busy || handedOff;
+  // A handed-off app is movable too: its sound follows it to the phone by default, the user may still take it to DeX.
+  const disabled = busy;
   // The quick flip: the phone ↔ DeX (from "İkisi" back to the phone, as before)
   const flipTo = live === 'phone' ? 'pc' : 'phone';
   const press = useLongPress({
@@ -61,9 +61,7 @@ export default function RouteChip({ pkg, className, tooltipPosition, tooltipAlig
   if (!hasWindow && !supported) return null;     // no per-app capture here: the app plays on the phone and that is all there is
 
   const { icon: Icon, label } = routeOption(live);
-  const title = handedOff
-    ? 'Uygulama telefona devredildi; sesi onunla birlikte telefonda'
-    : t('taskbar.bu_uygulamanin_sesi_label_tikla_value', { label, value: flipTo === 'pc' ? "DeX'e al" : t('taskbar.telefona_gonder') });
+  const title = t('taskbar.bu_uygulamanin_sesi_label_tikla_value', { label, value: flipTo === 'pc' ? "DeX'e al" : t('taskbar.telefona_gonder') });
   const notice = live === 'both' && hasWindow && app.synced === false
     ? t('taskbar.telefon_sesi_dex_ile_hizalanamadi')
     : null;

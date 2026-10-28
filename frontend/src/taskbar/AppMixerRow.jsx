@@ -5,7 +5,7 @@ import React from 'react';
 import { Smartphone, Volume2, VolumeX } from 'lucide-react';
 import AppIcon from '../ui/AppIcon.jsx';
 import { LevelMeter, RouteSelector, audioErrorText } from '../ui/audioRouting.jsx';
-import { useAudioMixerStore } from '../state/audioMixerStore.js';
+import { effectiveRoute, useAudioMixerStore } from '../state/audioMixerStore.js';
 import { MixerRow } from './MixerRow.jsx';
 import { t } from '../i18n/index.js';
 
@@ -16,9 +16,10 @@ export default function AppMixerRow({ app, label }) {
   const name = label || app.package;
   const errorText = audioErrorText(app.error);
 
+  // Handed to the phone its sound is there too — until the user picks DeX (then the level controls are back).
+  const route = effectiveRoute(app);
   let phoneNote = null;
-  if (app.on_phone) phoneNote = t('taskbar.telefonda_uygulama_telefona_devredildi');
-  else if (app.route === 'phone') phoneNote = t('taskbar.yalniz_telefonda_caliyor');
+  if (route === 'phone') phoneNote = app.on_phone ? t('taskbar.telefonda_uygulama_telefona_devredildi') : t('taskbar.yalniz_telefonda_caliyor');
 
   return (
     <div className="border-b border-border/55 py-2 last:border-b-0" data-testid={`app-mixer-${app.package}`}>
@@ -28,8 +29,8 @@ export default function AppMixerRow({ app, label }) {
           {name}
         </span>
         <RouteSelector
-          value={app.route}
-          onChange={(route) => setRoute(app.package, route)}
+          value={route}
+          onChange={(next) => setRoute(app.package, next)}
           label={t('taskbar.name_ses_cikisi', { name })}
         />
       </div>
