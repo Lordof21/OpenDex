@@ -770,8 +770,16 @@
   100% { background-color: transparent; box-shadow: 0 0 0 0 transparent; }
 }
 .settings-flash { animation: settings-flash 1.5s ease-out; }
+/* Aramanın bulduğu seçenek kartı: kenarlık rengiyle aynı halka iki kez nabız atar, sonra söner. */
+@keyframes settings-flash-option {
+  0%, 50% { box-shadow: 0 0 0 2px color-mix(in oklab, var(--primary) 70%, transparent), 0 0 0 6px color-mix(in oklab, var(--primary) 18%, transparent); }
+  25%, 75% { box-shadow: 0 0 0 2px color-mix(in oklab, var(--primary) 70%, transparent), 0 0 0 2px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+.settings-flash-option { animation: settings-flash-option 1.6s ease-out; }
 @media (prefers-reduced-motion: reduce) {
   .settings-flash { animation: none; background-color: color-mix(in oklab, var(--primary) 12%, transparent); }
+  .settings-flash-option { animation: none; box-shadow: 0 0 0 2px color-mix(in oklab, var(--primary) 60%, transparent); }
 }
 
 /* Tuval katmanları (window/canvas-overlays): yalnız transform/opacity/stroke-dashoffset animasyonları — video yüzeyinin altındaki

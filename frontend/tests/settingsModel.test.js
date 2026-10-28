@@ -72,6 +72,22 @@ describe('searchSettings', () => {
     expect(searchSettings('freeform')[0].id).toBe('handoffWindowing');
   });
 
+  it('kartların içindeki seçeneklerde de arar ("1 mbps" → Video bit hızı · 12 ve 16 Mbps)', () => {
+    const [first] = searchSettings('1 mbps');
+    expect(first.id).toBe('bitrate');
+    expect(first.options.map((o) => o.value)).toEqual(['12', '16']);
+    expect(searchSettings('200 dpi')[0]).toMatchObject({ id: 'customDpi', options: [{ value: '200', label: '200 DPI' }] });
+    expect(searchSettings('av1')[0]).toMatchObject({ id: 'codec', options: [{ value: 'av1' }] });
+  });
+
+  it('ayarın kendisi daha iyi eşleşiyorsa seçenek taşımaz; yalnız seçeneğin açıklamasında geçen sözcük kartı öne çıkarmaz', () => {
+    const custom = searchSettings('özel dpi').find((r) => r.id === 'customDpi');
+    expect(custom.options).toBeUndefined();
+    expect(searchSettings('özel dpi')[0].id).toBe('customDpi');
+    // "zayıf ağ için" yalnız 2 Mbps kartının açıklamasında: kart vurgulanmaz
+    expect(searchSettings('zayif').find((r) => r.id === 'bitrate')).toBeUndefined();
+  });
+
   it('sonuç sınırını uygular ve bölüm bilgisini taşır', () => {
     const results = searchSettings('a', { limit: 5 });
     expect(results.length).toBeLessThanOrEqual(5);

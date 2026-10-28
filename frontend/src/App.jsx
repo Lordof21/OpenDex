@@ -28,6 +28,7 @@ import { isLegacyAudioMode, useAudioMixerStore } from './state/audioMixerStore.j
 
 import BootSplash from './startup/BootSplash.jsx';
 import WallpaperLayer from './desktop/wallpaper/WallpaperLayer.jsx';
+import SharpenFilters from './window/SharpenFilters.jsx';
 import { useWallpaper, useWallpaperSlideshow } from './desktop/wallpaper/useWallpaper.js';
 import PipApp from './window/PipApp.jsx';
 import WorkspacePipApp from './window/workspacePip/WorkspacePipApp.jsx';
@@ -136,8 +137,11 @@ export default function App() {
   // ---- global keyboard routing & AppLauncher shortcut ---
   useEffect(() => {
     const onKeyDown = (e) => {
-      // Cmd+K or Ctrl+K -> App launcher search palette
+      // Cmd+K or Ctrl+K -> App launcher search palette; while the OpenDeX Settings window has focus it belongs to its own search
+      // (SettingsPanel listens for it).
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        const sys = useSystemStore.getState();
+        if (sys.settingsOpen && !sys.settingsMinimized && sys.settingsFocused && !sys.launchpadOpen) return;
         e.preventDefault();
         useSystemStore.getState().toggleLaunchpad();
         return;
@@ -189,30 +193,7 @@ export default function App() {
       <WallpaperLayer wallpaper={wallpaper} />
 
       {/* Global GPU Sharpening SVG Filter Kernels (Adaptive & Ultra Lanczos/CAS) */}
-      <svg className="pointer-events-none absolute size-0 opacity-0" aria-hidden="true">
-        <defs>
-          <filter id="dex-sharpen-adaptive" x="0%" y="0%" width="100%" height="100%">
-            <feConvolveMatrix
-              order="3"
-              preserveAlpha="true"
-              kernelMatrix="
-                 0   -0.18   0
-               -0.18  1.72 -0.18
-                 0   -0.18   0"
-            />
-          </filter>
-          <filter id="dex-sharpen-ultra" x="0%" y="0%" width="100%" height="100%">
-            <feConvolveMatrix
-              order="3"
-              preserveAlpha="true"
-              kernelMatrix="
-               -0.15 -0.35 -0.15
-               -0.35  3.00 -0.35
-               -0.15 -0.35 -0.15"
-            />
-          </filter>
-        </defs>
-      </svg>
+      <SharpenFilters />
 
       <AnimatePresence>
         {!backendHealthy && (

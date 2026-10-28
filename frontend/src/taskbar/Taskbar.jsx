@@ -727,6 +727,7 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
   return (
     <div
       ref={rootRef}
+      data-taskbar-root=""
       className={cn(
         'relative h-[50px] w-full shrink-0 z-taskbar select-none transition-all duration-200',
         hasFullscreenWindow && 'hidden'

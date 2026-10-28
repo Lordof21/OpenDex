@@ -160,16 +160,18 @@ export function ToggleRow({ item, icon: Icon, title, description, detail, badge,
 // ───────────────────────────────────────────────────────────────────────────────────────── Seçim kartları
 
 /** Seçim kartı: etiket + etiket-hapı + kısa açıklama; seçili kart vurgulu ve onay işaretli. */
-export function ChoiceCard({ option, selected, onSelect, icon: Icon }) {
+export function ChoiceCard({ option, selected, onSelect, icon: Icon, flash = false }) {
   return (
     <button
       type="button"
       onClick={() => onSelect(option.value)}
       aria-pressed={selected}
       title={option.description}
+      data-option-value={String(option.value)}
       className={cn(
         'group relative flex h-full min-w-0 cursor-pointer flex-col rounded-lg border px-3 py-2.5 text-left outline-none transition-[border-color,background-color,box-shadow] focus-visible:ring-2 focus-visible:ring-ring',
         selected ? 'border-primary bg-primary/[0.06] shadow-xs' : 'border-border/60 bg-background/60 hover:border-border hover:bg-background',
+        flash && 'settings-flash-option',
       )}
     >
       <span className="flex items-start gap-2">
@@ -202,10 +204,12 @@ export function ChoiceCard({ option, selected, onSelect, icon: Icon }) {
  */
 export function ChoiceGroup({ item, icon: Icon, title, subtitle, options, value, onChange, columns = 2, optionIcons, readout, children, detail }) {
   const meta = item ? settingItem(item) : null;
-  const { layout, flashId } = useSettingsUi();
+  const { layout, flashId, flashOptions } = useSettingsUi();
   const cols = layout === 'narrow' ? 1 : layout === 'rail' ? Math.min(columns, 2) : columns;
+  // Arama bir seçeneği bulduysa vurgu o kartlardadır; grubun kendisi sönük kalır (göz doğrudan karta gitsin).
+  const optionFlash = item && flashId === item && flashOptions?.length ? flashOptions.map(String) : null;
   return (
-    <section data-setting-id={item} className={cn('rounded-xl border border-border/70 bg-muted/30 p-3.5 transition-colors', flashClass(flashId, item))}>
+    <section data-setting-id={item} className={cn('rounded-xl border border-border/70 bg-muted/30 p-3.5 transition-colors', !optionFlash && flashClass(flashId, item))}>
       <div className="mb-2.5 flex items-start gap-2.5">
         {Icon && <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
         <div className="min-w-0 flex-1">
@@ -216,7 +220,14 @@ export function ChoiceGroup({ item, icon: Icon, title, subtitle, options, value,
       </div>
       <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
         {options.map((option) => (
-          <ChoiceCard key={String(option.value)} option={option} selected={value === option.value} onSelect={onChange} icon={optionIcons?.[option.value]} />
+          <ChoiceCard
+            key={String(option.value)}
+            option={option}
+            selected={value === option.value}
+            onSelect={onChange}
+            icon={optionIcons?.[option.value]}
+            flash={Boolean(optionFlash?.includes(String(option.value)))}
+          />
         ))}
       </div>
       {children}

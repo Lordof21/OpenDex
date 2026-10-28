@@ -158,7 +158,7 @@ describe('arama', () => {
     expect(list.querySelector('mark')).not.toBeNull();
   });
 
-  it('sonuca basınca ilgili bölüme gider, aramayı temizler ve satırı vurgular', async () => {
+  it('sonuca basınca ilgili bölüme gider, aramayı temizler ve bulunan kartı vurgular (hevc → H.265 kartı)', async () => {
     await mount();
     search('hevc');
     fireEvent.click(within(screen.getByRole('region', { name: 'Arama sonuçları' })).getAllByRole('button')[0]);
@@ -166,7 +166,7 @@ describe('arama', () => {
     expect(screen.getByRole('searchbox')).toHaveValue('');
     const row = document.querySelector('[data-setting-id="codec"]');
     expect(row).not.toBeNull();
-    expect(row.className).toContain('settings-flash');
+    expect(row.querySelector('[data-option-value="h265"]').className).toContain('settings-flash-option');
   });
 
   it('Enter ilk sonuca gider', async () => {
@@ -200,6 +200,69 @@ describe('arama', () => {
     await mount();
     fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
     expect(document.activeElement).toBe(screen.getByRole('searchbox'));
+  });
+
+  it('kartın içindeki seçeneği bulur, sonuçta gösterir; gidince o kart vurgulanır', async () => {
+    await mount();
+    search('16 mbps');
+    const list = screen.getByRole('region', { name: 'Arama sonuçları' });
+    const first = within(list).getAllByRole('button')[0];
+    expect(first).toHaveTextContent('Video Bit Hızı');
+    expect(within(first).getByLabelText('Eşleşen seçenekler')).toHaveTextContent('16 Mbps');
+    fireEvent.click(first);
+    expect(navButton('Yayın')).toHaveAttribute('aria-current', 'page');
+    const group = document.querySelector('[data-setting-id="bitrate"]');
+    expect(group.querySelector('[data-option-value="16"]').className).toContain('settings-flash-option');
+    expect(group.querySelector('[data-option-value="8"]').className).not.toContain('settings-flash-option');
+    expect(group.className).not.toContain('settings-flash'); // vurgu kartta; grup sönük
+  });
+
+  it('vurgu sönünce sayfa başa geri kaymaz (özel dpi → satıra iner, orada kalır)', async () => {
+    vi.useFakeTimers();
+    try {
+      await mount();
+      fireEvent.click(navButton('Görüntü'));
+      const scroller = screen.getByRole('searchbox').closest('[role="dialog"]').querySelector('.dex-scroll');
+      const scrollTo = vi.spyOn(scroller, 'scrollTo');
+      search('özel dpi');
+      fireEvent.keyDown(screen.getByRole('searchbox'), { key: 'Enter' });
+      expect(document.querySelector('[data-setting-id="customDpi"]').className).toContain('settings-flash');
+      await act(async () => {
+        vi.advanceTimersByTime(2500);
+      });
+      expect(document.querySelector('[data-setting-id="customDpi"]').className).not.toContain('settings-flash');
+      expect(scrollTo).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('Ctrl+K: ayarlar odaktayken aramaya; bir uygulama penceresi odaklanınca ayarlar odağı bırakır', async () => {
+    await mount();
+    expect(useSystemStore.getState().settingsFocused).toBe(true);
+    act(() => useWindowStore.setState((s) => ({ nextZ: (s.nextZ || 0) + 1 })));
+    expect(useSystemStore.getState().settingsFocused).toBe(false);
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    expect(document.activeElement).not.toBe(screen.getByRole('searchbox'));
+    fireEvent.pointerDown(screen.getByRole('dialog', { name: 'Tüm OpenDeX ayarları' }));
+    expect(useSystemStore.getState().settingsFocused).toBe(true);
+  });
+
+  it('pencere dışına (masaüstü) tıklamak odağı bırakır; görev çubuğu tıklaması bırakmaz', async () => {
+    await mount();
+    const bar = document.createElement('div');
+    bar.setAttribute('data-taskbar-root', '');
+    const desk = document.createElement('div');
+    document.body.append(bar, desk);
+    try {
+      fireEvent.pointerDown(bar);
+      expect(useSystemStore.getState().settingsFocused).toBe(true);
+      fireEvent.pointerDown(desk);
+      expect(useSystemStore.getState().settingsFocused).toBe(false);
+    } finally {
+      bar.remove();
+      desk.remove();
+    }
   });
 
   it('x düğmesi aramayı temizler', async () => {

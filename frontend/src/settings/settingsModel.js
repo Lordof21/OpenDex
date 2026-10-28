@@ -285,36 +285,83 @@ export function fold(text) {
     .trim();
 }
 
+const WORD_SPLIT = /[\s/&().:'’‑×-]+/;
+const startsWord = (text, token) => text.split(WORD_SPLIT).some((word) => word.startsWith(token));
+
+/** Ayarın kendi metinlerinde bir sözcüğün puanı: başlık > anahtar sözcük > bölüm adı > açıklama; yoksa 0. */
+function itemTokenScore(fields, token) {
+  if (fields.title.startsWith(token)) return 12;
+  if (startsWord(fields.title, token)) return 9;
+  if (fields.title.includes(token)) return 6;
+  if (fields.keywords.includes(token)) return 5;
+  if (fields.section.includes(token)) return 3;
+  if (fields.description.includes(token)) return 2;
+  return 0;
+}
+
+/** Kartın içindeki bir seçenekte sözcüğün puanı: etiket ("16 Mbps") > etiket hapı ("2K") > seçeneğin açıklaması. */
+function optionTokenScore(fields, token) {
+  if (startsWord(fields.label, token)) return 8;
+  if (fields.label.includes(token)) return 7;
+  if (fields.tag.includes(token)) return 5;
+  if (fields.description.includes(token)) return 2;
+  return 0;
+}
+
+/** Seçeneğin kendisini öne çıkaran en düşük puan: yalnız açıklamasında geçen sözcük o kartı vurgulatmaz (gürültü). */
+const OPTION_HIT_MIN = 5;
+
 /**
- * Ayarlarda arama. Her sözcük başlık/anahtar/açıklama/bölüm adında geçmelidir (VE); başlık eşleşmesi en yüksek puan.
+ * Ayarlarda arama. Her sözcük ayarın başlık/anahtar/açıklama/bölüm adında YA DA kartın içindeki bir seçenekte geçmelidir
+ * (VE); başlık eşleşmesi en yüksek puan. Bir seçenek sözcüğü ayarın kendisinden daha iyi karşılıyorsa sonuç o seçenekleri
+ * `options` olarak taşır ("1 mbps" → Video bit hızı · 12 Mbps, 16 Mbps): sonuç listesinde gösterilir, gidince o kartlar vurgulanır.
  * Boş sorgu boş liste döner. En çok `limit` sonuç.
  */
-export function searchSettings(query, { limit = 12, items = SETTING_ITEMS } = {}) {
+export function searchSettings(query, { limit = 12, items = SETTING_ITEMS, options = SETTING_OPTIONS } = {}) {
   const tokens = fold(query).split(/\s+/).filter(Boolean);
   if (!tokens.length) return [];
   const results = [];
   for (const [id, item] of Object.entries(items)) {
-    const title = fold(item.title);
-    const keywords = fold((item.keywords || []).join(' '));
-    const description = fold(item.description);
-    const section = fold(SECTIONS[item.section]?.label || '');
-    let score = 0;
-    let all = true;
-    for (const token of tokens) {
-      let best = 0;
-      if (title.startsWith(token)) best = 12;
-      else if (title.split(/[\s/&().:'’‑-]+/).some((word) => word.startsWith(token))) best = 9;
-      else if (title.includes(token)) best = 6;
-      else if (keywords.includes(token)) best = 5;
-      else if (section.includes(token)) best = 3;
-      else if (description.includes(token)) best = 2;
-      if (!best) {
-        all = false;
-        break;
+    const fields = {
+      title: fold(item.title),
+      keywords: fold((item.keywords || []).join(' ')),
+      description: fold(item.description),
+      section: fold(SECTIONS[item.section]?.label || ''),
+    };
+    const own = tokens.map((token) => itemTokenScore(fields, token));
+    let score = own.every(Boolean) ? own.reduce((sum, value) => sum + value, 0) : 0;
+
+    const hits = [];
+    for (const option of options[id] || []) {
+      const optionFields = { label: fold(option.label), tag: fold(option.tag), description: fold(option.description) };
+      let optionScore = 0;
+      let lifted = false;
+      for (let i = 0; i < tokens.length; i += 1) {
+        const value = optionTokenScore(optionFields, tokens[i]);
+        if (value > own[i] && value >= OPTION_HIT_MIN) lifted = true;
+        const best = Math.max(own[i], value);
+        if (!best) {
+          optionScore = 0;
+          break;
+        }
+        optionScore += best;
       }
-      score += best;
+      if (optionScore && lifted) hits.push({ option, score: optionScore });
     }
-    if (all) results.push({ id, section: item.section, title: item.title, description: item.description, score });
+    const topOption = hits.length ? Math.max(...hits.map((hit) => hit.score)) : 0;
+    score = Math.max(score, topOption);
+    if (!score) continue;
+    const matched = hits
+      .filter((hit) => hit.score === topOption)
+      .map(({ option }) => ({ value: option.value, label: option.label }));
+    results.push({
+      id,
+      section: item.section,
+      title: item.title,
+      description: item.description,
+      score,
+      ...(matched.length ? { options: matched } : {}),
+    });
   }
   results.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title, activeLocale()));
   return results.slice(0, limit);
@@ -423,6 +470,35 @@ export const APP_CLOSED_OPTIONS = [
   { value: 'close', label: t('common.pencereyi_kapat'), description: t('settings.telefondan_kapatilan_uygulamanin'), tag: t('common.varsayilan') },
   { value: 'badge', label: t('common.pencerede_goster'), description: t('settings.pencere_kalir_ustunde_yeniden_ac'), tag: t('common.yeniden_ac') },
 ];
+
+/** Ses çıkışı kartlarının arama karşılığı (kartların kendisi ui/audioRouting.jsx'teki ikonlu listeden çizilir). */
+const AUDIO_ROUTE_SEARCH_OPTIONS = [
+  { value: 'phone', label: t('common.telefon'), ...AUDIO_ROUTE_TEXT.phone },
+  { value: 'pc', label: 'DeX', ...AUDIO_ROUTE_TEXT.pc },
+  { value: 'both', label: t('common.ikisi'), ...AUDIO_ROUTE_TEXT.both },
+];
+
+/**
+ * Arama dizini: ayar kimliği → kartın içindeki seçenekler (bölümlerin `ChoiceGroup item=… options=…` eşlemesiyle birebir).
+ * Yeni bir seçim grubu eklerken buraya da ekle: arama yalnız buradakileri bilir.
+ */
+export const SETTING_OPTIONS = {
+  resolutionMode: RESOLUTION_OPTIONS,
+  customDpi: DPI_OPTIONS,
+  targetDp: TARGET_DP_OPTIONS,
+  fitMode: FIT_OPTIONS,
+  sharpen: SHARPEN_OPTIONS,
+  codec: CODEC_OPTIONS,
+  fps: FPS_OPTIONS,
+  bitrate: BITRATE_OPTIONS,
+  windowLimit: WINDOW_LIMIT_OPTIONS,
+  audioRoute: AUDIO_ROUTE_SEARCH_OPTIONS,
+  audioCodec: AUDIO_CODEC_OPTIONS,
+  windowingMode: WINDOWING_MODE_OPTIONS,
+  handoffWindowing: HANDOFF_OPTIONS,
+  appClosed: APP_CLOSED_OPTIONS,
+  theme: THEME_OPTIONS,
+};
 
 // ───────────────────────────────────────────────────────────────────────────────────────── Değer okumaları
 

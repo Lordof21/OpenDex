@@ -306,6 +306,7 @@ export const useSystemStore = create((set, get) => ({
   restoreSettings: () => set({ settingsOpen: true, settingsMinimized: false, settingsFocused: true }),
   toggleSettingsMaximized: () => set((s) => ({ settingsMaximized: !s.settingsMaximized })),
   focusSettings: () => set({ settingsFocused: true, settingsMinimized: false }),
+  blurSettings: () => set({ settingsFocused: false }),
   setLaunchpadOpen: (open) =>
     set((s) => ({ launchpadOpen: typeof open === 'function' ? open(s.launchpadOpen) : !!open })),
   toggleLaunchpad: () => set((s) => ({ launchpadOpen: !s.launchpadOpen })),

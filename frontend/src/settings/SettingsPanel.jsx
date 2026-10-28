@@ -6,8 +6,8 @@
 //   narrow  telefon: kategori listesi → ayrıntı sayfası, geri düğmesiyle (iOS/Android ayarları gibi)
 // Ekran 640 px'in altındaysa pencere tam ekran sayfaya dönüşür (sürükleme/boyutlandırma yok).
 //
-// Arama (Ctrl/⌘+K): tüm ayarlarda başlık, açıklama ve anahtar sözcüklerle (aksan duyarsız) arar; sonuca basınca ilgili
-// bölüme gider, satıra kayar ve kısa süre vurgular.
+// Arama (Ctrl/⌘+K): tüm ayarlarda başlık, açıklama, anahtar sözcük ve kartların İÇİNDEKİ seçeneklerde ("16 Mbps", "200 DPI")
+// aksan duyarsız arar; sonuca basınca ilgili bölüme gider, satıra (seçenek bulunduysa o karta) kayar ve kısa süre vurgular.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
@@ -163,7 +163,9 @@ function SearchField({ value, onChange, inputRef, onSubmit, compact = false, aut
   );
 }
 
-const SEARCH_SUGGESTIONS = ['DPI', 'FPS', t('settings.ses'), t('settings.tema'), t('settings.telefona_aktar'), t('common.pil_2')];
+const OPTION_CHIPS_SHOWN = 4;
+
+const SEARCH_SUGGESTIONS =['DPI', 'FPS', t('settings.ses'), t('settings.tema'), t('settings.telefona_aktar'), t('common.pil_2')];
 
 function SearchResults({ query, results, onOpen, onSuggest }) {
   if (!results.length) {
@@ -214,6 +216,21 @@ function SearchResults({ query, results, onOpen, onSuggest }) {
                   <span className="mt-0.5 line-clamp-2 block text-[11.5px] leading-[16px] text-muted-foreground">
                     <Highlight text={result.description} query={query} />
                   </span>
+                  {result.options?.length > 0 && (
+                    <span className="mt-1.5 flex flex-wrap items-center gap-1" aria-label={t('settings.eslesen_secenekler')}>
+                      {result.options.slice(0, OPTION_CHIPS_SHOWN).map((option) => (
+                        <span
+                          key={String(option.value)}
+                          className="inline-flex items-center rounded-md border border-primary/25 bg-primary/[0.07] px-1.5 py-px text-[10.5px] font-medium leading-[15px] text-foreground"
+                        >
+                          <Highlight text={option.label} query={query} />
+                        </span>
+                      ))}
+                      {result.options.length > OPTION_CHIPS_SHOWN && (
+                        <span className="text-[10.5px] text-muted-foreground">+{result.options.length - OPTION_CHIPS_SHOWN}</span>
+                      )}
+                    </span>
+                  )}
                 </span>
                 <Chip className="mt-0.5">{SECTIONS[result.section].label}</Chip>
               </button>
@@ -349,6 +366,7 @@ export default function SettingsPanel() {
     minimizeSettings,
     toggleSettingsMaximized,
     focusSettings,
+    blurSettings,
     closeSettings,
   } = useSystemStore();
   const connectionState = useSystemStore((s) => s.connectionState);
@@ -361,7 +379,9 @@ export default function SettingsPanel() {
   const [mobileScreen, setMobileScreen] = useState('list'); // narrow: 'list' | 'detail'
   const [query, setQuery] = useState('');
   const [flashId, setFlashId] = useState(null);
+  const [flashOptions, setFlashOptions] = useState(null); // arama bir seçeneği bulduysa: o kartların değerleri
   const [frame, setFrame] = useState(null);
+  const windowRef = useRef(null);
   const contentRef = useRef(null);
   const stageRef = useRef(null);
   const restoreRef = useRef(null);
@@ -427,12 +447,13 @@ export default function SettingsPanel() {
     });
   }, [settingsOpen, settingsMinimized, closeSettings]);
 
-  // Ctrl/⌘+K: aramaya odaklan (pencere odaktayken).
+  // Ctrl/⌘+K: aramaya odaklan (pencere odaktayken; App.jsx o an başlatıcıyı açmaz). Başlatıcı açıksa kısayol onu kapatır.
   useEffect(() => {
     if (!settingsOpen || settingsMinimized) return undefined;
     const onKey = (event) => {
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'k') return;
-      if (!useSystemStore.getState().settingsFocused) return;
+      const sys = useSystemStore.getState();
+      if (!sys.settingsFocused || sys.launchpadOpen) return;
       event.preventDefault();
       searchRef.current?.focus();
       searchRef.current?.select?.();
@@ -441,40 +462,78 @@ export default function SettingsPanel() {
     return () => window.removeEventListener('keydown', onKey);
   }, [settingsOpen, settingsMinimized]);
 
+  // Odak bir uygulama penceresine geçince (tıklama, Alt+Tab, yeni pencere: hepsi z sırasını artırır) ya da pencerenin dışına
+  // (masaüstü) tıklanınca ayarlar odağı bırakır; Ctrl+K o andan sonra başlatıcıyı açar. Görev çubuğu tıklamaları odağı
+  // değiştirmez: oradaki ayarlar düğmesi "odaktaysa küçült" kararını kendisi verir.
+  useEffect(() => {
+    if (!settingsOpen || settingsMinimized) return undefined;
+    const blur = () => {
+      if (useSystemStore.getState().settingsFocused) blurSettings();
+    };
+    const onPointerDown = (event) => {
+      const target = event.target;
+      if (!(target instanceof Element) || windowRef.current?.contains(target)) return;
+      if (target.closest('[data-taskbar-root], [data-taskbar-portal]')) return;
+      blur();
+    };
+    window.addEventListener('pointerdown', onPointerDown, true);
+    const unsubscribe = useWindowStore.subscribe((state, prev) => {
+      if (state.nextZ !== prev.nextZ) blur();
+    });
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown, true);
+      unsubscribe();
+    };
+  }, [settingsOpen, settingsMinimized, blurSettings]);
+
   const layout = layoutForWidth(frame?.width ?? 1200);
   const sheet = Boolean(frame?.sheet);
   const searching = query.trim().length > 0;
   const results = useMemo(() => searchSettings(query), [query]);
 
-  // Bölüm değişince sayfa başa kaydırılır (arama sonucuna gidişte satıra kaydırma bunu ezer).
+  // Bölüm GERÇEKTEN değişince sayfa başa kaydırılır; arama sonucuna gidişte satıra kaydırma bunu ezer. Vurgunun sönmesi
+  // (flashId → null) bir bölüm değişimi değildir: eskiden bu effect o anda da çalışıp sayfayı başa geri çekiyordu
+  // ("özel dpi" → satıra iner, vurgulanır, 1,7 sn sonra yukarı kaçar).
+  const pageKey = `${section}|${mobileScreen}`;
+  const pageKeyRef = useRef(pageKey);
   useEffect(() => {
+    if (pageKeyRef.current === pageKey) return;
+    pageKeyRef.current = pageKey;
     if (flashId) return;
     contentRef.current?.scrollTo?.({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' });
-  }, [section, mobileScreen, reduceMotion, flashId]);
+  }, [pageKey, reduceMotion, flashId]);
 
-  // Arama sonucundan gelinen ayar: satıra kaydır, kısa süre vurgula.
+  // Arama sonucundan gelinen ayar: satıra (bulunan seçenek varsa o karta) kaydır, kısa süre vurgula.
   useEffect(() => {
     if (!flashId) return undefined;
     const raf = requestAnimationFrame(() => {
-      const el = contentRef.current?.querySelector(`[data-setting-id="${flashId}"]`);
-      el?.scrollIntoView?.({ block: 'center', behavior: reduceMotion ? 'auto' : 'smooth' });
+      const row = contentRef.current?.querySelector(`[data-setting-id="${flashId}"]`);
+      const option = flashOptions?.length ? row?.querySelector(`[data-option-value="${String(flashOptions[0])}"]`) : null;
+      (option || row)?.scrollIntoView?.({ block: 'center', behavior: reduceMotion ? 'auto' : 'smooth' });
     });
-    const timer = setTimeout(() => setFlashId(null), FLASH_MS);
+    const timer = setTimeout(() => {
+      setFlashId(null);
+      setFlashOptions(null);
+    }, FLASH_MS);
     return () => {
       cancelAnimationFrame(raf);
       clearTimeout(timer);
     };
-  }, [flashId, section, reduceMotion]);
+  }, [flashId, flashOptions, section, reduceMotion]);
 
-  const go = useCallback((id, itemId = null) => {
+  const go = useCallback((id, itemId = null, optionValues = null) => {
     if (!isSection(id)) return;
     setQuery('');
     setSection(id);
     setMobileScreen('detail');
     setFlashId(itemId);
+    setFlashOptions(itemId && optionValues?.length ? optionValues : null);
   }, []);
 
-  const openResult = useCallback((result) => go(result.section, result.id), [go]);
+  const openResult = useCallback(
+    (result) => go(result.section, result.id, result.options?.map((option) => option.value)),
+    [go],
+  );
 
   // openOpenDexSettings(): the window opens on the overview, or — with a target — lands on that section and flashes one card.
   useEffect(() => {
@@ -571,6 +630,7 @@ export default function SettingsPanel() {
         {settingsOpen && !settingsMinimized && frame && (
           <motion.section
             key="opendex-settings-window"
+            ref={windowRef}
             role="dialog"
             aria-label={t('settings.tum_opendex_ayarlari')}
             onPointerDown={focusSettings}
@@ -654,7 +714,7 @@ export default function SettingsPanel() {
                   ref={contentRef}
                   className={cn('dex-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]', narrow ? 'p-3' : 'p-4 sm:p-6')}
                 >
-                  <SettingsUiProvider value={{ layout, flashId }}>
+                  <SettingsUiProvider value={{ layout, flashId, flashOptions }}>
                     {/* Yalnız giriş animasyonu (opaklık + 6 px): çıkış beklenmez, geçiş anında yanıt verir. */}
                     <motion.div
                       key={searching ? 'search' : showList ? 'list' : section}
