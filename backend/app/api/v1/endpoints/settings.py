@@ -68,6 +68,10 @@ async def put_settings(body: ProjectSettings, ctx: AppContextDep):
         # "ask" / "always" / "never": the lease re-decides at once (and a user's earlier "turn it off" no longer holds).
         await ctx.multi_audio_focus.on_policy_changed()
 
+    # "OpenDeX yönetsin" / "Sistem varsayılanı" (phone_footprint, and the USB guard / multi-focus policy it lists): a persistent
+    # value is written or removed now, a lease re-decides. A no-op when none of them changed.
+    await ctx.phone_footprint.on_settings_saved(body)
+
     if previous.audio_sync_offset_ms != body.audio_sync_offset_ms:
         # "İkisi": the fine tune applies at once (the phone's playout is retuned in place).
         await ctx.app_audio.on_sync_changed()

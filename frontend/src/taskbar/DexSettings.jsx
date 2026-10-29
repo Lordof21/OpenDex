@@ -1,5 +1,5 @@
 import React, { useCallback, useRef, useState, forwardRef } from 'react';
-import { motion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
   Activity,
   AppWindow,
@@ -26,6 +26,8 @@ import {
   ZoomOut,
 } from 'lucide-react';
 import { PanelShell } from './PanelShell.jsx';
+import { PhoneFootprintSummary, PhoneFootprintView } from './PhoneFootprint.jsx';
+import { subviewMotion } from '../ui/motion.js';
 import Button from '../ui/Button.jsx';
 import { SettingsGroup } from '../ui/Card.jsx';
 import { ChoiceChip, ChoiceGrid, IconTile } from '../ui/Choice.jsx';
@@ -154,6 +156,8 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
   const { theme, setTheme } = useTheme();
   // Sekme: seçilmediyse odaktaki pencere ayarlanabiliyorsa "Yoğunluk", değilse "Genel" (aşağıda `tab`).
   const [pickedTab, setPickedTab] = useState(null);
+  // Sistem sekmesinin içindeki "Telefon ayarları" alt görünümü (taskbar/PhoneFootprint.jsx).
+  const [footprintOpen, setFootprintOpen] = useState(false);
   const scrollRef = useRef(null);
 
   // Genel ayarlar tek canlı kaynaktan türetilir (settings/liveSettings): Ayarlar penceresiyle her an aynı değer,
@@ -262,6 +266,10 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
   const selectTab = useCallback((id) => {
     setPickedTab(id);
     scrollRef.current?.scrollTo?.({ top: 0 });   // yeni sekme hep başından açılır (jsdom'da scrollTo yok)
+  }, []);
+  const openFootprint = useCallback((open) => {
+    setFootprintOpen(open);
+    scrollRef.current?.scrollTo?.({ top: 0 });
   }, []);
   const headerMode = normalizeHeaderMode(activeWindow?.headerMode);
   const headerLocked = Boolean(activeWindow) && isMirrorPackage(activeWindow.package);
@@ -720,64 +728,76 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
 
         {/* ─── Tüm pencereler · Sistem ─── */}
         <TabPane id="system" active={tab === 'system'}>
-          <SettingsGroup dense icon={Smartphone} title={tt('common.telefona_aktarma_kipi')}>
-            <ChoiceGrid dense columns={2} options={HANDOFF_WINDOWING} value={handoffWindowing} onChange={handleHandoffWindowingChange} />
-            <p className="mt-1.5 text-[9px] leading-[12px] text-muted-foreground">
-             {tt('taskbar.yalniz_telefona_aktar_dugmesinin')}
-            </p>
-          </SettingsGroup>
+          <AnimatePresence mode="wait" initial={false}>
+            {footprintOpen ? (
+              <motion.div key="footprint" {...subviewMotion(1)}>
+                <PhoneFootprintView onBack={() => openFootprint(false)} />
+              </motion.div>
+            ) : (
+              <motion.div key="system" className="space-y-2" {...subviewMotion(-1)}>
+                <PhoneFootprintSummary visible={tab === 'system'} onOpen={() => openFootprint(true)} />
 
-          <SettingsGroup dense icon={Smartphone} title={tt('common.uygulama_telefonda_kapatilinca')}>
-            <ChoiceGrid dense columns={2} options={APP_CLOSED_BEHAVIOR} value={appClosedBehavior} onChange={handleAppClosedBehaviorChange} />
-            <p className="mt-1.5 text-[9px] leading-[12px] text-muted-foreground">
-             {tt('taskbar.son_kullanilanlar_dan_kapatilan')}
-            </p>
-          </SettingsGroup>
+                <SettingsGroup dense icon={Smartphone} title={tt('common.telefona_aktarma_kipi')}>
+                  <ChoiceGrid dense columns={2} options={HANDOFF_WINDOWING} value={handoffWindowing} onChange={handleHandoffWindowingChange} />
+                  <p className="mt-1.5 text-[9px] leading-[12px] text-muted-foreground">
+                   {tt('taskbar.yalniz_telefona_aktar_dugmesinin')}
+                  </p>
+                </SettingsGroup>
 
-          <SettingsGroup
-            dense
-            icon={Layers}
-            title={tt('common.varsayilan_pencereleme_davranisi')}
-            value={WINDOW_MODES.find((item) => item.value === windowMode)?.label ?? ''}
-          >
-            <div className="grid grid-cols-3 gap-1">
-              {WINDOW_MODES.map((item) => (
-                <IconTile
-                  variant="outlined"
+                <SettingsGroup dense icon={Smartphone} title={tt('common.uygulama_telefonda_kapatilinca')}>
+                  <ChoiceGrid dense columns={2} options={APP_CLOSED_BEHAVIOR} value={appClosedBehavior} onChange={handleAppClosedBehaviorChange} />
+                  <p className="mt-1.5 text-[9px] leading-[12px] text-muted-foreground">
+                   {tt('taskbar.son_kullanilanlar_dan_kapatilan')}
+                  </p>
+                </SettingsGroup>
+
+                <SettingsGroup
                   dense
-                  key={item.value}
-                  icon={item.icon}
-                  title={item.label}
-                  status={item.hint}
-                  active={windowMode === item.value}
-                  onClick={() => handleWindowModeChange(item.value)}
-                />
-              ))}
-            </div>
-            <p className="mt-1.5 text-[9px] leading-[12px] text-muted-foreground">
-             {tt('taskbar.bu_cihaz')}{' '} <strong className="font-semibold text-foreground">~16</strong> {' '}{tt('taskbar.bagimsiz_pencere_destekliyor')}
-            </p>
-          </SettingsGroup>
+                  icon={Layers}
+                  title={tt('common.varsayilan_pencereleme_davranisi')}
+                  value={WINDOW_MODES.find((item) => item.value === windowMode)?.label ?? ''}
+                >
+                  <div className="grid grid-cols-3 gap-1">
+                    {WINDOW_MODES.map((item) => (
+                      <IconTile
+                        variant="outlined"
+                        dense
+                        key={item.value}
+                        icon={item.icon}
+                        title={item.label}
+                        status={item.hint}
+                        active={windowMode === item.value}
+                        onClick={() => handleWindowModeChange(item.value)}
+                      />
+                    ))}
+                  </div>
+                  <p className="mt-1.5 text-[9px] leading-[12px] text-muted-foreground">
+                   {tt('taskbar.bu_cihaz')}{' '} <strong className="font-semibold text-foreground">~16</strong> {' '}{tt('taskbar.bagimsiz_pencere_destekliyor')}
+                  </p>
+                </SettingsGroup>
 
-          <SettingsGroup dense icon={Layers} title={tt('audio_focus.baslik')} value={focusStatus.label}>
-            {focusDetail.text && (
-              <p className="mb-1.5 text-[9px] leading-[12px] text-muted-foreground" data-testid="dex-multi-focus-detail">
-                {focusDetail.text}
-              </p>
-            )}
-            {(focusSnap.state === 'on' || focusSnap.state === 'off') && (
-              <p className="mb-1.5 text-[9px] leading-[12px] text-muted-foreground" data-testid="dex-multi-focus-ram-tip">
-                {tt('audio_focus.ram_ipucu')}
-              </p>
-            )}
-            <Button variant="outline" size="sm" className="w-full text-[10px]" data-testid="dex-multi-focus-open" onClick={handleOpenMultiFocus}>
-              {tt('audio_focus.dex_kisayol')}
-            </Button>
-          </SettingsGroup>
+                <SettingsGroup dense icon={Layers} title={tt('audio_focus.baslik')} value={focusStatus.label}>
+                  {focusDetail.text && (
+                    <p className="mb-1.5 text-[9px] leading-[12px] text-muted-foreground" data-testid="dex-multi-focus-detail">
+                      {focusDetail.text}
+                    </p>
+                  )}
+                  {(focusSnap.state === 'on' || focusSnap.state === 'off') && (
+                    <p className="mb-1.5 text-[9px] leading-[12px] text-muted-foreground" data-testid="dex-multi-focus-ram-tip">
+                      {tt('audio_focus.ram_ipucu')}
+                    </p>
+                  )}
+                  <Button variant="outline" size="sm" className="w-full text-[10px]" data-testid="dex-multi-focus-open" onClick={handleOpenMultiFocus}>
+                    {tt('audio_focus.dex_kisayol')}
+                  </Button>
+                </SettingsGroup>
 
-          <Button variant="outline" size="lg" className="w-full text-[11px]" startIcon={<ExternalLink className="size-3.5" />} onClick={handleOpenAllSettings}>
-           {tt('taskbar.tum_opendex_ayarlarini_ac')}
-          </Button>
+                <Button variant="outline" size="lg" className="w-full text-[11px]" startIcon={<ExternalLink className="size-3.5" />} onClick={handleOpenAllSettings}>
+                 {tt('taskbar.tum_opendex_ayarlarini_ac')}
+                </Button>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </TabPane>
       </div>
     </PanelShell>

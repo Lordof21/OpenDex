@@ -50,6 +50,7 @@ Geliştirirken buraya satır ekle; çeviri turundan sonra sil. (`npm run i18n:to
 
 | Anahtar(lar) | Nerede (dosya / ekran) | Not |
 |---|---|---|
+| `footprint.*` (81 anahtar) | `taskbar/PhoneFootprint.jsx` (DeX ayarları › Sistem › Telefon ayarları) ve `settings/sections/phone.jsx` (OpenDeX Ayarları › Telefon ayarları) | 2026-10-29. "Açık / Kapalı / OpenDeX / Sistem" kısa düğme etiketleri; `*_baslik` anahtarın AÇIK hâlini anlatır ("Başlık çubuğunu gizle"). `{{managed}}`, `{{active}}`, `{{title}}`, `{{value}}` yer tutucuları. |
 
 ## Metni değişenler (çeviri eskidi, otomatik bulunamaz)
 

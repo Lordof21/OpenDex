@@ -2,14 +2,14 @@
 
 # API reference
 
-All 130 operations of the public OpenAPI document ([`openapi.json`](openapi.json), OpenAPI 3.1.0), grouped by tag. Conventions that apply to every operation — authentication, the Origin/Host guard, limits, error shapes — are in [API.md](../API.md); the WebSocket channels and the event types are there too.
+All 132 operations of the public OpenAPI document ([`openapi.json`](openapi.json), OpenAPI 3.1.0), grouped by tag. Conventions that apply to every operation — authentication, the Origin/Host guard, limits, error shapes — are in [API.md](../API.md); the WebSocket channels and the event types are there too.
 
 Paths are relative to `http://127.0.0.1:8710/api/v1` (every operation is also served under `/api`, unversioned). **Auth** `token` = needs the API token; **Device** = answers `409` while no phone is bound.
 
 | Group | Operations |
 |---|---|
 | [general](#general) | 2 |
-| [devices](#devices) | 30 |
+| [devices](#devices) | 32 |
 | [pairing](#pairing) | 4 |
 | [apps](#apps) | 4 |
 | [windows](#windows) | 23 |
@@ -80,6 +80,8 @@ The bound phone: connection state, battery and its diagnostics, volumes, quick t
 | `GET` | `/device/battery` | Returns real-time battery level, charging status, voltage, and temperature. | token | yes |
 | `GET` | `/device/volumes` | Returns volume levels across all audio streams (Music, Ring, Notification, Alarm). | token | yes |
 | `POST` | `/device/volumes` | Sets volume for a specific audio stream. | token | yes |
+| `GET` | `/device/footprint` | What OpenDeX changes on the phone itself (device/phone_footprint.py): every item with who owns it ("auto" =… | token |  |
+| `PUT` | `/device/footprint/{item_id}` | Turns one item's phone value on (OpenDeX's value) or off (the user's own value, or the phone's default) NOW… | token | yes |
 | `GET` | `/device/states` | Returns quick hardware toggle states (wifi, bluetooth, mobile_data, torch, mute, etc.). | token | yes |
 | `POST` | `/device/states` | Toggles a hardware state. | token | yes |
 | `GET` | `/device/display-power` | Real physical screen state: `on` is true/false, or null when it cannot be read (never guessed). | token | yes |
@@ -283,6 +285,37 @@ Sets volume for a specific audio stream.
 | `stream_id` | integer | yes |  |
 | `value` | integer (nullable) | no |  |
 | `volume` | integer (nullable) | no |  |
+
+**Responses:** `200` Successful Response · `422` Validation Error · `409` no device bound · `401` token missing/wrong · `403` foreign Origin/Host · `411` chunked body · `413` body too large
+
+### `GET /device/footprint`
+
+What OpenDeX changes on the phone itself (device/phone_footprint.py): every item with who owns it ("auto" = OpenDeX
+manages it, "system" = left to the phone) and the phone's live value, read now in one shell call. Without a phone the
+choices are still listed (`connected: false`, states `unknown`). Choices are changed through `PUT /settings`
+(`phone_footprint`; `usb_stability_guard` and `multi_audio_focus_policy` for the two items that keep their own setting).
+
+*token required*
+
+**Responses:** `200` Successful Response · `401` token missing/wrong · `403` foreign Origin/Host
+
+### `PUT /device/footprint/{item_id}`
+
+Turns one item's phone value on (OpenDeX's value) or off (the user's own value, or the phone's default) NOW, whoever
+manages it — the way out when a value was left behind. 404 `unknown_item`; 409 `not_toggleable` (USB function, display
+defaults); answers the fresh snapshot.
+
+*token required; needs a bound device (`409` otherwise)*
+
+| Parameter | In | Type | Required | Notes |
+|---|---|---|---|---|
+| `item_id` | path | string (≤ 64 chars) | yes |  |
+
+**Request body** (JSON, `FootprintToggle`)
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `on` | boolean | yes |  |
 
 **Responses:** `200` Successful Response · `422` Validation Error · `409` no device bound · `401` token missing/wrong · `403` foreign Origin/Host · `411` chunked body · `413` body too large
 
@@ -979,6 +1012,7 @@ Updates settings and applies live quality/audio reconfigurations.
 | `windowing_mode` | `"eco"` \| `"independent"` \| `"hybrid_auto"` | no | default `"hybrid_auto"` |
 | `remember_devices` | boolean | no | default `true` |
 | `usb_stability_guard` | boolean | no | default `true` |
+| `phone_footprint` | object | no |  |
 | `phone_handoff_windowing` | `"fullscreen"` \| `"freeform"` | no | default `"fullscreen"` |
 | `app_closed_behavior` | `"close"` \| `"badge"` | no | default `"close"` |
 

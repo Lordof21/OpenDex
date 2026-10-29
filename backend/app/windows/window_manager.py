@@ -45,6 +45,9 @@ from ..device import android_shell, daemon_registry
 from ..device.adb import Adb
 from ..device.capability_probe import CapabilityProbe
 from ..device.device_manager import DeviceManager, DeviceNotBoundError
+from ..device.phone_footprint import BIND_ITEMS as FOOTPRINT_BIND_ITEMS
+from ..device.phone_footprint import bind_script as footprint_bind_script
+from ..device.phone_footprint import normalize_policy as normalize_footprint_policy
 from ..events import EventBus, cancel_and_wait, spawn_background
 from ..logging_config import window_logger
 from ..schemas import (
@@ -199,6 +202,8 @@ class WindowManager:
         self._probe = capability_probe
         self._devices = device_manager
         self._daemon_client = daemon_client
+        # What the user lets OpenDeX change on the phone itself (device/phone_footprint.py); None (tests) = everything.
+        self._phone_footprint: Any = None
         # Shared by reference with every composed component below; membership changes are observable (per-window
         # audio follows them — see set_app_audio).
         self._sessions: SessionTable = SessionTable()
@@ -248,6 +253,7 @@ class WindowManager:
             serial_getter=lambda: self._serial,
             enabled=settings.RESIZE_SUPPRESS_TRANSITION,
             tail_s=settings.RESIZE_TRANSITION_TAIL_S,
+            allowed=lambda: self._footprint_allows("transition_animation"),
         )
         self._reconfigure = SessionReconfigurer(
             adb, settings, events, broadcasters, self._sessions,
@@ -301,6 +307,7 @@ class WindowManager:
             broadcasters=broadcasters,
             daemon_client_getter=lambda: self._daemon_client,
             arrival_hook=self._guard_workspace_arrival,
+            footprint_getter=lambda: self._phone_footprint,
         )
         self._teleporter = TaskTeleporter(
             adb, settings, events, self._sessions, self._eco_workspace,
@@ -370,14 +377,15 @@ class WindowManager:
         #  * never lock Display 0's orientation globally (WindowManagerService watchdog deadlocks / reboots on
         #    HyperOS/MIUI) — virtual displays handle orientation per display (-d);
         #  * no leftover overlay displays.
+        # Each is a "phone footprint" the user may hand back to the phone (device/phone_footprint.py): those are not written,
+        # and a value an earlier OpenDeX session left behind is removed instead.
+        if self._phone_footprint is not None:
+            await self._phone_footprint.refresh_policy()
+            bind_cmd = self._phone_footprint.bind_script()
+        else:
+            bind_cmd = footprint_bind_script(normalize_footprint_policy(None), FOOTPRINT_BIND_ITEMS)
         with contextlib.suppress(Exception):
-            await self._adb.shell(
-                "settings put global enable_freeform_support 1; "
-                "settings put global force_resizable_activities 1; "
-                "settings put global force_desktop_mode_on_external_displays 0; "
-                "cmd window set-ignore-orientation-request false; settings put global overlay_display_devices none",
-                serial=serial,
-            )
+            await self._adb.shell(bind_cmd, serial=serial)
         if self._handoff_monitor_task is None or self._handoff_monitor_task.done():
             self._handoff_monitor_task = asyncio.create_task(self._handoff.run_monitor_loop(), name="handoff-watchdog")
         if self._orphan_reaper_task is None or self._orphan_reaper_task.done():
@@ -407,6 +415,17 @@ class WindowManager:
     def set_daemon_client(self, daemon_client: Any) -> None:
         """Attaches the device daemon client for sub-millisecond Binder IPC operations."""
         self._daemon_client = daemon_client
+
+    def set_phone_footprint(self, footprint: Any) -> None:
+        """Attaches the user's choice of what OpenDeX may change on the phone itself (device/phone_footprint.py)."""
+        self._phone_footprint = footprint
+
+    def _footprint_allows(self, item_id: str) -> bool:
+        return self._phone_footprint is None or self._phone_footprint.allows(item_id)
+
+    async def release_transition_gate(self) -> None:
+        """The user handed the transition animation back to the phone: a held gate gives the value back now."""
+        await self._transition_gate.restore_now()
 
     def set_link_probe(self, probe: Callable[[], Awaitable[bool]]) -> None:
         """The connection supervisor's "did the adb link drop?" question, asked when a window's server dies."""

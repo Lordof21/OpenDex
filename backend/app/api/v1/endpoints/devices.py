@@ -369,6 +369,34 @@ def _parse_states(out: str) -> dict[str, bool]:
     }
 
 
+@router.get("/device/footprint")
+async def get_phone_footprint(ctx: AppContextDep):
+    """What OpenDeX changes on the phone itself (device/phone_footprint.py): every item with who owns it ("auto" = OpenDeX
+    manages it, "system" = left to the phone) and the phone's live value, read now in one shell call. Without a phone the
+    choices are still listed (`connected: false`, states `unknown`). Choices are changed through `PUT /settings`
+    (`phone_footprint`; `usb_stability_guard` and `multi_audio_focus_policy` for the two items that keep their own setting)."""
+    return await ctx.phone_footprint.snapshot()
+
+
+class FootprintToggle(BaseModel):
+    on: bool
+
+
+@router.put("/device/footprint/{item_id}", dependencies=[RequireDevice])
+async def set_phone_footprint(body: FootprintToggle, ctx: AppContextDep, item_id: str = Path(..., max_length=64)):
+    """Turns one item's phone value on (OpenDeX's value) or off (the user's own value, or the phone's default) NOW, whoever
+    manages it — the way out when a value was left behind. 404 `unknown_item`; 409 `not_toggleable` (USB function, display
+    defaults); answers the fresh snapshot."""
+    try:
+        return await ctx.phone_footprint.set_live(item_id, body.on)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="unknown_item") from None
+    except ValueError:
+        raise HTTPException(status_code=409, detail="not_toggleable") from None
+    except LookupError:
+        raise HTTPException(status_code=409, detail="no_device") from None
+
+
 @router.get("/device/states", dependencies=[RequireDevice])
 async def get_hardware_states(ctx: AppContextDep):
     """Returns quick hardware toggle states (wifi, bluetooth, mobile_data, torch, mute, etc.)."""

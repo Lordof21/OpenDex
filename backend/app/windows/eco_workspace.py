@@ -31,6 +31,9 @@ from ..config import Settings
 from ..device import android_shell
 from ..device.adb import Adb
 from ..device.device_manager import DeviceNotBoundError
+from ..device.phone_footprint import WORKSPACE_ITEMS as FOOTPRINT_WORKSPACE_ITEMS
+from ..device.phone_footprint import bind_script as footprint_bind_script
+from ..device.phone_footprint import normalize_policy as normalize_footprint_policy
 from ..events import EventBus, cancel_and_wait, spawn_background
 from ..logging_config import window_logger
 from ..schemas import DeviceProfile, WindowState
@@ -260,6 +263,7 @@ class EcoWorkspaceManager:
         broadcasters: BroadcasterRegistry | None = None,
         daemon_client_getter: Callable[[], Any] | None = None,
         arrival_hook: Callable[[str], None] | None = None,
+        footprint_getter: Callable[[], Any] | None = None,
     ) -> None:
         self._adb = adb
         self._settings = settings
@@ -278,6 +282,8 @@ class EcoWorkspaceManager:
         # Called with the window id once a task has joined (opened, docked, brought back from the phone): the owner re-checks it a
         # moment later, when Android has finished — and possibly undone — the transition (WindowManager._guard_workspace_arrival).
         self._arrival_hook = arrival_hook
+        # What the user lets OpenDeX change on the phone itself (device/phone_footprint.py); None = everything (tests).
+        self._footprint_getter = footprint_getter or (lambda: None)
 
         self._server: ScrcpyServer | None = None
         self._display_id: str | None = None
@@ -385,17 +391,20 @@ class EcoWorkspaceManager:
         # was bound (window_manager.bind_device), and `hide_gesture_line` — the user's own gesture-bar choice (Xiaomi/
         # HyperOS) — was DELETED here on every open, which made SystemUI reset the phone's gesture handling. The virtual
         # display hides its own nav bar locally (scrcpy vd_system_decorations=false); the phone's gestures are not ours
-        # to touch. The display-scoped commands (`-d <id>`) cannot reach the physical screen.
+        # to touch. The display-scoped commands (`-d <id>`) cannot reach the physical screen. The phone-wide ones are "phone
+        # footprints" the user may hand back to the phone (device/phone_footprint.py): those are left alone (cleared if an
+        # earlier session wrote them).
+        footprint = self._footprint_getter()
+        phone_cmds = (
+            footprint.workspace_script() if footprint is not None
+            else footprint_bind_script(normalize_footprint_policy(None), FOOTPRINT_WORKSPACE_ITEMS)
+        )
         display_cmds = (
             f"; wm set-display-windowing-mode -d {self._display_id} 5; cmd window set-ignore-orientation -d {self._display_id} true"
             if self._display_id else ""
         )
         with contextlib.suppress(Exception):
-            await self._adb.shell(
-                "settings put secure force_resizable_activities 1; settings put global enable_non_resizable_multi_window 1; "
-                "wm set-multi-window-config --supportsNonResizable 1 --respectsActivityMinWidthHeight -1" + display_cmds,
-                serial=serial,
-            )
+            await self._adb.shell(phone_cmds + display_cmds, serial=serial)
 
         from .window_manager import WindowSession  # döngüsel import'tan kaçınmak için burada
 

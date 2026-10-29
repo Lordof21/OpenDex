@@ -51,6 +51,7 @@ from .storage import settings_db
 from .device.multi_audio_focus import MultiAudioFocusService
 from .device.phone_awake import PhoneAwakeLease
 from .device.freeform_caption import FreeformCaptionLease
+from .device.phone_footprint import PhoneFootprint
 from .device.usb_stability import UsbStabilityGuard
 from .streams.app_audio import AppAudioRouter
 from .device.battery_health import BatteryHealthService
@@ -215,7 +216,7 @@ class AppContext:
         self.window_manager.set_app_audio(self.app_audio)
         # The phone must not fall asleep under open windows (keyguard + the OEM app lock would black them out):
         # held while windows exist, the user's own value is given back afterwards (device/phone_awake.py).
-        self.phone_awake = PhoneAwakeLease(self.adb, lambda: self.serial, self.window_manager.has_windows)
+        self.phone_awake = PhoneAwakeLease(self.adb, lambda: self.serial, self._phone_awake_wanted)
         self.window_manager.subscribe_sessions(self.phone_awake.request_sync)
         # HyperOS draws a caption pill and a bottom handle on every freeform task (grey bars in the Workspace picture): hidden
         # while windows are open, the user's own value given back afterwards (device/freeform_caption.py). A handoff to the
@@ -231,6 +232,16 @@ class AppContext:
             self._multi_audio_focus_policy, self.event_bus.emit,
         )
         self.window_manager.subscribe_sessions(self.multi_audio_focus.request_sync)
+        # Everything OpenDeX changes on the phone itself, in one list the user can hand back to the phone's own defaults one
+        # by one (device/phone_footprint.py). The leases above and the bind/Workspace writes ask it before they touch anything.
+        self.phone_footprint = PhoneFootprint(
+            self.adb, lambda: self.serial, settings_db.get_project_settings,
+            on_lease_policy=self._on_footprint_lease_policy,
+            transition_release=self.window_manager.release_transition_gate,
+            multi_focus_snapshot=self.multi_audio_focus.snapshot,
+            multi_focus_set=lambda on: self.multi_audio_focus.enable() if on else self.multi_audio_focus.disable(),
+        )
+        self.window_manager.set_phone_footprint(self.phone_footprint)
         self.telemetry = TelemetryHub(
             self.adb,
             serial_getter=lambda: self.serial,
@@ -903,11 +914,20 @@ class AppContext:
     async def _freeform_caption_wanted(self) -> bool:
         """Hide HyperOS' freeform caption while OpenDex windows are open — unless an app was handed to the phone as HyperOS'
         own small window ("Serbest pencere" handoff mode): that window is moved and resized by the very handle we would hide."""
-        if not self.window_manager.has_windows():
+        if not self.window_manager.has_windows() or not self.phone_footprint.allows("caption"):
             return False
         if not self.window_manager.has_phone_handoff():
             return True
         return (await settings_db.get_project_settings()).phone_handoff_windowing != "freeform"
+
+    def _phone_awake_wanted(self) -> bool:
+        """Keep the phone awake under open windows — unless the user handed "stay awake" back to the phone."""
+        return self.window_manager.has_windows() and self.phone_footprint.allows("stay_awake")
+
+    def _on_footprint_lease_policy(self) -> None:
+        """The user changed who owns a leased setting: the leases re-decide at once (a released one gives the value back)."""
+        self.phone_awake.request_sync()
+        self.freeform_caption.request_sync()
 
     async def _multi_audio_focus_policy(self) -> str:
         """"ask" | "always" | "never": what the user chose for the phone's several-apps-at-once flag."""

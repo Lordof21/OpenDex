@@ -142,7 +142,7 @@ TRACE_CATEGORIES: dict[str, tuple[str, ...]] = {
     "adb": (
         "app.device.adb", "app.device.device_manager", "app.device.device_tracker", "app.device.capability_probe",
         "app.device.android_shell", "app.device.tools_jar", "app.device.xml_inspector", "app.device.network_utils",
-        "app.device.daemon_auth", "app.device.device_queries", "app.device.usb_stability",
+        "app.device.daemon_auth", "app.device.device_queries", "app.device.usb_stability", "app.device.phone_footprint",
     ),
     "scrcpy": ("app.windows.scrcpy_launcher",),
     "input": ("app.input.touch_control", "app.input.keyboard_control", "app.input.keyboard_setup"),

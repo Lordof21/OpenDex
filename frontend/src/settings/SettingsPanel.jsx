@@ -25,6 +25,7 @@ import {
   Radio,
   Search,
   SearchX,
+  ShieldCheck,
   Speaker,
   Stethoscope,
   X,
@@ -55,6 +56,7 @@ import { DisplaySection } from './sections/display.jsx';
 import { AudioSection, StreamSection } from './sections/stream.jsx';
 import { AppearanceSection, PowerSection, WindowsSection } from './sections/windows.jsx';
 import { AboutSection, AdvancedSection } from './sections/system.jsx';
+import { PhoneSection } from './sections/phone.jsx';
 import { t } from '../i18n/index.js';
 
 export const OPENDEX_SETTINGS_EVENT = 'opendex:open-settings';
@@ -71,6 +73,7 @@ const SECTION_ICONS = {
   audio: Speaker,
   windows: AppWindow,
   appearance: Palette,
+  phone: ShieldCheck,
   power: BatteryCharging,
   advanced: Stethoscope,
   about: Info,
@@ -120,6 +123,7 @@ function SectionBody({ section, ctl, go }) {
     case 'audio': return <AudioSection ctl={ctl} />;
     case 'windows': return <WindowsSection ctl={ctl} />;
     case 'appearance': return <AppearanceSection ctl={ctl} />;
+    case 'phone': return <PhoneSection />;
     case 'power': return <PowerSection ctl={ctl} />;
     case 'advanced': return <AdvancedSection ctl={ctl} />;
     case 'about': return <AboutSection />;

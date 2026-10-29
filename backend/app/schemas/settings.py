@@ -76,6 +76,9 @@ class ProjectSettings(BaseModel):
     # Telefonun USB işlevini "veri yok"ta tutar. Kablo takılı değilken bile ekran kilidi aç/kapa USB işlevini değiştirir, bu da
     # adbd'yi yeniden başlatır ve daemon + ekran akışlarını öldürür (bkz. device/usb_stability.py). Kapalıysa telefona dokunulmaz.
     usb_stability_guard: bool = True
+    # OpenDeX'in telefonda değiştirdiği genel ayarlar (device/phone_footprint.py): iz kimliği → "auto" (OpenDeX yönetsin,
+    # varsayılan) | "system" (dokunma; OpenDeX'in yazdığı değer silinir, telefon kendi varsayılanına döner). Eksik kimlik "auto".
+    phone_footprint: dict[str, Literal["auto", "system"]] = Field(default_factory=dict)
     # Uygulamayı telefona aktarırken görevin pencereleme kipi. "fullscreen" (varsayılan, önerilen):
     # telefonun ekranını tamamen kaplar. "freeform" (deneysel): ekranın ~%80'inde ortalı serbest pencere; üretici
     # freeform ölçeği telefonda da uygulanabildiğinden görev küçük görünebilir.

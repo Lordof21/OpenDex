@@ -14,7 +14,7 @@ import { t, activeLocale } from '../i18n/index.js';
 export const SECTION_GROUPS = [
   { id: 'start', label: '', sections: ['overview'] },
   { id: 'experience', label: t('settings.deneyim'), sections: ['display', 'stream', 'audio', 'windows', 'appearance'] },
-  { id: 'device', label: t('settings.cihaz_sistem'), sections: ['power', 'advanced', 'about'] },
+  { id: 'device', label: t('settings.cihaz_sistem'), sections: ['phone', 'power', 'advanced', 'about'] },
 ];
 
 export const SECTIONS = {
@@ -24,6 +24,7 @@ export const SECTIONS = {
   audio: { id: 'audio', label: t('common.ses'), subtitle: t('settings.yonlendirme_ve_ses_kodlayici') },
   windows: { id: 'windows', label: t('settings.pencereler_gecis'), subtitle: t('settings.pencere_davranisi_ve_telefon_pc_gecisi') },
   appearance: { id: 'appearance', label: t('common.gorunum'), subtitle: t('settings.tema_ve_arka_plan') },
+  phone: { id: 'phone', label: t('footprint.baslik'), subtitle: t('footprint.bolum_alt_baslik') },
   power: { id: 'power', label: t('settings.guc_cihaz'), subtitle: t('settings.pil_tasarrufu_ve_cihaz_hafizasi') },
   advanced: { id: 'advanced', label: t('settings.gelismis_teshis'), subtitle: t('settings.gunlukler_kapasite_testi_ve_sistem') },
   about: { id: 'about', label: t('settings.hakkinda'), subtitle: t('settings.mimari_ilkeler_ve_platform_sinirlari') },
@@ -207,6 +208,16 @@ export const SETTING_ITEMS = {
     title: t('settings.masaustu_gorunum_temasi'),
     description: t('settings.arayuzun_genel_temasini_secin_acik_ya'),
     keywords: ['tema', t('settings.karanlik'), 'koyu', t('common.acik'), 'dark', 'light', 'gece'],
+  },
+  phoneFootprint: {
+    section: 'phone',
+    title: t('footprint.baslik'),
+    description: t('footprint.bolum_alt_baslik'),
+    keywords: [
+      t('footprint.caption_baslik'), t('footprint.stay_awake_baslik'), t('footprint.transition_animation_baslik'),
+      t('footprint.resizable_apps_baslik'), 'geri al', 'varsayılan', 'sıfırla', 'caption', 'başlık çubuğu', 'uyanık',
+      'geliştirici seçenekleri', 'developer', 'animasyon', 'global',
+    ],
   },
   dimPhone: {
     section: 'power',

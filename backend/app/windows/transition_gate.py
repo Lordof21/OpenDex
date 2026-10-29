@@ -46,10 +46,12 @@ _RESTORE = (
 class TransitionGate:
     """`async with gate.hold():` — içeride geçiş animasyonları kapalıdır; son tutucu çıkınca `tail_s` sonra geri açılır."""
 
-    def __init__(self, adb, *, serial_getter, enabled: bool = True, tail_s: float = 1.0) -> None:
+    def __init__(self, adb, *, serial_getter, enabled: bool = True, tail_s: float = 1.0, allowed=None) -> None:
         self._adb = adb
         self._serial_getter = serial_getter
         self._enabled = enabled
+        # Kullanıcı geçiş animasyonunu telefona bıraktıysa (device/phone_footprint.py) kapı hiç kapanmaz; geri yükleme her zaman çalışır.
+        self._allowed = allowed or (lambda: True)
         self._tail_s = max(0.0, float(tail_s))
         self._holds = 0
         self._engaged = False
@@ -129,12 +131,14 @@ class TransitionGate:
 class _Hold:
     def __init__(self, gate: TransitionGate) -> None:
         self._gate = gate
+        self._counted = False
 
     async def __aenter__(self) -> "_Hold":
         gate = self._gate
-        if not gate._enabled:
+        if not gate._enabled or not gate._allowed():
             return self
         gate._holds += 1
+        self._counted = True
         try:
             await gate.recover()
             await gate._engage()
@@ -145,7 +149,7 @@ class _Hold:
 
     async def __aexit__(self, *_exc) -> None:
         gate = self._gate
-        if not gate._enabled:
+        if not self._counted:
             return
         gate._holds = max(0, gate._holds - 1)
         if gate._holds == 0 and gate._engaged:

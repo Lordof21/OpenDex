@@ -33,6 +33,7 @@
     "windowing_mode": "hybrid_auto",
     "remember_devices": true,
     "usb_stability_guard": true,
+    "phone_footprint": {},
     "phone_handoff_windowing": "fullscreen",
     "app_closed_behavior": "close"
   },
