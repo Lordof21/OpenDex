@@ -227,6 +227,7 @@ class SessionReconfigurer:
             # flex-resize confirmation, or a server-initiated change we did not
             # request (_resolve_resize_ack tells them apart).
             self._resolve_resize_ack(window_id, meta)
+            self._follow_stream_size(window_id, meta)
 
         async def _pump_wrapper() -> None:
             try:
@@ -356,6 +357,29 @@ class SessionReconfigurer:
             "[Resize:ACK_IGNORED] sunucu kaynaklı session paketi %dx%d (beklenen %s) — resize onayı sayılmadı",
             meta.width, meta.height, pending.expected,
         )
+
+    def _follow_stream_size(self, window_id: str, meta: SessionMeta) -> None:
+        """Every mid-stream session packet IS the encoder's output size, and touch is checked and scaled against it (the
+        page maps the pointer onto the decoded frame). It used to be taken from a resize's confirmation only, so a later
+        server-initiated change stuck to the old size: a reclaim confirmed 1600x968 as 968x1600 (the app still portrait
+        from the phone), the app turned landscape a moment later, the frames became 1600x968 — and every touch past
+        x=968 was dropped as "outside screen" until the user resized the window again (device 2026-10-29). The same
+        change back to the window's own orientation also shows the app does not lock it: the "rotates on resize" lesson
+        that one transient confirmation taught is dropped."""
+        session = self._sessions.get(window_id)
+        if session is None or meta.width <= 0 or meta.height <= 0:
+            return
+        size = (meta.width, meta.height)
+        if size == (session.stream_w, session.stream_h):
+            return
+        wlog = window_logger(__name__, window_id)
+        wlog.info("[Stream:SIZE] kodlayıcı çıktısı %dx%d -> %dx%d — dokunma alanı yeni boyutu izliyor",
+                  session.stream_w, session.stream_h, meta.width, meta.height)
+        session.stream_w, session.stream_h = size
+        tw, th = session.target_display_w, session.target_display_h
+        if session.rotates_on_resize and tw != th and (meta.width > meta.height) == (tw > th):
+            session.rotates_on_resize = False
+            wlog.info("[Stream:SIZE] çıktı pencerenin yönüne döndü — uygulama yönü kilitlemiyor")
 
     def _abort_pending_ack(self, window_id: str, reason: str) -> None:
         pending = self._pending_resize_acks.get(window_id)

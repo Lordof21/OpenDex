@@ -1233,6 +1233,29 @@ async def test_once_known_to_rotate_the_same_landscape_request_is_a_no_op(flex_m
     assert (result.display_w, result.display_h) == (800, 1088)
 
 
+async def test_a_later_server_size_change_moves_the_touch_area_with_the_frames(flex_manager):
+    """Device 2026-10-29 (reclaim of a portrait app): asked 1600x968, the confirmation said 968x1600 (the app was still
+    portrait from the phone), then the app turned landscape and the encoder sent 1600x968 frames — but touch kept the
+    confirmation's size and dropped every point past x=968 as "outside screen" until the window was resized again."""
+    handle = await _open_flex_window(flex_manager)
+    session = flex_manager.get_session(handle.window_id)
+    session.server.size_alignment = 16
+    _script_control(
+        flex_manager, handle.window_id,
+        lambda w, h: _ack(flex_manager, handle.window_id, 800, 1088, client_resized=False),
+    )
+    await flex_manager.resize_window(handle.window_id, 1088, 800)
+    assert (session.display_w, session.display_h) == (800, 1088) and session.rotates_on_resize is True
+
+    # The app re-laid itself out in the window's orientation: a server-initiated session packet, no resize pending.
+    flex_manager._reconfigure._follow_stream_size(handle.window_id, SessionMeta(width=1088, height=800, client_resized=False))
+
+    assert (session.display_w, session.display_h) == (1088, 800)
+    assert session.rotates_on_resize is False                     # it does not lock the orientation after all
+    from app.input.touch_control import TouchAction, serialize_touch
+    serialize_touch(TouchAction.DOWN, 1000, 400, session.display_w, session.display_h)   # no longer "outside screen"
+
+
 async def test_an_app_that_keeps_the_orientation_is_not_marked_as_rotating(flex_manager):
     handle = await _open_flex_window(flex_manager)
     session = flex_manager.get_session(handle.window_id)
