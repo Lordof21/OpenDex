@@ -481,6 +481,7 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
           focusWindow(ecoContainer.id);
         }
         useWindowStore.getState().focusWorkspaceTask(ecoTask.windowId);
+        useWindowStore.getState().verifyWorkspaceTask(ecoTask.windowId);
         return;
       }
 

@@ -128,11 +128,10 @@ async def test_a_surface_that_has_not_caught_up_with_a_resize_does_not_win_over_
     assert probe.await_count == 1 + mgr.SF_CATCHUP_TRIES
 
 
-async def test_a_mini_window_is_taken_from_surfaceflinger_as_one_consistent_pair(monkeypatch):
-    """HyperOS mini window (the phone's home button on a freeform window): the window really IS drawn at 0.2269 — that surface is
-    not lagging behind a resize, it is the truth. Box and scale both come from SF. Field log 2026-10-27 23:44:46: the WM box
-    paired with this scale made every later visible→Android conversion 3× too big, and the Workspace guard grew Chrome to
-    106450×75844 px."""
+async def test_a_mini_window_preserves_ledger_bounds_and_device_profile(monkeypatch):
+    """HyperOS mini window (the phone's home button on a freeform window): the window is drawn at 0.2269.
+    The ledger keeps its healthy requested bounds and device freeform scale so the UI doesn't collapse;
+    on user click it will be restored by verify_member."""
     monkeypatch.setattr(eco_workspace.settings_db, "save_device_profile", AsyncMock())
     profile = _Profile()
     profile.freeform_scale = 0.70
@@ -145,7 +144,7 @@ async def test_a_mini_window_is_taken_from_surfaceflinger_as_one_consistent_pair
 
     bounds, scale = await mgr._get_task_effective_bounds("SER", "5", (374, 77, 1315, 772))
 
-    assert bounds == (374, 77, 679, 302) and scale == (0.2269, 0.2269)
+    assert bounds == (374, 77, 1315, 772) and scale == (0.70, 0.70)
     assert probe.await_count == 1, "not lagging: no catch-up wait"
     assert profile.freeform_scale == 0.70, "one low reading never becomes the device's value"
 

@@ -1,5 +1,6 @@
 package com.opendex.tools;
 
+import android.app.ActivityOptions;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -169,7 +170,11 @@ public class OpenDexDaemon {
             // a task raised / lowered by id (no activity start: works for tasks whose top activity is not exported)
             "task_reorder",
             // a task moved onto a display and lowered in the same call (never shows there)
-            "park_task"
+            "park_task",
+            // restores a HyperOS mini-floating task back to normal freeform mode
+            "restore_mini_task",
+            // a NEW freeform task at its box on a display (HyperOS's `am start` cannot pass launch bounds)
+            "start_freeform"
     );
 
     // =========================================================================
@@ -1954,6 +1959,97 @@ public class OpenDexDaemon {
         return new JSONArray().put(r.left).put(r.top).put(r.right).put(r.bottom);
     }
 
+    /**
+     * Starts {@code component} as a NEW freeform task on {@code displayId} at {@code bounds}: `am start --windowingMode 5`
+     * plus the launch bounds HyperOS's `am` cannot take ("Unknown option --activity-launch-bounds"). The bounds are what
+     * keep it freeform: a start without initial bounds takes the windowing mode LaunchParamsPersister remembered for the
+     * component, and on HyperOS that record is only ever written for FULLSCREEN (Task.saveLaunchingStateIfNeeded skips
+     * freeform unless its desktop mode is on). So an app once seen fullscreen on the Workspace display came back
+     * fullscreen on every later start, whatever `--windowingMode` said (device 2026-10-29: `FDST freefrom to full...`
+     * right after the task was created freeform). Same call as `am start`: IActivityManager as the shell, user 0.
+     */
+    private static JSONObject startFreeform(int displayId, Rect bounds, String component) {
+        JSONObject res = Json.obj("type", "start_freeform_result", "ok", false, "display_id", displayId);
+        ComponentName cn = component == null ? null : ComponentName.unflattenFromString(component);
+        if (displayId < 0 || bounds == null || cn == null) return Json.put(res, "error", "bad_args");
+        try {
+            Intent intent = new Intent().setComponent(cn)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+            ActivityOptions options = ActivityOptions.makeBasic();
+            options.setLaunchDisplayId(displayId);
+            options.setLaunchBounds(bounds);
+            ActivityOptions.class.getMethod("setLaunchWindowingMode", int.class).invoke(options, 5);
+            Object am = Binders.service("activity", "android.app.IActivityManager$Stub");
+            if (am == null) return Json.put(res, "error", "no_activity_manager");
+            Method start = null;
+            for (Method m : am.getClass().getMethods()) {
+                if (m.getName().equals("startActivityAsUserWithFeature") && m.getParameterTypes().length == 12) start = m;
+            }
+            if (start == null) return Json.put(res, "error", "no_start_method");
+            int code = (Integer) start.invoke(am, null, ShellContext.PACKAGE, null, intent, null, null, null, 0, 0, null,
+                    options.toBundle(), 0);
+            // ActivityManager.START_SUCCESS (0) and the "brought to front" results are >= 0; failures are negative
+            return Json.put(Json.put(res, "ok", code >= 0), "code", code);
+        } catch (Throwable t) {
+            Log.warn("Daemon", "startFreeform " + component + " başarısız: " + Json.reason(t));
+            return Json.put(res, "error", Json.reason(t));
+        }
+    }
+
+    /**
+     * Restores a HyperOS/MIUI freeform task from mini mode (scale ~0.227x, mMode=1) back to normal freeform mode.
+     * SystemUI only registers an InputMonitor on Display 0. When a tap is delivered to the mini window's
+     * visual position on Display 0, MiuiFreeformModeMiniStateHandler.singleTap is triggered,
+     * expanding the task back to full freeform size.
+     */
+    private static boolean restoreMiniTask(int taskId) {
+        if (taskId <= 0) return false;
+        try {
+            String dump = execCommand("dumpsys activity service com.android.systemui/.SystemUIService WMShell dump");
+            if (dump != null && !dump.isEmpty()) {
+                int taskIdx = dump.indexOf("mTaskId=" + taskId);
+                if (taskIdx >= 0) {
+                    int nextTaskIdx = dump.indexOf("MiuiFreeformModeTaskInfo", taskIdx + 10);
+                    String block = nextTaskIdx > taskIdx ? dump.substring(taskIdx, nextTaskIdx) : dump.substring(taskIdx);
+
+                    int cx = -1;
+                    int cy = -1;
+
+                    Matcher mCx = Pattern.compile("folmeCenterX=([\\d.]+)").matcher(block);
+                    Matcher mCy = Pattern.compile("destinationActualTopY=([\\d.]+)").matcher(block);
+                    Matcher mH = Pattern.compile("folmeHeight=([\\d.]+)").matcher(block);
+                    if (mCx.find() && mCy.find()) {
+                        cx = (int) Float.parseFloat(mCx.group(1));
+                        float h = mH.find() ? Float.parseFloat(mH.group(1)) : 200f;
+                        cy = (int) (Float.parseFloat(mCy.group(1)) + h / 2f);
+                    } else {
+                        Matcher mBounds = Pattern.compile("smallWindowBounds=\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]").matcher(block);
+                        if (mBounds.find()) {
+                            int l = Integer.parseInt(mBounds.group(1));
+                            int t = Integer.parseInt(mBounds.group(2));
+                            int r = Integer.parseInt(mBounds.group(3));
+                            int b = Integer.parseInt(mBounds.group(4));
+                            cx = (l + r) / 2;
+                            cy = (t + b) / 2;
+                        }
+                    }
+
+                    if (cx > 0 && cy > 0) {
+                        Log.info("Daemon", "restoreMiniTask: triggering tap on display 0 at (" + cx + ", " + cy + ") for taskId=" + taskId);
+                        execCommand("input -d 0 tap " + cx + " " + cy);
+                        return true;
+                    }
+                }
+            }
+            // No position in the dump: a guessed point would tap whatever the phone shows there, so nothing is sent.
+            Log.warn("Daemon", "restoreMiniTask: mini window position not found for taskId=" + taskId + "; no tap");
+            return false;
+        } catch (Throwable t) {
+            Log.error("Daemon", "restoreMiniTask failed for taskId=" + taskId + ": " + t.getMessage());
+            return false;
+        }
+    }
+
     private static JSONObject taskGeometryError(int taskId, String error) {
         return Json.obj("type", "task_geometry_result", "ok", false, "task_id", taskId, "error", error);
     }
@@ -2470,6 +2566,22 @@ public class OpenDexDaemon {
                 case "task_density_info": {
                     int taskId = parts.length > 1 ? Integer.parseInt(parts[1]) : -1;
                     return taskDensityInfo(taskId);
+                }
+                case "start_freeform": {
+                    // start_freeform <display> <l,t,r,b> <component>
+                    if (parts.length < 4) {
+                        return res.put("type", "start_freeform_result").put("ok", false).put("error", "bad_args");
+                    }
+                    int displayId = -1;
+                    try {
+                        displayId = Integer.parseInt(parts[1]);
+                    } catch (Throwable ignored) {}
+                    return startFreeform(displayId, parseRect(parts[2]), parts[3]);
+                }
+                case "restore_mini_task": {
+                    int taskId = parts.length > 1 ? Integer.parseInt(parts[1]) : -1;
+                    boolean ok = restoreMiniTask(taskId);
+                    return res.put("type", "restore_mini_task_result").put("ok", ok).put("task_id", taskId);
                 }
                 case "restart_task_activity": {
                     int taskId = parts.length > 1 ? Integer.parseInt(parts[1]) : -1;

@@ -286,7 +286,9 @@ async def test_a_task_back_from_the_phone_returns_as_a_freeform_window_not_fulls
 
     assert daemon.calls[0] == ("42", 5, (20, 20, 600, 500))  # mode + box together
     assert daemon.mode == 5
-    assert not any("task resize 42" in c for c in adb.shell_calls)  # the box rode in the transaction
+    # the box rode in the transaction; the only shell resizes are the 1 px out-and-back that makes HyperOS scale it
+    resizes = [c for c in adb.shell_calls if c.startswith("cmd activity task resize 42 ")]
+    assert resizes == ["cmd activity task resize 42 20 20 601 500", "cmd activity task resize 42 20 20 600 500"]
 
 
 @pytest.mark.asyncio
@@ -321,10 +323,19 @@ def _workspace_with(daemon, monkeypatch):
     return mgr, adb
 
 
+def _fresh_launch_finds(monkeypatch, task_id="42"):
+    import app.device.deep_navigator as nav
+
+    async def _found(adb, pkg, display_id=None, serial=None):
+        return task_id
+
+    monkeypatch.setattr(nav, "find_task_id_for_package", _found)
+
+
 @pytest.mark.asyncio
-async def test_a_fresh_freeform_launch_gets_no_extra_windowing_command(monkeypatch):
-    """open_in_workspace: a task launched here with --windowingMode 5 already is freeform — no mode is set, no state is
-    read for it (the launch is the hot path: every app opened in the Workspace goes through it)."""
+async def test_a_fresh_launch_that_already_is_freeform_gets_no_extra_windowing_command(monkeypatch):
+    """open_in_workspace: the launched task is read back once; when `--windowingMode 5` took, nothing is sent."""
+    _fresh_launch_finds(monkeypatch)
     daemon = _WindowingDaemon(mode=5, box=(20, 20, 600, 500))
     mgr, adb = _workspace_with(daemon, monkeypatch)
 
@@ -332,6 +343,20 @@ async def test_a_fresh_freeform_launch_gets_no_extra_windowing_command(monkeypat
 
     assert daemon.calls == []
     assert not any("task windowing-mode" in c for c in adb.shell_calls)
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_launch_that_came_up_fullscreen_is_made_freeform_at_its_box(monkeypatch):
+    """Field log 2026-10-28: `am start --windowingMode 5` on the shared VD left the task FULLSCREEN at (0,0,VD size); the arrival
+    guard fixed it ~2 s later with the wrong box. The launch itself now sets freeform + the window's box in one transaction."""
+    _fresh_launch_finds(monkeypatch)
+    daemon = _WindowingDaemon(mode=1, box=(0, 0, 1920, 1080))
+    mgr, _adb = _workspace_with(daemon, monkeypatch)
+
+    await mgr.open_in_workspace("com.app.b", "win-b", bounds=(20, 20, 600, 500))
+
+    assert daemon.calls and daemon.calls[0][:2] == ("42", 5)
+    assert daemon.mode == 5 and daemon.calls[0][2] == (20, 20, 600, 500)
 
 
 @pytest.mark.asyncio
@@ -351,6 +376,98 @@ async def test_a_task_running_on_another_display_is_moved_in_as_a_freeform_windo
 
     assert daemon.calls and daemon.calls[0][:2] == ("42", 5)
     assert daemon.mode == 5
+
+
+class _LaunchingDaemon(_WindowingDaemon):
+    """A daemon that can start a task with launch bounds (`start_freeform`) and move one in by WindowContainerTransaction."""
+
+    def __init__(self, mode=5, box=(0, 0, 1220, 2712)):
+        super().__init__(mode, box, capabilities=("get_task_geometry", "set_task_windowing_bounds", "start_freeform", "move_task_wct"))
+        self.starts, self.moves = [], []
+
+    async def start_freeform(self, display_id, bounds, component):
+        self.starts.append((str(display_id), tuple(bounds), component))
+        self.mode, self.box = 5, tuple(bounds)
+        return True
+
+    async def move_task_wct(self, task_id, display_id, mode=1, clear_bounds=False, bounds=None):
+        self.moves.append((str(task_id), str(display_id), mode, tuple(bounds) if bounds else None))
+        self.mode = mode
+        if bounds:
+            self.box = tuple(bounds)
+        return True
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_launch_starts_through_the_daemon_with_its_box(monkeypatch):
+    """Device 2026-10-29: HyperOS remembers an app's launch windowing mode ONLY when it is fullscreen (never freeform), and a
+    start without launch bounds takes that record over `--windowingMode 5` — an app once fullscreen on the Workspace display
+    came up fullscreen on every open. HyperOS's `am` cannot pass launch bounds; the daemon starts it with them."""
+    _fresh_launch_finds(monkeypatch)
+    daemon = _LaunchingDaemon()
+    mgr, adb = _workspace_with(daemon, monkeypatch)
+
+    await mgr.open_in_workspace("com.app.b", "win-b", bounds=(20, 20, 600, 500))
+
+    assert daemon.starts == [("9", (20, 20, 600, 500), "com.app.b/.MainActivity")]
+    assert not any(c.startswith("am start") for c in adb.shell_calls)
+    assert daemon.calls == []  # it came up freeform at its box: nothing to correct
+
+
+@pytest.mark.asyncio
+async def test_a_docked_task_is_moved_in_as_freeform_at_its_box_and_then_rescaled(monkeypatch):
+    """Moved as fullscreen (the old mode=1), the task was visible fullscreen on the freeform Workspace display for a moment —
+    exactly what HyperOS writes into the app's remembered launch mode: the move now makes it freeform at its box. HyperOS
+    applies its 0.7 freeform scale only when the box changes, and a task moved in at its box stayed drawn at 1.0 (device
+    2026-10-29): one pixel out and back follows."""
+    daemon = _LaunchingDaemon(mode=1)
+    mgr, adb = _workspace_with(daemon, monkeypatch)
+
+    await mgr.attach_existing_task("com.app.b", "win-b", "42", bounds=(20, 20, 600, 500))
+
+    assert daemon.moves == [("42", "9", 5, (20, 20, 600, 500))]
+    resizes = [c for c in adb.shell_calls if c.startswith("cmd activity task resize 42 ")]
+    assert resizes[-2:] == ["cmd activity task resize 42 20 20 601 500", "cmd activity task resize 42 20 20 600 500"]
+
+
+def _member_with_box(mgr, box=(200, 100, 1500, 900)):
+    from app.windows.eco_workspace import WorkspaceTask
+
+    mgr._tasks["win-p"] = WorkspaceTask(window_id="win-p", package="com.android.vending", task_id="42", bounds=box,
+                                        render_scale=(0.7, 0.7))
+    mgr.BOX_HOLD_DELAYS_S = (0.0,)
+
+
+@pytest.mark.asyncio
+async def test_a_member_the_system_moved_right_after_the_start_is_put_back_into_its_frame(monkeypatch):
+    """Device 2026-10-29: HyperOS turned Play Store (asks for portrait) into its own portrait box ~0.3 s after the start
+    (FREEFORM_ORIENTATION_CHANGED), after the box was read back — the app was drawn past the Workspace's bottom edge while
+    its frame stayed at the remembered box. The box is given again; a resize afterwards holds."""
+    daemon = _WindowingDaemon(mode=5, box=(347, 130, 1567, 2082))
+    mgr, adb = _workspace_with(daemon, monkeypatch)
+    _member_with_box(mgr)
+
+    await mgr._hold_box_after_start("SERIAL1", "win-p", logging.getLogger("test"))
+
+    assert any(c.startswith("cmd activity task resize 42 200 100 ") for c in adb.shell_calls)
+    assert mgr.get_task("win-p").bounds == (200, 100, 1500, 900)  # the frame keeps its box
+
+
+@pytest.mark.asyncio
+async def test_a_member_still_in_its_box_or_resized_by_the_user_is_left_alone(monkeypatch):
+    daemon = _WindowingDaemon(mode=5, box=(200, 100, 2057, 1243))  # the box at 0.7, as placed
+    mgr, adb = _workspace_with(daemon, monkeypatch)
+    _member_with_box(mgr)
+    await mgr._hold_box_after_start("SERIAL1", "win-p", logging.getLogger("test"))
+    assert not any("task resize" in c for c in adb.shell_calls)
+
+    daemon.box = (347, 130, 1567, 2082)
+    mgr.BOX_HOLD_DELAYS_S = (0.05,)
+    hold = asyncio.create_task(mgr._hold_box_after_start("SERIAL1", "win-p", logging.getLogger("test")))
+    await asyncio.sleep(0)
+    mgr._resize_epoch["win-p"] = mgr._resize_epoch.get("win-p", 0) + 1  # the user resized meanwhile: the box is theirs
+    await hold
+    assert not any("task resize" in c for c in adb.shell_calls)
 
 
 @pytest.mark.asyncio

@@ -173,6 +173,47 @@ DENSITY_MODES = ("auto", "manual")
 # stream keeps most of its area, a ball keeps a sliver.
 COLLAPSED_AREA_RATIO = 0.35
 
+# HyperOS mini pencere eşiği: SF ölçeği cihaz ölçeğinin yarısından küçükse (örn. 0,227x < 0,5 × 0,70x) pencere mini moddadır.
+MINI_SCALE_RATIO_CEILING = 0.5
+
+
+def is_mini_scale(measured_scale: float, device_freeform_scale: float) -> bool:
+    """True when a measured task scale represents HyperOS's mini floating window (~0.227x to 0.25x)
+    rather than a normal freeform scale (0.70x to 1.0x) or standard fit-to-display reduction (~0.57x)."""
+    if measured_scale <= 0.05 or device_freeform_scale <= 0.05:
+        return False
+    return measured_scale < MINI_SCALE_RATIO_CEILING * device_freeform_scale
+
+
+def parse_mini_task_info(wmshell_dump: str, task_id: str | int) -> dict[str, Any] | None:
+    """Extracts mode, scale, and Display 0 touch coordinates for a task from WMShell dump. `coords` is None when the dump does
+    not say where the mini window is: a guessed point would tap whatever the phone shows there."""
+    if not wmshell_dump:
+        return None
+    pattern = rf"MiuiFreeformModeTaskInfo\s+mTaskId={task_id}\b.*?(?=MiuiFreeformModeTaskInfo|\Z)"
+    match = re.search(pattern, wmshell_dump, re.DOTALL)
+    if not match:
+        return None
+    block = match.group(0)
+    mode_m = re.search(r"mMode=(\d+)", block)
+    mode = int(mode_m.group(1)) if mode_m else 0
+    scale_m = re.search(r"mScale=([\d\.]+)", block)
+    scale = float(scale_m.group(1)) if scale_m else 1.0
+    dest_m = re.search(r"destinationCenterX=([\d\.]+).*?destinationActualTopY=([\d\.]+)", block)
+    folme_m = re.search(r"folmeHeight=([\d\.]+)", block)
+    coords = None
+    if dest_m:
+        cx = float(dest_m.group(1))
+        cy = float(dest_m.group(2))
+        fh = float(folme_m.group(1)) if folme_m else 200.0
+        coords = (int(cx), int(cy + fh / 2.0))
+    return {
+        "mode": mode,
+        "scale": scale,
+        "is_mini": mode == 1,
+        "coords": coords,
+    }
+
 
 @dataclass(frozen=True)
 class MemberCheck:
@@ -289,6 +330,8 @@ class EcoWorkspaceManager:
         self._display_id: str | None = None
         self._anchor: "WindowSession | None" = None
         self._tasks: dict[str, WorkspaceTask] = {}  # window_id -> WorkspaceTask
+        # Counts each member's resizes: a box the user set after the start is theirs (see `_hold_box_after_start`).
+        self._resize_epoch: dict[str, int] = {}
         self._vd_w: int | None = None
         self._vd_h: int | None = None
         self._scale_pending: float | None = None  # a lower freeform-scale reading awaiting its confirmation (next_freeform_scale)
@@ -470,6 +513,7 @@ class EcoWorkspaceManager:
         dead_members = [wid for wid, t in self._tasks.items() if not t.parked]
         for wid in dead_members:
             self._tasks.pop(wid, None)
+            self._resize_epoch.pop(wid, None)
             self._sessions.pop(wid, None)
         self._sessions.pop(anchor_id, None)
         if self._broadcasters is not None:
@@ -517,6 +561,57 @@ class EcoWorkspaceManager:
         profile = self._profile_getter()
         scale = profile.freeform_scale if profile else None
         return scale if scale is not None else 1.0
+
+    async def _restore_mini_task(self, serial: str, task_id: str, wlog: logging.Logger | None = None) -> bool:
+        """Restores a HyperOS freeform task that was minimized into a mini floating window (0.227x).
+        HyperOS's WMShell only creates an InputMonitor for Display 0 (physical screen), dropping touch events on virtual displays.
+        By injecting a single tap to the task's destination coordinate on Display 0, MiuiFreeformModeMiniStateHandler.singleTap
+        is triggered in system UI, expanding the task back to full freeform size."""
+        # 1. Daemon-First: daemon üzerinden doğrudan Display 0 tap
+        daemon = self._daemon_client_getter()
+        if daemon and daemon.supports("restore_mini_task"):
+            try:
+                ok = await daemon.restore_mini_task(task_id)
+                if ok:
+                    await asyncio.sleep(0.4)
+                    freeform_scale = await self._get_freeform_scale(serial)
+                    geom = await surfaceflinger_probe.probe_omni_geometry(self._adb, serial, task_id)
+                    if geom and geom.scale_measured and not is_mini_scale(geom.scale_x, freeform_scale):
+                        if wlog:
+                            wlog.info("🪄 [MINI-RESTORE:SUCCESS] task=%s daemon ile serbest pencereye geri büyütüldü (yeni ölçek: %.2f)", task_id, geom.scale_x)
+                        return True
+            except Exception as exc:
+                if wlog:
+                    wlog.info("Daemon restore_mini_task istisnası: %s, adb fallback deneniyor", exc)
+
+        # 2. ADB Shell Fallback: only at the coordinates WMShell's dump gives — a guessed point would tap whatever the phone
+        # shows there (an app icon, a button), so without them nothing is sent.
+        coords = None
+        try:
+            dump_out = await self._adb.shell("dumpsys activity service com.android.systemui/.SystemUIService WMShell dump", serial=serial, timeout_s=1.5)
+            info = parse_mini_task_info(dump_out, task_id)
+            coords = info.get("coords") if info else None
+        except Exception as exc:
+            if wlog:
+                wlog.info("WMShell dump failed during mini restore (%s)", exc)
+        if coords is None:
+            if wlog:
+                wlog.info("🪄 [MINI-RESTORE] task=%s mini pencerenin yeri okunamadı — telefona dokunulmadı", task_id)
+            return False
+
+        cx, cy = coords
+        if wlog:
+            wlog.info("🪄 [MINI-RESTORE] task=%s Display 0 üzerine dokunma gönderiliyor (%d, %d)", task_id, cx, cy)
+        await self._adb.shell(f"input -d 0 tap {cx} {cy}", serial=serial, timeout_s=1.5)
+        await asyncio.sleep(0.4)
+
+        freeform_scale = await self._get_freeform_scale(serial)
+        geom = await surfaceflinger_probe.probe_omni_geometry(self._adb, serial, task_id)
+        if geom and geom.scale_measured and not is_mini_scale(geom.scale_x, freeform_scale):
+            if wlog:
+                wlog.info("🪄 [MINI-RESTORE:SUCCESS] task=%s serbest pencereye geri büyütüldü (yeni ölçek: %.2f)", task_id, geom.scale_x)
+            return True
+        return False
 
     async def _remember_measured_scale(self, measured: float) -> None:
         """Feeds a task's MEASURED scale into the device's stored one (see `next_freeform_scale`)."""
@@ -676,6 +771,16 @@ class EcoWorkspaceManager:
                 )
             return wm_bounds, (freeform_scale, freeform_scale)
         if geom and geom.render_bounds:
+            is_mini = geom.scale_measured and is_mini_scale(geom.scale_x, freeform_scale)
+            if is_mini:
+                if wlog:
+                    wlog.info(
+                        "🎯 [OMNI-ADAPTER] task=%s HyperOS mini modda (%s, scale=%.2f) — defter kutusu ve cihaz ölçeği korunuyor: %s",
+                        task_id, geom.render_bounds, geom.scale_x, requested,
+                    )
+                # Mini ölçeği defteri zehirlemesin; kullanıcı tıkladığında verify_member tarafından geri büyütülecek
+                return requested, (freeform_scale, freeform_scale)
+
             # A scale not READ from a transform line is the parser's default, not evidence: the device's value stands in.
             measured = geom.scale_measured and geom.scale_x > 0.1 and geom.scale_y > 0.1
             scale_x = geom.scale_x if measured else freeform_scale
@@ -778,8 +883,48 @@ class EcoWorkspaceManager:
 
         if self._arrival_hook is not None:
             self._arrival_hook(window_id)
+        spawn_background(self._hold_box_after_start(serial, window_id, wlog), name=f"ws-hold-{task_id}")
         stream_w, stream_h = self._stream_dims(server)
         return self._ws_url(), stream_w, stream_h, effective_bounds
+
+    # HyperOS turns a freeform window whose app asks for portrait into its OWN portrait box ~0.3 s after the start (transition
+    # FREEFORM_ORIENTATION_CHANGED), after the box above was read back: the app left its frame (device 2026-10-29: Play Store
+    # placed at visible (200,100,1500,900), drawn at (243,91,1097,1457), past the Workspace's bottom edge). A resize to the
+    # same box afterwards holds (device: put back at +0.8 s, still there at +3 s). Checked early — each reading is ~2 ms through
+    # the daemon — and again after the app has settled, for a turn that comes late.
+    BOX_HOLD_DELAYS_S = (0.3, 1.0, 2.5)
+    BOX_HOLD_TOLERANCE_PX = 6  # visible→Android rounding
+
+    async def _hold_box_after_start(self, serial: str, window_id: str, wlog) -> None:
+        """Puts a member that just arrived back into its frame's box (the app's remembered place, else the default) when the
+        system moved it away right after the start. Once the user resizes the window, the ledger's box changes or the task
+        leaves, the box is no longer this check's: nothing is sent. Never raises."""
+        task = self._tasks.get(window_id)
+        if task is None:
+            return
+        box, epoch = task.bounds, self._resize_epoch.get(window_id, 0)
+        waited = 0.0
+        for delay in self.BOX_HOLD_DELAYS_S:
+            await asyncio.sleep(delay - waited)
+            waited = delay
+            task = self._tasks.get(window_id)
+            if task is None or task.parked or task.bounds != box or self._resize_epoch.get(window_id, 0) != epoch:
+                return
+            try:
+                state = await read_task_windowing(self._adb, serial, task.task_id)
+                if not state.found or state.windowing_mode != FREEFORM or state.bounds is None:
+                    continue
+                scale = task.render_scale[0] if task.render_scale[0] > 0.1 else await self._get_freeform_scale(serial)
+                want = visible_to_android_bounds(box, scale)
+                if _same_box(tuple(state.bounds), want, tolerance=self.BOX_HOLD_TOLERANCE_PX):
+                    continue
+                wlog.info(
+                    "📐 [ECO WORKSPACE:HOLD_BOX] %s (task=%s) +%.1fs sistem kutuyu %s yaptı — çerçevenin kutusuna geri: %s",
+                    task.package, task.task_id, delay, tuple(state.bounds), want,
+                )
+                await self._resize_task_to(serial, task.task_id, want, wlog, "HOLD_BOX")
+            except Exception as exc:  # noqa: BLE001 — best effort; the guard on the next press still checks the task
+                wlog.debug("[ECO WORKSPACE:HOLD_BOX] task=%s okunamadı: %s", task.task_id, exc)
 
     async def open_in_workspace(
         self,
@@ -806,28 +951,27 @@ class EcoWorkspaceManager:
         component = await self._launch_component(serial, package)
 
         profile = self._profile_getter()
-        try_bounds_flag = profile is None or profile.supports_launch_bounds is not False
         freeform_scale = await self._get_freeform_scale(serial)
         android_target = visible_to_android_bounds(target_bounds, freeform_scale)
         wlog.info("🌱 [ECO WORKSPACE:OPEN_REQ] %s -> Hedef Bounds: %s (Android: %s, Scale: %.2f), Component: %s, Display: %s",
                   package, target_bounds, android_target, freeform_scale, component, self._display_id)
 
-        with_bounds = await self._start_freeform(serial, component, android_target if try_bounds_flag else None, wlog, raise_errors=True)
-        try_bounds_flag = try_bounds_flag and with_bounds
-        wlog.info("🌱 [ECO WORKSPACE:LAUNCHED] am start %s çalıştırıldı.",
-                  "--activity-launch-bounds ile" if with_bounds else "(bounds bayrağı olmadan)")
+        with_bounds = await self._start_freeform(serial, component, android_target, wlog, raise_errors=True)
+        try_bounds_flag = with_bounds
+        wlog.info("🌱 [ECO WORKSPACE:LAUNCHED] başlatıldı %s.",
+                  "(başlatma kutusuyla)" if with_bounds else "(kutusuz)")
 
-        moved = False
         task_id = await find_task_id_for_package(self._adb, package, display_id=self._display_id, serial=serial)
         if not task_id:
             # Fallback to global search across entire device
             task_id = await find_task_id_for_package(self._adb, package, display_id=None, serial=serial)
             if task_id:
                 # Task was running on another display; move it to this shared workspace display
-                moved = True
                 wlog.info("🌱 [ECO WORKSPACE:MOVE_TASK] %s (task=%s) paylaşımlı ekrana (%s) taşınıyor...", package, task_id, self._display_id)
                 with contextlib.suppress(Exception):
-                    await move_task_to_display(self._adb, task_id, self._display_id, serial=serial)
+                    # freeform at its box (see attach_existing_task), then drawn at the freeform scale
+                    await move_task_to_display(self._adb, task_id, self._display_id, serial=serial, mode=5, bounds=android_target)
+                    await self._rescale_moved_in(serial, task_id, android_target, wlog)
 
         if not task_id:
             # Brief retry after WM settles
@@ -837,12 +981,14 @@ class EcoWorkspaceManager:
         if not task_id:
             raise RuntimeError(f"{package} paylaşımlı çalışma alanında başlatılamadı (task_id bulunamadı).")
 
-        # Resizable, and freeform: a fresh launch already is (`--windowingMode 5`); a task found on another display and
-        # moved here keeps whatever mode it requested there — set it, verified (nothing is sent when it already is).
+        # Resizable, and freeform: `--windowingMode 5` is only a request — on a shared VD the phone came back with the task
+        # FULLSCREEN at (0,0,VD size) (field log 2026-10-28 20:52 / 20:54: the arrival guard turned it freeform ~2 s later, with
+        # the wrong box, because `task resize` does nothing to a fullscreen task and the ledger took that box). A task moved here
+        # keeps whatever mode it had on its old display. Both are set in one verified transaction, before anything is read back
+        # (nothing is sent when the task already is freeform).
         with contextlib.suppress(Exception):
             await self._adb.shell(f"cmd activity task resizeable {task_id} 2", serial=serial)
-        if moved:
-            await self._make_freeform(serial, task_id, package, android_target, wlog, skip_if_ok=True, via="açılış")
+        await self._make_freeform(serial, task_id, package, android_target, wlog, skip_if_ok=True, via="açılış")
 
         if try_bounds_flag and profile is not None and profile.supports_launch_bounds is None:
             supported = await self._probe_launch_bounds_support(serial, task_id, target_bounds, freeform_scale=freeform_scale)
@@ -885,8 +1031,13 @@ class EcoWorkspaceManager:
         server = await self._ensure_shared_display()
         assert self._display_id
         wlog.info("🏠 [ECO WORKSPACE:ATTACH_START] %s (task=%s) -> target_display=%s, bounds=%s", package, task_id, self._display_id, target_bounds)
+        freeform_scale = await self._get_freeform_scale(serial)
+        android_target = visible_to_android_bounds(target_bounds, freeform_scale)
         try:
-            await move_task_to_display(self._adb, task_id, self._display_id, serial=serial)
+            # Freeform at its box in the SAME transaction as the move: moved as fullscreen (the old mode=1), the task was
+            # visible fullscreen on this freeform display for a moment, and HyperOS writes exactly that into the app's
+            # remembered launch mode — every later start of the app then came up fullscreen (see `_start_freeform`).
+            await move_task_to_display(self._adb, task_id, self._display_id, serial=serial, mode=5, bounds=android_target)
             wlog.info("🏠 [ECO WORKSPACE:MOVE_STACK_OK] task=%s display=%s üzerine taşındı", task_id, self._display_id)
         except Exception as exc:
             wlog.warning("⚠️ [ECO WORKSPACE:MOVE_STACK_WARN] move_task_to_display uyarısı: %s", exc)
@@ -898,19 +1049,15 @@ class EcoWorkspaceManager:
             wlog.warning("⚠️ [ECO WORKSPACE:RESIZEABLE_ERR] %s", exc)
 
         component = await self._launch_component(serial, package)
-        freeform_scale = await self._get_freeform_scale(serial)
-        android_target = visible_to_android_bounds(target_bounds, freeform_scale)
-
-        profile = self._profile_getter()
-        bounds_ok = profile is None or profile.supports_launch_bounds is not False
-        await self._start_freeform(serial, component, android_target if bounds_ok else None, wlog)
+        await self._start_freeform(serial, component, android_target, wlog)
 
         wlog.info("🔬 [ECO WORKSPACE:DOCK_REQ] %s (task=%s) -> Hedef Bounds: %s (Android: %s, Scale: %.2f)",
                   package, task_id, target_bounds, android_target, freeform_scale)
-        # The task arrives with the mode it requested where it was — FULLSCREEN when it comes back from the phone (pinned
-        # there) or from its own window. `am start --windowingMode 5` above does not change an existing task's mode, so
-        # it is set here, together with its box, and verified: the task returns as a freeform window, not fullscreen.
+        # Mode and box again, verified: the adb fallback moves the task with the mode it had where it was — FULLSCREEN from the
+        # phone or from its own window — and `am start --windowingMode 5` does not change an existing task's mode (not
+        # skip_if_ok: with a box given that check reads only the mode).
         await self._make_freeform(serial, task_id, package, android_target, wlog, skip_if_ok=False, via="dock")
+        await self._rescale_moved_in(serial, task_id, android_target, wlog)
 
         ws_url, stream_w, stream_h, effective_bounds = await self._finalize_task_registration(
             window_id, package, task_id, target_bounds, serial, wlog, server,
@@ -926,8 +1073,21 @@ class EcoWorkspaceManager:
         whose `am` does not know `--activity-launch-bounds` (HyperOS / Android 16: "Unknown option", the WHOLE start fails)
         is remembered in the device profile and the start is repeated without it — it used to fail on every dock, with a
         Java stack trace in the terminal. Returns whether the bounds went with a successful start. `raise_errors`: a start
-        that fails even without the flag raises (opening a window needs the start; a dock only brings the task forward)."""
+        that fails even without the flag raises (opening a window needs the start; a dock only brings the task forward).
+
+        The daemon goes first when bounds are given: it passes them as launch bounds, which `am` cannot on HyperOS — and
+        only a start WITH bounds ignores the windowing mode Android remembered for the app. HyperOS remembers only
+        FULLSCREEN (never freeform), so an app once fullscreen on this display came back fullscreen on every `am start
+        --windowingMode 5` and showed so until `_make_freeform` turned it (device 2026-10-29)."""
         assert self._display_id
+        daemon = self._daemon_client_getter()
+        if android_bounds is not None and daemon is not None:
+            with contextlib.suppress(Exception):
+                if await daemon.start_freeform(self._display_id, android_bounds, component):
+                    return True
+        profile = self._profile_getter()
+        if android_bounds is not None and profile is not None and profile.supports_launch_bounds is False:
+            android_bounds = None  # this `am` rejects the flag: the start would fail first
         if android_bounds is not None:
             try:
                 await self._adb.shell(freeform_start_command(self._display_id, component, android_bounds), serial=serial, timeout_s=3.0)
@@ -997,6 +1157,16 @@ class EcoWorkspaceManager:
         activity = await _resolve_default_launcher_activity(self._adb, serial, package)
         return activity if activity and "/" in activity else package
 
+    async def _rescale_moved_in(self, serial: str, task_id: str, android_bounds: TaskBounds, wlog) -> None:
+        """HyperOS works out a freeform task's window-layer scale (its 0.7 transform) only when the task's box CHANGES. A task
+        moved in from another display stayed drawn at 1.0 (its box unscaled: 1.4× its frame, past the Workspace) or at its
+        old fullscreen size, although WindowManager had the right box — until something resized it (device 2026-10-29:
+        SF (200,100,2057,1243) and (0,0,1920,1080) against the frame's box, for seconds). One pixel out and back is a change:
+        drawn at 0.7 in its box right after (measured). Best effort."""
+        left, top, right, bottom = android_bounds
+        await self._resize_task_to(serial, task_id, (left, top, right + 1, bottom), wlog, "RESCALE")
+        await self._resize_task_to(serial, task_id, android_bounds, wlog, "RESCALE")
+
     async def _resize_task_to(self, serial: str, task_id: str, android_bounds: TaskBounds, wlog, tag: str) -> None:
         """Places a freeform task at `android_bounds` (Android px), best effort. Both spellings are sent as they
         always were: on AOSP `am` is only a wrapper script over `cmd activity`, so the second is probably redundant —
@@ -1028,6 +1198,21 @@ class EcoWorkspaceManager:
             return MemberCheck("absent")
         wlog = window_logger(__name__, window_id)
         try:
+            freeform_scale = await self._get_freeform_scale(serial)
+            if await android_shell.is_miui_or_hyperos(self._adb, serial):
+                geom = await surfaceflinger_probe.probe_omni_geometry(self._adb, serial, task.task_id)
+                if geom and geom.scale_measured and is_mini_scale(geom.scale_x, freeform_scale):
+                    wlog.warning("🩹 [WS-GUARD] %s (task=%s) HyperOS mini floating modda (ölçek=%.2f) — tek dokunuşla geri büyütülüyor",
+                                 task.package, task.task_id, geom.scale_x)
+                    healed = await self._restore_mini_task(serial, task.task_id, wlog)
+                    if healed:
+                        effective, new_scale = await self._settled_effective_bounds(serial, task.task_id, task.bounds, wlog)
+                        task.bounds, task.render_scale = effective, new_scale
+                        await self._events.emit(
+                            "workspace_task_bounds_changed", window_id=window_id, bounds=list(effective), render_scale=list(new_scale),
+                        )
+                        return MemberCheck("healed", "mini_restored", effective)
+
             state = await read_task_windowing(self._adb, serial, task.task_id)
             if not self._ledger_box_plausible(task.bounds):
                 # A ledger box far bigger than the Workspace itself is OUR error (a bad scale reading), never the task's
@@ -1082,7 +1267,16 @@ class EcoWorkspaceManager:
             # `cmd activity task resize` onu bozardı. Slot geometrisi frontend'de yerel kalır
             # ve reclaim isteğiyle birlikte gelir.
             return None
+        self._resize_epoch[window_id] = self._resize_epoch.get(window_id, 0) + 1
         wlog = window_logger(__name__, window_id)
+        # Inside the Workspace on ALL four sides, at the size asked for (smaller only when bigger than the Workspace): the
+        # window is moved in, not cut. Before, only the left/top edge was held — the conversion below clamps those at 0
+        # while the far edge stayed, so a window dragged past the left edge SHRANK (log 2026-10-29: (-67,66,1233,866) →
+        # 1253 px wide instead of 1300) — and a window dragged past the right/bottom edge stayed half outside.
+        requested = tuple(bounds)
+        bounds = fit_to_canvas(requested, self.vd_w, self.vd_h)
+        if bounds != requested:
+            wlog.info("📐 [ECO WORKSPACE:RESIZE_FIT] %s Workspace dışına taşıyordu → içeri alındı: %s", requested, bounds)
 
         # Density MUST be applied BEFORE the resize commands / effective-bounds
         # readback below, not after (as this used to do): changing a task's
@@ -1102,6 +1296,13 @@ class EcoWorkspaceManager:
             await self.set_task_density(window_id, density, mode=density_mode or task.density_mode)
         elif density_mode in DENSITY_MODES:
             task.density_mode = density_mode
+
+        if await android_shell.is_miui_or_hyperos(self._adb, serial):
+            freeform_scale = await self._get_freeform_scale(serial)
+            geom = await surfaceflinger_probe.probe_omni_geometry(self._adb, serial, task.task_id)
+            if geom and geom.scale_measured and is_mini_scale(geom.scale_x, freeform_scale):
+                wlog.info("🪄 [ECO WORKSPACE:RESIZE] task=%s mini modda, önce geri büyütülüyor", task.task_id)
+                await self._restore_mini_task(serial, task.task_id, wlog)
 
         scale = task.render_scale[0] if task.render_scale[0] > 0.1 else (await self._get_freeform_scale(serial))
         android_bounds = visible_to_android_bounds(bounds, scale)
@@ -1138,6 +1339,7 @@ class EcoWorkspaceManager:
         düşer. Son üye ayrılıyorsa `_teardown_if_empty` paylaşımlı VD'yi de
         imha eder."""
         task = self._tasks.pop(window_id, None)
+        self._resize_epoch.pop(window_id, None)
         if not task:
             return
         await self._remember_placement(task)
@@ -1237,6 +1439,7 @@ class EcoWorkspaceManager:
         şey yapmaz — çağıran (task_teleporter.popout_to_desktop) task'ı ZATEN
         başka bir display'e taşıdığı için burada force-stop edilMEMELİdir."""
         task = self._tasks.pop(window_id, None)
+        self._resize_epoch.pop(window_id, None)
         if task:
             await self._remember_placement(task)
             window_logger(__name__, window_id).info(

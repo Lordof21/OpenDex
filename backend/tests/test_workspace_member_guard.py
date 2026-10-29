@@ -197,6 +197,11 @@ async def _until(predicate, seconds=2.0):
         await asyncio.sleep(0.01)
 
 
+def _guard_calls(eco):
+    """The guard's own `_make_freeform` calls (`via="koruma"`), not the verification every launch gets (`via="açılış"`)."""
+    return [c for c in eco._make_freeform.await_args_list if c.kwargs.get("via") == "koruma"]
+
+
 async def test_a_task_that_arrives_fullscreen_is_put_right_without_a_press(manager):
     """Field report 2026-10-24: the frame stood in the right place but the app filled the whole display until the user pressed it once."""
     manager.WORKSPACE_ARRIVAL_CHECKS_S = (0.01,)
@@ -214,8 +219,8 @@ async def test_a_task_that_arrives_fullscreen_is_put_right_without_a_press(manag
         handle = await manager.open_window_in_workspace("com.app.a")
         await _until(lambda: front.await_count == 1)
 
-    eco._make_freeform.assert_awaited_once()
-    assert eco._make_freeform.await_args.kwargs["skip_if_ok"] is False
+    assert len(_guard_calls(eco)) == 1
+    assert _guard_calls(eco)[0].kwargs["skip_if_ok"] is False
     event = next(e for e in await _drain(q) if e.type == "workspace_task_bounds_changed")
     assert event.payload["window_id"] == handle.window_id and event.payload["bounds"] == list(BOX)
 
@@ -235,7 +240,7 @@ async def test_the_arrival_check_leaves_a_healthy_task_alone(manager):
         await manager.open_window_in_workspace("com.app.a")
         await _until(lambda: len(reads) >= 2)
 
-    eco._make_freeform.assert_not_awaited()
+    assert _guard_calls(eco) == []
     front.assert_not_awaited()
 
 
@@ -258,7 +263,7 @@ async def test_the_arrival_check_stops_when_the_task_is_gone(manager):
         await asyncio.sleep(0.15)
 
     assert reads == []
-    eco._make_freeform.assert_not_awaited()
+    assert _guard_calls(eco) == []
 
 
 async def test_the_endpoint_reports_the_check_and_ok_means_ok_or_healed(manager):
@@ -277,3 +282,117 @@ async def test_the_endpoint_reports_the_check_and_ok_means_ok_or_healed(manager)
     assert (ok["ok"], ok["status"], ok["bounds"]) == (True, "ok", None)
     assert (healed["ok"], healed["status"], healed["bounds"]) == (True, "healed", list(BOX))
     assert (failed["ok"], failed["status"]) == (False, "failed")
+
+
+# -------------------------------------------------------- HyperOS mini-freeform on-click restore
+
+
+def test_is_mini_scale_detection():
+    from app.windows.eco_workspace import is_mini_scale
+    assert is_mini_scale(0.2269, 0.70) is True
+    assert is_mini_scale(0.25, 0.70) is True
+    assert is_mini_scale(0.57, 0.70) is False   # fit-to-display reduction
+    assert is_mini_scale(0.70, 0.70) is False   # normal freeform
+    assert is_mini_scale(1.0, 1.0) is False     # AOSP standard
+
+
+def test_parse_mini_task_info():
+    from app.windows.eco_workspace import parse_mini_task_info
+    sample = """
+    MiuiFreeformModeController
+    MiuiFreeformModeTaskInfo mTaskId=2052
+        mDisplayId=92
+        mMode=1
+        mScale=0.2271035
+        destinationCenterX=195.5, destinationActualTopY=154.0
+        folmeHeight=233.2
+    MiuiFreeformModeTaskInfo mTaskId=100
+        mDisplayId=0
+        mMode=0
+        mScale=0.70
+    """
+    info = parse_mini_task_info(sample, 2052)
+    assert info is not None
+    assert info["is_mini"] is True
+    assert info["mode"] == 1
+    assert info["scale"] == pytest.approx(0.2271, abs=0.001)
+    assert info["coords"] == (195, 270)  # 154 + 233.2 / 2
+
+    info_normal = parse_mini_task_info(sample, 100)
+    assert info_normal is not None
+    assert info_normal["is_mini"] is False
+    assert info_normal["mode"] == 0
+    assert info_normal["coords"] is None   # no position in the dump: never a guessed point
+
+    assert parse_mini_task_info(sample, 9999) is None
+
+
+async def test_hyperos_mini_task_is_restored_on_click(manager):
+    """When a task enters HyperOS mini floating window mode (0.227x), clicking on it
+    triggers verify_workspace_task which restores it with a single tap on Display 0 coordinates."""
+    from app.windows.surfaceflinger_probe import TaskGeometry
+
+    window_id, eco, task = await _member(manager)
+    serial = "SER"
+    q = await manager._test_events.subscribe()
+
+    mini_geom = TaskGeometry(
+        render_bounds=(121, 93, 632, 639),
+        logical_bounds=(121, 93, 632, 639),
+        scale_x=0.2271,
+        scale_y=0.2271,
+        scale_measured=True,
+    )
+    with patch("app.device.android_shell.is_miui_or_hyperos", AsyncMock(return_value=True)), \
+         patch.object(eco_module.surfaceflinger_probe, "probe_omni_geometry", AsyncMock(return_value=mini_geom)), \
+         patch.object(eco, "_restore_mini_task", AsyncMock(return_value=True)) as mock_restore:
+
+        check = await manager.verify_workspace_task(window_id)
+
+    assert check.status == "healed"
+    assert check.reason == "mini_restored"
+    assert check.bounds == BOX
+    mock_restore.assert_awaited_once()
+    event = next(e for e in await _drain(q) if e.type == "workspace_task_bounds_changed")
+    assert event.payload["window_id"] == window_id
+
+
+async def test_restore_mini_task_injects_tap_and_verifies(manager):
+    """_restore_mini_task extracts WMShell destination coordinates, injects tap to Display 0, and verifies recovery."""
+    from app.windows.surfaceflinger_probe import TaskGeometry
+
+    window_id, eco, task = await _member(manager)
+    serial = "SER"
+
+    wmshell_dump = """
+    MiuiFreeformModeController
+    MiuiFreeformModeTaskInfo mTaskId=2052
+        mDisplayId=92
+        mMode=1
+        mScale=0.2271035
+        destinationCenterX=195.5, destinationActualTopY=154.0
+        folmeHeight=233.2
+    """
+    healed_geom = TaskGeometry(
+        render_bounds=(19, 130, 1201, 1393),
+        logical_bounds=(19, 130, 2269, 1938),
+        scale_x=0.5253,
+        scale_y=0.5253,
+        scale_measured=True,
+    )
+
+    eco._adb.shell = AsyncMock(side_effect=[wmshell_dump, ""])
+    with patch.object(eco_module.surfaceflinger_probe, "probe_omni_geometry", AsyncMock(return_value=healed_geom)):
+        ok = await eco._restore_mini_task(serial, "2052")
+
+    assert ok is True
+    eco._adb.shell.assert_any_await("input -d 0 tap 195 270", serial=serial, timeout_s=1.5)
+
+
+async def test_restore_mini_task_never_taps_a_guessed_point(manager):
+    """No position for the task in WMShell's dump: a fixed point would tap whatever the phone shows there — nothing is sent."""
+    _window_id, eco, _task = await _member(manager)
+    eco._adb.shell = AsyncMock(return_value="MiuiFreeformModeTaskInfo mTaskId=2052\n    mMode=1\n    mScale=0.2271\n")
+
+    assert await eco._restore_mini_task("SER", "2052") is False
+    assert not any("input" in str(c.args[0]) for c in eco._adb.shell.await_args_list)

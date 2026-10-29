@@ -912,6 +912,31 @@ class DeviceDaemonClient:
         log.info("🔄 [OpenDexDaemon:RESTART_TASK_ACTIVITY] taskId=%s -> %s", clean_task, res)
         return bool(res and res.get("ok", False))
 
+    async def restore_mini_task(self, task_id: int | str) -> bool:
+        """Restores a HyperOS mini-floating task by triggering Display 0 tap via daemon."""
+        if not self.is_connected or not self.supports("restore_mini_task"):
+            return False
+        clean_task = "".join(filter(str.isdigit, str(task_id)))
+        if not clean_task:
+            return False
+        res = await self._send_rpc_full(f"restore_mini_task {int(clean_task)}", "restore_mini_task", timeout=2.5)
+        log.info("🪄 [OpenDexDaemon:RESTORE_MINI_TASK] taskId=%s -> %s", clean_task, res)
+        return bool(res and res.get("ok", False))
+
+    async def start_freeform(self, display_id: int | str, bounds: tuple[int, int, int, int], component: str) -> bool:
+        """Starts ``component`` as a freeform task on ``display_id`` at ``bounds`` (Android px) — `am start --windowingMode 5`
+        with the launch bounds HyperOS's `am` cannot pass. Only with bounds does the start ignore the windowing mode Android
+        remembered for the app (HyperOS remembers only FULLSCREEN, so an app once fullscreen on the Workspace display came
+        back fullscreen on every start). False while disconnected, with an older jar or when the start was refused."""
+        clean_disp = "".join(filter(str.isdigit, str(display_id)))
+        if not clean_disp or not component or " " in component or not self.supports("start_freeform"):
+            return False
+        box = ",".join(str(int(v)) for v in bounds)
+        res = await self._send_rpc_full(f"start_freeform {int(clean_disp)} {box} {component}", "start_freeform", timeout=3.5)
+        if res and not res.get("ok", False):
+            log.info("🌱 [OpenDexDaemon:START_FREEFORM] %s -> %s", component, res)
+        return bool(res and res.get("ok", False))
+
     async def reorder_task(self, task_id: int | str, *, front: bool) -> bool:
         """Raises (`front`) or lowers a task within its display by id, with no activity start — one WindowContainerTransaction.
         Lowering parks a task just moved onto the phone screen UNDER whatever the user is using there; raising works for a

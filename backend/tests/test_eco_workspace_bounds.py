@@ -180,6 +180,28 @@ async def test_open_cok_kucuk_dumpsys_kutusu_yok_sayilir():
 # ------------------------------------------------------------------ resize
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("asked, placed", [
+    ((-67, 66, 1233, 866), (0, 66, 1300, 866)),        # past the LEFT edge: moved in, not narrowed (was 1253 px wide)
+    ((800, 100, 2100, 900), (620, 100, 1920, 900)),    # past the RIGHT edge: moved in (it used to stay half outside)
+    ((100, -40, 900, 560), (100, 0, 900, 600)),        # past the TOP edge
+    ((100, 700, 900, 1300), (100, 480, 900, 1080)),    # past the BOTTOM edge
+])
+async def test_a_window_dragged_past_any_edge_is_moved_inside_at_its_size(asked, placed):
+    """Field report 2026-10-29: the left/top edge held the window (by shrinking it), the right/bottom edge did not hold it at
+    all. Every edge now moves it inside the Workspace (1920×1080 here) at the size asked for."""
+    adb = _FakeAdb()
+    mgr = _mgr(adb, _FakeEvents())
+    await mgr.open_in_workspace("com.app.a", "win-1")
+    adb.shell_calls.clear()
+
+    await mgr.resize_task("win-1", asked)
+
+    l, t, r, b = placed
+    assert any(c.startswith(f"cmd activity task resize ") and c.split()[-4:] == [str(l), str(t), str(r), str(b)]
+               for c in adb.shell_calls), adb.shell_calls
+
+
+@pytest.mark.asyncio
 async def test_resize_sonrasi_task_bounds_GERCEK_kutuya_snap_eder():
     """I5: Sürükleme bitince çerçeve, Android'in verdiği kutuya oturmalı."""
     adb = _FakeAdb(dumpsys_bounds="10, 20 - 480, 390")
@@ -514,6 +536,13 @@ async def test_daemon_first_geometry_skips_dumpsys(monkeypatch):
                 "bounds": [120, 120, 820, 620],
             }
 
+    import app.windows.task_windowing as tw
+
+    async def _freeform_already(adb, serial, task_id):
+        # the launch's own mode check (a pre-1.2 daemon has no mode, the dump would answer): the task is freeform already
+        return tw.TaskWindowingState(task_id=str(task_id), found=True, windowing_mode=tw.FREEFORM, bounds=(120, 120, 820, 620))
+
+    monkeypatch.setattr(tw, "read_task_windowing", _freeform_already)
     adb = _FakeAdb(dumpsys_bounds=None)
     events = _FakeEvents()
     mgr = _mgr(adb, events, daemon=_FakeDaemon())

@@ -125,8 +125,6 @@ async def test_move_task_wct_writes_command_and_resolves_status():
     assert await task is True
 
 
-
-
 @pytest.mark.asyncio
 async def test_reorder_task_writes_command_and_resolves_status():
     client = _connected_client()
@@ -143,6 +141,25 @@ async def test_reorder_task_is_false_without_the_capability_and_sends_nothing():
     client = _connected_client()
     client.daemon_capabilities = {"move_task_wct"}      # an older jar
     assert await client.reorder_task(205, front=False) is False
+    assert bytes(client._writer.written) == b""
+
+
+@pytest.mark.asyncio
+async def test_start_freeform_sends_display_box_and_component():
+    client = _connected_client()
+    client.daemon_capabilities = {"start_freeform"}
+    task = asyncio.create_task(client.start_freeform("103", (267, 99, 2236, 1338), "com.android.vending/.AssetBrowserActivity"))
+    await asyncio.sleep(0)
+    assert bytes(client._writer.written) == b"#1 start_freeform 103 267,99,2236,1338 com.android.vending/.AssetBrowserActivity\n"
+    await client._dispatch_event({"type": "start_freeform_result", "ok": True, "code": 0, "req_id": "1"})
+    assert await task is True
+
+
+@pytest.mark.asyncio
+async def test_start_freeform_is_false_without_the_capability_and_sends_nothing():
+    client = _connected_client()
+    client.daemon_capabilities = {"move_task_wct"}      # an older jar: the caller falls back to `am start`
+    assert await client.start_freeform(103, (0, 0, 10, 10), "com.app/.Main") is False
     assert bytes(client._writer.written) == b""
 
 
