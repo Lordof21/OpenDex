@@ -41,6 +41,7 @@ import {
 } from './windowStore.js';
 import { useSystemStore } from '../state/systemStore.js';
 import { getSettings } from '../settings/settingsApi.js';
+import { getLiveSettings } from '../settings/liveSettings.js';
 import { isMirrorPackage } from './mirrorPackage.js';
 import { isCropWindow } from './cropWindow.js';
 import { logger } from '../lib/logger.js';
@@ -93,7 +94,11 @@ export function chromeFor(win) {
     // small positive constant, never negative and never huge.
     if (dw >= 0 && dw < 64 && dh >= 0 && dh < 160) return { dw, dh };
   }
-  return chromeForMode('normal', isHeaderHidden(win, null));
+  // Unmeasured (a DeX crop window never is: it has no VideoCanvas): the header's visibility follows the live settings —
+  // `null` read a "follow" window under the hover-header setting as having a 46 px title bar it does not show, and a
+  // released crop resize asked Android for a box 44 px (≈74 VD px) too short; the canvas then measured the real height and
+  // a second request followed ("first the width, then the height", log 2026-10-29 12:42:46 / :47).
+  return chromeForMode('normal', isHeaderHidden(win, getLiveSettings()));
 }
 
 // Wide enough to actually grab reliably (an 8px sliver with no visual marker
