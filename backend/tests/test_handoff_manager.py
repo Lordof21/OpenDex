@@ -79,8 +79,9 @@ async def test_on_device_task_focused_hands_the_app_to_the_phone(mock_adb, event
     calls = [call[0][0] for call in mock_adb.shell.call_args_list]
     # The window's display keeps the window's density
     assert not any(c.startswith("wm density") and "-d 10" in c for c in calls)
-    # Normalized on Display 0 in fullscreen launcher mode
-    assert any("am start --display 0" in c and "com.android.chrome" in c for c in calls)
+    # Raised on Display 0 by task id: no new intent reaches the running app
+    mock_daemon.reorder_task.assert_any_await("999", front=True)
+    assert not any("am start --display 0" in c and "com.android.chrome" in c for c in calls)
 
 
 @pytest.mark.asyncio
@@ -334,6 +335,41 @@ async def test_without_a_proven_prelanding_the_move_still_gets_its_post_settle(m
 
     density.schedule_settle.assert_called_once()                          # eski yol: taşıma sonrası doğrulanmış yenileme
     assert (phases == ["stealth", "live"]) == ("prelanding_setting" not in kw)   # ayar kapalıyken perde hiç açılmaz
+
+
+@pytest.mark.asyncio
+async def test_an_app_both_the_prelanding_and_the_move_recreate_is_rebuilt_once_on_the_move(mock_adb, events, settings):
+    """Log 2026-10-30 (com.ntech.app): the pre-landing's relaunch (0x1400) and the move's (0x2804008) ~1 s apart left the app
+    on its home page; reclaim's single relaunch kept the page. No pre-landing and no process kill: the move's one relaunch
+    carries the phone's density, the settle after it checks."""
+    handoff, _session, density, _log, phases, patches = _prelanding_rig(mock_adb, events, settings)
+    daemon = handoff._daemon_client_getter()
+    daemon.task_density_info = AsyncMock(return_value={"ok": True, "config_changes": 0x00b0})
+    daemon.restart_task_activity = AsyncMock(return_value=True)
+    with patches[0], patches[1] as set_density, patches[2]:
+        assert await handoff.handoff_to_phone("win-3") is True
+
+    set_density.assert_not_awaited()
+    daemon.restart_task_activity.assert_not_awaited()
+    density.schedule_settle.assert_called_once()
+    assert "stealth" not in phases
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("info", [
+    {"ok": True, "config_changes": 0x40005ffb},   # Chrome: handles all of it, never recreated
+    {"ok": True, "config_changes": 0x1db0},       # handles density + size: only the move recreates it
+    {"ok": True, "config_changes": 0x4008},       # handles the move: only the pre-landing recreates it
+    {"ok": True},                                 # older jar: unknown
+    None,                                         # unreadable
+])
+async def test_the_prelanding_stays_when_the_app_is_recreated_at_most_once(mock_adb, events, settings, info):
+    handoff, _session, _density, _log, _phases, patches = _prelanding_rig(mock_adb, events, settings)
+    handoff._daemon_client_getter().task_density_info = AsyncMock(return_value=info)
+    with patches[0], patches[1] as set_density, patches[2]:
+        await handoff.handoff_to_phone("win-3")
+
+    set_density.assert_awaited_once()
 
 
 # ---------------------------------------------------------------- ön-iniş: telefonun CANLI yoğunluğu
@@ -623,7 +659,11 @@ async def test_handoff_windowing_choice_overrides_the_setting_for_this_handoff_o
     ):
         assert await handoff.handoff_to_phone("win-3", windowing=choice) is True
 
-    assert mock_bring_to_front.await_args.kwargs["windowing_mode"] == launch_mode
+    if launch_mode is None:  # fullscreen: raised by id, no am start (no intent for the app)
+        mock_bring_to_front.assert_not_awaited()
+        daemon_client.reorder_task.assert_awaited_with("888", front=True)
+    else:
+        assert mock_bring_to_front.await_args.kwargs["windowing_mode"] == launch_mode
     assert mock_settle.await_args.kwargs["windowing"] == settled_with
 
 
@@ -645,7 +685,8 @@ async def test_app_opened_on_the_phone_is_always_fullscreen_whatever_the_freefor
     ):
         await handoff._execute_to_phone(session, "com.google.android.youtube", None, "S", task_id="888", source=source)
 
-    assert mock_bring_to_front.await_args.kwargs["windowing_mode"] is None
+    mock_bring_to_front.assert_not_awaited()   # fullscreen: raised by id, no am start --windowingMode
+    handoff._daemon_client_getter().reorder_task.assert_awaited_with("888", front=True)
     assert mock_settle.await_args.kwargs["windowing"] == "fullscreen"
 
 
@@ -733,6 +774,7 @@ async def test_hyperos_unlock_that_fails_falls_back_to_plain_bring_to_front(mock
     handoff, session, density, _log, _phases, patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=False)
     daemon_client = handoff._daemon_client_getter()
     daemon_client.move_task_wct = AsyncMock(return_value=True)
+    daemon_client.reorder_task = AsyncMock(return_value=False)   # older jar: no intent-free raise
     with (
         patches[0], patches[1], patches[2],
         patch("app.device.android_shell.phone_size", AsyncMock(return_value=(1220, 2712))),
@@ -768,10 +810,33 @@ async def test_a_task_the_shell_cannot_start_is_raised_by_id_instead_of_staying_
 
 
 @pytest.mark.asyncio
-async def test_non_xiaomi_handoff_keeps_the_plain_reorder(mock_adb, events, settings):
+async def test_non_xiaomi_handoff_raises_the_task_by_id_without_an_intent(mock_adb, events, settings):
+    """`am start -n … --activity-reorder-to-front` gives the already running app a needless new intent (onNewIntent); the
+    daemon raises the task by id instead."""
     handoff, session, density, _log, _phases, patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=False)
     daemon_client = handoff._daemon_client_getter()
     daemon_client.move_task_wct = AsyncMock(return_value=True)
+    daemon_client.reorder_task = AsyncMock(return_value=True)
+    with (
+        patches[0], patches[1], patches[2],
+        patch("app.device.android_shell.phone_size", AsyncMock(return_value=(1220, 2712))),
+        patch("app.device.android_shell.is_miui_or_hyperos", AsyncMock(return_value=False)),
+        patch("app.device.android_shell.unlock_display0_gesture_navigation", AsyncMock()) as unlock,
+        patch("app.device.android_shell.bring_to_front", AsyncMock(return_value="OK")) as plain,
+    ):
+        assert await handoff.handoff_to_phone("win-3") is True
+
+    unlock.assert_not_awaited()
+    plain.assert_not_awaited()
+    daemon_client.reorder_task.assert_awaited_once_with("888", front=True)
+
+
+@pytest.mark.asyncio
+async def test_non_xiaomi_handoff_keeps_the_plain_reorder_when_the_daemon_cannot_raise(mock_adb, events, settings):
+    handoff, session, density, _log, _phases, patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=False)
+    daemon_client = handoff._daemon_client_getter()
+    daemon_client.move_task_wct = AsyncMock(return_value=True)
+    daemon_client.reorder_task = AsyncMock(return_value=False)
     with (
         patches[0], patches[1], patches[2],
         patch("app.device.android_shell.phone_size", AsyncMock(return_value=(1220, 2712))),

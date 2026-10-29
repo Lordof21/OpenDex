@@ -97,7 +97,7 @@ async def test_the_display_takes_the_phones_size_and_density_in_one_step_before_
     assert handoff.resize_calls == [("win-test", 1080, 2400, 520, True)]  # one step: size AND density, in place only
     assert session.landing == Landing(window=WINDOW, landed=Geometry(1080, 2400, 520))
     assert _density_writes(daemon) == []  # the resize carried the density: no second display change
-    assert daemon.info_calls == ["555"]  # the app was reconciled on the VD (task 555), before it moved
+    assert daemon.info_calls == ["555", "555"]  # two-relaunch check, then reconciled on the VD (task 555), before it moved
 
 
 async def test_only_the_size_differs_the_display_is_resized_and_no_density_work_happens(tasks):

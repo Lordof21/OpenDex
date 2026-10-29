@@ -302,6 +302,36 @@ class HandoffManager:
         except Exception:  # noqa: BLE001 — an unreadable DB means the defaults: on
             return True
 
+    # ActivityInfo.configChanges bits. The pre-landing changes density and screen size on the window's display; the move onto
+    # the phone still changes touchscreen and colorMode, which no pre-landing can match (docs/design/HANDOFF.md §6).
+    _LANDING_CONFIG = 0x1000 | 0x0400
+    _MOVE_CONFIG = 0x0008 | 0x4000
+
+    async def _rebuilt_on_landing_and_move(self, pkg: str, task_id: str | int | None) -> bool:
+        """True when the app's top activity handles neither the pre-landing's changes nor the move's: Android would recreate
+        it twice ~1 s apart, and an app still restoring its page after the first comes back on its home page after the
+        second (log 2026-10-30, com.ntech.app: relaunch 0x1400 then 0x2804008; reclaim's single relaunch 0x2805408 kept the
+        page). Without a pre-landing the move's one relaunch carries the density too. Unknown (no daemon, older jar,
+        unreadable) → False: the pre-landing stays."""
+        daemon = self._daemon_client_getter() if callable(self._daemon_client_getter) else None
+        if not task_id or daemon is None or not hasattr(daemon, "task_density_info"):
+            return False
+        try:
+            info = await daemon.task_density_info(task_id)
+        except Exception:  # noqa: BLE001 — unreadable: the pre-landing stays
+            return False
+        changes = info.get("config_changes") if isinstance(info, dict) else None
+        if not isinstance(changes, int) or isinstance(changes, bool):
+            return False
+        twice = (changes & self._LANDING_CONFIG) != self._LANDING_CONFIG and (changes & self._MOVE_CONFIG) != self._MOVE_CONFIG
+        if twice:
+            log.info(
+                "🛬 [HANDOFF: ÖN-İNİŞ ATLANDI] %s hem yoğunluk/boyut hem taşıma değişiminde yeniden kuruluyor "
+                "(configChanges=0x%x): tek yeniden kurulum taşımada olur, sayfa korunur",
+                pkg, changes,
+            )
+        return twice
+
     async def _land_size(
         self, session: "WindowSession", phone_size: tuple[int, int], phys_dpi: int, wlog: logging.Logger,
     ) -> bool:
@@ -659,7 +689,9 @@ class HandoffManager:
             # ÖN-İNİŞ (yalnız PC'den aktarım): yoğunluk değişimi perdenin arkasında, sanal ekranda yaşanır; taşıma nötr olur.
             prelanded = False
             density_before, changed_at = None, None
-            if await self._prelanding_wanted(session, pkg, disp_id, task_id, window_dpi, phys_dpi, phone_size, source):
+            landing = await self._prelanding_wanted(session, pkg, disp_id, task_id, window_dpi, phys_dpi, phone_size, source)
+            rebuilt_by_move = landing and await self._rebuilt_on_landing_and_move(pkg, task_id)
+            if landing and not rebuilt_by_move:
                 veiled = True
                 prelanded, density_before, changed_at, rebuilt = await self._prelanding(
                     session, pkg, disp_id, window_dpi, phys_dpi, phone_size, task_id, serial,
@@ -720,13 +752,13 @@ class HandoffManager:
 
                 out_start = ""
                 # HyperOS/MIUI: görev WCT ile taşındıysa Home'a gerçek bir ön-plan geçişi verilmeli, yoksa kenar geri jesti
-                # (GestureStub) dokunuşa kapalı kalır — Home → uygulama (kök neden: docs/design/HANDOFF.md §4).
+                # (GestureStub) dokunuşa kapalı kalır — ara görev → uygulama (kök neden: docs/design/HANDOFF.md §4).
                 # Başlatma komutu hata verirse (çözülemeyen intent) kullanıcı Home'da kalmasın: düz öne getirmeye düşülür.
                 if task_id and await android_shell.is_miui_or_hyperos(self._adb, serial):
                     try:
                         out_start = await android_shell.unlock_display0_gesture_navigation(
                             self._adb, serial, pkg, windowing_mode=launch_mode,
-                            behind_task_id=behind_task, daemon=daemon,
+                            behind_task_id=behind_task, daemon=daemon, task_id=task_id,
                         )
                     except Exception as exc:  # noqa: BLE001 — düz öne getirmeye düşülür
                         log.warning("⚠️ [HANDOFF: HYPEROS JEST KİLİDİ] Home → %s geçişi başarısız: %s", pkg, exc)
@@ -734,6 +766,12 @@ class HandoffManager:
                         out_start = ""
                     elif out_start:
                         log.info("🧭 [HANDOFF: HYPEROS JEST KİLİDİ] Home → %s geçişi yapıldı (onForegroundChanged → GestureStub)", pkg)
+                if not out_start and task_id and daemon and launch_mode is None:
+                    # Tam ekran: görev kimliğiyle öne alınır — `am start -n … --activity-reorder-to-front` zaten açık
+                    # uygulamaya gereksiz bir yeni intent (onNewIntent) verir.
+                    with contextlib.suppress(Exception):
+                        if await daemon.reorder_task(task_id, front=True):
+                            out_start = f"görev {task_id} kimliğiyle öne alındı (intent yok)"
                 if not out_start:
                     try:
                         out_start = await android_shell.bring_to_front(
@@ -746,7 +784,7 @@ class HandoffManager:
                         if not (task_id and daemon and await daemon.reorder_task(task_id, front=True)):
                             raise
                         out_start = f"görev {task_id} kimliğiyle öne alındı ({exc.__class__.__name__})"
-                log.info("🎯 [HANDOFF] am start --display 0 tamamlandı (comp=%s mode=%s): '%s'", top_component or "auto", launch_mode, out_start.strip() if out_start else "OK")
+                log.info("🎯 [HANDOFF] Display 0'da öne alındı (comp=%s mode=%s): '%s'", top_component or "auto", launch_mode, out_start.strip() if out_start else "OK")
             except Exception as exc:
                 log.warning("⚠️ [HANDOFF] am start --display 0 uyarısı: %s", exc)
 
@@ -809,7 +847,9 @@ class HandoffManager:
                 # "adapted [system: ...]" evidence), so a forced process kill is not needed — and it is what left the app with
                 # no process and a BLACK screen (field report 2026-10-17). The evidence-based settle at the end of this
                 # method decides, and restarts only an app that provably did not adapt.
-                should_reinflate = (not prelanded or is_web_rendered_app(pkg)) and not moved_by_android
+                # The same holds for an app the move itself recreates (`rebuilt_by_move`, pre-landing skipped for it): Android's
+                # relaunch carries the phone's density, and a kill would lose the page that relaunch keeps.
+                should_reinflate = (not prelanded or is_web_rendered_app(pkg)) and not moved_by_android and not rebuilt_by_move
                 if should_reinflate and task_id and self._daemon_client_getter:
                     try:
                         restarted = await self._reinflate(pkg, task_id)

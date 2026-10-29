@@ -191,7 +191,8 @@ async def test_handoff_to_phone_settles_the_process_on_the_window_display_before
         assert await handoff.handoff_to_phone("win-test") is True
     await rec.wait_idle()
 
-    assert daemon.info_calls == ["555"]  # the task still on the window's display when the density landed
+    # the pre-landing's two-relaunch check, then the reconcile: the task still on the window's display both times
+    assert daemon.info_calls == ["555", "555"]
     assert daemon.restarts == ["555"]
     assert _density_writes(daemon) == [("10", 520)]
 

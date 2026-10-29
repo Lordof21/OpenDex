@@ -427,8 +427,9 @@ async def unlock_display0_gesture_navigation(
     windowing_mode: int | None = None,
     behind_task_id: int | str | None = None,
     daemon: Any = None,
+    task_id: int | str | None = None,
 ) -> str:
-    """HyperOS / MIUI üzerinde kenar geri jestlerini (GestureStubLeft/Right) dokunuşa açar; `am start` çıktısını döndürür.
+    """HyperOS / MIUI üzerinde kenar geri jestlerini (GestureStubLeft/Right) dokunuşa açar; son adımın çıktısını döndürür.
 
     Kök Neden (bkz. docs/design/HANDOFF.md §4):
     HyperOS RecentsImpl (com.miui.home / com.mi.android.globallauncher), kenar geri jestlerini
@@ -442,11 +443,29 @@ async def unlock_display0_gesture_navigation(
 
     Ara görev: `behind_task_id` (aktarımdan ÖNCE telefonun ön planındaki görev) daemon ile öne alınırsa kullanıcının açık
     uygulaması hedefin ARKASINDA görünür kalır (serbest pencerede arka plan o uygulamadır; geri alınınca telefon oraya döner).
-    Verilmezse ya da öne alınamazsa Home kullanılır — telefon ana ekrana düşer ve açık uygulama arka plana atılır.
-    `windowing_mode`: serbest kip aktarımında görevin kipi (5) değişmesin diye hedef `am start`a verilir.
+    Verilmezse ya da öne alınamazsa `task_id` daemon ile bir anlığına alta indirilir: altındaki görev (çoğu zaman Home) öne
+    gelir — Home'a intent gitmez. Home intent'i HyperOS'un `toHome`'udur: Workspace'inkiler dahil her serbest pencereyi mini
+    hâle küçültür (cihaz 2026-10-29); yalnız daemon görev taşıyamazsa son çaredir.
+
+    Hedef, tam ekran aktarımında (`windowing_mode` yok) görev kimliğiyle öne alınır: zaten açık uygulamaya yeni bir intent
+    (onNewIntent) gitmez. `windowing_mode` (serbest kip, 5) `am start` ister: HyperOS kipi yalnız kendi Shell geçişinden tanır.
     """
     target = bring_to_front_command(package, "0", windowing_mode, reorder_only=False, component=component)
-    if behind_task_id is not None and daemon is not None:
+    if daemon is not None and task_id is not None:
+        stepped_aside = False
+        with contextlib.suppress(Exception):
+            if behind_task_id is not None:
+                stepped_aside = bool(await daemon.reorder_task(behind_task_id, front=True))
+            if not stepped_aside:
+                stepped_aside = bool(await daemon.reorder_task(task_id, front=False))
+        if stepped_aside:
+            await asyncio.sleep(0.15)
+            if windowing_mode is None:
+                with contextlib.suppress(Exception):
+                    if await daemon.reorder_task(task_id, front=True):
+                        return f"görev {task_id} kimliğiyle öne alındı (intent yok)"
+            return await adb.shell(target, serial=serial, timeout_s=timeout_s)
+    elif behind_task_id is not None and daemon is not None:
         with contextlib.suppress(Exception):
             if await daemon.reorder_task(behind_task_id, front=True):
                 await asyncio.sleep(0.15)

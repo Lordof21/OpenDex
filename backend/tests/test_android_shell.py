@@ -144,6 +144,50 @@ async def test_unlock_display0_gesture_navigation_falls_back_to_home_when_the_ta
         assert "category.HOME; sleep 0.15; " in adb.calls[0]
 
 
+async def test_unlock_display0_gesture_navigation_with_the_task_id_sends_no_intent_at_all():
+    """The task steps aside and comes back by id: Home gets its foreground change from whatever is under the task — no HOME
+    intent (HyperOS's `toHome` shrinks every freeform window to mini) — and the running app gets no new intent."""
+    adb = _Adb("Starting: Intent")
+    daemon = SimpleNamespace(reorder_task=AsyncMock(return_value=True))
+    out = await android_shell.unlock_display0_gesture_navigation(adb, "SER", "com.ntech.app", daemon=daemon, task_id=2153)
+    assert adb.calls == []
+    assert [c.args + (c.kwargs["front"],) for c in daemon.reorder_task.await_args_list] == [(2153, False), (2153, True)]
+    assert "error" not in out.lower()
+
+
+async def test_unlock_display0_gesture_navigation_with_the_task_id_raises_the_users_open_app_as_the_intermediate():
+    adb = _Adb("")
+    daemon = SimpleNamespace(reorder_task=AsyncMock(return_value=True))
+    await android_shell.unlock_display0_gesture_navigation(
+        adb, "SER", "com.ntech.app", behind_task_id=371, daemon=daemon, task_id=2153,
+    )
+    assert adb.calls == []
+    assert [c.args + (c.kwargs["front"],) for c in daemon.reorder_task.await_args_list] == [(371, True), (2153, True)]
+
+
+async def test_unlock_display0_gesture_navigation_freeform_still_needs_the_shell_start_but_not_home():
+    """HyperOS knows the freeform mode only from its own Shell transition, so the mode-5 `am start` stays."""
+    adb = _Adb("Starting: Intent")
+    daemon = SimpleNamespace(reorder_task=AsyncMock(return_value=True))
+    await android_shell.unlock_display0_gesture_navigation(
+        adb, "SER", "com.android.chrome", windowing_mode=5, daemon=daemon, task_id=40,
+    )
+    daemon.reorder_task.assert_awaited_once_with(40, front=False)
+    assert len(adb.calls) == 1 and "category.HOME" not in adb.calls[0]
+    assert adb.calls[0].startswith("am start --display 0 --windowingMode 5 ")
+
+
+async def test_unlock_display0_gesture_navigation_falls_back_to_the_shell_when_the_task_cannot_be_moved():
+    adb = _Adb("")
+    raise_fails = SimpleNamespace(reorder_task=AsyncMock(side_effect=[True, False]))
+    await android_shell.unlock_display0_gesture_navigation(adb, "SER", "com.android.chrome", daemon=raise_fails, task_id=40)
+    assert len(adb.calls) == 1 and "category.HOME" not in adb.calls[0]   # the task stepped aside: only the start remains
+    adb.calls.clear()
+    nothing_moves = SimpleNamespace(reorder_task=AsyncMock(return_value=False))
+    await android_shell.unlock_display0_gesture_navigation(adb, "SER", "com.android.chrome", daemon=nothing_moves, task_id=40)
+    assert "category.HOME; sleep 0.15; " in adb.calls[0]   # older jar: the Home intent is the last resort
+
+
 async def test_set_display_density_prefers_the_daemon():
     adb = _Adb("")
     daemon = SimpleNamespace(is_connected=True, set_display_density=AsyncMock(return_value=True))
