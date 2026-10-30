@@ -15,14 +15,17 @@ import { historyCursor, useDeviceLoadStore } from '../src/telemetry/deviceLoadSt
 import { DeviceLoadPanel, DeviceLoadTrayButton } from '../src/telemetry/DeviceLoadPanel.jsx';
 import { TimeChart } from '../src/telemetry/TimeChart.jsx';
 import {
+  bitsPerPixel,
   bodyTemp,
   continuousRuns,
+  encodeInsight,
   encodeLoad,
   fmt,
   fmtTime,
   gapSeconds,
   inRange,
   isStale,
+  nearestSample,
   niceTicks,
   powerLabel,
   processTable,
@@ -141,6 +144,33 @@ describe('loadModel', () => {
     expect(encodeLoad(sample(0, { streams: [...sample(0).streams, paused] })).count).toBe(1);
     const fresh = { window_id: 'w3', w: 1000, h: 800, fps: null, mbps: null, paused: false };
     expect(encodeLoad(sample(0, { streams: [...sample(0).streams, fresh] })).mpx).toBeNull();
+  });
+});
+
+describe('the two loads of one stream (phone: Mpx/s, link: Mbps)', () => {
+  const enc = (mpx, mbps, count = 1) => ({ mpx, mbps, fps: 60, count });
+
+  it('reads compression as bits per encoded pixel', () => {
+    expect(bitsPerPixel(enc(100, 8))).toBeCloseTo(0.08);
+    expect(bitsPerPixel(enc(0, 0, 0))).toBeNull();
+    expect(bitsPerPixel(enc(null, null))).toBeNull();
+  });
+
+  it('says which side the work is on', () => {
+    expect(encodeInsight(enc(0, 0, 0))).toBe('none');
+    expect(encodeInsight(enc(null, null))).toBe('unknown');
+    expect(encodeInsight(enc(20, 2))).toBe('calm');
+    expect(encodeInsight(enc(110, 3))).toBe('phone'); // many pixels, little data: a plain picture
+    expect(encodeInsight(enc(30, 14))).toBe('link'); // few pixels, much data: a moving picture
+    expect(encodeInsight(enc(120, 16))).toBe('both');
+  });
+
+  it('finds the sample nearest in time', () => {
+    const s = [sample(0), sample(1), sample(2)];
+    expect(nearestSample(s, T0 + 6).t).toBe(T0 + 5);
+    expect(nearestSample(s, T0 - 100).t).toBe(T0);
+    expect(nearestSample([], T0)).toBeNull();
+    expect(nearestSample(s, null)).toBeNull();
   });
 });
 
@@ -556,16 +586,36 @@ describe('DeviceLoadPanel', () => {
     delete Element.prototype.scrollTo;
   });
 
-  it('the encoder is one chart on one axis; its bandwidth is in the header and in the tooltip', () => {
+  it("the stream is two charts, one axis each — the phone's Mpx/s and the link's Mbps — on one crosshair", () => {
     wide();
     seed();
     render(<DeviceLoadPanel />);
-    const chart = screen.getByRole('group', { name: /şu an saniyede 84 megapiksel/ });
-    expect(screen.queryByRole('group', { name: /bant genişliği/i })).toBeNull();
+    const pixels = screen.getByRole('group', { name: /şu an saniyede 84 megapiksel/ });
+    const link = screen.getByRole('group', { name: /şu an saniyede 7,8 megabit/ });
     expect(screen.getByText('84 Mpx/s · 7,8 Mbps')).toBeInTheDocument();
-    fireEvent.pointerMove(chart, { clientX: 400 });
-    expect(within(chart).getByRole('status')).toHaveTextContent('1 akış · 7,8 Mbps · 60 kare/sn');
+    // the tiles say what each number is, and one sentence which side the work is on
+    expect(screen.getByText('Telefonun işi')).toBeInTheDocument();
+    expect(screen.getByText('Ağın işi')).toBeInTheDocument();
+    expect(screen.getByText('Sıkıştırma')).toBeInTheDocument();
+    expect(screen.getByRole('note')).toHaveTextContent(/Telefon|Az piksel|rahat|yoğun/);
+    // one crosshair: moving over one chart reads the same moment on the other
+    fireEvent.pointerMove(pixels, { clientX: 400 });
+    expect(within(link).getByRole('status')).toHaveTextContent(/7,8/);
     vi.restoreAllMocks();
+  });
+
+  it('explains why the stream has two charts, and remembers that it was closed', () => {
+    wide();
+    seed();
+    window.localStorage.removeItem('opendex.loadPanel.encodeExplainer');
+    render(<DeviceLoadPanel />);
+    const toggle = screen.getByRole('button', { name: /Neden iki grafik/ });
+    expect(toggle).toHaveAttribute('aria-expanded', 'true'); // first look: shown
+    expect(screen.getByText('Mpx/s: telefonun işi')).toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(window.localStorage.getItem('opendex.loadPanel.encodeExplainer')).toBe('closed');
+    window.localStorage.removeItem('opendex.loadPanel.encodeExplainer');
   });
 
   it('remembers the range and the table view, and offers two hours', () => {

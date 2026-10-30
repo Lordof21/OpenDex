@@ -31,8 +31,8 @@ import { SegmentedControl } from '../ui/SegmentedControl.jsx';
 import { useDeviceLoadStore } from './deviceLoadStore.js';
 import { Sparkline, TimeChart, useSharedHover } from './TimeChart.jsx';
 import { MarqueeText, SmoothHeight } from './motionParts.jsx';
+import { EncodeFlow } from './EncodeFlow.jsx';
 import {
-  ENCODE_REF_MPX_S,
   GROUPS,
   MARKER_KINDS,
   RANGES,
@@ -83,16 +83,6 @@ function agoText(seconds) {
   return seconds < 120
     ? t('telemetry.sure_sn', { value: fmt(seconds, 0) })
     : t('telemetry.sure_dk', { value: fmt(seconds / 60, 0) });
-}
-
-const ENCODE_SERIES = Object.freeze([
-  { key: 'mpx', label: t('telemetry.kodlanan_piksel'), color: 'var(--viz-opendex)', emphasis: true, value: (smp) => encodeLoad(smp).mpx },
-]);
-
-function encodeDetail(smp) {
-  const e = encodeLoad(smp);
-  if (!e.count) return t('telemetry.akis_yok');
-  return t('telemetry.akis_detay', { count: e.count, mbps: fmt(e.mbps, 1), fps: fmt(e.fps, 0) });
 }
 
 function SeverityChip({ severity, className }) {
@@ -434,11 +424,6 @@ export function DeviceLoadPanel(motionProps) {
   };
 
   const encodeNow = encodeLoad(latest);
-  const encodeDomain = useMemo(() => {
-    const peak = Math.max(0, ...samples.map((s) => encodeLoad(s).mpx).filter((v) => Number.isFinite(v)));
-    // Always frame one 1080p60 stream: the load reads against the encoder reference, not an auto-zoomed axis.
-    return [0, Math.ceil(Math.max(ENCODE_REF_MPX_S * 1.15, peak * 1.1) / 20) * 20];
-  }, [samples]);
 
   // Details follow the selected moment, else the latest sample.
   const focus = pinned || latest;
@@ -705,20 +690,9 @@ export function DeviceLoadPanel(motionProps) {
                 icon={Activity}
                 aside={<Aside>{`${fmt(encodeNow.mpx, 0)} Mpx/s · ${fmt(encodeNow.mbps, 1)} Mbps`}</Aside>}
               >
-                {/* One chart, one axis (the encoder's work); the bandwidth, frame rate and stream count of any moment are
-                    in its tooltip and the current ones in the header — never a second y-scale on the same plot */}
-                <TimeChart
-                  {...chartProps}
-                  ariaLabel={t('telemetry.grafik_kodlama_aria', { rangeMinutes, value: fmt(encodeNow.mpx, 0) })}
-                  series={ENCODE_SERIES}
-                  yDomain={encodeDomain}
-                  unit=" Mpx/s"
-                  digits={0}
-                  refLines={[{ value: ENCODE_REF_MPX_S, label: t('telemetry.ref_1080p60') }]}
-                  detail={encodeDetail}
-                  height={140}
-                />
-                <p className="mt-1.5 text-[9px] leading-[13px] text-muted-foreground">{t('telemetry.kodlama_aciklama')}</p>
+                {/* Two charts, one axis each (never a second y-scale on one plot): the phone's work (Mpx/s) and the link's
+                    work (Mbps) — related, not the same. They share the panel's crosshair; see EncodeFlow. */}
+                <EncodeFlow samples={samples} chartProps={chartProps} pinned={pinned} latest={latest} rangeMinutes={rangeMinutes} />
               </Section>
             )}
           </>

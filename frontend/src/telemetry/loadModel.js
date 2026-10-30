@@ -236,6 +236,50 @@ export function encodeLoad(sample) {
   };
 }
 
+// The link's side of the same stream: the highest video rate the settings offer (BITRATE_OPTIONS), read as "the link is busy".
+export const LINK_BUSY_MBPS = 12;
+// A share of one 1080p60 stream from where the phone's encoder counts as busy.
+export const ENCODE_BUSY_SHARE = 0.75;
+
+/** Bits spent per encoded pixel in one moment (Mbps ÷ Mpx/s): how hard the picture compresses. Small = a plain picture, large =
+ *  a moving, detailed one. Null when there is nothing encoded or a rate is unknown. */
+export function bitsPerPixel(enc) {
+  if (!enc || !Number.isFinite(enc.mpx) || !Number.isFinite(enc.mbps) || enc.mpx <= 0) return null;
+  return enc.mbps / enc.mpx;
+}
+
+/** What one moment says about the two loads, as a key the panel turns into a sentence:
+ *  'none' (no stream), 'unknown' (a rate not measured yet), 'both' (the phone AND the link are busy), 'phone' (many pixels, little
+ *  data: a plain picture — the work is the phone's), 'link' (few pixels, much data: a moving picture — the work is the link's),
+ *  'calm' (neither). */
+export function encodeInsight(enc) {
+  if (!enc || !enc.count) return 'none';
+  if (!Number.isFinite(enc.mpx) || !Number.isFinite(enc.mbps)) return 'unknown';
+  const phoneBusy = enc.mpx >= ENCODE_REF_MPX_S * ENCODE_BUSY_SHARE;
+  const linkBusy = enc.mbps >= LINK_BUSY_MBPS;
+  if (phoneBusy && linkBusy) return 'both';
+  if (phoneBusy) return 'phone';
+  if (linkBusy) return 'link';
+  return 'calm';
+}
+
+/** The sample closest in time to `t` (samples are in time order), or null. */
+export function nearestSample(samples, t) {
+  if (!samples?.length || !Number.isFinite(t)) return null;
+  let best = samples[0];
+  let bestGap = Math.abs(best.t - t);
+  for (let i = 1; i < samples.length; i += 1) {
+    const gap = Math.abs(samples[i].t - t);
+    if (gap < bestGap) {
+      best = samples[i];
+      bestGap = gap;
+    } else if (samples[i].t > t) {
+      break;
+    }
+  }
+  return best;
+}
+
 // Android's thermal status (PowerManager.THERMAL_STATUS_*, backend ThermalLevel). From "moderate" on the platform
 // caps clock speeds itself. Severity follows the backend's throttle finding.
 export const THERMAL_LEVELS = Object.freeze({
