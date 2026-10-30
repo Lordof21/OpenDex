@@ -17,7 +17,7 @@ export function ChoiceChip({ label, hint, active, onClick, disabled = false, den
       disabled={disabled}
       aria-pressed={Boolean(active)}
       className={cn(
-        'flex flex-col items-center justify-center rounded-[6px] border border-border/70 bg-background px-1.5 text-center text-[10px] font-medium leading-[12px] transition-colors hover:bg-accent/60 cursor-pointer',
+        'flex min-w-0 flex-col items-center justify-center rounded-[6px] border border-border/70 bg-background px-1.5 text-center text-[10px] font-medium leading-[12px] transition-colors hover:bg-accent/60 cursor-pointer',
         dense ? (hint ? 'min-h-8 py-1' : 'min-h-7 py-1') : 'min-h-9 py-1.5',
         active && 'border-primary bg-primary text-primary-foreground hover:bg-primary',
         disabled && 'cursor-not-allowed opacity-50 hover:bg-background',

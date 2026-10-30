@@ -445,18 +445,24 @@ export default function Taskbar({ windowSize = { width: 1920, height: 1080 } }) 
   const launchApp = async (appOrId) => {
     setSurface(null);
     setLaunchpadOpen(false);
-    if (typeof appOrId === 'string') {
-      if (appOrId === 'opendex' || appOrId === 'settings') {
-        if (settingsOpen) {
-          if (settingsMinimized) restoreSettings();
-          else if (settingsFocused) minimizeSettings();
-          else focusSettings();
-        } else {
-          openSettings();
-          openOpenDexSettings();
-        }
-        return;
+    // OpenDeX Ayarları bir telefon uygulaması değil, ön yüzün kendi paneli: başlatıcıdan bir uygulama NESNESİ olarak da gelir
+    // (`com.opendex.settings`) ve `openWindow`'a düşerse arka uç onu telefonda açmaya çalışır. Görev çubuğu simgesi (dize) açıkken
+    // tıklanınca küçültür; başlatıcıdan açmak yalnız açar / geri yükler / öne getirir.
+    const isSettingsEntry = typeof appOrId === 'string'
+      ? appOrId === 'opendex' || appOrId === 'settings'
+      : appOrId?.package === 'com.opendex.settings';
+    if (isSettingsEntry) {
+      if (settingsOpen) {
+        if (settingsMinimized) restoreSettings();
+        else if (settingsFocused && typeof appOrId === 'string') minimizeSettings();
+        else focusSettings();
+      } else {
+        openSettings();
+        openOpenDexSettings();
       }
+      return;
+    }
+    if (typeof appOrId === 'string') {
       const existingWin = windows.find(
         (w) => w.appId === appOrId || w.package === appOrId || w.id === appOrId
       );

@@ -298,8 +298,10 @@ function SideNav({ layout, section, tipCount, onSelect }) {
       aria-label={t('settings.ayar_bolumleri')}
       onKeyDown={onKeyDown}
       className={cn(
-        'flex shrink-0 flex-col overflow-y-auto border-r border-border/60 bg-muted/20 select-none',
-        layout === 'rail' ? 'w-[52px] items-center gap-1 p-1.5' : 'w-[232px] gap-3 p-2.5',
+        'flex shrink-0 flex-col overflow-y-auto overflow-x-hidden overscroll-contain border-r border-border/60 bg-muted/20 select-none',
+        // The 52 px rail has no room for a scrollbar beside its icons (it would push them into a horizontal scroll): it scrolls
+        // without one; the full list gets the app's thin scrollbar.
+        layout === 'rail' ? 'no-scrollbar w-[52px] items-center gap-1 p-1.5' : 'dex-scroll w-[232px] gap-3 p-2.5',
       )}
     >
       {SECTION_GROUPS.map((group) => (
@@ -735,7 +737,7 @@ export default function SettingsPanel() {
 
                 <div
                   ref={contentRef}
-                  className={cn('dex-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]', narrow ? 'p-3' : 'p-4 sm:p-6')}
+                  className={cn('dex-scroll min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain [scrollbar-gutter:stable]', narrow ? 'p-3' : 'p-4 sm:p-6')}
                 >
                   <SettingsUiProvider value={{ layout, flashId, flashOptions }}>
                     {/* Yalnız giriş animasyonu (opaklık + 6 px): çıkış beklenmez, geçiş anında yanıt verir. */}

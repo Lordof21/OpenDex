@@ -413,7 +413,7 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
         windowName={windowName}
       />
 
-      <div ref={scrollRef} className="dex-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-2.5">
+      <div ref={scrollRef} className="dex-scroll min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-2.5">
         {/* ─── Bu pencere · Yoğunluk ─── */}
         <TabPane id="density" active={tab === 'density'}>
           {canTuneWindow ? (
@@ -925,7 +925,7 @@ function InlineChoice({ title, options, value, onChange, dataSetting }) {
   return (
     <section className="flex items-center justify-between gap-2 rounded-md border border-border/70 bg-muted/40 p-2">
       <h3 className="min-w-0 shrink text-[11px] font-semibold leading-[13px]">{title}</h3>
-      <div className="grid w-[236px] shrink-0 grid-cols-3 gap-1" data-window-setting={dataSetting}>
+      <div className="grid w-[236px] max-w-[62%] shrink-0 grid-cols-3 gap-1" data-window-setting={dataSetting}>
         {options.map((option) => (
           <ChoiceChip
             dense

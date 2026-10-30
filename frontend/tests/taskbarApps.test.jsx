@@ -377,6 +377,21 @@ describe('açık görev çubuğu paneli: nereye basınca kapanır', () => {
 describe('uygulama çekmecesi görev çubuğunda', () => {
   const launcherButton = () => document.querySelector('[data-taskbar-launcher]');
 
+  it('çekmeceden "OpenDeX Ayarları" açmak ayarlar panelini açar; telefona pencere açma isteği GİTMEZ', async () => {
+    const openWindow = vi.fn().mockResolvedValue('x');
+    setWindows([], { openWindow });
+    act(() => useSystemStore.setState({ settingsOpen: false, settingsMinimized: false, settingsFocused: false }));
+    render(<Taskbar />);
+    fireEvent.click(launcherButton());
+    const dialog = await screen.findByRole('dialog', { name: 'Uygulamalar' });
+    const input = within(dialog).getByRole('combobox');
+    fireEvent.change(input, { target: { value: 'OpenDeX Ayarları' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(useSystemStore.getState().settingsOpen).toBe(true));
+    expect(openWindow).not.toHaveBeenCalled();
+    act(() => useSystemStore.setState({ settingsOpen: false, settingsMinimized: false, settingsFocused: false }));
+  });
+
   it('başlatıcı düğmesi çekmeceyi açar; Esc kapatır ve odak düğmeye döner', async () => {
     setWindows([]);
     render(<Taskbar />);

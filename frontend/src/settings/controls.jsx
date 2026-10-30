@@ -24,7 +24,7 @@ const flashClass = (flashId, id) => (id && flashId === id ? 'settings-flash' : '
 export function Page({ icon: Icon, title, subtitle, actions, children }) {
   const { layout } = useSettingsUi();
   return (
-    <div className="mx-auto flex w-full max-w-[720px] flex-col gap-5">
+    <div className="mx-auto flex w-full min-w-0 max-w-[720px] flex-col gap-5 break-words">
       {layout !== 'narrow' && (
         <header className="flex items-start gap-3">
           {Icon && (
