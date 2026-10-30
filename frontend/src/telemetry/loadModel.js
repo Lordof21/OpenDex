@@ -3,8 +3,8 @@ import { activeLocale } from '../i18n/index.js';
 // Telefon Yükü — pure helpers shared by the store, the charts and the panel (no React, no DOM).
 
 export const RANGES = Object.freeze([
-  { minutes: 5, label: '5 dk' },
-  { minutes: 15, label: '15 dk' },
+  { minutes: 5, label: tt('telemetry.5_dk') },
+  { minutes: 15, label: tt('telemetry.15_dk') },
   { minutes: 60, label: tt('telemetry.1_sa') },
   { minutes: 120, label: tt('telemetry.2_sa') }, // the backend keeps two hours (TELEMETRY_HISTORY_S)
 ]);
@@ -137,25 +137,100 @@ export function groupValue(sample, key) {
   return Number.isFinite(v) ? v : null;
 }
 
-/** Process rows over the range: [{key, label, group, now, avg}], busiest first. `avg` is over the samples that
+/** At most `points` values from `values`, each the mean of its bucket (null stays null when a whole bucket was not
+ *  measured) — a two-hour range is 1 400 samples, a sparkline is 48 px wide. */
+export function downsample(values, points) {
+  if (values.length <= points) return values;
+  const out = [];
+  for (let i = 0; i < points; i += 1) {
+    const from = Math.floor((i * values.length) / points);
+    const to = Math.max(from + 1, Math.floor(((i + 1) * values.length) / points));
+    const bucket = values.slice(from, to).filter((v) => Number.isFinite(v));
+    out.push(bucket.length ? bucket.reduce((a, b) => a + b, 0) / bucket.length : null);
+  }
+  return out;
+}
+
+export const TREND_POINTS = 40;
+
+/** Process rows over the range: [{key, label, group, now, avg, trend}], busiest first. `avg` is over the samples that
  *  measured the process (an app is only tracked while its window is open: the samples before that are "not measured",
  *  not 0 %); `now` is the share in `at` (the latest sample, or a moment the user selected), null when `at` did not
- *  measure it. */
+ *  measure it. `trend`: its share over the range, one value per sample (null where it was not measured), thinned to
+ *  TREND_POINTS for the row's sparkline. */
 export function processTable(samples, at = samples[samples.length - 1]) {
   const acc = new Map();
-  samples.forEach((s) => {
+  samples.forEach((s, i) => {
     (s.procs || []).forEach((p) => {
-      const row = acc.get(p.key) || { key: p.key, label: p.label, group: p.group, sum: 0, n: 0 };
+      const row = acc.get(p.key) || { key: p.key, label: p.label, group: p.group, sum: 0, n: 0, series: new Array(samples.length).fill(null) };
       row.sum += p.cpu;
       row.n += 1;
+      row.series[i] = p.cpu;
       row.where = p.where ?? row.where; // apps: "window" | "phone" (open on the phone's own screen), as last seen
       acc.set(p.key, row);
     });
   });
   const latest = new Map((at?.procs || []).map((p) => [p.key, p.cpu]));
   return [...acc.values()]
-    .map((r) => ({ key: r.key, label: r.label, group: r.group, where: r.where ?? null, avg: r.sum / Math.max(1, r.n), now: latest.get(r.key) ?? null }))
+    .map((r) => ({
+      key: r.key,
+      label: r.label,
+      group: r.group,
+      where: r.where ?? null,
+      avg: r.sum / Math.max(1, r.n),
+      now: latest.get(r.key) ?? null,
+      trend: downsample(r.series, TREND_POINTS),
+    }))
     .sort((a, b) => b.avg - a.avg);
+}
+
+/** Lowest / mean / highest of `pick(sample)` over the samples, with WHEN the extremes happened:
+ *  { min, avg, max, minT, maxT } — all null when nothing was measured. */
+export function rangeStats(samples, pick) {
+  let min = null;
+  let max = null;
+  let minT = null;
+  let maxT = null;
+  let sum = 0;
+  let n = 0;
+  samples.forEach((s) => {
+    const v = pick(s);
+    if (!Number.isFinite(v)) return;
+    sum += v;
+    n += 1;
+    if (min == null || v < min) {
+      min = v;
+      minT = s.t;
+    }
+    if (max == null || v > max) {
+      max = v;
+      maxT = s.t;
+    }
+  });
+  return { min, max, minT, maxT, avg: n ? sum / n : null };
+}
+
+/** Stretches of time Android held the phone back (thermal status above "none"): [{from, to, level}]. A stretch runs from
+ *  its first sample to the next one (so a single sample is still a visible sliver) and never across an unmeasured gap. */
+export function thermalSpans(samples, gapS) {
+  const spans = [];
+  samples.forEach((s, i) => {
+    if (!s.thermal || s.thermal === 'none' || !THERMAL_LEVELS[s.thermal]) return;
+    const next = samples[i + 1];
+    const to = next && next.t - s.t <= gapS ? next.t : s.t + Math.min(gapS, 5);
+    const last = spans[spans.length - 1];
+    if (last && last.level === s.thermal && s.t - last.to <= 1e-6) last.to = to;
+    else spans.push({ from: s.t, to, level: s.thermal });
+  });
+  return spans;
+}
+
+/** The time window a drag on a chart selected, snapped to what is possible: [a, b] ordered and clipped to the axis, or
+ *  null when it is too narrow to be a selection (a click that wobbled) — at least `minSpanS`. */
+export function brushWindow(t1, t2, start, end, minSpanS) {
+  const a = Math.max(start, Math.min(t1, t2));
+  const b = Math.min(end, Math.max(t1, t2));
+  return b - a >= minSpanS ? [a, b] : null;
 }
 
 /** Two samples further apart than this are not one continuous measurement (a reconnect, a sleeping backend): charts
@@ -212,6 +287,18 @@ export function sortProcesses(rows, by) {
 export function findingColumns(count) {
   if (count <= 3) return Math.max(1, count);
   return count === 4 ? 2 : 3;
+}
+
+/** The section of the panel that holds the evidence for a finding (its id comes from the backend's insights):
+ *  null for a finding with no single place. */
+export function findingSection(id) {
+  const key = String(id || '');
+  if (key === 'temp' || key === 'throttle' || key.startsWith('charge_')) return 'temp';
+  if (key === 'cpu' || key === 'cpu_opendex') return 'cpu';
+  if (key === 'encode') return 'encode';
+  if (key === 'polling') return 'commands';
+  if (key.startsWith('restarts')) return 'events';
+  return null;
 }
 
 /** "No sample for longer than a gap" while the monitor claims to run: the numbers on screen are old. */

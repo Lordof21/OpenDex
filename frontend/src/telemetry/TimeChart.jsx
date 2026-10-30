@@ -2,12 +2,14 @@
 // Marks follow the dataviz spec: 2px round lines, 8px end dot with a 2px surface ring, solid hairline grid/axis, a 2px
 // surface gap between stacked bands, threshold hairlines labelled in ink, event markers as hairlines with a glyph.
 // Every chart on the panel shares one crosshair (`hoverT`), so a temperature rise reads straight against the CPU
-// breakdown and the event that caused it. Keyboard: ←/→ move the crosshair, Esc clears it.
+// breakdown and the event that caused it. Keyboard: ←/→ move the crosshair, Esc clears it. Pointer: a click selects the
+// moment, a drag across the plot selects a time window (`onBrush`), a double click gives the window back.
 
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../lib/utils.js';
 import {
   MARKER_KINDS,
+  brushWindow,
   continuousRuns,
   fmt,
   fmtClock,
@@ -88,8 +90,14 @@ export function TimeChart({
   highlightKey = null, // a series to bring forward (legend / table row hover): the others recede
   pinnedT = null, // a moment the user selected (click / Enter): a solid line on every chart
   onPinT,
+  spans = [], // [{ from, to, color }] — stretches of time shaded behind the data (e.g. Android held the phone back)
+  peak = null, // { t, value } — the highest reading of the range, ringed and labelled
+  onBrush, // ([from, to] | null) — a drag across the plot selects a window; a double click gives it back (null)
 }) {
   const wrapRef = useRef(null);
+  const dragRef = useRef(null); // { x0, active } while the primary button is down on the plot
+  const suppressClick = useRef(false); // the click that ends a drag must not also select a moment
+  const [brush, setBrush] = useState(null); // { a, b } in px while dragging
   const width = useWidth(wrapRef);
   const gapS = gapSeconds(intervalS);
   // Events get their own band above the plot: glyphs and rug ticks never sit on the data or the end label.
@@ -164,14 +172,58 @@ export function TimeChart({
     if (px < M.left - 4 || px > M.left + plotW + 4) return null;
     return samples[nearestIndex(samples, start + ((px - M.left) / plotW) * (end - start))] ?? null;
   };
+  const pxOf = (e) => e.clientX - wrapRef.current.getBoundingClientRect().left;
+  const clampPx = (px) => Math.min(M.left + plotW, Math.max(M.left, px));
+  const timeAtPx = (px) => start + ((clampPx(px) - M.left) / plotW) * (end - start);
+  const endDrag = () => {
+    dragRef.current = null;
+    setBrush(null);
+  };
+  const onPointerDown = (e) => {
+    if (!onBrush || e.button !== 0 || !samples.length) return;
+    const px = pxOf(e);
+    if (px < M.left - 4 || px > M.left + plotW + 4) return;
+    dragRef.current = { x0: px, active: false, id: e.pointerId };
+  };
   const onPointer = (e) => {
+    const drag = dragRef.current;
+    if (drag) {
+      const px = pxOf(e);
+      if (!drag.active && Math.abs(px - drag.x0) > 4) {
+        drag.active = true;
+        try {
+          wrapRef.current.setPointerCapture?.(drag.id); // keep the drag when the pointer leaves the plot
+        } catch {
+          /* a synthetic pointer: nothing to capture */
+        }
+      }
+      if (drag.active) setBrush({ a: clampPx(drag.x0), b: clampPx(px) });
+    }
     const s = sampleUnderPointer(e);
     if (s) onHoverT?.(s.t);
+  };
+  const onPointerUp = (e) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    if (drag.active) {
+      suppressClick.current = true;
+      setTimeout(() => {
+        suppressClick.current = false;
+      }, 0);
+      try {
+        wrapRef.current.releasePointerCapture?.(drag.id);
+      } catch {
+        /* already released */
+      }
+      const win = brushWindow(timeAtPx(drag.x0), timeAtPx(pxOf(e)), start, end, intervalS * 3);
+      if (win) onBrush?.(win);
+    }
+    endDrag();
   };
   // Click selects the moment under the pointer (again on the same moment: clears it).
   const pin = (t) => onPinT?.(t != null && pinnedT != null && Math.abs(t - pinnedT) < 1e-6 ? null : t);
   const onClick = (e) => {
-    if (!onPinT) return;
+    if (!onPinT || suppressClick.current) return;
     const s = sampleUnderPointer(e);
     if (s) pin(s.t);
   };
@@ -182,6 +234,7 @@ export function TimeChart({
     else if (e.key === 'ArrowRight') onHoverT?.(samples[Math.min(samples.length - 1, i + 1)].t);
     else if (e.key === 'Enter' && onPinT) pin(samples[i].t);
     else if (e.key === 'Escape') {
+      endDrag();
       onHoverT?.(null);
       if (pinnedT != null) onPinT?.(null);
     } else return;
@@ -214,13 +267,17 @@ export function TimeChart({
         onPinT && samples.length > 0 && 'cursor-crosshair',
         stale && 'opacity-60',
       )}
-      style={{ height }}
+      style={{ height, touchAction: 'pan-y' }}
       role="group"
-      aria-roledescription="grafik"
+      aria-roledescription={tt('telemetry.grafik_rol')}
       aria-label={ariaLabel}
       tabIndex={0}
       onClick={onClick}
+      onDoubleClick={() => onBrush?.(null)}
+      onPointerDown={onPointerDown}
       onPointerMove={onPointer}
+      onPointerUp={onPointerUp}
+      onPointerCancel={endDrag}
       onPointerLeave={() => onHoverT?.(null)}
       onKeyDown={onKey}
       onBlur={() => onHoverT?.(null)}
@@ -258,6 +315,20 @@ export function TimeChart({
               </g>
             );
           })}
+
+          {/* shaded stretches (Android's thermal limit): a faint wash behind the data and a solid strip on the axis */}
+          {spans
+            .filter((sp) => sp.to > start && sp.from < end)
+            .map((sp) => {
+              const sx = x(Math.max(start, sp.from));
+              const sw = Math.max(2, x(Math.min(end, sp.to)) - sx);
+              return (
+                <g key={`s${sp.from}`} data-testid="chart-span">
+                  <rect x={sx} y={M.top} width={sw} height={plotH} fill={sp.color} fillOpacity="0.13" />
+                  <rect x={sx} y={M.top + plotH - 3} width={sw} height="3" fill={sp.color} fillOpacity="0.85" />
+                </g>
+              );
+            })}
 
           {/* stacked bands: fill, then a 2px surface gap along each band's top edge */}
           {geometry.bands.map((b) => (
@@ -341,6 +412,47 @@ export function TimeChart({
               </g>
             ))}
 
+          {/* the highest reading of the range: a ring, labelled unless the live end label already sits there */}
+          {peak && Number.isFinite(peak.value) && peak.t >= start && peak.t <= end && (() => {
+            const px = x(peak.t);
+            const py = y(Math.min(max, Math.max(min, peak.value)));
+            const lastDot = geometry.lines.find((l) => l.emphasis && l.last);
+            const crowded = lastDot ? Math.abs(px - x(lastDot.last.t)) < 44 : false;
+            const anchor = px > M.left + plotW - 30 ? 'end' : px < M.left + 30 ? 'start' : 'middle';
+            return (
+              <g data-testid="chart-peak">
+                <circle cx={px} cy={py} r="5" fill="none" stroke="var(--foreground)" strokeWidth="1.5" />
+                {!crowded && (
+                  <text x={px} y={py < M.top + 14 ? py + 16 : py - 9} textAnchor={anchor} className="fill-foreground text-[9px] font-semibold tabular-nums">
+                    {fmt(peak.value, digits)}{unit}
+                  </text>
+                )}
+              </g>
+            );
+          })()}
+
+          {/* the window being selected by a drag */}
+          {brush && (
+            <g data-testid="chart-brush">
+              <rect
+                x={Math.min(brush.a, brush.b)}
+                y={M.top}
+                width={Math.abs(brush.b - brush.a)}
+                height={plotH}
+                fill="var(--foreground)"
+                fillOpacity="0.08"
+                stroke="var(--foreground)"
+                strokeOpacity="0.45"
+                strokeWidth="1"
+              />
+              {Math.abs(brush.b - brush.a) >= 70 && (
+                <text x={(brush.a + brush.b) / 2} y={M.top + 11} textAnchor="middle" className="fill-foreground text-[9px] font-semibold tabular-nums">
+                  {fmtClock(timeAtPx(Math.min(brush.a, brush.b)))}–{fmtClock(timeAtPx(Math.max(brush.a, brush.b)))}
+                </text>
+              )}
+            </g>
+          )}
+
           {/* the selected moment: solid ink — it stays while the pointer moves on */}
           {pinnedVisible && (
             <g data-testid="chart-pin">
@@ -364,7 +476,7 @@ export function TimeChart({
         </svg>
       )}
 
-      {hovered && (
+      {hovered && !brush && (
         <div
           className="pointer-events-none absolute top-1 z-10 min-w-[150px] rounded-md border border-border/70 bg-popover/95 px-2 py-1.5 text-[10px] shadow-lg backdrop-blur"
           style={flip ? { right: width - tooltipLeft + 10 } : { left: tooltipLeft + 10 }}
@@ -414,10 +526,11 @@ export function TimeChart({
 }
 
 /** Tiny trend line for a stat tile, in the de-emphasis ink. */
-export function Sparkline({ values, width = 72, height = 22, className }) {
+export function Sparkline({ values, width = 72, height = 22, className, floor }) {
   const finite = values.filter((v) => Number.isFinite(v));
   if (finite.length < 2) return <span className={cn('inline-block', className)} style={{ width, height }} />;
-  const lo = Math.min(...finite);
+  // `floor`: the value the baseline stands for (0 for a share), so a quiet row does not look like a spike.
+  const lo = floor != null ? Math.min(floor, ...finite) : Math.min(...finite);
   const hi = Math.max(...finite);
   const span = hi - lo || 1;
   const step = width / Math.max(1, values.length - 1);

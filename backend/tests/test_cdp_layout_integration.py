@@ -20,6 +20,7 @@ import pytest
 
 from app.config import Settings
 from app.schemas.settings import ProjectSettings
+from app.windows import cdp_refresher as cr
 from app.windows.cdp_refresher import (
     _build_nudge_script,
     _find_active_page_target,
@@ -517,7 +518,9 @@ async def _run_watcher(events, *, phone_dpr=NATIVE, key="chrome-pkg", mode="mobi
 
 
 def _session_methods(fake_ws, session_id):
-    return [m.get("method") for m in fake_ws.sent_messages if m.get("sessionId") == session_id]
+    """What was sent to one session. The page's watch for its own frames (Target.setAutoAttach) is left out: it is not what these tests are about."""
+    return [m.get("method") for m in fake_ws.sent_messages
+            if m.get("sessionId") == session_id and m.get("method") != "Target.setAutoAttach"]
 
 
 @pytest.mark.asyncio
@@ -860,3 +863,117 @@ async def test_active_tab_is_found_even_when_earlier_tabs_do_not_answer():
     with patch("websockets.connect", side_effect=fake_connect):
         found = await _find_active_page_target(9222, tabs, timeout_s=0.5)
     assert found["id"] == "tab_4"
+
+
+@pytest.mark.asyncio
+async def test_a_page_watches_for_its_cross_origin_frames_and_a_frame_gets_the_pages_identity():
+    """A cross-origin frame (a Cloudflare check, an ad, a player) is a target of its own: it is given the SAME user agent / client hints as its page
+    (the check saw the browser's real model next to the page's empty one) — but no scale: Chrome refuses it on a frame target."""
+    events = [
+        {"id": 1, "result": {}},
+        {"id": 2, "result": {"targetInfos": []}},
+        {"method": "Target.attachedToTarget", "params": {
+            "sessionId": "S_PAGE", "waitingForDebugger": True, "targetInfo": {"targetId": "T1", "type": "page", "url": ""}}},
+        {"method": "Target.attachedToTarget", "params": {
+            "sessionId": "S_FRAME", "waitingForDebugger": True, "targetInfo": {"targetId": "T2", "type": "iframe", "url": "https://challenges.cloudflare.com/x"}}},
+    ]
+    fake_ws, _ = await _run_watcher(events)
+    try:
+        page = [m for m in fake_ws.sent_messages if m.get("sessionId") == "S_PAGE"]
+        assert page[0]["method"] == "Target.setAutoAttach" and page[0]["params"]["flatten"] is True
+        frame = _session_methods(fake_ws, "S_FRAME")
+        assert frame == ["Emulation.setUserAgentOverride", "Runtime.runIfWaitingForDebugger"]
+        ua = next(m for m in fake_ws.sent_messages if m.get("sessionId") == "S_FRAME" and m["method"] == "Emulation.setUserAgentOverride")["params"]
+        brands = {b["brand"] for b in ua["userAgentMetadata"]["brands"]}
+        assert "Not(A:Brand" in brands            # the entry every real Chrome has; a list without it gives a hand-made object away
+    finally:
+        stop_browser_auto_attach_watcher("chrome-pkg")
+
+
+def test_the_phones_client_hints_carry_its_real_model_and_android_release():
+    meta = cr._mobile_ua_metadata("Chrome/155.0.8059.81", "2412DPC0AG", "16")
+    assert meta["model"] == "2412DPC0AG" and meta["platformVersion"] == "16.0.0" and meta["mobile"] is True
+    assert {b["brand"] for b in meta["brands"]} == {"Not(A:Brand", "Chromium", "Google Chrome"}
+    assert meta["fullVersionList"][1]["version"] == "155.0.8059.81"
+    assert cr._mobile_ua_metadata("Chrome/155.0.8059.81")["platformVersion"] == ""       # unknown stays unknown, never invented
+    desk = cr._desktop_ua("Chrome/155.0.8059.81")
+    assert desk["platform"] == "Linux x86_64" and desk["userAgentMetadata"]["mobile"] is False
+
+
+class _AnsweringWebSocket(FakeBrowserWatcherWebSocket):
+    """After the scripted events, answers the watcher's page questions by what they ask (the ids depend on how many commands came before)."""
+
+    def __init__(self, target_events, answers):
+        super().__init__(target_events)
+        self._answers = answers          # [(substring of the expression, the page's answer)]
+        self._done: set[int] = set()
+
+    async def recv(self) -> str:
+        if self.target_events:
+            return json.dumps(self.target_events.pop(0))
+        for _ in range(300):
+            for msg in self.sent_messages:
+                expr = (msg.get("params") or {}).get("expression", "")
+                if msg.get("method") != "Runtime.evaluate" or msg["id"] in self._done:
+                    continue
+                for needle, answer in self._answers:
+                    if needle in expr:
+                        self._done.add(msg["id"])
+                        return json.dumps({"id": msg["id"], "result": {"result": {"value": json.dumps(answer)}}})
+            await asyncio.sleep(0.02)
+        await asyncio.sleep(10.0)
+        return json.dumps({})
+
+
+_FP = {"s": 200, "h": "a.example", "u": "/r", "vp": "width=device-width", "tags": {"div": 100, "img": 20}, "words": {"a": 5}, "res": ["x.js"], "n": 5000}
+
+
+async def _run_same_page_tab(state: dict, now: dict):
+    """A desktop-site tab in front that answers 'the same page under both identities': the watcher keeps it, then asks how it is sized now."""
+    events = [
+        {"id": 1, "result": {}},
+        {"id": 2, "result": {"targetInfos": [{"targetId": "TAB_A", "type": "page", "url": "https://a.example/r"}]}},
+        {"method": "Target.attachedToTarget", "params": {
+            "sessionId": "S_A", "waitingForDebugger": False, "targetInfo": {"targetId": "TAB_A", "type": "page", "url": "https://a.example/r"}}},
+        {"id": 4, "result": {"result": {"value": json.dumps(state)}}},   # 3 is the attach of the tab open at the start
+    ]
+    fake_ws = _AnsweringWebSocket(events, [
+        ("odxFingerprint()", {"fp": _FP, "lay": {"iw": 380, "sw": 380}}),
+        (cr._STALE_WIDTH_PROBE_JS, now),
+    ])
+    with (
+        patch("urllib.request.urlopen", return_value=MagicMock(read=lambda: _VERSION.encode())),
+        patch("websockets.connect", return_value=fake_ws),
+    ):
+        watcher = start_browser_auto_attach_watcher(FakeCdpAdb(), "SERIAL_123", "chrome_devtools_remote", "chrome-pkg", NATIVE)
+        try:
+            assert await watcher.wait_ready()
+            await asyncio.sleep(1.4)               # the watcher waits 0.7 s for the new scale to settle before it looks again
+        finally:
+            stop_browser_auto_attach_watcher("chrome-pkg")
+    return fake_ws
+
+
+_FRONT = {"mobile": False, "visible": True, "t": None, "playing": False, "y": 29000, "url": "https://a.example/r", "host": "a.example",
+          "vw": 800, "a": {"p": "div:nth-of-type(78)", "f": 0.75}, "dirty": False, "fp": _FP, "since": 60000, "c": []}
+
+
+@pytest.mark.asyncio
+async def test_a_kept_tab_that_is_still_sized_for_the_old_width_is_reloaded_to_where_it_was():
+    """The same page under both identities is not reloaded for its identity — but a page that measured itself in script at the window's old
+    width (a reader's fixed min-height per page) keeps gaps at the phone's width: it is reloaded, to its content point."""
+    fake_ws = await _run_same_page_tab(_FRONT, {"vw": 380, "c": {"vw": 380, "gaps": 2, "over": 0}})
+    methods = _session_methods(fake_ws, "S_A")
+    assert "Page.reload" in methods, [(m.get("method"), m.get("sessionId"), (m.get("params") or {}).get("expression", "")[:40]) for m in fake_ws.sent_messages]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state, now", [
+    (_FRONT, {"vw": 380, "c": {"vw": 380, "gaps": 0, "over": 0}}),                      # a responsive page: no symptom
+    (_FRONT, {"vw": 700, "c": {"vw": 700, "gaps": 2, "over": 0}}),                      # the width did not really change
+    ({**_FRONT, "playing": True}, {"vw": 380, "c": {"vw": 380, "gaps": 2, "over": 0}}),  # a playing video is never cut
+    ({**_FRONT, "dirty": True}, {"vw": 380, "c": {"vw": 380, "gaps": 2, "over": 0}}),    # typed text would be lost
+])
+async def test_a_kept_tab_is_not_reloaded_without_the_symptom_a_real_change_or_when_it_would_lose_something(state, now):
+    fake_ws = await _run_same_page_tab(state, now)
+    assert "Page.reload" not in _session_methods(fake_ws, "S_A")

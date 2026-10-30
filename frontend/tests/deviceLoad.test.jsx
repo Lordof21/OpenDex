@@ -17,9 +17,12 @@ import { TimeChart } from '../src/telemetry/TimeChart.jsx';
 import {
   bitsPerPixel,
   bodyTemp,
+  brushWindow,
   continuousRuns,
+  downsample,
   encodeInsight,
   encodeLoad,
+  findingSection,
   fmt,
   fmtTime,
   gapSeconds,
@@ -29,9 +32,11 @@ import {
   niceTicks,
   powerLabel,
   processTable,
+  rangeStats,
   slopePerMin,
   sourcesText,
   tempSeverity,
+  thermalSpans,
   timeTicks,
   unmeasuredSpans,
 } from '../src/telemetry/loadModel.js';
@@ -147,6 +152,59 @@ describe('loadModel', () => {
   });
 });
 
+describe('reading a range like an analyst', () => {
+  it('gives lowest, mean and highest with WHEN the extremes happened, skipping unmeasured samples', () => {
+    const s = [sample(0), sample(1, { temp: {} }), sample(2), sample(3)];
+    const stats = rangeStats(s, bodyTemp);
+    expect(stats.min).toBeCloseTo(43);
+    expect(stats.minT).toBe(T0);
+    expect(stats.max).toBeCloseTo(43.15);
+    expect(stats.maxT).toBe(T0 + 15);
+    expect(stats.avg).toBeCloseTo((43 + 43.1 + 43.15) / 3);
+    expect(rangeStats([], bodyTemp)).toMatchObject({ min: null, max: null, avg: null });
+  });
+
+  it('shades only the time Android held the phone back, never across an unmeasured gap', () => {
+    const level = (i, thermal) => sample(i, { thermal });
+    const s = [level(0, 'none'), level(1, 'moderate'), level(2, 'moderate'), level(3, 'severe'), level(4, 'none'), level(60, 'light')];
+    const spans = thermalSpans(s, gapSeconds(5));
+    expect(spans).toEqual([
+      { from: T0 + 5, to: T0 + 15, level: 'moderate' },
+      { from: T0 + 15, to: T0 + 20, level: 'severe' },
+      { from: T0 + 300, to: T0 + 305, level: 'light' }, // the last sample: a short sliver, not a stretch to nowhere
+    ]);
+  });
+
+  it('turns a drag into an ordered window on the axis, and a wobble into nothing', () => {
+    expect(brushWindow(T0 + 120, T0 + 60, T0, T0 + 300, 15)).toEqual([T0 + 60, T0 + 120]);
+    expect(brushWindow(T0 - 50, T0 + 400, T0, T0 + 300, 15)).toEqual([T0, T0 + 300]);
+    expect(brushWindow(T0 + 60, T0 + 65, T0, T0 + 300, 15)).toBeNull();
+  });
+
+  it('thins a long series for a sparkline by bucket means and keeps "not measured" as null', () => {
+    expect(downsample([1, 2, 3], 5)).toEqual([1, 2, 3]);
+    expect(downsample([2, 4, 6, 8], 2)).toEqual([3, 7]);
+    expect(downsample([null, null, 5, 7], 2)).toEqual([null, 6]);
+  });
+
+  it('gives every process a trend over the range (null where it was not measured)', () => {
+    const late = (i) => sample(i, { procs: [...sample(i).procs, { key: 'com.app', label: 'com.app', group: 'apps', cpu: 30, pids: 1 }] });
+    const app = processTable([sample(0), late(1), late(2)]).find((r) => r.key === 'com.app');
+    expect(app.trend).toEqual([null, 30, 30]);
+  });
+
+  it('sends a finding to the section that holds its evidence', () => {
+    expect(findingSection('temp')).toBe('temp');
+    expect(findingSection('throttle')).toBe('temp');
+    expect(findingSection('charge_drain')).toBe('temp');
+    expect(findingSection('cpu_opendex')).toBe('cpu');
+    expect(findingSection('encode')).toBe('encode');
+    expect(findingSection('polling')).toBe('commands');
+    expect(findingSection('restarts:com.google.android.youtube')).toBe('events');
+    expect(findingSection('something_new')).toBeNull();
+  });
+});
+
 describe('the two loads of one stream (phone: Mpx/s, link: Mbps)', () => {
   const enc = (mpx, mbps, count = 1) => ({ mpx, mbps, fps: 60, count });
 
@@ -221,6 +279,63 @@ describe('TimeChart', () => {
     );
     const area = container.querySelector('path[fill="blue"]').getAttribute('d');
     expect(area.match(/M/g)).toHaveLength(2); // two separate areas around the unmeasured sample
+  });
+
+  describe('a drag across the plot selects a time window', () => {
+    // 600 px wide, plot from x=34 to x=586 over T0 … T0+300 (552 px for 300 s)
+    const lines = (extra = {}) => {
+      vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({ width: 600, height: 150, left: 0, top: 0, right: 600, bottom: 150 });
+      const s = Array.from({ length: 60 }, (_, i) => sample(i));
+      const onBrush = vi.fn();
+      const onPinT = vi.fn();
+      const view = render(
+        <TimeChart samples={s} start={T0} end={T0 + 300} yDomain={[30, 50]} intervalS={5} onBrush={onBrush} onPinT={onPinT}
+          series={[{ key: 'b', label: 'b', color: 'red', emphasis: true, value: (x) => x.temp.battery }]} {...extra} />,
+      );
+      return { ...view, onBrush, onPinT, chart: screen.getByRole('group') };
+    };
+    const drag = (chart, from, to) => {
+      fireEvent.pointerDown(chart, { clientX: from, button: 0 });
+      fireEvent.pointerMove(chart, { clientX: to });
+      fireEvent.pointerUp(chart, { clientX: to });
+    };
+
+    it('reports the ordered window, draws the selection while dragging, and the drag is not also a click', () => {
+      const { chart, onBrush, onPinT } = lines();
+      fireEvent.pointerDown(chart, { clientX: 300, button: 0 });
+      fireEvent.pointerMove(chart, { clientX: 100 });
+      expect(screen.getByTestId('chart-brush')).toBeInTheDocument();
+      fireEvent.pointerUp(chart, { clientX: 100 });
+      expect(screen.queryByTestId('chart-brush')).toBeNull();
+      const [a, b] = onBrush.mock.calls[0][0];
+      expect(a).toBeCloseTo(T0 + ((100 - 34) / 552) * 300, 0);
+      expect(b).toBeCloseTo(T0 + ((300 - 34) / 552) * 300, 0);
+      fireEvent.click(chart, { clientX: 100 }); // the click that ends a drag selects nothing
+      expect(onPinT).not.toHaveBeenCalled();
+      vi.restoreAllMocks();
+    });
+
+    it('a wobble of a few pixels is still a click, and a double click gives the window back', () => {
+      const { chart, onBrush, onPinT } = lines();
+      drag(chart, 200, 202);
+      expect(onBrush).not.toHaveBeenCalled();
+      fireEvent.click(chart, { clientX: 200 });
+      expect(onPinT).toHaveBeenCalledTimes(1);
+      fireEvent.doubleClick(chart);
+      expect(onBrush).toHaveBeenLastCalledWith(null);
+      vi.restoreAllMocks();
+    });
+
+    it('shades the spans it is given and rings the peak', () => {
+      const { container } = lines({
+        spans: [{ from: T0 + 50, to: T0 + 100, color: 'orange' }],
+        peak: { t: T0 + 150, value: 44 },
+      });
+      expect(screen.getAllByTestId('chart-span')).toHaveLength(1);
+      expect(container.querySelector('[data-testid="chart-span"] rect[fill="orange"]')).not.toBeNull();
+      expect(screen.getByTestId('chart-peak')).toHaveTextContent('44,0');
+      vi.restoreAllMocks();
+    });
   });
 });
 
@@ -407,7 +522,9 @@ describe('DeviceLoadPanel', () => {
     const samples = Array.from({ length: 60 }, (_, i) => sample(i, { thermal: 'moderate' }));
     useDeviceLoadStore.setState({ samples, active: true, insights: [] });
     api.get.mockResolvedValue({ active: true, interval_s: 5, samples, markers: [], insights: [], adb: [] });
+    window.localStorage.setItem('opendex.loadPanel.encodeView', 'pixels');
     render(<DeviceLoadPanel />);
+    window.localStorage.removeItem('opendex.loadPanel.encodeView');
     expect(screen.getByText('Android termal durumu: orta — hız sınırlı')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /Görüntü kodlama yükü/ })).toBeInTheDocument();
     expect(screen.getByRole('group', { name: /şu an saniyede 84 megapiksel/ })).toBeInTheDocument();
@@ -418,7 +535,9 @@ describe('DeviceLoadPanel', () => {
     useDeviceLoadStore.setState({ samples, active: true, insights: [] });
     api.get.mockResolvedValue({ active: true, interval_s: 5, samples, markers: [], insights: [], adb: [] });
     vi.setSystemTime((T0 + 97) * 1000);
+    window.localStorage.setItem('opendex.loadPanel.encodeView', 'pixels');
     render(<DeviceLoadPanel />);
+    window.localStorage.removeItem('opendex.loadPanel.encodeView');
     expect(screen.getByRole('group', { name: /şu an saniyede 0 megapiksel/ })).toBeInTheDocument();
     expect(screen.getByText('0 Mpx/s · 0,0 Mbps')).toBeInTheDocument();
     expect(screen.queryByText(/Android termal durumu/)).toBeNull();
@@ -577,8 +696,8 @@ describe('DeviceLoadPanel', () => {
     expect(flashed()).toHaveTextContent(/kim ne kadar kullanıyor/);
     fireEvent.click(screen.getByRole('button', { name: /Sıcaklık.*ayrıntıya git/ }));
     expect(flashed()).toHaveTextContent(/Hissedilen sıcaklık/);
-    fireEvent.click(screen.getByRole('button', { name: /Arka plan komutu — ayrıntıya git/ }));
-    expect(flashed()).toHaveTextContent(/Bildirim yoklaması/);
+    fireEvent.click(screen.getByRole('button', { name: /Görüntü akışı — ayrıntıya git/ }));
+    expect(flashed()).toHaveTextContent(/Görüntü kodlama yükü/);
     expect(intoView).not.toHaveBeenCalled(); // it scrolls every ancestor: the desktop went blank under the panel
     expect(scrolledBoxes).toHaveLength(3);
     expect(scrolledBoxes.every((el) => el.hasAttribute('data-load-scroller'))).toBe(true);
@@ -586,25 +705,144 @@ describe('DeviceLoadPanel', () => {
     delete Element.prototype.scrollTo;
   });
 
-  it("the stream is two charts, one axis each — the phone's Mpx/s and the link's Mbps — on one crosshair", () => {
+  it('a finding takes you to the section that holds its evidence; one without a place is plain text', () => {
+    seed();
+    useDeviceLoadStore.setState({ insights: [...INSIGHTS, { id: 'something_new', severity: 'info', title: 'Yeni bir bulgu', detail: 'ayrıntı' }] });
+    Element.prototype.scrollTo = function scrollTo() {};
+    const { container } = render(<DeviceLoadPanel />);
+    const flashed = () => [...container.querySelectorAll('section')].find((s) => s.className.includes('ring-primary/50'));
+    fireEvent.click(screen.getByRole('button', { name: /Telefon çok sıcak/ }));
+    expect(flashed()).toHaveTextContent(/Hissedilen sıcaklık/);
+    fireEvent.click(screen.getByRole('button', { name: /16 kez yeniden/ }));
+    expect(flashed()).toHaveTextContent(/Olaylar/);
+    expect(screen.queryByRole('button', { name: /Yeni bir bulgu/ })).toBeNull();
+    expect(screen.getByText('Yeni bir bulgu')).toBeInTheDocument();
+    delete Element.prototype.scrollTo;
+  });
+
+  it('shows the stream next to the temperature, CPU and power, with both loads', () => {
+    seed();
+    render(<DeviceLoadPanel />);
+    const tile = screen.getByRole('button', { name: /Görüntü akışı — ayrıntıya git/ });
+    expect(tile).toHaveTextContent('84');
+    expect(tile).toHaveTextContent('Mpx/s');
+    expect(tile).toHaveTextContent('7,8 Mbps · 1 akış');
+  });
+
+  it('under each chart: lowest, mean and highest — the peak button selects that moment on every chart', () => {
     wide();
     seed();
     render(<DeviceLoadPanel />);
-    const pixels = screen.getByRole('group', { name: /şu an saniyede 84 megapiksel/ });
-    const link = screen.getByRole('group', { name: /şu an saniyede 7,8 megabit/ });
+    const stats = screen.getAllByTestId('range-stats');
+    expect(stats).toHaveLength(2); // temperature, CPU
+    expect(stats[0]).toHaveTextContent('En düşük43,0 °C');
+    expect(stats[0]).toHaveTextContent('Tepe46,0 °C');
+    fireEvent.click(within(stats[0]).getByRole('button', { name: /Tepe/ }));
+    expect(screen.getByText(/Seçili an/).closest('[role="status"]')).toHaveTextContent(fmtTime(T0 + 295));
+    expect(screen.getAllByTestId('chart-pin').length).toBeGreaterThan(1);
+    vi.restoreAllMocks();
+  });
+
+  it('reads Android\'s thermal limit on the temperature chart, and says what else was going on at the crosshair', () => {
+    wide();
+    const samples = Array.from({ length: 60 }, (_, i) => sample(i, { thermal: i >= 30 ? 'moderate' : 'none' }));
+    useDeviceLoadStore.setState({ samples, active: true, insights: [] });
+    api.get.mockResolvedValue({ active: true, interval_s: 5, samples, markers: [], insights: [], adb: [] });
+    render(<DeviceLoadPanel />);
+    const chart = screen.getByRole('group', { name: /Sıcaklık grafiği/i });
+    expect(within(chart).getAllByTestId('chart-span')).toHaveLength(1);
+    expect(screen.getByText(/Gölge: Android'in telefonu yavaşlattığı süreler/)).toBeInTheDocument();
+    fireEvent.pointerMove(chart, { clientX: 640 }); // a moment inside the limited stretch
+    expect(within(chart).getByRole('status')).toHaveTextContent('İşlemci %40 · Güç -1,4 W · Android termal durumu: orta');
+    vi.restoreAllMocks();
+  });
+
+  it('names the busiest process in the CPU tooltip, and each process row carries its trend', () => {
+    wide();
+    seed();
+    render(<DeviceLoadPanel />);
+    fireEvent.pointerMove(cpuChart(), { clientX: 640 });
+    expect(within(cpuChart()).getByRole('status')).toHaveTextContent('En yoğun: com.google.android.youtube %15');
+    const procs = screen.getByRole('table', { name: /İzlenen süreçlerin/ });
+    expect(within(procs).getByRole('columnheader', { name: 'Seyir' })).toBeInTheDocument();
+    expect(procs.querySelectorAll('tbody tr svg')).toHaveLength(2);
+    vi.restoreAllMocks();
+  });
+
+  it('a dragged window zooms every chart and table to it, the headline stays live, and the chip gives it back', () => {
+    wide();
+    seed();
+    render(<DeviceLoadPanel />);
+    const chart = screen.getByRole('group', { name: /Sıcaklık grafiği/i });
+    // 15 min over a 652 px plot: x 500 → T0 + 38 s, x 600 → T0 + 176 s
+    fireEvent.pointerDown(chart, { clientX: 500, button: 0 });
+    fireEvent.pointerMove(chart, { clientX: 600 });
+    fireEvent.pointerUp(chart, { clientX: 600 });
+    const chip = screen.getByRole('button', { name: /Yakınlaştırmayı kaldır/ });
+    expect(screen.getAllByText('46,0').length).toBeGreaterThan(0); // the headline temperature is still NOW
+    fireEvent.click(screen.getByRole('button', { name: 'Tablo' }));
+    expect(within(screen.getByRole('table', { name: 'Ölçüm tablosu' })).getAllByRole('row')).toHaveLength(29); // header + 28 samples
+    fireEvent.click(chip);
+    expect(screen.queryByRole('button', { name: /Yakınlaştırmayı kaldır/ })).toBeNull();
+    expect(within(screen.getByRole('table', { name: 'Ölçüm tablosu' })).getAllByRole('row')).toHaveLength(61);
+    vi.restoreAllMocks();
+  });
+
+  it('picking a range clears the zoom', () => {
+    wide();
+    seed();
+    render(<DeviceLoadPanel />);
+    const chart = screen.getByRole('group', { name: /Sıcaklık grafiği/i });
+    fireEvent.pointerDown(chart, { clientX: 500, button: 0 });
+    fireEvent.pointerMove(chart, { clientX: 600 });
+    fireEvent.pointerUp(chart, { clientX: 600 });
+    expect(screen.getByRole('button', { name: /Yakınlaştırmayı kaldır/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: '1 sa' }));
+    expect(screen.queryByRole('button', { name: /Yakınlaştırmayı kaldır/ })).toBeNull();
+    vi.restoreAllMocks();
+  });
+
+  it('copies the table for a spreadsheet', async () => {
+    seed();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    render(<DeviceLoadPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'Tablo' }));
+    fireEvent.click(screen.getByRole('button', { name: /Kopyala/ }));
+    await screen.findByText('Kopyalandı');
+    const text = writeText.mock.calls[0][0];
+    expect(text.split('\n')).toHaveLength(61); // header + 60 samples, newest first
+    expect(text.split('\n')[0].split('\t')[0]).toBe('Saat');
+    expect(text.split('\n')[1].split('\t')[0]).toBe(fmtTime(T0 + 295));
+    delete navigator.clipboard;
+  });
+
+  it("the stream shows both loads on one percent axis; Mpx/s and Mbps buttons show one load each and the choice is remembered", () => {
+    wide();
+    seed();
+    window.localStorage.removeItem('opendex.loadPanel.encodeView');
+    render(<DeviceLoadPanel />);
+    const both = screen.getByRole('group', { name: /kendi yoğun eşiklerine göre/ });
     expect(screen.getByText('84 Mpx/s · 7,8 Mbps')).toBeInTheDocument();
-    // the tiles say what each number is, and one sentence which side the work is on
+    // the strip says what each number is, and one sentence which side the work is on
     expect(screen.getByText('Telefonun işi')).toBeInTheDocument();
     expect(screen.getByText('Ağın işi')).toBeInTheDocument();
     expect(screen.getByText('Sıkıştırma')).toBeInTheDocument();
     expect(screen.getByRole('note')).toHaveTextContent(/Telefon|Az piksel|rahat|yoğun/);
-    // one crosshair: moving over one chart reads the same moment on the other
-    fireEvent.pointerMove(pixels, { clientX: 400 });
-    expect(within(link).getByRole('status')).toHaveTextContent(/7,8/);
+    // the real values of the hovered moment, in the tooltip of the percent chart
+    fireEvent.pointerMove(both, { clientX: 400 });
+    expect(within(both).getByRole('status')).toHaveTextContent('84 Mpx/s · 7,8 Mbps');
+    // one load at a time
+    fireEvent.click(screen.getByRole('radio', { name: 'Mbps' }));
+    expect(screen.getByRole('group', { name: /şu an saniyede 7,8 megabit/ })).toBeInTheDocument();
+    expect(window.localStorage.getItem('opendex.loadPanel.encodeView')).toBe('link');
+    fireEvent.click(screen.getByRole('radio', { name: 'Mpx/s' }));
+    expect(screen.getByRole('group', { name: /şu an saniyede 84 megapiksel/ })).toBeInTheDocument();
+    window.localStorage.removeItem('opendex.loadPanel.encodeView');
     vi.restoreAllMocks();
   });
 
-  it('explains why the stream has two charts, and remembers that it was closed', () => {
+  it('explains why there are two loads, and remembers that it was closed', () => {
     wide();
     seed();
     window.localStorage.removeItem('opendex.loadPanel.encodeExplainer');

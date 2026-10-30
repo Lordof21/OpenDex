@@ -24,6 +24,8 @@ from typing import TYPE_CHECKING, Any
 
 import websockets
 
+from ..events import spawn_background
+
 if TYPE_CHECKING:
     from ..device.adb import Adb
 
@@ -128,6 +130,36 @@ const odxCapture = () => odxScrollers().map((el) => ({
   p: odxPath(el), r: +(el.scrollTop / Math.max(1, el.scrollHeight - el.clientHeight)).toFixed(4),
   t: Math.round(el.scrollTop), h: el.scrollHeight, c: el.clientHeight,
 }));
+// The content point at the very top of the viewport: the deepest in-flow element there and how far into it the top edge is (a fraction of
+// its height). A pixel offset means another place once the page is laid out at another width (images scale with it); "this part of this
+// picture" does not. Fixed / sticky bars are skipped; an element taller than a few screens is too coarse to anchor to.
+const odxAnchor = () => {
+  try {
+    for (const el of document.elementsFromPoint(Math.round(innerWidth / 2), 2)) {
+      if (el === document.documentElement || el === document.body) continue;
+      const pos = getComputedStyle(el).position;
+      if (pos === 'fixed' || pos === 'sticky') continue;
+      const r = el.getBoundingClientRect();
+      if (r.height < 20 || r.height > innerHeight * 6) continue;
+      const p = odxPath(el);
+      if (p) return { p, f: +Math.max(0, Math.min(1, (2 - r.top) / r.height)).toFixed(4) };
+    }
+  } catch (e) {}
+  return null;
+};
+const odxApplyAnchor = (a) => {
+  if (!a || !a.p) return false;
+  let el = null;
+  try { el = document.querySelector(a.p); } catch (e) { return false; }
+  if (!el) return false;
+  const r = el.getBoundingClientRect();
+  if (r.height < 1) return false;
+  const delta = r.top - (2 - a.f * r.height);
+  if (Math.abs(delta) > 2) window.scrollBy({ top: delta, behavior: 'instant' });
+  return true;
+};
+// Text typed into the page (a reload would lose it): a field with a value, or an editable area with text.
+const odxTyped = () => Array.from(document.querySelectorAll('input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]), textarea, [contenteditable=""], [contenteditable="true"]')).some((el) => (el.value !== undefined ? String(el.value).length > 0 : (el.textContent || '').length > 0));
 const odxApplyOnce = (saved) => {
   const list = (saved && saved.c) || [];
   const sc = odxScrollers();
@@ -152,7 +184,9 @@ const odxRestoreAll = async (saved) => {
   try {
     for (let i = 0; i < 40 && !touched; i++) {
       const applied = odxApplyOnce(saved);
-      if (saved.y && Math.abs(window.scrollY - saved.y) > 4) window.scrollTo(0, saved.y);
+      // The page that scrolls as a whole goes back by its content point (right at any width); the pixel offset is the fallback for a
+      // page whose element is not there (yet) — a list that renders as it scrolls.
+      if (saved.y && !(saved.a && odxApplyAnchor(saved.a)) && Math.abs(window.scrollY - saved.y) > 4) window.scrollTo(0, saved.y);
       if (!want && !saved.y) break;
       const sig = odxScrollers().map((el) => el.scrollHeight).join(',') + '|' + document.documentElement.scrollHeight;
       stable = (applied >= want && sig === last) ? stable + 1 : 0;
@@ -278,7 +312,8 @@ def _tab_state_js(want_mobile: bool, *, wait_ms: int = 0, with_fp: bool = False)
   const mobile = navigator.userAgentData ? navigator.userAgentData.mobile : /Mobi/.test(navigator.userAgent);
   const out = {{
     mobile, visible: vis(), t: v ? v.currentTime : null, playing: v ? (!v.paused && !v.ended) : null, since: Math.round(performance.now()),
-    y: window.scrollY, url: location.href, host: location.hostname, c: odxCapture(),
+    y: window.scrollY, url: location.href, host: location.hostname, c: odxCapture(), a: odxAnchor(), vw: innerWidth,
+    dirty: odxTyped(),
   }};
   if ({'true' if with_fp else 'false'} && vis() && mobile !== {'true' if want_mobile else 'false'} && /^https?:$/.test(location.protocol)) {{
     try {{ out.fp = await odxFingerprint(); }} catch (e) {{}}
@@ -595,6 +630,9 @@ async def capture_browser_scroll_state(
                         "    ratio: ratio, "
                         "    anchorPath: anchorPath, "
                         "    containers: odxCapture(), "
+                        "    anchor: odxAnchor(), "
+                        "    vw: window.innerWidth, "
+                        "    dirty: odxTyped(), "
                         "    hasMedia: Array.from(document.querySelectorAll('video, audio')).some(el => !el.paused && !el.ended && el.readyState > 2)"
                         "  });"
                         "})()"
@@ -707,6 +745,14 @@ async def refresh_browser_layout_inplace(
                                 log.info("♻️ [CDP_REFRESH] Uygulama sayfayı kendisi yeniden yükledi — video (%s sn) ve kaydırma geri konuyor",
                                          resume.get("t"))
 
+                # 3c. The window is another width than the page was laid out for, and the page shows it (sizes it measured once, in script,
+                # at the old width): reloaded, the content point it was on goes back. Background: the load takes seconds.
+                if resume is not None:
+                    with contextlib.suppress(Exception):
+                        reason = await _stale_width_reason(ws, saved_scroll)
+                        if reason and _same_page(str(resume["url"]), str(target_page.get("url", ""))):
+                            spawn_background(_reload_and_restore(adb, serial, socket_name, resume, reason), "cdp-width-reload")
+
                 # 4. Scale factor 1.0 on the background tabs: best effort, in parallel, under one overall budget — a frozen tab
                 # must never hold the caller (a handoff, under the window lifecycle lock) for seconds.
                 background = [
@@ -728,7 +774,8 @@ async def refresh_browser_layout_inplace(
 async def _capture_scroll_over(ws: Any) -> dict[str, Any] | None:
     """Where the page scrolls right now (window AND inner containers), asked over an open tab socket. None: nothing worth putting back."""
     with contextlib.suppress(Exception):
-        js = "(() => {" + _SCROLL_LIB_JS + "return JSON.stringify({ y: window.scrollY, url: location.href, c: odxCapture() });})()"
+        js = ("(() => {" + _SCROLL_LIB_JS
+              + "return JSON.stringify({ y: window.scrollY, url: location.href, c: odxCapture(), a: odxAnchor(), vw: innerWidth });})()")
         res = await _send_cdp(ws, "Runtime.evaluate", {"expression": js}, req_id=30, timeout_s=0.8)
         raw = ((res or {}).get("result") or {}).get("result", {}).get("value")
         state = json.loads(raw) if isinstance(raw, str) else None
@@ -835,13 +882,26 @@ async def _remove_forward_safe(adb: "Adb", serial: str, port: int) -> None:
         pass
 
 
-def _mobile_ua_metadata(browser: str) -> dict[str, Any]:
-    """Client-hints metadata for the phone's own mobile user agent (``browser``: "Chrome/155.0.8059.39")."""
-    full = browser.split("/", 1)[-1]
+def _brand_lists(full: str) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    """The brand lists a real Chrome reports: its two brands AND the "not a brand" entry every Chrome adds (a list without it is how a
+    hand-made client-hints object gives itself away). Returns (brands with major versions, fullVersionList)."""
     major = full.split(".", 1)[0]
+    grease = ("Not(A:Brand", "24", "24.0.0.0")
+    brands = [{"brand": grease[0], "version": grease[1]}, {"brand": "Chromium", "version": major}, {"brand": "Google Chrome", "version": major}]
+    full_list = [{"brand": grease[0], "version": grease[2]}, {"brand": "Chromium", "version": full}, {"brand": "Google Chrome", "version": full}]
+    return brands, full_list
+
+
+def _mobile_ua_metadata(browser: str, model: str = "", android: str = "") -> dict[str, Any]:
+    """Client-hints metadata for the phone's own mobile user agent (``browser``: "Chrome/155.0.8059.39"). ``model`` / ``android``: the phone's real
+    model and Android release (``getprop``), which a real Chrome reports as ``model`` / ``platformVersion`` — empty values next to a cross-origin
+    frame that reports the real ones are what a bot check reads as a tampered browser."""
+    full = browser.split("/", 1)[-1]
+    brands, full_list = _brand_lists(full)
+    version = android if android.count(".") >= 2 else (f"{android}.0.0" if android else "")
     return {
-        "brands": [{"brand": "Chromium", "version": major}, {"brand": "Google Chrome", "version": major}],
-        "fullVersion": full, "platform": "Android", "platformVersion": "", "architecture": "", "model": "", "mobile": True,
+        "brands": brands, "fullVersionList": full_list, "fullVersion": full, "platform": "Android", "platformVersion": version,
+        "architecture": "", "bitness": "", "model": model, "mobile": True, "wow64": False,
     }
 
 
@@ -849,13 +909,32 @@ def _desktop_ua(browser: str) -> dict[str, Any]:
     """The user agent + client hints Chrome sends for "Desktop site" (``browser``: "Chrome/155.0.8059.39")."""
     full = browser.split("/", 1)[-1]
     major = full.split(".", 1)[0]
+    brands, full_list = _brand_lists(full)
     return {
         "userAgent": f"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36",
+        "platform": "Linux x86_64",   # navigator.platform: left alone it would say "Linux armv81" next to an x86_64 user agent
         "userAgentMetadata": {
-            "brands": [{"brand": "Chromium", "version": major}, {"brand": "Google Chrome", "version": major}],
-            "fullVersion": full, "platform": "Linux", "platformVersion": "", "architecture": "x86", "model": "", "mobile": False,
+            "brands": brands, "fullVersionList": full_list, "fullVersion": full, "platform": "Linux", "platformVersion": "6.5.0",
+            "architecture": "x86", "bitness": "64", "model": "", "mobile": False, "wow64": False,
         },
     }
+
+
+_device_identity_cache: dict[str, tuple[str, str]] = {}
+
+
+async def _device_identity(adb: "Adb", serial: str) -> tuple[str, str]:
+    """(model, Android release) of the phone — what its Chrome reports in client hints. Asked once per phone; ("", "") when unreadable."""
+    if serial in _device_identity_cache:
+        return _device_identity_cache[serial]
+    model = release = ""
+    with contextlib.suppress(Exception):
+        out = await adb.shell("getprop ro.product.model; getprop ro.build.version.release", serial=serial, timeout_s=1.5)
+        lines = [ln.strip() for ln in str(out or "").splitlines() if ln.strip()]
+        if len(lines) >= 2:
+            model, release = lines[0], lines[1]
+            _device_identity_cache[serial] = (model, release)
+    return model, release
 
 
 _MOBILE_HOSTS = ("m.", "mobile.", "touch.")
@@ -906,7 +985,100 @@ def _resume_state(saved: dict[str, Any] | None) -> dict[str, Any] | None:
         t = t + max(0.0, time.time() - stamp)
     containers = saved.get("containers")
     return {"t": t, "playing": saved.get("playing"), "y": saved.get("scrollY"), "url": saved["url"],
-            "c": containers if isinstance(containers, list) else []}
+            "c": containers if isinstance(containers, list) else [], "a": saved.get("anchor"), "vw": saved.get("vw")}
+
+
+# A page that sized itself in script at ITS load width keeps those sizes when the window is another width: a reader that put
+# `min-height: 750px` on every page while the window was 800 px wide leaves ~400 px gaps between its images at the phone's 380 px. The
+# in-place nudge (a `resize` event) cannot make such a page measure again; a reload can. Only when the width really changed and the page
+# shows the symptom — a responsive site that handles the resize itself is never reloaded for it.
+_WIDTH_RELOAD_RATIO = 1.3
+_STALE_LAYOUT_JS = r"""(() => {
+  let gaps = 0, over = 0;
+  const vw = innerWidth;
+  const els = document.querySelectorAll('[style*="min-height"], [style*="width"]');
+  for (let i = 0; i < els.length && i < 4000; i++) {
+    const el = els[i], st = el.style, r = el.getBoundingClientRect();
+    if (st.minHeight && /px$/.test(st.minHeight) && parseFloat(st.minHeight) >= 200 && r.height > 0) {
+      let bottom = -1;
+      for (const c of el.children) { const cr = c.getBoundingClientRect(); if (cr.height > 0) bottom = Math.max(bottom, cr.bottom); }
+      // content that is not laid out (content-visibility: auto, off screen) says nothing: only boxes that have content count
+      if (bottom >= 0 && (bottom - r.top) < r.height * 0.7 && r.height - (bottom - r.top) > 120) gaps++;
+    }
+    if (/px$/.test(st.width) && r.right > vw + 2 && r.width > vw * 0.4) over++;
+  }
+  return JSON.stringify({ vw, gaps, over });
+})()"""
+
+
+# The width the page has NOW and the symptom, read in one go (the tab watcher asks after its scale is in place).
+_STALE_WIDTH_PROBE_JS = "(() => { const c = JSON.parse(" + _STALE_LAYOUT_JS + "); return JSON.stringify({ vw: innerWidth, c }); })()"
+
+
+def _width_reload_verdict(before_vw: Any, now_vw: Any, check: Any) -> str | None:
+    """Why a page whose window changed width must be reloaded (a short reason for the log), or None. ``check``: what ``_STALE_LAYOUT_JS`` read."""
+    nums = (before_vw, now_vw)
+    if not all(isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 for v in nums):
+        return None
+    if max(before_vw / now_vw, now_vw / before_vw) < _WIDTH_RELOAD_RATIO or not isinstance(check, dict):
+        return None
+    gaps, over = int(check.get("gaps") or 0), int(check.get("over") or 0)
+    if gaps:
+        return f"{gaps} kutuda sabit yükseklik içeriğe uymuyor (genişlik {before_vw:.0f} → {now_vw:.0f})"
+    if over:
+        return f"{over} öğe sabit pikselle ekrandan taşıyor (genişlik {before_vw:.0f} → {now_vw:.0f})"
+    return None
+
+
+async def _stale_width_reason(ws: Any, saved: dict[str, Any] | None) -> str | None:
+    """After a move that changed the window's width: does the page keep sizes it measured at the old width? Waits (at most ~0.3 s) for the
+    new width to settle, then reads the symptom. None: not reloaded for this (media playing, text typed in, width the same, no symptom)."""
+    if not isinstance(saved, dict) or saved.get("hasMedia") or saved.get("dirty"):
+        return None
+    before = saved.get("vw")
+    if not isinstance(before, (int, float)) or isinstance(before, bool) or before <= 0:
+        return None
+    now: float | None = None
+    for i in range(3):
+        res = await _send_cdp(ws, "Runtime.evaluate", {"expression": "innerWidth", "returnByValue": True}, req_id=140 + i, timeout_s=0.3)
+        value = ((res or {}).get("result") or {}).get("result", {}).get("value")
+        value = float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+        if value is not None and value == now:
+            break
+        now = value
+        if i < 2:
+            await asyncio.sleep(0.15)
+    if now is None or max(before / now, now / before) < _WIDTH_RELOAD_RATIO:
+        return None
+    res = await _send_cdp(ws, "Runtime.evaluate", {"expression": _STALE_LAYOUT_JS, "returnByValue": True}, req_id=145, timeout_s=0.8)
+    raw = ((res or {}).get("result") or {}).get("result", {}).get("value")
+    check = json.loads(raw) if isinstance(raw, str) else None
+    return _width_reload_verdict(before, now, check)
+
+
+async def _reload_and_restore(adb: "Adb", serial: str, socket_name: str, resume: dict[str, Any], reason: str) -> None:
+    """Reloads the tab in front and puts back the content point the user was on (the state read BEFORE the move). Runs after the handoff
+    has let go of the DevTools lock: the load takes seconds and the handoff must not wait for it. Never raises."""
+    async with _get_cdp_lock(serial):
+        try:
+            async with open_cdp_session(adb, serial, socket_name, timeout_s=2.5) as port:
+                pages = await _web_pages(port)
+                if not pages:
+                    return
+                target = await _find_active_page_target(port, pages, timeout_s=0.4)
+                ws_raw = target.get("webSocketDebuggerUrl")
+                if not ws_raw or not _same_page(str(resume["url"]), str(target.get("url", ""))):
+                    return
+                ws_url = re.sub(r"ws://[^/]+/", f"ws://127.0.0.1:{port}/", ws_raw)
+                async with websockets.connect(ws_url, open_timeout=_TAB_OPEN_TIMEOUT_S, close_timeout=0.4) as ws:
+                    await _send_cdp(ws, "Page.enable", req_id=130, timeout_s=0.3)
+                    nav = await _send_cdp(ws, "Page.reload", {"ignoreCache": False}, req_id=131, timeout_s=1.0)
+                    if not nav or "error" in nav:
+                        return
+                    log.info("🔄 [CDP_REFRESH] Sayfa yeniden yükleniyor (%s) — kaldığı içerik noktasına dönülecek", reason)
+                    await _restore_after_load(ws, resume, timeout_s=8.0)
+        except Exception as exc:  # noqa: BLE001 — a nicety on top of the in-place nudge
+            log.debug("[CDP_REFRESH] Genişlik değişimi yenilemesi atlandı: %s", exc)
 
 
 def _same_page(a: str, b: str) -> bool:
@@ -950,9 +1122,11 @@ def _restore_script(state: dict[str, Any]) -> str:
     and play state it had. The two run side by side — a page with no video no longer waits for one — and this is the ONLY writer of
     the scroll after a reload (the layout nudge leaves a fresh page alone). It gives up the moment the user touches the page."""
     containers = state.get("c")
+    anchor = state.get("a")
     saved = json.dumps({
         "t": state.get("t"), "playing": state.get("playing"), "y": state.get("y"), "url": state.get("url"),
         "c": containers if isinstance(containers, list) else [],
+        "a": anchor if isinstance(anchor, dict) and anchor.get("p") else None,
     })
     # The page starts its own player (autoplay) a moment after it loads: the saved play state is held for a few seconds, not set once.
     # The video is put at its second once, the play state is held for ~4 s, and for 12 s the video is watched: a site that starts at the
@@ -1033,6 +1207,7 @@ class BrowserTabAutoAttachWatcher:
         self._front_seen = False             # a tab reported itself visible: the others cannot be the one in front
         self._front_done = False             # the tab in front has been handled (mode set, reload decided): settling no longer waits for hidden tabs
         self._page_sessions: set[str] = set()                         # sessions of page tabs only (a worker takes no scale)
+        self._frame_sessions: set[str] = set()                        # cross-origin frames (a bot check, an ad, a player): their own targets
         self._apply_scale: Any = None        # set by the running session: an async callable that re-sends the scale to every page tab
 
     def _resume_for(self, url: str) -> dict[str, Any] | None:
@@ -1113,7 +1288,9 @@ class BrowserTabAutoAttachWatcher:
             user_agent = ver.get("User-Agent")
             browser = ver.get("Browser", "Chrome/0")
             if want_mobile:
-                ua_params = {"userAgent": user_agent, "userAgentMetadata": _mobile_ua_metadata(browser)} if user_agent else None
+                model, android = await _device_identity(self._adb, self._serial)
+                ua_params = ({"userAgent": user_agent, "userAgentMetadata": _mobile_ua_metadata(browser, model, android)}
+                             if user_agent else None)
             else:
                 ua_params = _desktop_ua(browser)
 
@@ -1125,6 +1302,7 @@ class BrowserTabAutoAttachWatcher:
                 attached: dict[str, str] = {}                  # targetId -> session: a tab is handled ONCE (see below)
                 initial: set[str] | None = None                # targetIds of the tabs open at the start that still wait for their turn
                 probes: dict[str, dict[str, Any]] = {}         # session -> tab state, while the "does a reload change anything?" measurement runs
+                stale_states: dict[str, dict[str, Any]] = {}   # session -> tab state, while the "is the page still sized for the old width?" read runs
                 watchdogs: dict[str, asyncio.Task] = {}        # session -> the timer that reloads when that measurement never answers
                 awaiting_front: dict[str, str] = {}            # session -> targetId of a hidden tab asked a second time (it may be the front tab)
 
@@ -1185,6 +1363,17 @@ class BrowserTabAutoAttachWatcher:
                         "awaitPromise": True, "returnByValue": True,
                     }, session_id, tag=("dpr", session_id))
 
+                frame_watch_id = 800000        # its own id range: the watch for frames must not shift the ids of the commands a tab's flow counts on
+
+                async def watch_frames(session_id: str) -> None:
+                    """The session's cross-origin frames (a bot check, an ad, a player) are attached too, paused at their start: each gets the page's identity."""
+                    nonlocal frame_watch_id
+                    frame_watch_id += 1
+                    await ws.send(json.dumps({
+                        "id": frame_watch_id, "method": "Target.setAutoAttach", "sessionId": session_id,
+                        "params": {"autoAttach": True, "waitForDebuggerOnStart": True, "flatten": True},
+                    }))
+
                 async def put_in_place(session_id: str, tab_mobile: bool, *, reload: bool, verify: bool = True) -> None:
                     """The user agent of this watcher's mode and the scale (phone or window). ``reload``: the tab is the one in front and was
                     loaded as the other site — it is scaled as THIS mode's site (the decision whether it must also be reloaded follows).
@@ -1230,6 +1419,19 @@ class BrowserTabAutoAttachWatcher:
                         await send("Page.reload", {"ignoreCache": False}, session_id)
                     log.info("🔁 [CDP_WATCHER: SİTE KİPİ] %s sekmesi %s siteye çevriliyor — karar=reload, sebep=%s (video ve kaydırma korunacak)",
                              str(state.get("url", ""))[:50], "mobil" if want_mobile else "masaüstü", reason)
+
+                async def stale_check(session_id: str, state: dict[str, Any]) -> None:
+                    """A tab kept (same page under both identities) after the window became another width: once the new scale has settled, is the
+                    page still sized for the old width (sizes it measured in script at load)? The answer arrives as ('stale', session)."""
+                    try:
+                        await asyncio.sleep(0.7)
+                        stale_states[session_id] = state
+                        await send("Runtime.evaluate", {"expression": _STALE_WIDTH_PROBE_JS, "returnByValue": True}, session_id,
+                                   tag=("stale", session_id))
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:  # noqa: BLE001 — the socket may be gone; the watcher's own loop reports that
+                        log.debug("[CDP_WATCHER] genişlik denetimi: %s", exc)
 
                 async def probe_watchdog(session_id: str) -> None:
                     """The measurement never answered (a page that blocks fetch, a frozen renderer): reload — the safe answer."""
@@ -1302,6 +1504,17 @@ class BrowserTabAutoAttachWatcher:
                                 log.info("📏 [CDP_WATCHER: ÖLÇEK] sayfa dpr=%.3f (hedef %.3f): Chrome override'ı %.2fx çarpıyor, düzeltiliyor",
                                          observed, target, observed / applied)
                                 await send("Emulation.setDeviceMetricsOverride", scale_params(mobile_flag), session_id)
+                            elif kind == "stale" and session_id:
+                                state = stale_states.pop(session_id, None)
+                                raw = (msg.get("result") or {}).get("result", {}).get("value")
+                                try:
+                                    now = json.loads(raw) if isinstance(raw, str) else None
+                                except ValueError:
+                                    now = None
+                                if state is not None and isinstance(now, dict):
+                                    why = _width_reload_verdict(state.get("vw"), now.get("vw"), now.get("c"))
+                                    if why:
+                                        await start_reload(session_id, state, why)
                             elif kind == "probe" and session_id:
                                 state = probes.pop(session_id, None)
                                 watchdog = watchdogs.pop(session_id, None)
@@ -1320,6 +1533,8 @@ class BrowserTabAutoAttachWatcher:
                                 else:
                                     log.info("✅ [CDP_WATCHER: SİTE KİPİ] %s sekmesi iki kimlikle de aynı sayfa — karar=atla (%s); ölçek ve kimlik yeterli",
                                              str(state.get("url", ""))[:50], why)
+                                    if not state.get("playing") and not state.get("dirty"):
+                                        spawn_background(stale_check(session_id, state), "cdp-stale-width")
                                 finish(session_id)
                             elif kind in ("state", "state2") and session_id:
                                 if kind == "state2" and session_id not in awaiting_front:
@@ -1370,6 +1585,11 @@ class BrowserTabAutoAttachWatcher:
                             await send("Runtime.evaluate", {"expression": _restore_script(resume_on_load.pop(msg["sessionId"])), "userGesture": True},
                                        msg["sessionId"])
                             continue
+                        if method == "Target.detachedFromTarget":
+                            gone = (msg.get("params") or {}).get("sessionId")
+                            for group in (self._sessions, self._page_sessions, self._frame_sessions):
+                                group.discard(gone)
+                            continue
                         if method != "Target.attachedToTarget":
                             continue
                         params = msg.get("params", {})
@@ -1380,6 +1600,18 @@ class BrowserTabAutoAttachWatcher:
                         self._sessions.add(session_id)
                         waiting = bool(params.get("waitingForDebugger"))
                         target_id = info.get("targetId")
+                        if info.get("type") == "iframe":
+                            # A cross-origin frame is a target of its own and gets NONE of its page's overrides unless given them: the Cloudflare
+                            # check saw the browser's REAL client hints (model, Android version) while its page said something else. The identity
+                            # is the same for the whole page now. (The scale cannot follow: Chrome refuses setDeviceMetricsOverride on a frame
+                            # target — "can only be executed on top-level targets" — so a frame keeps the browser's own scale.)
+                            self._frame_sessions.add(session_id)
+                            if ua_params:
+                                await send("Emulation.setUserAgentOverride", ua_params, session_id)
+                            await watch_frames(session_id)
+                            if waiting:
+                                await send("Runtime.runIfWaitingForDebugger", {}, session_id)
+                            continue
                         if target_id in attached and not waiting:
                             # The browser auto-attached this open tab (setAutoAttach) AND we attached it from the target list: two
                             # sessions for one tab made two reloads and two restores run against each other.
@@ -1388,6 +1620,7 @@ class BrowserTabAutoAttachWatcher:
                             attached[target_id] = session_id
                         if info.get("type") == "page":
                             self._page_sessions.add(session_id)
+                            await watch_frames(session_id)
                             if waiting:
                                 # A tab created now: this mode's user agent + scale BEFORE it loads, then let it run.
                                 await put_in_place(session_id, want_mobile, reload=False, verify=False)

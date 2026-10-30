@@ -1,9 +1,14 @@
 // Telefon Yükü — "how hard is the phone working, and how much of it is OpenDeX?" in one panel.
-// Reading order: the headline temperature + three stat tiles (each takes you to its chart) → findings (why it is warm)
-// → temperature over time → CPU by owner over time → the encoder (pixels, bandwidth) → who/what in detail (processes,
-// video streams, OpenDeX's own background commands) → events. A table view replaces every chart with its numbers.
+// Reading order: the headline temperature + three stat tiles (CPU, power, the video stream — each takes you to its chart)
+// → findings (why it is warm; each one takes you to its evidence) → temperature over time → CPU by owner over time → the
+// encoder (pixels, bandwidth) → who/what in detail (processes, video streams, OpenDeX's own background commands) →
+// events. A table view replaces every chart with its numbers (and copies them for a spreadsheet).
 // Every chart shares one crosshair; a click selects a moment (summary bar on top, "Back to live"), and the process and
-// stream tables then show that moment. Hovering a legend entry or a process row brings its owner's band forward.
+// stream tables then show that moment. A DRAG across any chart zooms every chart and table to that window (the headline
+// numbers stay live; a chip gives the window back). Under the temperature and CPU charts: lowest / mean / peak of the
+// range — the peak button selects that moment. Android's thermal limit is shaded on the temperature chart, and a
+// tooltip names what else was going on (CPU, power, the busiest process). Hovering a legend entry or a process row
+// brings its owner's band forward; process rows carry a trend line over the range.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
@@ -12,8 +17,10 @@ import {
   AlertTriangle,
   ArrowDown,
   BatteryCharging,
+  Check,
   CheckCircle2,
   ChevronDown,
+  Copy,
   Cpu,
   Crosshair,
   Flame,
@@ -24,6 +31,7 @@ import {
   Thermometer,
   X,
   Zap,
+  ZoomIn,
 } from 'lucide-react';
 import { cn } from '../lib/utils.js';
 import { Z_INDEX } from '../ui/zIndex.js';
@@ -44,20 +52,24 @@ import {
   bodyTemp,
   encodeLoad,
   findingColumns,
+  findingSection,
   fmt,
   fmtClock,
   fmtTime,
+  gapSeconds,
   groupValue,
   inRange,
   isStale,
   mean,
   powerLabel,
   processTable,
+  rangeStats,
   sampleAt,
   slopePerMin,
   sortProcesses,
   sourcesText,
   tempSeverity,
+  thermalSpans,
 } from './loadModel.js';
 import { t } from '../i18n/index.js';
 
@@ -188,7 +200,7 @@ function StatTile({ icon: Icon, label, value, unit, sub, trend, onClick }) {
 
 /** Findings flow side by side: as many per row as fill it (4 → 2 + 2), each at least ~210 px, so on a narrow panel
  *  they wrap and the last one stretches across. A "normal" finding is one line. */
-function Findings({ insights }) {
+function Findings({ insights, onGo }) {
   if (!insights.length) {
     return <p className="text-[10px] text-muted-foreground">{t('telemetry.ilk_olcumler_bekleniyor')}</p>;
   }
@@ -198,12 +210,9 @@ function Findings({ insights }) {
       {insights.map((f) => {
         const Icon = SEVERITY_ICON[f.severity] || Info;
         const calm = f.severity === 'good';
-        return (
-          <li
-            key={f.id}
-            className="flex min-w-[210px] gap-2 rounded-lg bg-background/70 px-2.5 py-2 ring-1 ring-border/50"
-            style={{ flex: `1 1 calc(${100 / cols}% - 6px)` }}
-          >
+        const target = findingSection(f.id); // the evidence for this finding, when it has one place
+        const body = (
+          <>
             <Icon className={cn('size-4 shrink-0', calm ? 'mt-px' : 'mt-0.5')} style={{ color: SEVERITY[f.severity]?.color }} strokeWidth={2.2} aria-hidden="true" />
             {calm ? (
               <p className="min-w-0 text-[11px] leading-4 text-foreground">
@@ -220,10 +229,59 @@ function Findings({ insights }) {
                 <p className="mt-0.5 text-[10px] leading-[15px] text-muted-foreground">{f.detail}</p>
               </div>
             )}
+            {target && <ArrowDown className="ml-auto mt-0.5 size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" aria-hidden="true" />}
+          </>
+        );
+        return (
+          <li
+            key={f.id}
+            className="min-w-[210px] rounded-lg bg-background/70 ring-1 ring-border/50"
+            style={{ flex: `1 1 calc(${100 / cols}% - 6px)` }}
+          >
+            {target ? (
+              <button
+                type="button"
+                onClick={() => onGo(target)}
+                title={t('telemetry.bulgu_kanit_ipucu')}
+                className="group flex w-full cursor-pointer gap-2 rounded-lg px-2.5 py-2 text-left outline-none transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {body}
+              </button>
+            ) : (
+              <div className="flex gap-2 px-2.5 py-2">{body}</div>
+            )}
           </li>
         );
       })}
     </ul>
+  );
+}
+
+/** Lowest / mean / highest of a range under a chart's title. The peak is a button: it selects THAT moment on every chart. */
+function RangeStats({ stats, unit, digits = 1, onPeak }) {
+  if (stats.max == null) return null;
+  const chip = 'inline-flex items-center gap-1 rounded-full bg-background px-2 py-0.5 text-[10px] ring-1 ring-border/60';
+  return (
+    <div className="mb-1 flex flex-wrap items-center gap-1" data-testid="range-stats">
+      <span className={chip}>
+        <span className="text-muted-foreground">{t('telemetry.en_dusuk')}</span>
+        <span className="font-semibold tabular-nums text-foreground">{fmt(stats.min, digits)}{unit}</span>
+      </span>
+      <span className={chip}>
+        <span className="text-muted-foreground">{t('telemetry.ortalama')}</span>
+        <span className="font-semibold tabular-nums text-foreground">{fmt(stats.avg, digits)}{unit}</span>
+      </span>
+      <button
+        type="button"
+        onClick={onPeak}
+        title={t('telemetry.tepe_ipucu')}
+        className={cn(chip, 'cursor-pointer outline-none transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring')}
+      >
+        <span className="text-muted-foreground">{t('telemetry.tepe')}</span>
+        <span className="font-semibold tabular-nums text-foreground">{fmt(stats.max, digits)}{unit}</span>
+        <span className="font-mono text-[9px] tabular-nums text-muted-foreground">{fmtClock(stats.maxT)}</span>
+      </button>
+    </div>
   );
 }
 
@@ -325,6 +383,9 @@ export function DeviceLoadPanel(motionProps) {
   const load = useDeviceLoadStore((s) => s.load);
   const [hoverT, setHoverT] = useSharedHover();
   const [pinnedT, setPinnedT] = useState(null);
+  const [zoom, setZoom] = useState(null); // [from, to] — a window the user dragged out on a chart; null = the live range
+  const [copied, setCopied] = useState(false);
+  const copiedTimer = useRef(null);
   const [highlight, setHighlight] = useState(null); // an owner group whose band is brought forward
   const [hiddenGroups, setHiddenGroups] = useState(() => new Set());
   const [procSort, setProcSort] = useState('avg');
@@ -361,7 +422,10 @@ export function DeviceLoadPanel(motionProps) {
     clearTimeout(flashTimer.current);
     flashTimer.current = setTimeout(() => setFlash(null), FLASH_MS);
   }, []);
-  useEffect(() => () => clearTimeout(flashTimer.current), []);
+  useEffect(() => () => {
+    clearTimeout(flashTimer.current);
+    clearTimeout(copiedTimer.current);
+  }, []);
 
   useEffect(() => {
     load();
@@ -372,24 +436,39 @@ export function DeviceLoadPanel(motionProps) {
   // Live: the axis ends NOW once the data is late, so the missing minutes show at the right edge.
   // Not measuring (no phone): the last session's record, ending at its last sample.
   const stale = active && latest != null && isStale(latest.t, nowS, intervalS);
-  const end = stale ? nowS : latest?.t ?? nowS;
-  const start = end - rangeMinutes * 60;
-  const samples = useMemo(() => inRange(samplesAll, rangeMinutes, end), [samplesAll, rangeMinutes, end]);
-  const markers = useMemo(() => markersAll.filter((m) => m.t >= start), [markersAll, start]);
+  const liveEnd = stale ? nowS : latest?.t ?? nowS;
+  const liveSamples = useMemo(() => inRange(samplesAll, rangeMinutes, liveEnd), [samplesAll, rangeMinutes, liveEnd]);
+  // The headline numbers always say how it is NOW; the charts and tables follow the live range, or the window the user
+  // dragged out (their processes, streams and statistics are then those of that window).
+  const zoomed = zoom && zoom[1] > liveEnd - rangeMinutes * 60 ? zoom : null;
+  const end = zoomed ? zoomed[1] : liveEnd;
+  const start = zoomed ? zoomed[0] : liveEnd - rangeMinutes * 60;
+  const samples = useMemo(
+    () => (zoomed ? samplesAll.filter((s) => s.t >= zoomed[0] && s.t <= zoomed[1]) : liveSamples),
+    [samplesAll, liveSamples, zoomed],
+  );
+  const markers = useMemo(() => markersAll.filter((m) => m.t >= start && m.t <= end), [markersAll, start, end]);
   // The selected moment, while it is still on the axis (it scrolls out of a live range like any sample).
-  const pinned = useMemo(() => (pinnedT != null && pinnedT >= start ? sampleAt(samples, pinnedT, intervalS) : null), [samples, pinnedT, start, intervalS]);
+  const pinned = useMemo(
+    () => (pinnedT != null && pinnedT >= start && pinnedT <= end ? sampleAt(samples, pinnedT, intervalS) : null),
+    [samples, pinnedT, start, end, intervalS],
+  );
+  const chooseRange = (minutes) => {
+    setZoom(null);
+    setRange(minutes);
+  };
 
   // Headline numbers ---------------------------------------------------------------------------------------------
   const temp = bodyTemp(latest);
   const tempSev = tempSeverity(temp);
-  const slope = slopePerMin(samples.filter((s) => s.t >= end - 300).map((s) => [s.t, bodyTemp(s)]));
-  const lastMin = samples.filter((s) => s.t >= end - 60);
+  const slope = slopePerMin(liveSamples.filter((s) => s.t >= liveEnd - 300).map((s) => [s.t, bodyTemp(s)]));
+  const lastMin = liveSamples.filter((s) => s.t >= liveEnd - 60);
   const cpuNow = mean(lastMin, (s) => s.cpu?.total);
   const opendexNow = mean(lastMin, (s) => groupValue(s, 'opendex'));
   const power = powerLabel(latest?.battery);
   const heavyRate = adb.filter((r) => r.heavy).reduce((acc, r) => acc + r.per_min, 0);
   const totalRate = adb.reduce((acc, r) => acc + r.per_min, 0);
-  const trendOf = (pick) => samples.slice(-36).map(pick);
+  const trendOf = (pick) => liveSamples.slice(-36).map(pick);
   const thermal = THERMAL_LEVELS[latest?.thermal] || null;
 
   // Chart configuration ---------------------------------------------------------------------------------------
@@ -412,6 +491,34 @@ export function DeviceLoadPanel(motionProps) {
     const step = peak < 20 ? 5 : 10;
     return [0, Math.min(100, Math.ceil(peak / step) * step + step)];
   }, [samples, cpuSeries]);
+  const cpuTotal = useCallback(
+    (smp) => {
+      const values = cpuSeries.map((g) => groupValue(smp, g.key)).filter((v) => Number.isFinite(v));
+      return values.length ? values.reduce((a, b) => a + b, 0) : null;
+    },
+    [cpuSeries],
+  );
+  const tempStats = useMemo(() => rangeStats(samples, bodyTemp), [samples]);
+  const cpuStats = useMemo(() => rangeStats(samples, cpuTotal), [samples, cpuTotal]);
+  // Android's own thermal limit, shaded on the temperature chart: when the phone was held back, not only how hot it was.
+  const thermalBands = useMemo(
+    () => thermalSpans(samples, gapSeconds(intervalS)).map((sp) => ({ ...sp, color: SEVERITY[THERMAL_LEVELS[sp.level].severity]?.color })),
+    [samples, intervalS],
+  );
+  // What else was going on at the moment under the crosshair — read on the chart that shows only one of them.
+  const tempDetail = (smp) => {
+    const parts = [];
+    if (Number.isFinite(smp.cpu?.total) || Number.isFinite(smp.battery?.power_w)) {
+      parts.push(t('telemetry.ipucu_isi_baglam', { cpu: fmt(smp.cpu?.total, 0), power: fmt(smp.battery?.power_w, 1) }));
+    }
+    if (THERMAL_LEVELS[smp.thermal] && smp.thermal !== 'none') parts.push(t('telemetry.android_termal', { value: THERMAL_LEVELS[smp.thermal].label }));
+    return parts.join(' · ') || null;
+  };
+  const cpuDetail = (smp) => {
+    const top = [...(smp.procs || [])].sort((a, b) => b.cpu - a.cpu)[0];
+    return top && top.cpu >= 1 ? t('telemetry.ipucu_en_yogun', { name: top.label, value: fmt(top.cpu, 0) }) : null;
+  };
+  const peakOf = (stats) => (stats.max == null ? null : { t: stats.maxT, value: stats.max });
   const groupNow = Object.fromEntries(GROUPS.map((g) => [g.key, `%${fmt(mean(lastMin, (s) => groupValue(s, g.key)), 0)}`]));
   const toggleGroup = (key) => {
     setHiddenGroups((cur) => {
@@ -440,6 +547,45 @@ export function DeviceLoadPanel(motionProps) {
   const chartProps = {
     samples, start, end, markers, intervalS, hoverT, onHoverT: setHoverT,
     pinnedT: pinned ? pinned.t : null, onPinT: setPinnedT, stale: loading && samples.length > 0,
+    onBrush: (win) => setZoom(win),
+  };
+  const pinPeak = (stats) => stats.maxT != null && setPinnedT(stats.maxT);
+  const fmtSpan = (a, b) => `${fmtClock(a)}–${fmtClock(b)}`;
+
+  // The table as text for a spreadsheet (tab-separated): the numbers of the range, newest first.
+  const tableColumns = [
+    { key: 't', label: t('telemetry.saat'), render: (r) => <span className="font-mono tabular-nums">{fmtTime(r.t)}</span>, copy: (r) => fmtTime(r.t) },
+    { key: 'bt', label: t('telemetry.pil_c'), align: 'right', render: (r) => fmt(bodyTemp(r), 1), copy: (r) => fmt(bodyTemp(r), 1) },
+    { key: 'soc', label: t('telemetry.islemci_c'), align: 'right', render: (r) => fmt(r.temp?.soc, 1), copy: (r) => fmt(r.temp?.soc, 1) },
+    { key: 'cpu', label: t('telemetry.islemci_2'), align: 'right', render: (r) => fmt(r.cpu?.total, 0), copy: (r) => fmt(r.cpu?.total, 0) },
+    ...GROUPS.map((g) => ({
+      key: g.key,
+      label: `${g.label} %`,
+      align: 'right',
+      render: (r) => fmt(groupValue(r, g.key), 1),
+      copy: (r) => fmt(groupValue(r, g.key), 1),
+    })),
+    { key: 'w', label: t('telemetry.guc_w'), align: 'right', render: (r) => fmt(r.battery?.power_w, 1), copy: (r) => fmt(r.battery?.power_w, 1) },
+    { key: 'mpx', label: t('telemetry.kodlama_mpx'), align: 'right', render: (r) => fmt(encodeLoad(r).mpx, 1), copy: (r) => fmt(encodeLoad(r).mpx, 1) },
+    { key: 'mbps', label: t('common.mbps'), align: 'right', render: (r) => fmt(encodeLoad(r).mbps, 1), copy: (r) => fmt(encodeLoad(r).mbps, 1) },
+    {
+      key: 'thermal',
+      label: t('telemetry.android_termal_sutun'),
+      render: (r) => THERMAL_LEVELS[r.thermal]?.label ?? '—',
+      copy: (r) => THERMAL_LEVELS[r.thermal]?.label ?? '—',
+    },
+  ];
+  const tableRows = useMemo(() => [...samples].reverse().map((s) => ({ ...s, id: s.t })), [samples]);
+  const copyTable = async () => {
+    const text = [tableColumns.map((c) => c.label), ...tableRows.map((r) => tableColumns.map((c) => c.copy(r)))].map((row) => row.join('\t')).join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(() => setCopied(false), 1600);
+    } catch {
+      /* the clipboard is not available (no permission): nothing was copied, the button stays as it was */
+    }
   };
 
   return (
@@ -478,12 +624,25 @@ export function DeviceLoadPanel(motionProps) {
                     : t('telemetry.cihaz_baglaninca_olcum_baslar')}
           </p>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center justify-end gap-1.5">
+          {zoomed && (
+            <button
+              type="button"
+              onClick={() => setZoom(null)}
+              title={t('telemetry.yakinlastirmayi_sifirla')}
+              aria-label={`${fmtSpan(zoomed[0], zoomed[1])} — ${t('telemetry.yakinlastirmayi_sifirla')}`}
+              className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-full bg-primary/10 px-2.5 text-[10px] font-semibold tabular-nums text-foreground ring-1 ring-border/70 transition-colors hover:bg-accent/60"
+            >
+              <ZoomIn className="size-3" aria-hidden="true" />
+              {fmtSpan(zoomed[0], zoomed[1])}
+              <X className="size-3 text-muted-foreground" aria-hidden="true" />
+            </button>
+          )}
           <SegmentedControl
             label={t('telemetry.zaman_araligi')}
             options={RANGES.map((r) => ({ value: r.minutes, label: r.label }))}
             value={rangeMinutes}
-            onChange={setRange}
+            onChange={chooseRange}
             size="md"
           />
           <button
@@ -567,7 +726,7 @@ export function DeviceLoadPanel(motionProps) {
             <span className="text-[10px] text-muted-foreground">
               {slope == null
                 ? t('telemetry.egilim_icin_en_az_1_dk_veri_gerekiyor')
-                : `${slope >= 0 ? '+' : ''}${fmt(slope, 2)} °C/dk · son 5 dk`}
+                : t('telemetry.egilim_son_5_dk', { value: `${slope >= 0 ? '+' : ''}${fmt(slope, 2)}` })}
               {latest?.temp?.soc != null && t('telemetry.islemci_value_c', { value: fmt(latest.temp.soc, 0) })}
             </span>
             {thermal && (
@@ -606,37 +765,42 @@ export function DeviceLoadPanel(motionProps) {
               onClick={() => reveal('temp')}
             />
           )}
+          {/* The video stream is the biggest thing OpenDeX asks of the phone: it belongs with the headline numbers
+              (the background commands are OpenDeX's own overhead and live in their section). */}
           <StatTile
-            icon={Radio}
-            label={t('telemetry.arka_plan_komutu')}
-            value={fmt(totalRate, 0)}
-            unit="/dk"
-            sub={t('telemetry.value_dk_agir_dumpsys_logcat', { value: fmt(heavyRate, 0) })}
-            onClick={() => reveal('commands')}
+            icon={Activity}
+            label={t('telemetry.akis_karo')}
+            value={fmt(encodeNow.mpx, 0)}
+            unit="Mpx/s"
+            sub={t('telemetry.akis_karo_alt', { mbps: fmt(encodeNow.mbps, 1), count: encodeNow.count })}
+            trend={trendOf((s) => encodeLoad(s).mpx)}
+            onClick={() => reveal('encode')}
           />
         </div>
 
         <Section title={t('telemetry.neden_isiniyor')} icon={Flame}>
-          <Findings insights={insights} />
+          <Findings insights={insights} onGo={reveal} />
         </Section>
 
         {tableView ? (
-          <Section title={t('telemetry.olcumler')} icon={Table2} ref={(el) => { sectionRef('temp')(el); sectionRef('cpu')(el); }} flash={flash === 'temp' || flash === 'cpu'}>
-            <DataTable
-              caption={t('telemetry.olcum_tablosu')}
-              columns={[
-                { key: 't', label: t('telemetry.saat'), render: (r) => <span className="font-mono tabular-nums">{fmtTime(r.t)}</span> },
-                { key: 'bt', label: t('telemetry.pil_c'), align: 'right', render: (r) => fmt(bodyTemp(r), 1) },
-                { key: 'soc', label: t('telemetry.islemci_c'), align: 'right', render: (r) => fmt(r.temp?.soc, 1) },
-                { key: 'cpu', label: t('telemetry.islemci_2'), align: 'right', render: (r) => fmt(r.cpu?.total, 0) },
-                ...GROUPS.map((g) => ({ key: g.key, label: `${g.label} %`, align: 'right', render: (r) => fmt(groupValue(r, g.key), 1) })),
-                { key: 'w', label: t('telemetry.guc_w'), align: 'right', render: (r) => fmt(r.battery?.power_w, 1) },
-                { key: 'mpx', label: t('telemetry.kodlama_mpx'), align: 'right', render: (r) => fmt(encodeLoad(r).mpx, 1) },
-                { key: 'mbps', label: t('common.mbps'), align: 'right', render: (r) => fmt(encodeLoad(r).mbps, 1) },
-                { key: 'thermal', label: t('telemetry.android_termal_sutun'), render: (r) => THERMAL_LEVELS[r.thermal]?.label ?? '—' },
-              ]}
-              rows={[...samples].reverse().map((s) => ({ ...s, id: s.t }))}
-            />
+          <Section
+            title={t('telemetry.olcumler')}
+            icon={Table2}
+            ref={(el) => { sectionRef('temp')(el); sectionRef('cpu')(el); }}
+            flash={flash === 'temp' || flash === 'cpu'}
+            aside={
+              <button
+                type="button"
+                onClick={copyTable}
+                title={t('telemetry.kopyala_ipucu')}
+                className="inline-flex h-6 cursor-pointer items-center gap-1 rounded-full bg-background px-2 text-[10px] font-semibold text-muted-foreground ring-1 ring-border/70 outline-none transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {copied ? <Check className="size-3" aria-hidden="true" /> : <Copy className="size-3" aria-hidden="true" />}
+                {copied ? t('telemetry.kopyalandi') : t('telemetry.kopyala')}
+              </button>
+            }
+          >
+            <DataTable caption={t('telemetry.olcum_tablosu')} columns={tableColumns} rows={tableRows} />
           </Section>
         ) : (
           <>
@@ -645,8 +809,9 @@ export function DeviceLoadPanel(motionProps) {
               flash={flash === 'temp'}
               title={t('telemetry.hissedilen_sicaklik_pil')}
               icon={Thermometer}
-              aside={<Aside>{t('telemetry.an_sec_ipucu')}</Aside>}
+              aside={<Aside>{t('telemetry.an_sec_surukle_ipucu')}</Aside>}
             >
+              <RangeStats stats={tempStats} unit=" °C" onPeak={() => pinPeak(tempStats)} />
               <TimeChart
                 {...chartProps}
                 ariaLabel={t('telemetry.sicaklik_grafigi_son_rangeminutes', { rangeMinutes, value: fmt(temp, 1) })}
@@ -657,8 +822,17 @@ export function DeviceLoadPanel(motionProps) {
                   { value: TEMP_WARN_C, label: t('telemetry.temp_warn_c_c_olagan_ust_sinir', { TEMP_WARN_C }) },
                   { value: TEMP_CRITICAL_C, label: t('telemetry.temp_critical_c_c_cok_sicak', { TEMP_CRITICAL_C }) },
                 ]}
+                spans={thermalBands}
+                peak={peakOf(tempStats)}
+                detail={tempDetail}
                 height={170}
               />
+              {thermalBands.length > 0 && (
+                <p className="mt-1 flex items-center gap-1.5 text-[9px] leading-[13px] text-muted-foreground">
+                  <span className="h-1 w-3 shrink-0 rounded-full" style={{ background: thermalBands[thermalBands.length - 1].color }} aria-hidden="true" />
+                  {t('telemetry.termal_bant_not')}
+                </p>
+              )}
             </Section>
 
             <Section
@@ -668,6 +842,7 @@ export function DeviceLoadPanel(motionProps) {
               icon={Cpu}
               aside={<Legend items={GROUPS} values={groupNow} hidden={hiddenGroups} onHighlight={setHighlight} onToggle={toggleGroup} />}
             >
+              <RangeStats stats={cpuStats} unit="%" digits={0} onPeak={() => pinPeak(cpuStats)} />
               <TimeChart
                 {...chartProps}
                 ariaLabel={t('telemetry.islemci_kullanimi_sahibine_gore', { rangeMinutes, value: fmt(cpuNow, 0) })}
@@ -676,6 +851,8 @@ export function DeviceLoadPanel(motionProps) {
                 yDomain={cpuDomain}
                 unit="%"
                 highlightKey={highlight}
+                peak={peakOf(cpuStats)}
+                detail={cpuDetail}
                 height={170}
               />
               <p className="mt-1.5 text-[9px] leading-[13px] text-muted-foreground">
@@ -686,6 +863,8 @@ export function DeviceLoadPanel(motionProps) {
             {/* Always shown: with no stream the encoder does nothing — a measured 0, not a missing chart */}
             {samples.length > 0 && (
               <Section
+                ref={sectionRef('encode')}
+                flash={flash === 'encode'}
                 title={t('telemetry.goruntu_kodlama')}
                 icon={Activity}
                 aside={<Aside>{`${fmt(encodeNow.mpx, 0)} Mpx/s · ${fmt(encodeNow.mbps, 1)} Mbps`}</Aside>}
@@ -725,8 +904,15 @@ export function DeviceLoadPanel(motionProps) {
                       </span>
                     ),
                   },
-                  { key: 'now', sortKey: 'now', label: pinned ? t('telemetry.o_an') : t('telemetry.simdi'), align: 'right', className: 'w-[64px]', render: (r) => fmt(r.now, 1) },
-                  { key: 'avg', sortKey: 'avg', label: t('telemetry.ort'), align: 'right', className: 'w-[64px]', render: (r) => fmt(r.avg, 1) },
+                  {
+                    key: 'trend',
+                    label: t('telemetry.seyir'),
+                    className: 'w-[58px]',
+                    // The row's share over the range, from zero: who is steady, who spikes, who just arrived.
+                    render: (r) => <Sparkline values={r.trend} width={46} height={16} floor={0} className="block" />,
+                  },
+                  { key: 'now', sortKey: 'now', label: pinned ? t('telemetry.o_an') : t('telemetry.simdi'), align: 'right', className: 'w-[56px]', render: (r) => fmt(r.now, 1) },
+                  { key: 'avg', sortKey: 'avg', label: t('telemetry.ort'), align: 'right', className: 'w-[56px]', render: (r) => fmt(r.avg, 1) },
                 ]}
                 rows={procs.map((p) => ({ ...p, id: p.key }))}
               />
@@ -748,7 +934,7 @@ export function DeviceLoadPanel(motionProps) {
                 columns={[
                   { key: 'package', label: t('common.pencere'), render: (r) => <MarqueeText text={r.package} /> },
                   { key: 'res', label: t('telemetry.cozunurluk'), align: 'right', className: 'w-[74px]', render: (r) => (r.w && r.h ? `${r.w}×${r.h}` : '—') },
-                  { key: 'fps', label: t('telemetry.kare_sn'), align: 'right', className: 'w-[52px]', render: (r) => (r.paused ? 'durdu' : fmt(r.fps, 0)) },
+                  { key: 'fps', label: t('telemetry.kare_sn'), align: 'right', className: 'w-[52px]', render: (r) => (r.paused ? t('telemetry.durdu') : fmt(r.fps, 0)) },
                   { key: 'mbps', label: t('common.mbps'), align: 'right', className: 'w-[46px]', render: (r) => fmt(r.mbps, 1) },
                 ]}
                 rows={streams.map((s) => ({ ...s, id: s.window_id }))}
@@ -760,7 +946,7 @@ export function DeviceLoadPanel(motionProps) {
               flash={flash === 'commands'}
               title={t('telemetry.opendex_in_telefona_gonderdigi')}
               icon={Radio}
-              aside={<Aside>{t('telemetry.dakikada')}</Aside>}
+              aside={<Aside>{t('telemetry.komut_toplam_dakikada', { total: fmt(totalRate, 0), heavy: fmt(heavyRate, 0) })}</Aside>}
             >
               {adb.length === 0 ? (
                 <p className="text-[10px] text-muted-foreground">{t('telemetry.son_1_dakikada_komut_yok')}</p>
@@ -803,7 +989,7 @@ export function DeviceLoadPanel(motionProps) {
         </div>
 
         {/* Events: hover = that moment on every chart; click = select it */}
-        <Section title={t('telemetry.olaylar')} icon={Activity} aside={<Aside>{t('telemetry.olay_ipucu')}</Aside>}>
+        <Section ref={sectionRef('events')} flash={flash === 'events'} title={t('telemetry.olaylar')} icon={Activity} aside={<Aside>{t('telemetry.olay_ipucu')}</Aside>}>
           {recentAll.length === 0 ? (
             <p className="text-[10px] text-muted-foreground">{t('telemetry.bu_aralikta_olay_yok')}</p>
           ) : (
