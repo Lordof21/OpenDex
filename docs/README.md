@@ -11,7 +11,7 @@ Start with the row that matches what you want to do.
 | **script it or write my own client** | [API.md](API.md) (what the API is for, rules, WebSockets, events) → [api/REFERENCE.md](api/REFERENCE.md) and [api/openapi.json](api/openapi.json) |
 | **change the code** | [DEVELOPMENT.md](DEVELOPMENT.md) · [TESTING.md](TESTING.md) · [../CONTRIBUTING.md](../CONTRIBUTING.md) · [DAEMON_PROTOCOL.md](DAEMON_PROTOCOL.md) (the phone helper) · [CONFIGURATION.md](CONFIGURATION.md) |
 | **build a release** | [BUILD_AND_RELEASE.md](BUILD_AND_RELEASE.md) |
-| **know where it is going** | [ROADMAP.md](ROADMAP.md) · [design/GAME_MODE.md](design/GAME_MODE.md) |
+| **know where it is going** | [ROADMAP.md](ROADMAP.md) · [PRODUCT_IDEAS.md](PRODUCT_IDEAS.md) (candidates by kind of user) · [design/GAME_MODE.md](design/GAME_MODE.md) |
 | **check a change on a real phone** | [DEVICE_CHECKLIST.md](DEVICE_CHECKLIST.md) |
 
 ## What is hand-written and what is generated

@@ -23,5 +23,6 @@ Intentions, not promises. Items marked ⚠ are known gaps that the documentation
 
 * **Game mode** for mirror windows — the product requirements are in [design/GAME_MODE.md](design/GAME_MODE.md). Phase 0 (no finger ever stays stuck after a focus loss or a dropped
   connection, the on-screen D-pad fix) is done; pointer capture, the game bar, key-map profiles and gamepad are not.
+* More candidates, by kind of user (clipboard sync, scenes, per-window recording, a first-run wizard…): [PRODUCT_IDEAS.md](PRODUCT_IDEAS.md).
 * Opus audio (the setting exists, the path does not).
 * More than one phone at a time.
