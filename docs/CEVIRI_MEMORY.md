@@ -50,7 +50,6 @@ Geliştirirken buraya satır ekle; çeviri turundan sonra sil. (`npm run i18n:to
 
 | Anahtar(lar) | Nerede (dosya / ekran) | Not |
 |---|---|---|
-| `footprint.*` (81 anahtar) | `taskbar/PhoneFootprint.jsx` (DeX ayarları › Sistem › Telefon ayarları) ve `settings/sections/phone.jsx` (OpenDeX Ayarları › Telefon ayarları) | 2026-10-29. "Açık / Kapalı / OpenDeX / Sistem" kısa düğme etiketleri; `*_baslik` anahtarın AÇIK hâlini anlatır ("Başlık çubuğunu gizle"). `{{managed}}`, `{{active}}`, `{{title}}`, `{{value}}` yer tutucuları. |
 
 ## Metni değişenler (çeviri eskidi, otomatik bulunamaz)
 
@@ -66,6 +65,7 @@ Var olan anahtarın **Türkçe metni değiştiğinde** ekle; çeviri turunda o a
 | 2026-10-16 | 222 anahtar × 18 dil: tuş düzeni (keymapper.*), kilit/aktarım örtüleri (overlay.*), otomatik yoğunluk (taskbar.oto_*), kablosuz doğrulama hatası, ortak kısa metinler | Sonnet 5.5 (elle, dil dil); sonraki turlar için Haiku önerilir |
 | 2026-10-25 | 57 anahtar × 18 dil (1026 metin): çoklu uygulama sesi (audio_focus.*, 41) + tuş düzenleyici "Oyna" / paneller / tuş tanı ve Ctrl+G bildirimleri (keymapper.*, window.tus_duzeni_*, 16); `i18n:todo` boş | Sonnet 5.5 (elle, dil dil; yer tutucular betikle doğrulandı) |
 | 2026-10-28 | 88 anahtar × 18 dil (1584 metin): Telefon Yükü paneli (telemetry.*, 40), arama içi seçenek eşleşmesi (settings.eslesen_secenekler), uygulama çekmecesi (launcher.*, 50); metni değişen 2 telemetry anahtarı yeniden çevrildi; `i18n:todo` boş | Haiku (dil başına bir ajan, paralel; yer tutucular `i18n:apply` ile doğrulandı) |
+| 2026-10-30 | 112 anahtar × 18 dil (2016 metin): Telefon ayarları (footprint.*, 81) + Telefon Yükü akış paneli: telefonun işi / ağın işi / sıkıştırma (telemetry.akis_*, 31); kullanılmayan 3 telemetry anahtarı silindi; `i18n:todo` boş | Haiku (tek ajan, 18 dil sırayla — önbellekten yararlanmak için dil başına ajan açılmadı; yer tutucular `i18n:apply` ile doğrulandı) |
 
 ## Notlar
 
