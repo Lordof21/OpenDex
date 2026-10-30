@@ -443,7 +443,7 @@ class EcoWorkspaceManager:
             else footprint_bind_script(normalize_footprint_policy(None), FOOTPRINT_WORKSPACE_ITEMS)
         )
         display_cmds = (
-            f"; wm set-display-windowing-mode -d {self._display_id} 5; cmd window set-ignore-orientation -d {self._display_id} true"
+            f"; wm set-display-windowing-mode -d {self._display_id} 5; wm set-ignore-orientation-request -d {self._display_id} true"
             if self._display_id else ""
         )
         with contextlib.suppress(Exception):

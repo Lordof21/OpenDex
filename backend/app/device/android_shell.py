@@ -490,6 +490,24 @@ async def sync_display0_focus(
     pass
 
 
+async def ignore_orientation_requests(adb: Any, serial: str, display_id: str | int) -> bool:
+    """Makes a virtual display ignore its apps' requested orientation (``wm set-ignore-orientation-request -d <id> true``).
+
+    A window is a fixed-size box: without this an app that asks for portrait (YouTube) turns the display to portrait inside a landscape
+    window and the picture shrinks into a letterboxed strip. Android honours the request below ~600 dp of short side, which a small DeX
+    window often is. The setting is per display and dies with it. Best effort: False when the display id is not a number or the call
+    failed — the window then simply behaves as before."""
+    clean = "".join(ch for ch in str(display_id) if ch.isdigit())
+    if not clean:
+        return False
+    try:
+        await adb.shell(f"wm set-ignore-orientation-request -d {int(clean)} true", serial=serial, timeout_s=1.5)
+        return True
+    except Exception as exc:  # noqa: BLE001 — a nicety: the window works without it
+        log.debug("[Orientation] display=%s yön isteği yok sayılamadı: %s", clean, exc)
+        return False
+
+
 async def wake_and_unlock(adb: Any, serial: str) -> None:
     """Wakes the phone screen and dismisses a non-secure keyguard (best effort, never raises)."""
     with contextlib.suppress(Exception):

@@ -356,6 +356,11 @@ async def coordinate_window_lifecycle(
 
         wlog.info("🎯 [STEALTH DPI] display_id=%s tespit edildi (Faz 1 DPI=%d, Hedef Faz 2 DPI=%d)", disp_id, p1_dpi, p2_dpi)
 
+        # Pencere sabit boyutlu bir kutu: dikey isteyen uygulama (YouTube) ekranı döndürüp görüntüyü yatay pencerede dar bir şeride
+        # sıkıştırmasın. Ekran başına bir ayar; ekranla birlikte gider.
+        if await android_shell.ignore_orientation_requests(adb, serial, disp_id):
+            wlog.debug("[Orientation] display=%s yön istekleri yok sayılıyor", disp_id)
+
         from app.device.deep_navigator import find_task_id_for_package
 
         # Yoğunluk uzlaştırma için: yoğunluğu değiştiren SON adımdan hemen önceki cihaz saati (density_reconciler.mark).

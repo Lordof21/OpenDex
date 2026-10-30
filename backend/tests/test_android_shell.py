@@ -227,3 +227,27 @@ def test_visible_packages_by_display():
         "12": {"com.whatsapp"},
     }
     assert android_shell.visible_packages_by_display("") == {}
+
+
+@pytest.mark.asyncio
+async def test_a_virtual_display_ignores_the_orientation_its_apps_ask_for():
+    adb = MagicMock()
+    adb.shell = AsyncMock(return_value="")
+    assert await android_shell.ignore_orientation_requests(adb, "S", "168") is True
+    assert adb.shell.await_args.args[0] == "wm set-ignore-orientation-request -d 168 true"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("display", ["", "abc", None])
+async def test_ignoring_the_orientation_needs_a_numeric_display(display):
+    adb = MagicMock()
+    adb.shell = AsyncMock(return_value="")
+    assert await android_shell.ignore_orientation_requests(adb, "S", display) is False
+    adb.shell.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_refused_orientation_setting_never_raises():
+    adb = MagicMock()
+    adb.shell = AsyncMock(side_effect=RuntimeError("boom"))
+    assert await android_shell.ignore_orientation_requests(adb, "S", 168) is False
