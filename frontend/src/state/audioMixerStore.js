@@ -56,7 +56,7 @@ export function isLegacyAudioMode(mode) {
 }
 
 /** The route an app really has for the user: handed to the phone, its sound is there unless they picked another since (not saved). */
-export const effectiveRoute = (app) => (app?.on_phone ? app.phone_pick || 'phone' : app?.route);
+export const effectiveRoute = (app) => (app?.on_phone ? app.phone_pick || app.route : app?.route);
 
 function withPending(app) {
   const edit = pending[app.package];

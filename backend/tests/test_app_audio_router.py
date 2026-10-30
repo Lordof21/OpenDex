@@ -202,55 +202,73 @@ async def test_the_default_route_phone_opens_no_capture_but_the_window_is_listed
 # ---------------------------------------------------------------- handoff
 
 
-async def test_handoff_sends_the_sound_to_the_phone_and_reclaim_brings_it_back():
+async def test_a_handoff_does_not_move_the_sound_wherever_it_was():
+    """Moving the sound at the moment of the handoff ends the capture and the player stops itself (YouTube Music): on the PC it
+    stays on the PC, on the phone it stays on the phone, and the daemon is not asked to change anything."""
     h = _Harness()
     await h.per_app()
     await h.open("w1", "com.a")
+    calls_before = list(h.daemon.calls)
 
     h.windows["w1"] = AudioWindow("com.a", on_phone=True)       # HandoffManager sets the flag, then emits
     await h.bus.emit("app_handoff_to_phone", window_id="w1", package="com.a")
     await settle(h.router)
-    assert h.daemon.calls[-1] == ("com.a", "phone")
+    assert h.daemon.calls == calls_before                        # no route change, no capture ended
     app = h.router.list_apps()[0]
-    assert (app["route"], app["live_route"], app["on_phone"]) == ("pc", "phone", True)
+    assert (app["route"], app["live_route"], app["on_phone"]) == ("pc", "pc", True)
 
     h.windows["w1"] = AudioWindow("com.a", on_phone=False)
     await h.bus.emit("app_handoff_resolved", window_id="w1", package="com.a")
     await settle(h.router)
-    assert h.daemon.calls[-1] == ("com.a", "pc")
+    assert h.daemon.calls == calls_before
+    assert h.router.list_apps()[0]["live_route"] == "pc"
+
+
+async def test_a_sound_on_the_phone_stays_on_the_phone_through_a_handoff():
+    h = _Harness()
+    await h.per_app()
+    await h.open("w1", "com.a")
+    await h.router.set_prefs("com.a", route="phone")
+    calls_before = list(h.daemon.calls)
+
+    h.windows["w1"] = AudioWindow("com.a", on_phone=True)
+    await h.bus.emit("app_handoff_to_phone", window_id="w1", package="com.a")
+    await settle(h.router)
+    assert h.daemon.calls == calls_before
+    app = h.router.list_apps()[0]
+    assert (app["route"], app["live_route"], app["on_phone"]) == ("phone", "phone", True)
 
 
 async def test_a_handed_off_app_can_be_sent_to_the_pc_and_back_by_the_user():
     """The capture works on the app's UID, whichever screen shows it: the user's pick holds while the app is on the phone,
-    and ends with its stay there (the sound is on the phone again after a next handoff)."""
+    and ends with its stay there (the saved route rules again after a next handoff)."""
     h = _Harness()
     await h.per_app()
     await h.open("w1", "com.a")
     h.windows["w1"] = AudioWindow("com.a", on_phone=True)
     await h.bus.emit("app_handoff_to_phone", window_id="w1", package="com.a")
     await settle(h.router)
-    assert h.daemon.calls[-1] == ("com.a", "phone")           # by default the sound follows the app
+    assert h.router.list_apps()[0]["live_route"] == "pc"      # the sound stays where it was
 
-    app = await h.router.set_prefs("com.a", route="pc")       # the user: "DeX'e al" (the saved route is 'pc' already)
-    assert (app["live_route"], app["phone_pick"], app["on_phone"]) == ("pc", "pc", True)
-    assert h.daemon.calls[-1] == ("com.a", "pc")
+    app = await h.router.set_prefs("com.a", route="phone")    # the user: "telefonda dinle"
+    assert (app["live_route"], app["phone_pick"], app["on_phone"]) == ("phone", "phone", True)
+    assert h.daemon.calls[-1] == ("com.a", "phone")
 
     app = await h.router.set_prefs("com.a", route="both")
     assert (app["live_route"], app["phone_pick"]) == ("both", "both")
-    app = await h.router.set_prefs("com.a", route="phone")
-    assert (app["live_route"], app["phone_pick"]) == ("phone", "phone")
+    app = await h.router.set_prefs("com.a", route="pc")
+    assert (app["live_route"], app["phone_pick"]) == ("pc", "pc")
 
-    await h.router.set_prefs("com.a", route="pc")
+    await h.router.set_prefs("com.a", route="phone")
     h.windows["w1"] = AudioWindow("com.a", on_phone=False)    # reclaimed: the pick ends, the saved route rules again
     await h.bus.emit("app_handoff_resolved", window_id="w1", package="com.a")
     await settle(h.router)
     app = h.router.list_apps()[0]
-    assert (app["live_route"], app["phone_pick"], app["on_phone"]) == ("pc", None, False)
+    assert (app["live_route"], app["phone_pick"], app["on_phone"]) == ("phone", None, False)
 
-    h.windows["w1"] = AudioWindow("com.a", on_phone=True)     # a NEW handoff: the sound goes to the phone again
+    h.windows["w1"] = AudioWindow("com.a", on_phone=True)     # a NEW handoff: the sound still stays where the user has it
     await h.bus.emit("app_handoff_to_phone", window_id="w1", package="com.a")
     await settle(h.router)
-    assert h.daemon.calls[-1] == ("com.a", "phone")
     assert h.router.list_apps()[0]["live_route"] == "phone"
 
 
@@ -842,6 +860,8 @@ async def test_a_live_capture_is_not_taken_apart_before_the_guard_has_answered()
     h.windows["w1"] = AudioWindow("com.a", on_phone=True)          # HandoffManager sets the flag, then emits
     await h.bus.emit("app_handoff_to_phone", window_id="w1", package="com.a")
     await settle(h.router)
+    assert order == []                                             # a handoff alone does not touch the capture
+    await h.router.set_prefs("com.a", route="phone")               # the user sends the sound to the phone
     assert order == ["guard:com.a", "route:phone"]                  # the sound goes back to the phone only AFTER the guard
 
 

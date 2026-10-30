@@ -108,11 +108,13 @@ class AppAudioState:
     phone_ms: int | None = None   # … and the phone's own (the same plus the user's fine tune)
 
     def target_route(self) -> AudioRoute:
-        """Handed to the phone, the sound follows the app there — unless the user picked another route since (the mixer, the
-        Media Center chip): the capture works on the app's UID, whichever screen it is shown on."""
+        """Where the sound is while the app is on the phone: where the user had it. A handoff does not move the sound — on the PC it
+        stays on the PC, on the phone it stays on the phone (changing the route at that moment ends the capture and the player
+        stops itself) — until the user picks another route (the mixer, the Media Center chip): the capture works on the app's UID,
+        whichever screen it is shown on."""
         if not self.windows:
             return "phone"
-        return (self.phone_pick or "phone") if self.on_phone else self.route
+        return (self.phone_pick or self.route) if self.on_phone else self.route
 
     def public(self) -> dict[str, Any]:
         return {
@@ -749,7 +751,7 @@ class AppAudioRouter:
     # ------------------------------------------------------------------ events & helpers
 
     async def _on_handoff_event(self, **_: Any) -> None:
-        # The session's handoff_to_phone flag is already updated when these fire: the sound follows the app.
+        # The session's handoff_to_phone flag is already updated when these fire; the route itself stays where the user had it.
         self.request_sync()
 
     async def _load(self, package: str) -> AppAudioState:

@@ -81,7 +81,7 @@ describe('mixer: DeX\'teki uygulamalar', () => {
   });
 
   it('a handed-off app shows where its sound is instead of a slider', () => {
-    seed([app({ on_phone: true, live_route: 'phone' })]);
+    seed([app({ on_phone: true, route: 'phone', live_route: 'phone' })]);
     renderMixer();
     expect(screen.getByText(/telefona devredildi/)).toBeInTheDocument();
     expect(screen.queryByRole('slider', { name: 'YouTube ses düzeyi' })).toBeNull();
@@ -96,7 +96,7 @@ describe('mixer: DeX\'teki uygulamalar', () => {
   });
 
   it('a handed-off app: picking DeX in the mixer sends the route (the selector showed Telefon although the saved route is DeX)', () => {
-    seed([app({ on_phone: true, live_route: 'phone' })]);
+    seed([app({ on_phone: true, route: 'phone', live_route: 'phone' })]);
     renderMixer();
     fireEvent.click(screen.getByRole('radio', { name: /DeX/ }));
     expect(api.put).toHaveBeenCalledWith('/api/audio/apps/com.google.android.youtube', { route: 'pc' });
@@ -141,7 +141,7 @@ describe('Media Center RouteChip', () => {
   });
 
   it('a handed-off app can still be taken to DeX from the chip (its saved route is DeX already: the pick is what counts)', () => {
-    seed([app({ on_phone: true, live_route: 'phone' })]);
+    seed([app({ on_phone: true, route: 'phone', live_route: 'phone' })]);
     render(<RouteChip pkg="com.google.android.youtube" />);
     const chip = screen.getByRole('button', { name: 'Ses: Telefon' });
     expect(chip).not.toBeDisabled();
@@ -218,7 +218,7 @@ describe('Media Center RouteChip — press & hold opens Telefon / DeX / İkisi',
   });
 
   it('a handed-off app has the menu too: Telefon / DeX / İkisi', async () => {
-    seed([app({ on_phone: true, live_route: 'phone' })]);
+    seed([app({ on_phone: true, route: 'phone', live_route: 'phone' })]);
     render(<RouteChip pkg="com.google.android.youtube" />);
     fireEvent.contextMenu(screen.getByRole('button', { name: 'Ses: Telefon' }));
     expect(screen.getByRole('menu')).toBeInTheDocument();
