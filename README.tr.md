@@ -10,10 +10,18 @@ Her uygulama kendi penceresinde — boyutlandırılabilir — kendi sesi, görev
 ![Desktop](https://img.shields.io/badge/desktop-Windows-lightgrey)
 ![Android](https://img.shields.io/badge/Android-10%2B-green)
 
-[English](README.md) · [İndir](download/) · [Kurulum](docs/INSTALL.md) · [Dokümantasyon](docs/README.md)
+[English](README.md) · [Tanıtım videosu](#tanıtım-videosunu-izle) · [İndir](download/) · [Kurulum](docs/INSTALL.md) · [Dokümantasyon](docs/README.md)
 
 <img alt="OpenDeX: Windows masaüstünde pencerelerde telefon uygulamaları ve görev çubuğu" src="docs/images/live/hero.webp" width="900">
 
+</div>
+
+## Tanıtım videosunu izle
+
+<div align="center">
+<a href="docs/media/opendex-demo.mp4"><img alt="OpenDeX tanıtım videosunu izle (6 dk, sessiz)" src="docs/images/live/demo-poster.webp" width="760"></a>
+
+<sub>▶ Oynatmak için tıklayın — 6 dk, sessiz, 26 MB.</sub>
 </div>
 
 ## Uygulamayı telefona ver, geri al

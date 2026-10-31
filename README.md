@@ -10,10 +10,18 @@ Every app in its own resizable window — with its own sound, a taskbar, a file 
 ![Desktop](https://img.shields.io/badge/desktop-Windows-lightgrey)
 ![Android](https://img.shields.io/badge/Android-10%2B-green)
 
-[Download](#download) · [Install](docs/INSTALL.md) · [Documentation](docs/README.md) · [Türkçe](README.tr.md)
+[Demo video](#watch-the-demo) · [Download](#download) · [Install](docs/INSTALL.md) · [Documentation](docs/README.md) · [Türkçe](README.tr.md)
 
 <img alt="OpenDeX: several phone apps in resizable windows on a Windows desktop with a taskbar" src="docs/images/live/hero.webp" width="900">
 
+</div>
+
+## Watch the demo
+
+<div align="center">
+<a href="docs/media/opendex-demo.mp4"><img alt="Watch the OpenDeX demo video (6 min, no sound)" src="docs/images/live/demo-poster.webp" width="760"></a>
+
+<sub>▶ Click to play — 6 min, silent, 26 MB.</sub>
 </div>
 
 ## Hand an app over, take it back
