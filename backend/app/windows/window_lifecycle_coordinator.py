@@ -418,7 +418,7 @@ async def coordinate_window_lifecycle(
                     await land_fullscreen(adb, serial, pkg_name, disp_id, task_id=task_id, daemon=daemon, wlog=wlog)
                     # Sanal display üzerinde görevi öne çıkar ve resume ettir
                     with contextlib.suppress(Exception):
-                        await android_shell.bring_to_front(adb, serial, pkg_name, disp_id)
+                        await android_shell.bring_task_to_front(adb, serial, pkg_name, disp_id, task_id=task_id, daemon=daemon)
                     # Display 0 ve sanal display aynı DPI'da (520 DPI) olduğundan Chrome reflow ve scroll kaybı yaşamaz
                     await asyncio.sleep(0.4)
                 else:

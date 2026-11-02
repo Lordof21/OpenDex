@@ -455,7 +455,7 @@ class TaskTeleporter:
             # Android'in tam ekran yığınına oturmasını sağla + telefonu uyandır
             # (handoff_manager._execute_reverse_stealth adım 3-4 ile aynı).
             with contextlib.suppress(Exception):
-                await android_shell.bring_to_front(self._adb, serial, pkg, "0")
+                await android_shell.bring_task_to_front(self._adb, serial, pkg, "0", task_id=task_id, daemon=daemon)
             await android_shell.wake_and_unlock(self._adb, serial)
 
         # Taşımadan SONRA: Workspace'ten kalan freeform/override bounds temizlenir ve doğrulanır,

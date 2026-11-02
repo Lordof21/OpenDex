@@ -1059,8 +1059,14 @@ class HandoffManager:
 
                 # Ekrandaki aktiviteyi ön plana çıkar ve canlandır (reorder_only: aktivite yığınını ve scroll durumunu sıfırlamaz)
                 wlog.info("✨ [RECLAIM: SANAL EKRANDA ÖNE ÇIKARMA] %s Display %s üzerinde öne çıkarılıyor", pkg, disp_id)
+                # Görev kimliğiyle (intent YOK, telefona aktarmadaki gibi): `am start -n …LauncherActivity` uygulamanın açılış
+                # etkinliğine yeni bir intent verir ve bazı uygulamalar (Medium) bunu ana sayfaya yönlendirip açık makaleyi/durumu
+                # kaybeder. Daemon görevi yükseltemezse (eski jar, görev yok) intent'li yola düşülür.
                 with contextlib.suppress(Exception):
-                    await android_shell.bring_to_front(self._adb, serial, pkg, disp_id, reorder_only=bool(task_id))
+                    await android_shell.bring_task_to_front(
+                        self._adb, serial, pkg, disp_id, task_id=task_id or None, daemon=self._daemon_client_getter(),
+                        reorder_only=bool(task_id),
+                    )
 
                 # Telefon tarafındaki sekme izleyicisini durdur (telefon kipi biter)
                 with contextlib.suppress(Exception):

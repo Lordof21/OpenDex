@@ -147,3 +147,45 @@ async def test_a_reclaim_with_the_window_pixels_brings_the_display_back_at_exact
     assert ok is True
     assert resized == [(1656, 1016, 180)]
     assert session.landing is None
+
+
+class _Daemon:
+    """Just the one call the reclaim uses to raise a task by id."""
+
+    def __init__(self, raises: bool) -> None:
+        self.raised_by_id: list[tuple[str, bool]] = []
+        self._ok = raises
+
+    async def reorder_task(self, task_id, *, front):
+        self.raised_by_id.append((str(task_id), front))
+        return self._ok
+
+
+@pytest.mark.asyncio
+async def test_a_live_task_comes_back_by_its_id_without_a_new_intent(monkeypatch):
+    """`am start -n …LauncherActivity` gives the app's launcher a new intent on the way back: Medium routes that to its home feed and the
+    article the user was reading is gone (the way TO the phone raises the task by id and loses nothing)."""
+    mgr, session, adb, moves, seen = _build(monkeypatch, find_returns="42", move_raises=False)
+    daemon = _Daemon(raises=True)
+    mgr._daemon_client_getter = lambda: daemon
+
+    assert await mgr.reclaim("w1") is True
+    await asyncio.sleep(0)
+
+    assert daemon.raised_by_id == [("42", True)]
+    assert not [c for c in adb.shell_calls if c.startswith("am start --display 7")]   # no intent reached the app
+    assert seen["result"]["outcome"] == "moved"
+
+
+@pytest.mark.asyncio
+async def test_when_the_daemon_cannot_raise_the_task_the_old_way_still_runs(monkeypatch):
+    mgr, session, adb, moves, seen = _build(monkeypatch, find_returns="42", move_raises=False)
+    daemon = _Daemon(raises=False)                         # an older jar, or the task is gone
+    mgr._daemon_client_getter = lambda: daemon
+
+    assert await mgr.reclaim("w1") is True
+    await asyncio.sleep(0)
+
+    assert daemon.raised_by_id == [("42", True)]
+    assert any(c.startswith("am start --display 7") and PKG in c for c in adb.shell_calls)
+    assert seen["result"]["outcome"] == "moved"

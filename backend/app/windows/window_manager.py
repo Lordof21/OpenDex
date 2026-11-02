@@ -1918,7 +1918,9 @@ class WindowManager:
                         with contextlib.suppress(Exception):
                             await move_task_to_display(self._adb, task_id, disp, serial=self._serial, daemon=self._daemon_client)
                         with contextlib.suppress(Exception):
-                            await android_shell.bring_to_front(self._adb, self._serial, session.state.package, disp)
+                            await android_shell.bring_task_to_front(
+                                self._adb, self._serial, session.state.package, disp, task_id=task_id, daemon=self._daemon_client,
+                            )
                 except Exception:
                     # Stays frozen with its last frame: restoring it from the taskbar retries the unfreeze.
                     log.exception("[TRANSPORT] %s yeni taşıyıcıda yeniden kurulamadı — donmuş kalıyor", wid)

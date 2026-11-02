@@ -399,6 +399,30 @@ async def bring_to_front(
     )
 
 
+async def bring_task_to_front(
+    adb: Any,
+    serial: str,
+    package: str,
+    display_id: str | int,
+    *,
+    task_id: int | str | None = None,
+    daemon: Any = None,
+    timeout_s: float = 2.0,
+    reorder_only: bool = False,
+) -> str:
+    """Raises a task that already lives on `display_id` — by its id, WITHOUT a new intent, when the daemon can.
+
+    `am start -n …Launcher…` hands the app's launcher activity a new intent, and some apps (Medium) route that to their home screen:
+    the article that was open is gone. A handoff, a teleport, a restore from the taskbar must leave the app exactly as it is, so the
+    id-based raise (one WindowContainerTransaction) comes first; the launcher start stays the fallback for an older jar, a task whose
+    id is unknown, or one the daemon cannot find."""
+    if task_id is not None and daemon is not None:
+        with contextlib.suppress(Exception):
+            if await daemon.reorder_task(task_id, front=True):
+                return f"görev {task_id} kimliğiyle öne alındı (intent yok)"
+    return await bring_to_front(adb, serial, package, display_id, timeout_s=timeout_s, reorder_only=reorder_only)
+
+
 _is_miui_cache: dict[str, bool] = {}
 
 

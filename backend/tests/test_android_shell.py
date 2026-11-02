@@ -251,3 +251,49 @@ async def test_a_refused_orientation_setting_never_raises():
     adb = MagicMock()
     adb.shell = AsyncMock(side_effect=RuntimeError("boom"))
     assert await android_shell.ignore_orientation_requests(adb, "S", 168) is False
+
+
+# ---------------------------------------------------------------- bringing a task back without a new intent
+
+
+class _Shell:
+    def __init__(self):
+        self.commands: list[str] = []
+
+    async def shell(self, cmd, *, serial=None, timeout_s=3.0):
+        self.commands.append(cmd)
+        return ""
+
+    async def resolve(self, *_a, **_k):
+        return "pkg/.Launcher"
+
+
+class _Daemon:
+    def __init__(self, ok=True, raises=False):
+        self.calls: list[tuple[str, bool]] = []
+        self._ok, self._raises = ok, raises
+
+    async def reorder_task(self, task_id, *, front):
+        self.calls.append((str(task_id), front))
+        if self._raises:
+            raise RuntimeError("daemon gone")
+        return self._ok
+
+
+@pytest.mark.asyncio
+async def test_a_task_comes_back_by_its_id_and_no_intent_reaches_the_app(monkeypatch):
+    """A launcher start gives the app's launcher a new intent and Medium routes it home: every way back to the DeX window raises the task by id."""
+    adb, daemon = _Shell(), _Daemon(ok=True)
+    monkeypatch.setattr(android_shell, "resolve_package_component", adb.resolve)
+    out = await android_shell.bring_task_to_front(adb, "S", "pkg", "7", task_id=42, daemon=daemon)
+    assert daemon.calls == [("42", True)] and adb.commands == []
+    assert "intent yok" in out
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("daemon,task_id", [(_Daemon(ok=False), 42), (_Daemon(raises=True), 42), (None, 42), (_Daemon(ok=True), None)])
+async def test_the_launcher_start_is_only_the_fallback(monkeypatch, daemon, task_id):
+    adb = _Shell()
+    monkeypatch.setattr(android_shell, "resolve_package_component", adb.resolve)
+    await android_shell.bring_task_to_front(adb, "S", "pkg", "7", task_id=task_id, daemon=daemon)
+    assert len(adb.commands) == 1 and adb.commands[0].startswith("am start --display 7")

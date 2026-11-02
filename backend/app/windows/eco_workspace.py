@@ -1238,7 +1238,9 @@ class EcoWorkspaceManager:
             )
             await self._make_freeform(serial, task.task_id, task.package, android_box, wlog, skip_if_ok=False, via="koruma")
             with contextlib.suppress(Exception):
-                await android_shell.bring_to_front(self._adb, serial, task.package, self._display_id)
+                await android_shell.bring_task_to_front(
+                    self._adb, serial, task.package, self._display_id, task_id=task.task_id, daemon=self._daemon_client_getter(),
+                )
             effective, new_scale = await self._settled_effective_bounds(serial, task.task_id, task.bounds, wlog)
             task.bounds, task.render_scale = effective, new_scale
             await self._events.emit(
