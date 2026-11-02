@@ -367,20 +367,16 @@ async def test_the_tab_is_taken_back_to_the_address_it_was_on_after_the_app_rebu
     assert len(restores) == 1 and restores[0]["params"].get("userGesture") is True   # the video is put back either way
 
 
-def test_build_nudge_script_element_anchoring_and_text_size_adjust():
-    """Validates the generated JavaScript stabilizer handles element anchoring, origin anchoring, and webkitTextSizeAdjust."""
-    # 1. Scrolled with anchor
-    script = _build_nudge_script({
-        "isTop": False,
-        "scrollX": 0,
-        "scrollY": 1200,
-        "ratio": 0.5,
-        "anchorPath": "div#main > article:nth-of-type(1)",
-    })
+def test_build_nudge_script_locator_anchoring_and_text_size_adjust():
+    """The generated stabilizer scrolls back by the locator (pixels last), anchors the top, and handles webkitTextSizeAdjust."""
+    # 1. Scrolled, with a locator
+    locator = {"v": 1, "prog": 0.5, "probes": [{"y": 0.0, "f": 0.5, "p": "div#main > article:nth-of-type(1)", "t": "a paragraph of the article"}]}
+    script = _build_nudge_script({"isTop": False, "scrollX": 0, "scrollY": 1200, "locator": locator})
     assert "webkitTextSizeAdjust = '100%'" in script
     assert "overflowAnchor = 'none'" in script
-    assert "document.querySelector(anchorPath)" in script
-    assert "scrollIntoView({ behavior: 'instant', block: 'start' })" in script
+    assert "odxApplyLocator(savedLocator)" in script
+    assert '"p": "div#main > article:nth-of-type(1)"' in script
+    assert "scrollIntoView" not in script and "anchorPath" not in script       # no second, older way of finding the place
     assert "setTimeout(lockScroll, 80)" in script
     assert "setTimeout(lockScroll, 250)" in script
     assert "setTimeout(" in script and "600" in script
@@ -955,7 +951,7 @@ async def _run_same_page_tab(state: dict, now: dict):
 
 
 _FRONT = {"mobile": False, "visible": True, "t": None, "playing": False, "y": 29000, "url": "https://a.example/r", "host": "a.example",
-          "vw": 800, "a": {"p": "div:nth-of-type(78)", "f": 0.75}, "dirty": False, "fp": _FP, "since": 60000, "c": []}
+          "vw": 800, "l": {"v": 1, "prog": 0.9, "probes": [{"y": 0.0, "f": 0.75, "p": "div:nth-of-type(78)"}]}, "dirty": False, "fp": _FP, "since": 60000, "c": []}
 
 
 @pytest.mark.asyncio

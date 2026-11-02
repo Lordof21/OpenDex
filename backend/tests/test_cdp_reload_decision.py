@@ -747,7 +747,7 @@ def test_resume_state_advances_a_playing_video_by_the_time_that_passed():
     with patch.object(cr.time, "time", return_value=1004.5):
         state = cr._resume_state(saved)
     assert state == {"t": 94.5, "playing": True, "y": 120, "url": "https://m.youtube.com/watch?v=1", "c": [{"p": None, "r": 0.3}],
-                     "a": None, "vw": None}
+                     "l": None, "vw": None}
 
 
 def test_resume_state_leaves_a_paused_video_where_it_was():

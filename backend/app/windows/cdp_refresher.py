@@ -7,7 +7,7 @@ the process.
 Achieves TRUE ZERO-STATE-LOSS for browsers (Chrome, Edge, Brave, Opera, etc.):
 - Video/audio continues playing
 - Form inputs and scroll positions are retained
-- Top-left (0,0) reference anchor is strictly preserved: eliminates cumulative downward drift
+- The scroll position is kept by what the user was looking at (a multi-probe locator, cdp_locator.py), not by a pixel offset
 - Stale 201 DPI text layout is cleanly refreshed to 513 DPI in ~25 milliseconds.
 """
 from __future__ import annotations
@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 import websockets
 
 from ..events import spawn_background
+from .cdp_locator import LOCATOR_JS, clean_locator
 
 if TYPE_CHECKING:
     from ..device.adb import Adb
@@ -100,7 +101,7 @@ async def open_cdp_session(
 # SCROLLS: many apps (chat UIs, mail, feeds) scroll an inner container and leave `window` at 0 — `window.scrollY` alone saves nothing for
 # them, and a reload then lands where the container itself starts (measured on claude.ai: 30% -> bottom). So the biggest scrollable
 # containers are captured by their position as a RATIO (it survives a different viewport and a re-rendered list) and put back by it.
-_SCROLL_LIB_JS = r"""
+_PAGE_HELPERS_JS = r"""
 const odxPath = (el) => {
   const parts = [];
   for (let n = el, d = 0; n && n.nodeType === 1 && n !== document.documentElement; n = n.parentElement, d++) {
@@ -130,34 +131,9 @@ const odxCapture = () => odxScrollers().map((el) => ({
   p: odxPath(el), r: +(el.scrollTop / Math.max(1, el.scrollHeight - el.clientHeight)).toFixed(4),
   t: Math.round(el.scrollTop), h: el.scrollHeight, c: el.clientHeight,
 }));
-// The content point at the very top of the viewport: the deepest in-flow element there and how far into it the top edge is (a fraction of
-// its height). A pixel offset means another place once the page is laid out at another width (images scale with it); "this part of this
-// picture" does not. Fixed / sticky bars are skipped; an element taller than a few screens is too coarse to anchor to.
-const odxAnchor = () => {
-  try {
-    for (const el of document.elementsFromPoint(Math.round(innerWidth / 2), 2)) {
-      if (el === document.documentElement || el === document.body) continue;
-      const pos = getComputedStyle(el).position;
-      if (pos === 'fixed' || pos === 'sticky') continue;
-      const r = el.getBoundingClientRect();
-      if (r.height < 20 || r.height > innerHeight * 6) continue;
-      const p = odxPath(el);
-      if (p) return { p, f: +Math.max(0, Math.min(1, (2 - r.top) / r.height)).toFixed(4) };
-    }
-  } catch (e) {}
-  return null;
-};
-const odxApplyAnchor = (a) => {
-  if (!a || !a.p) return false;
-  let el = null;
-  try { el = document.querySelector(a.p); } catch (e) { return false; }
-  if (!el) return false;
-  const r = el.getBoundingClientRect();
-  if (r.height < 1) return false;
-  const delta = r.top - (2 - a.f * r.height);
-  if (Math.abs(delta) > 2) window.scrollBy({ top: delta, behavior: 'instant' });
-  return true;
-};
+"""
+
+_PAGE_RESTORE_JS = r"""
 // Text typed into the page (a reload would lose it): a field with a value, or an editable area with text.
 const odxTyped = () => Array.from(document.querySelectorAll('input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]), textarea, [contenteditable=""], [contenteditable="true"]')).some((el) => (el.value !== undefined ? String(el.value).length > 0 : (el.textContent || '').length > 0));
 const odxApplyOnce = (saved) => {
@@ -169,10 +145,27 @@ const odxApplyOnce = (saved) => {
     if (!el) return;
     const range = el.scrollHeight - el.clientHeight;
     if (range < 40) return;
-    el.scrollTop = s.r * range;
+    el.scrollTo({ top: s.r * range, behavior: 'instant' });   // a plain `scrollTop =` would crawl on a container that asks for smooth scrolling
     applied++;
   });
   return applied;
+};
+// A page of pictures (a manga chapter is a column of them) has no height where a picture has not arrived: placing the page then puts it where
+// the content WAS, and every picture that lands pushes it away again — the reader watches it jump. So the first placement waits until no
+// picture is loading and the document height has been still for a moment, at most `capMs`; the loop that follows only catches stragglers.
+const odxPictureHeavy = (saved) => document.images.length >= 4 || !!(saved.l && (saved.l.probes || []).some((p) => p.i));
+const odxWaitForPictures = async (capMs, touched) => {
+  const t0 = performance.now();
+  let still = 0, lastHeight = -1;
+  while (performance.now() - t0 < capMs && !touched()) {
+    const loading = [...document.images].some((im) => !im.complete && (im.currentSrc || im.getAttribute('src')));
+    const height = document.documentElement.scrollHeight;
+    still = (!loading && height === lastHeight) ? still + 50 : 0;
+    lastHeight = height;
+    if (still >= 150) return 'settled';
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return 'cap';
 };
 const odxRestoreAll = async (saved) => {
   const want = (saved.c || []).length;
@@ -182,11 +175,12 @@ const odxRestoreAll = async (saved) => {
   events.forEach((e) => addEventListener(e, stop, { capture: true, passive: true }));
   let stable = 0, last = '';
   try {
+    if (saved.y && odxPictureHeavy(saved)) await odxWaitForPictures(700, () => touched);
     for (let i = 0; i < 40 && !touched; i++) {
       const applied = odxApplyOnce(saved);
-      // The page that scrolls as a whole goes back by its content point (right at any width); the pixel offset is the fallback for a
-      // page whose element is not there (yet) — a list that renders as it scrolls.
-      if (saved.y && !(saved.a && odxApplyAnchor(saved.a)) && Math.abs(window.scrollY - saved.y) > 4) window.scrollTo(0, saved.y);
+      // The page that scrolls as a whole goes back by what was under the probes (right at any width and on another site variant); the
+      // pixel offset is the last resort, for a page the locator could not read (or that has nothing resolvable yet).
+      if (saved.y && !(saved.l && odxApplyLocator(saved.l)) && Math.abs(window.scrollY - saved.y) > 4) window.scrollTo({ left: 0, top: saved.y, behavior: 'instant' });
       if (!want && !saved.y) break;
       const sig = odxScrollers().map((el) => el.scrollHeight).join(',') + '|' + document.documentElement.scrollHeight;
       stable = (applied >= want && sig === last) ? stable + 1 : 0;
@@ -224,6 +218,9 @@ const odxFingerprint = async () => {
   }
 };
 """
+
+# helpers (paths, scrollers) | the locator (cdp_locator.py) | restore / fingerprint — one library, one place for each concern
+_SCROLL_LIB_JS = _PAGE_HELPERS_JS + LOCATOR_JS + _PAGE_RESTORE_JS
 
 
 def _variants_differ(a: Any, b: Any) -> tuple[bool | None, str]:
@@ -312,7 +309,7 @@ def _tab_state_js(want_mobile: bool, *, wait_ms: int = 0, with_fp: bool = False)
   const mobile = navigator.userAgentData ? navigator.userAgentData.mobile : /Mobi/.test(navigator.userAgent);
   const out = {{
     mobile, visible: vis(), t: v ? v.currentTime : null, playing: v ? (!v.paused && !v.ended) : null, since: Math.round(performance.now()),
-    y: window.scrollY, url: location.href, host: location.hostname, c: odxCapture(), a: odxAnchor(), vw: innerWidth,
+    y: window.scrollY, url: location.href, host: location.hostname, c: odxCapture(), l: odxLocator(), vw: innerWidth,
     dirty: odxTyped(),
   }};
   if ({'true' if with_fp else 'false'} && vis() && mobile !== {'true' if want_mobile else 'false'} && /^https?:$/.test(location.protocol)) {{
@@ -338,13 +335,17 @@ def _probe_js(want_mobile: bool) -> str:
 
 
 def _build_nudge_script(saved_scroll: dict[str, Any] | None) -> str:
+    """The in-place nudge after a display / density / width change: the page is told its viewport changed (at every phase of Android's
+    settle window) and, unless it was just loaded, scrolled back to where the user was — by the LOCATOR (cdp_locator.py), pixels last."""
     saved_is_top = "null"
     saved_x = "null"
     saved_y = "null"
-    saved_ratio = "null"
-    saved_anchor_path = "null"
+    saved_locator = "null"
     saved_containers = "[]"
     if saved_scroll and isinstance(saved_scroll, dict):
+        locator = clean_locator(saved_scroll.get("locator"))
+        if locator is not None:
+            saved_locator = json.dumps(locator)
         containers = saved_scroll.get("containers")
         if isinstance(containers, list):
             saved_containers = json.dumps([c for c in containers if isinstance(c, dict)][:3])
@@ -354,10 +355,6 @@ def _build_nudge_script(saved_scroll: dict[str, Any] | None) -> str:
             saved_x = str(saved_scroll["scrollX"])
         if "scrollY" in saved_scroll and isinstance(saved_scroll["scrollY"], (int, float)):
             saved_y = str(saved_scroll["scrollY"])
-        if "ratio" in saved_scroll and isinstance(saved_scroll["ratio"], (int, float)):
-            saved_ratio = str(saved_scroll["ratio"])
-        if "anchorPath" in saved_scroll and isinstance(saved_scroll["anchorPath"], str):
-            saved_anchor_path = json.dumps(saved_scroll["anchorPath"])
 
     lib = _SCROLL_LIB_JS      # interpolated, not part of the f-string source: its braces need no escaping
     return f"""
@@ -366,8 +363,7 @@ def _build_nudge_script(saved_scroll: dict[str, Any] | None) -> str:
         const savedIsTop = {saved_is_top};
         const savedX = {saved_x};
         const savedY = {saved_y};
-        const targetRatio = {saved_ratio};
-        const anchorPath = {saved_anchor_path};
+        const savedLocator = {saved_locator};
         const savedContainers = {saved_containers};
         // A document that was just (re)loaded has its scroll put back by the reload's own restore (one writer): this nudge leaves the
         // scroll alone there. It still tells the page its viewport changed at EVERY phase below — Android settles a display / density
@@ -403,7 +399,7 @@ def _build_nudge_script(saved_scroll: dict[str, Any] | None) -> str:
             try {{ document.activeElement.blur(); }} catch (e) {{}}
         }}
 
-        // 2. Re-anchor strictly to document origin (0, 0) if at top, or exact reading anchor
+        // 2. Back to the top when it was there; else to what the user was looking at (the locator), pixels only when it cannot be read
         const lockScroll = () => {{
             if (fresh) {{
                 window.dispatchEvent(new Event('resize'));
@@ -412,24 +408,7 @@ def _build_nudge_script(saved_scroll: dict[str, Any] | None) -> str:
             }}
             if (isTop) {{
                 window.scrollTo({{ left: 0, top: 0, behavior: 'instant' }});
-            }} else if (anchorPath) {{
-                try {{
-                    const el = document.querySelector(anchorPath);
-                    if (el) {{
-                        el.scrollIntoView({{ behavior: 'instant', block: 'start' }});
-                    }} else if (targetRatio !== null) {{
-                        const maxScroll = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
-                        window.scrollTo({{ left: targetX || 0, top: targetRatio * maxScroll, behavior: 'instant' }});
-                    }} else {{
-                        window.scrollTo({{ left: targetX, top: targetY, behavior: 'instant' }});
-                    }}
-                }} catch (e) {{
-                    window.scrollTo({{ left: targetX, top: targetY, behavior: 'instant' }});
-                }}
-            }} else if (targetRatio !== null) {{
-                const maxScroll = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
-                window.scrollTo({{ left: targetX || 0, top: targetRatio * maxScroll, behavior: 'instant' }});
-            }} else {{
+            }} else if (!(savedLocator && odxApplyLocator(savedLocator))) {{
                 window.scrollTo({{ left: targetX, top: targetY, behavior: 'instant' }});
             }}
             if (savedContainers.length) odxApplyOnce({{ c: savedContainers }});
@@ -589,35 +568,6 @@ async def capture_browser_scroll_state(
                         "  const scrollY = window.scrollY;"
                         "  const scrollX = window.scrollX;"
                         "  const isTop = (scrollY <= 2);"
-                        "  const maxScroll = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);"
-                        "  const ratio = scrollY / maxScroll;"
-                        "  let anchorPath = null;"
-                        "  const getCssPath = (el) => {"
-                        "    if (!(el instanceof Element)) return null;"
-                        "    const path = [];"
-                        "    while (el && el.nodeType === Node.ELEMENT_NODE) {"
-                        "      let selector = el.nodeName.toLowerCase();"
-                        "      if (el.id) {"
-                        "        selector += '#' + el.id;"
-                        "        path.unshift(selector);"
-                        "        break;"
-                        "      } else {"
-                        "        let sib = el, nth = 1;"
-                        "        while (sib = sib.previousElementSibling) {"
-                        "          if (sib.nodeName.toLowerCase() === selector) nth++;"
-                        "        }"
-                        "        if (nth !== 1) selector += ':nth-of-type(' + nth + ')';"
-                        "      }"
-                        "      path.unshift(selector);"
-                        "      el = el.parentNode;"
-                        "      if (!el || el === document.body) break;"
-                        "    }"
-                        "    return path.join(' > ');"
-                        "  };"
-                        "  const midEl = document.elementFromPoint(window.innerWidth / 2, Math.min(200, window.innerHeight / 3));"
-                        "  if (midEl) {"
-                        "    anchorPath = getCssPath(midEl);"
-                        "  }"
                         "  const vid = Array.from(document.querySelectorAll('video')).find(x => x.duration > 0 && isFinite(x.duration));"
                         "  return JSON.stringify({"
                         "    t: vid ? vid.currentTime : null, "
@@ -627,10 +577,8 @@ async def capture_browser_scroll_state(
                         "    scrollX: scrollX, "
                         "    scrollY: scrollY, "
                         "    isTop: isTop, "
-                        "    ratio: ratio, "
-                        "    anchorPath: anchorPath, "
                         "    containers: odxCapture(), "
-                        "    anchor: odxAnchor(), "
+                        "    locator: odxLocator(), "
                         "    vw: window.innerWidth, "
                         "    dirty: odxTyped(), "
                         "    hasMedia: Array.from(document.querySelectorAll('video, audio')).some(el => !el.paused && !el.ended && el.readyState > 2)"
@@ -775,7 +723,7 @@ async def _capture_scroll_over(ws: Any) -> dict[str, Any] | None:
     """Where the page scrolls right now (window AND inner containers), asked over an open tab socket. None: nothing worth putting back."""
     with contextlib.suppress(Exception):
         js = ("(() => {" + _SCROLL_LIB_JS
-              + "return JSON.stringify({ y: window.scrollY, url: location.href, c: odxCapture(), a: odxAnchor(), vw: innerWidth });})()")
+              + "return JSON.stringify({ y: window.scrollY, url: location.href, c: odxCapture(), l: odxLocator(), vw: innerWidth });})()")
         res = await _send_cdp(ws, "Runtime.evaluate", {"expression": js}, req_id=30, timeout_s=0.8)
         raw = ((res or {}).get("result") or {}).get("result", {}).get("value")
         state = json.loads(raw) if isinstance(raw, str) else None
@@ -985,7 +933,7 @@ def _resume_state(saved: dict[str, Any] | None) -> dict[str, Any] | None:
         t = t + max(0.0, time.time() - stamp)
     containers = saved.get("containers")
     return {"t": t, "playing": saved.get("playing"), "y": saved.get("scrollY"), "url": saved["url"],
-            "c": containers if isinstance(containers, list) else [], "a": saved.get("anchor"), "vw": saved.get("vw")}
+            "c": containers if isinstance(containers, list) else [], "l": clean_locator(saved.get("locator")), "vw": saved.get("vw")}
 
 
 # A page that sized itself in script at ITS load width keeps those sizes when the window is another width: a reader that put
@@ -1122,11 +1070,10 @@ def _restore_script(state: dict[str, Any]) -> str:
     and play state it had. The two run side by side — a page with no video no longer waits for one — and this is the ONLY writer of
     the scroll after a reload (the layout nudge leaves a fresh page alone). It gives up the moment the user touches the page."""
     containers = state.get("c")
-    anchor = state.get("a")
     saved = json.dumps({
         "t": state.get("t"), "playing": state.get("playing"), "y": state.get("y"), "url": state.get("url"),
         "c": containers if isinstance(containers, list) else [],
-        "a": anchor if isinstance(anchor, dict) and anchor.get("p") else None,
+        "l": clean_locator(state.get("l")),
     })
     # The page starts its own player (autoplay) a moment after it loads: the saved play state is held for a few seconds, not set once.
     # The video is put at its second once, the play state is held for ~4 s, and for 12 s the video is watched: a site that starts at the
@@ -1406,7 +1353,7 @@ class BrowserTabAutoAttachWatcher:
                     resume = _resume_state(self._resume)
                     if resume is not None and isinstance(state.get("since"), (int, float)) and state["since"] < _FRESH_LOAD_MS \
                             and _same_page(resume["url"], url):
-                        state = {**state, **{k: resume[k] for k in ("t", "playing", "y", "c")}}
+                        state = {**state, **{k: resume[k] for k in ("t", "playing", "y", "c", "l")}}
                     reloading[session_id] = state
                     await send("Page.enable", {}, session_id)
                     target_url = _mobile_site_url(url) if want_mobile else None
