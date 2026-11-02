@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import logging
 from typing import Any, Literal
 
@@ -202,7 +203,7 @@ class EventBus:
         callbacks = list(self._listeners.get(type, []))
         for cb in callbacks:
             try:
-                if asyncio.iscoroutinefunction(cb):
+                if inspect.iscoroutinefunction(cb):   # asyncio.iscoroutinefunction is deprecated (3.14) and goes in 3.16
                     self._spawn_listener(cb(**payload), type)
                 else:
                     res = cb(**payload)
