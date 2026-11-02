@@ -120,6 +120,7 @@ export default defineConfig(({ command, mode }) => {
       environment: 'jsdom',
       globals: true,
       setupFiles: './tests/setup.js',
+      fileParallelism: true, // test files run side by side in workers (one per CPU); the jsdom start-up per file dominates the time
     },
   };
 });
