@@ -25,6 +25,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -35,6 +36,7 @@ DOWNLOAD_DIR = ROOT_DIR / "download"
 API = "https://api.github.com"
 UPLOADS = "https://uploads.github.com"
 FALLBACK_REPO = "Lordof21/OpenDex"
+CONNECTION_ATTEMPTS = 4
 CONTENT_TYPES = {".zip": "application/zip", ".msi": "application/x-msi", ".txt": "text/plain"}
 
 
@@ -76,28 +78,32 @@ def request(method: str, url: str, token: str, body: dict | None = None, file: p
         "X-GitHub-Api-Version": "2022-11-28",
         "User-Agent": "opendex-release",
     }
-    handle = None
     if file is not None:
         headers["Content-Type"] = CONTENT_TYPES.get(file.suffix.lower(), "application/octet-stream")
         headers["Content-Length"] = str(file.stat().st_size)
-        handle = file.open("rb")
-        data = handle
     elif body is not None:
         headers["Content-Type"] = "application/json"
-        data = json.dumps(body).encode("utf-8")
-    else:
-        data = None
-    try:
-        req = urllib.request.Request(url, data=data, headers=headers, method=method)
-        with urllib.request.urlopen(req, timeout=600) as resp:
-            raw = resp.read()
-        return json.loads(raw) if raw else None
-    except urllib.error.HTTPError as err:
-        detail = err.read().decode("utf-8", "replace")[:400]
-        raise RuntimeError(f"GitHub {method} {url.split('?')[0]} → {err.code}: {detail}") from err
-    finally:
-        if handle:
-            handle.close()
+    # A connection-level failure (an occasional "certificate verify failed" or a reset on this machine) is retried; an HTTP answer is not.
+    for attempt in range(1, CONNECTION_ATTEMPTS + 1):
+        handle = file.open("rb") if file is not None else None
+        data = handle if handle else (json.dumps(body).encode("utf-8") if body is not None else None)
+        try:
+            req = urllib.request.Request(url, data=data, headers=headers, method=method)
+            with urllib.request.urlopen(req, timeout=600) as resp:
+                raw = resp.read()
+            return json.loads(raw) if raw else None
+        except urllib.error.HTTPError as err:
+            detail = err.read().decode("utf-8", "replace")[:400]
+            raise RuntimeError(f"GitHub {method} {url.split('?')[0]} → {err.code}: {detail}") from err
+        except (urllib.error.URLError, ConnectionError, TimeoutError) as err:
+            if attempt == CONNECTION_ATTEMPTS:
+                raise RuntimeError(f"GitHub {method} {url.split('?')[0]}: bağlantı kurulamadı ({err})") from err
+            print(f"[release] bağlantı hatası ({err}); {attempt}/{CONNECTION_ATTEMPTS}, yeniden deneniyor...")
+            time.sleep(3 * attempt)
+        finally:
+            if handle:
+                handle.close()
+    return None
 
 
 def _sha256(path: pathlib.Path) -> str:
