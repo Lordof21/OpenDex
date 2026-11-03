@@ -8,7 +8,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod files;
+mod gpu;
 mod pointer;
+mod restart;
 mod sidecar;
 mod tray;
 mod webview_memory;
@@ -17,6 +19,8 @@ mod window_icon;
 use tauri::Manager;
 
 fn main() {
+    // Before anything can create a webview: the user's graphics-card choice becomes a WebView2 switch (gpu.rs).
+    gpu::apply_saved_preference();
     tauri::Builder::default()
         .plugin(window_icon::init())
         .plugin(tauri_plugin_shell::init())
@@ -30,6 +34,9 @@ fn main() {
         // File manager: the shell token + native pickers (files.rs) — the only way a PC path outside the roots is vouched for.
         .invoke_handler(tauri::generate_handler![
             webview_memory::webview_memory_level,
+            gpu::gpu_preference,
+            gpu::set_gpu_preference,
+            restart::restart_app,
             pointer::primary_button_down,
             sidecar::api_token,
             files::fs_shell_token,

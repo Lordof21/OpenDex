@@ -219,6 +219,12 @@ export const SETTING_ITEMS = {
       'geliştirici seçenekleri', 'developer', 'animasyon', 'global',
     ],
   },
+  gpuPreference: {
+    section: 'power',
+    title: t('settings.ekran_karti_gpu'),
+    description: t('settings.masaustu_arayuzunu_hangi_ekran_karti_cizsin'),
+    keywords: ['gpu', 'rtx', 'nvidia', 'amd', 'radeon', 'intel', 'ekran karti', 'graphics card', 'donanim hizlandirma', 'surucu', 'imlec', 'donma', 'tam ekran', 'bellek', 'sorun giderme'],
+  },
   dimPhone: {
     section: 'power',
     title: t('settings.kullanirken_telefon_ekranini_karart'),
@@ -482,6 +488,13 @@ export const APP_CLOSED_OPTIONS = [
   { value: 'badge', label: t('common.pencerede_goster'), description: t('settings.pencere_kalir_ustunde_yeniden_ac'), tag: t('common.yeniden_ac') },
 ];
 
+/** Masaüstü arayüzünü çizen ekran kartı (gpu.rs): değerler `lib/gpuPreference.js` GPU_MODES ile aynı. */
+export const GPU_OPTIONS = [
+  { value: 'auto', label: t('settings.windows_a_birak'), description: t('settings.genellikle_islemcideki_tumlesik_gpu_az_pil'), tag: t('common.varsayilan') },
+  { value: 'high_performance', label: t('settings.ayrik_gpu_rtx_radeon'), description: t('settings.ayrik_ekran_kartini_kullanir_pil_harcar'), tag: t('settings.ayrik_gpu') },
+  { value: 'software', label: t('settings.yazilim_gpu_siz'), description: t('settings.ekran_kartini_hic_kullanmaz_yavas'), tag: t('settings.sorun_giderme') },
+];
+
 /** Ses çıkışı kartlarının arama karşılığı (kartların kendisi ui/audioRouting.jsx'teki ikonlu listeden çizilir). */
 const AUDIO_ROUTE_SEARCH_OPTIONS = [
   { value: 'phone', label: t('common.telefon'), ...AUDIO_ROUTE_TEXT.phone },
@@ -509,6 +522,7 @@ export const SETTING_OPTIONS = {
   handoffWindowing: HANDOFF_OPTIONS,
   appClosed: APP_CLOSED_OPTIONS,
   theme: THEME_OPTIONS,
+  gpuPreference: GPU_OPTIONS,
 };
 
 // ───────────────────────────────────────────────────────────────────────────────────────── Değer okumaları

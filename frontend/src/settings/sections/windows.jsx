@@ -5,6 +5,7 @@ import {
   AppWindow,
   BatteryCharging,
   Blocks,
+  Cpu,
   GripHorizontal,
   Layers,
   Lock,
@@ -14,21 +15,26 @@ import {
   MousePointer2,
   Palette,
   RefreshCw,
+  RotateCw,
   ShieldCheck,
   Smartphone,
   Sparkles,
   Sun,
   Zap,
 } from 'lucide-react';
+import Button from '../../ui/Button.jsx';
 import { Callout, ChoiceGroup, Group, Page, PrecisionSlider, SliderField, ToggleRow } from '../controls.jsx';
 import { MOUSE_SENSITIVITY_RANGE, useKeymapStore } from '../../keymapper/keymapStore.js';
 import {
   APP_CLOSED_OPTIONS,
+  GPU_OPTIONS,
   HANDOFF_OPTIONS,
   SECTIONS,
   THEME_OPTIONS,
   WINDOWING_MODE_OPTIONS,
+  settingItem,
 } from '../settingsModel.js';
+import { useGpuPreference } from '../useGpuPreference.js';
 import { t } from '../../i18n/index.js';
 
 const WINDOWING_ICONS = { eco: Zap, independent: Monitor, hybrid: Sparkles };
@@ -156,6 +162,42 @@ export function AppearanceSection({ ctl }) {
   );
 }
 
+/** Hangi ekran kartı arayüzü çizer (yalnız masaüstü uygulaması; src-tauri/src/gpu.rs). Seçim bir sonraki açılışta geçerli olur. */
+function GpuGroup() {
+  const gpu = useGpuPreference();
+  if (!gpu.ready) return null;
+  if (!gpu.supported) {
+    return (
+      <Callout tone="info" title={settingItem('gpuPreference').title}>
+        {t('settings.ekran_karti_secimi_masaustu_uygulamasina')}
+      </Callout>
+    );
+  }
+  return (
+    <div className="space-y-3">
+      <ChoiceGroup item="gpuPreference" icon={Cpu} options={GPU_OPTIONS} value={gpu.saved} onChange={gpu.choose} columns={3}>
+        {gpu.renderer && <p className="mt-2 text-[11px] leading-[15px] text-muted-foreground">{t('settings.su_an_gpu', { gpu: gpu.renderer })}</p>}
+      </ChoiceGroup>
+      {gpu.saved !== gpu.active && (
+        <Callout
+          tone="warn"
+          title={t('settings.yeniden_baslatma_gerekli')}
+          action={
+            <Button size="sm" onClick={gpu.restart} loading={gpu.restarting} startIcon={<RotateCw />}>
+              {t('common.uygulamayi_yeniden_baslat')}
+            </Button>
+          }
+        >
+          {t('settings.secimin_uygulanmasi_icin_opendex_i_kapatip')}
+        </Callout>
+      )}
+      {gpu.restartFailed === 'dev_session' && <Callout tone="info">{t('settings.gelistirme_oturumunda_otomatik_yeniden_baslatma_yok')}</Callout>}
+      {gpu.restartFailed === 'failed' && <Callout tone="warn">{t('settings.opendex_yeniden_baslatilamadi_kapatip_elle_ac')}</Callout>}
+      {gpu.failed && <Callout tone="warn">{t('settings.ekran_karti_tercihi_kaydedilemedi')}</Callout>}
+    </div>
+  );
+}
+
 export function PowerSection({ ctl }) {
   const { values: v, actions: a } = ctl;
   return (
@@ -175,6 +217,7 @@ export function PowerSection({ ctl }) {
           detail={t('settings.kapatirsaniz_yeni_eslesen_cihazlar')}
         />
       </Group>
+      <GpuGroup />
     </Page>
   );
 }
