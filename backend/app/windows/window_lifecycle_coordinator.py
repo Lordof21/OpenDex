@@ -243,8 +243,15 @@ async def wait_for_app_lock_unlock(
 
             if not raised:
                 # An older jar (no `task_reorder`) or no task at all: the launcher start is the only way left to bring it up.
+                # A task that EXISTS is raised on the activity it is showing (its `top`), not on the app's launcher activity: that intent
+                # would send e.g. Medium back to its home screen. No task → there is nothing to preserve, the launcher start is right.
+                top: str | None = None
+                if target_task_id and daemon is not None:
+                    with contextlib.suppress(Exception):
+                        info = await daemon.task_info(target_task_id)
+                        top = info.get("top") if isinstance(info, dict) and isinstance(info.get("top"), str) else None
                 with contextlib.suppress(Exception):
-                    await android_shell.bring_to_front(adb, serial, pkg_name, disp_id)
+                    await android_shell.bring_to_front(adb, serial, pkg_name, disp_id, component=top, reorder_only=bool(top))
                 if sockets and sockets.control:
                     with contextlib.suppress(Exception):
                         await sockets.control.send(serialize_start_app(pkg_name))

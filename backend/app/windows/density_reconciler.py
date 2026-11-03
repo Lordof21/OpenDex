@@ -86,6 +86,7 @@ import asyncio
 import contextlib
 import logging
 import re
+import shlex
 import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Union
@@ -669,7 +670,7 @@ class DensityReconciler:
             if not (component and serial is not None and display is not None):
                 return
             log.warning("⚠️ [DENSITY] %s: süreç öldürüldü ama geri gelmedi — görev %s'de yeniden başlatılıyor", package, display)
-            await self._adb.shell(f"am start --display {int(display)} -n {component} -f 0x10200000", serial=serial, timeout_s=3.0)
+            await self._adb.shell(f"am start --display {int(display)} -n {shlex.quote(str(component))} -f 0x10200000", serial=serial, timeout_s=3.0)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 — a safety net must not turn into the failure

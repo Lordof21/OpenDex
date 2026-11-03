@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from ..logging_config import BackoffLogLimiter
+from ..privacy import mask_user_paths
 from .daemon_auth import TOKEN_ENV
 
 from ..telemetry.adb_meter import meter as adb_meter
@@ -172,7 +173,7 @@ class Adb:
                     raise AdbError(args, 1, "adb.exe: device offline (not asked again: adb said so a moment ago)")
                 del self._gone_until[target]
         cmd = self._build(args, serial)
-        log.debug("exec: %s", " ".join(shlex.quote(a) for a in _redacted(cmd)))
+        log.debug("exec: %s", mask_user_paths(" ".join(shlex.quote(a) for a in _redacted(cmd))))
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdin=asyncio.subprocess.PIPE if stdin is not None else None,
@@ -267,7 +268,7 @@ class Adb:
             if wait is None or not await wait(target, min(DAEMON_COMEBACK_WAIT_S, timeout_s)):
                 return None
         if log.isEnabledFor(logging.DEBUG):
-            log.debug("exec(daemon): %s", redact_command(command)[:200])
+            log.debug("exec(daemon): %s", mask_user_paths(redact_command(command))[:200])
         try:
             outcome = await transport.run_shell(command, timeout_s=timeout_s, binary=binary)
             if outcome is not None:
@@ -279,7 +280,7 @@ class Adb:
                 log.warning("[Adb] daemon shell failed (%s: %s) — using adb", type(exc).__name__, exc)
             return None
         if outcome is None:
-            log.debug("[Adb] daemon did not take: %s — using adb", redact_command(command)[:120])
+            log.debug("[Adb] daemon did not take: %s — using adb", mask_user_paths(redact_command(command))[:120])
         return outcome
 
     async def push(self, local: str, remote: str, serial: str | None = None) -> None:

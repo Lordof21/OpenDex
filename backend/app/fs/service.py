@@ -458,13 +458,16 @@ class FsService:
         hit = self.previews.get(key)
         if hit is None:
             lock = self._fetching.setdefault(key, asyncio.Lock())
-            async with lock:
-                hit = self.previews.get(key)
-                if hit is None:
-                    data = await self._fetch_to_memory(phone, canonical, limit)
-                    self.previews.put(key, data)
-                    hit = ("", data)
-            self._fetching.pop(key, None)
+            try:
+                async with lock:
+                    hit = self.previews.get(key)
+                    if hit is None:
+                        data = await self._fetch_to_memory(phone, canonical, limit)
+                        self.previews.put(key, data)
+                        hit = ("", data)
+            finally:                                                   # also on a failed fetch: no lock left behind for a dead key
+                if self._fetching.get(key) is lock and not lock.locked():
+                    del self._fetching[key]
         return ContentFile(policy, entry.name, len(hit[1]), data=hit[1])
 
     @staticmethod

@@ -14,6 +14,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from .privacy import PRIVATE_KEYS, hidden
+
 log = logging.getLogger(__name__)
 
 # ── Log payload sanitizer ─────────────────────────────────────────────────────
@@ -33,6 +35,9 @@ def truncate_payload(obj: Any, _depth: int = 0, *, long_strings: bool = True) ->
     if isinstance(obj, dict):
         result = {}
         for k, v in obj.items():
+            if k in PRIVATE_KEYS and v not in (None, "", [], {}):
+                result[k] = hidden(v)           # somebody's words (a notification, a track): the size is logged, the text is not
+                continue
             if isinstance(v, str):
                 image = k in _LARGE_FIELDS or v.startswith("data:")
                 if image or (long_strings and len(v) > 80):

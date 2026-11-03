@@ -1,4 +1,5 @@
 """Shared Android shell primitives (device/android_shell.py) and the lookups built on them."""
+import shlex
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -85,6 +86,23 @@ def test_bring_to_front_command():
     assert android_shell.bring_to_front_command("com.a", 0, reorder_only=True, component="com.a/.MainActivity") == (
         "am start --display 0 -n com.a/.MainActivity -f 0x10020000 --activity-reorder-to-front"
     )
+
+
+def test_an_inner_class_activity_reaches_the_shell_whole():
+    """The line runs under `sh -c`: an unquoted `.Settings$WifiSettingsActivity` lost its `$Wifi…` and opened the wrong screen."""
+    name = "com.android.settings/.Settings$WifiSettingsActivity"
+    for reorder in (True, False):
+        cmd = android_shell.bring_to_front_command("com.android.settings", 0, reorder_only=reorder, component=name)
+        assert "-n 'com.android.settings/.Settings$WifiSettingsActivity'" in cmd
+    assert shlex.split(cmd)[shlex.split(cmd).index("-n") + 1] == name          # what sh hands to `am`
+
+
+def test_the_other_am_start_lines_quote_their_component_too():
+    from app.windows.eco_workspace import freeform_start_command
+
+    cmd = freeform_start_command("7", "com.android.settings/.Settings$WifiSettingsActivity")
+    assert shlex.split(cmd)[-1] == "com.android.settings/.Settings$WifiSettingsActivity"
+    assert freeform_start_command("7", "com.a/.Main").endswith("-n com.a/.Main")      # a plain name is untouched
 
 
 async def test_sync_display0_focus_is_harmless_noop():

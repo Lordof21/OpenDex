@@ -44,6 +44,7 @@ import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -221,27 +222,51 @@ public class OpenDexDaemon {
         return result == INVOKE_FAILED ? null : result;
     }
 
+    /** Kills a command that outlived its ceiling. A thread of its own, NOT `scheduler`: `scheduler` is single-threaded and runs the very
+     * commands this guards, so a killer queued on it would wait behind the stuck one. */
+    private static final ScheduledExecutorService execKiller = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "exec-killer");
+        t.setDaemon(true);
+        return t;
+    });
+    private static final int EXEC_MAX_CHARS = 256 * 1024;
+
     /** Deadlock-free & timeout-protected shell exec. stdout+stderr merged (an
      * unread stderr stream filling its pipe buffer would otherwise hang
-     * p.waitFor() forever); a hard 3s ceiling guarantees no single command
-     * can freeze the daemon. */
+     * p.waitFor() forever). The 3 s ceiling is a WATCHDOG that kills the process and closes its pipe: reading to EOF first and only
+     * then calling waitFor(3 s) never timed out a command that kept its output open (`sleep 8` returned after 8 s), and one such
+     * command on the single-thread scheduler froze every tick, push and restore timer. Output is capped too. */
     static String execCommand(String cmd) {
         Process p = null;
+        ScheduledFuture<?> kill = null;
+        final AtomicBoolean timedOut = new AtomicBoolean(false);
         try {
             p = new ProcessBuilder("sh", "-c", cmd).redirectErrorStream(true).start();
+            final Process proc = p;
+            try { proc.getOutputStream().close(); } catch (IOException ignored) { }          // nothing to feed it: a command waiting on stdin ends
+            kill = execKiller.schedule(() -> {
+                timedOut.set(true);
+                proc.destroyForcibly();
+                try { proc.getInputStream().close(); } catch (IOException ignored) { }       // a grandchild holding the pipe open still releases readLine()
+            }, 3, TimeUnit.SECONDS);
             StringBuilder sb = new StringBuilder();
-            try (BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
+            try (BufferedReader br = new BufferedReader(new InputStreamReader(proc.getInputStream(), StandardCharsets.UTF_8))) {
                 String l;
-                while ((l = br.readLine()) != null) {
+                while (sb.length() < EXEC_MAX_CHARS && (l = br.readLine()) != null) {
                     if (sb.length() > 0) sb.append("\n");
                     sb.append(l);
                 }
+            } catch (IOException e) {
+                if (!timedOut.get()) return "ERROR: " + e.getMessage();
             }
-            boolean finished = p.waitFor(3, TimeUnit.SECONDS);
-            if (!finished) { p.destroyForcibly(); return "ERROR: timeout"; }
+            if (timedOut.get()) return "ERROR: timeout";
+            proc.waitFor(1, TimeUnit.SECONDS);
             return sb.toString().trim();
         } catch (Throwable t) { return "ERROR: " + t.getMessage(); }
-        finally { if (p != null) p.destroy(); }
+        finally {
+            if (kill != null) kill.cancel(false);
+            if (p != null) p.destroyForcibly();
+        }
     }
 
     /** Exit-code aware variant — `wm density`/`am display move-stack` print NOTHING
@@ -1979,7 +2004,7 @@ public class OpenDexDaemon {
             options.setLaunchDisplayId(displayId);
             options.setLaunchBounds(bounds);
             ActivityOptions.class.getMethod("setLaunchWindowingMode", int.class).invoke(options, 5);
-            Object am = Binders.service("activity", "android.app.IActivityManager$Stub");
+            Object am =Binders.service("activity", "android.app.IActivityManager$Stub");
             if (am == null) return Json.put(res, "error", "no_activity_manager");
             Method start = null;
             for (Method m : am.getClass().getMethods()) {

@@ -659,16 +659,17 @@ class DeviceDaemonClient:
 
         # Yeni parça başladı?
         if new_title and new_title != prev_title:
+            # What is playing is the user's listening history: the log says a track changed, not which one.
             log.debug(
-                "🎵 [MediaUpdate:TRACK_CHANGE] '%s' - '%s' (pkg=%s pos=%dms art_ready=%s)",
-                new_title, new_artist, new_pkg, new_pos or 0, data.get("art_ready"),
+                "🎵 [MediaUpdate:TRACK_CHANGE] başlık=%d sanatçı=%d karakter (pkg=%s pos=%dms art_ready=%s)",
+                len(new_title or ""), len(new_artist or ""), new_pkg, new_pos or 0, data.get("art_ready"),
             )
         # Play/Pause durumu değişti?
         elif prev_play is not None and new_play != prev_play:
             state_label = "▶ PLAYING" if new_play else "⏸ PAUSED"
             log.debug(
-                "🎵 [MediaUpdate:PLAY_STATE] %s  '%s' (pkg=%s pos=%dms)",
-                state_label, new_title, new_pkg, new_pos or 0,
+                "🎵 [MediaUpdate:PLAY_STATE] %s (pkg=%s pos=%dms)",
+                state_label, new_pkg, new_pos or 0,
             )
         elif data.get("active"):
             # Rutin pozisyon güncellemesi — sadece aktif ise logla

@@ -1221,15 +1221,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     return app
 
 
-# Process images this backend may terminate when they hold its port: its own frozen build and a dev interpreter.
-_OWN_BACKEND_IMAGES = ("opendex-backend", "python")
+def _is_opendex_listening(port: int) -> bool:
+    """True when what answers on `port` is an OpenDeX backend: `/api/health` is open and returns OpenDeX's own shape. A dev
+    interpreter's image name (`python.exe`) says nothing — a user's Flask/uvicorn server has the same one."""
+    import json
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{int(port)}/api/health", timeout=0.5) as res:  # noqa: S310 — loopback, fixed scheme
+            body = json.loads(res.read(2048))
+        return isinstance(body, dict) and body.get("ok") is True and body.get("auth") == "bearer" and "version" in body
+    except Exception:  # noqa: BLE001 — not answering / not JSON / not ours
+        return False
 
 
-def _is_own_backend_image(image_name: str | None) -> bool:
+def _is_own_backend_image(image_name: str | None, port: int | None = None) -> bool:
     """Only a previous OpenDeX backend is ever killed for holding the port — never whatever else happens to listen
-    on 8710 (a user's own dev server, a different product)."""
+    on 8710 (a user's own dev server, a different product). Our frozen build is recognised by its image name; a dev
+    interpreter (`python*`) only when it ANSWERS as OpenDeX on that port."""
     name = (image_name or "").strip().lower()
-    return bool(name) and any(name.startswith(own) for own in _OWN_BACKEND_IMAGES)
+    if name.startswith("opendex-backend"):
+        return True
+    return name.startswith("python") and port is not None and _is_opendex_listening(port)
 
 
 def _windows_image_name(pid: int) -> str | None:
@@ -1271,7 +1284,7 @@ def _kill_stale_process_on_port(port: int) -> None:
                 if pid == os.getpid():
                     continue
                 image = _windows_image_name(pid)
-                if not _is_own_backend_image(image):
+                if not _is_own_backend_image(image, port):
                     log.warning("Port %d is held by PID %d (%s) — not an OpenDeX backend, leaving it alone", port, pid, image)
                     continue
                 log.info("Terminating stale backend process %s (PID %d) on port %d...", image, pid, port)

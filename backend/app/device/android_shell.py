@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import logging
 import re
+import shlex
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
@@ -350,24 +351,28 @@ def bring_to_front_command(
     reorder_only: bool = False,
     component: str | None = None,
 ) -> str:
-    mode = f" --windowingMode {windowing_mode}" if windowing_mode is not None else ""
+    mode = f" --windowingMode {int(windowing_mode)}" if windowing_mode is not None else ""
+    disp = int(display_id)
     if component:
         # Explicit component (-n pkg/cls) — avoids intent resolution failures (e.g. X, Google Analytics)
-        # and brings the exact task/activity to front without resetting internal activity stack
+        # and brings the exact task/activity to front without resetting internal activity stack.
+        # Quoted: the line runs under `sh -c`, and an inner-class activity (`.Settings$WifiSettingsActivity`) would lose its `$Name`.
+        comp = shlex.quote(component)
         if reorder_only:
-            return f"am start --display {display_id}{mode} -n {component} -f 0x10020000 --activity-reorder-to-front"
-        return f"am start --display {display_id}{mode} -n {component} -f 0x10000000"
+            return f"am start --display {disp}{mode} -n {comp} -f 0x10020000 --activity-reorder-to-front"
+        return f"am start --display {disp}{mode} -n {comp} -f 0x10000000"
 
+    pkg = shlex.quote(package)
     if reorder_only:
         # Taşıma sonrası zaten çalışan görevi öne getirirken sıfırdan LAUNCHER intent'i pompalamaz;
         # URL/input odağını, sayfa geçmişini ve pencere durumunu korur.
         return (
-            f"am start --display {display_id}{mode} -a android.intent.action.MAIN "
-            f"-c android.intent.category.LAUNCHER -p {package} -f 0x10020000 --activity-reorder-to-front"
+            f"am start --display {disp}{mode} -a android.intent.action.MAIN "
+            f"-c android.intent.category.LAUNCHER -p {pkg} -f 0x10020000 --activity-reorder-to-front"
         )
     return (
-        f"am start --display {display_id}{mode} -a android.intent.action.MAIN "
-        f"-c android.intent.category.LAUNCHER -p {package} -f 0x10000000"
+        f"am start --display {disp}{mode} -a android.intent.action.MAIN "
+        f"-c android.intent.category.LAUNCHER -p {pkg} -f 0x10000000"
     )
 
 

@@ -84,11 +84,40 @@ def test_stored_settings_that_no_longer_validate_fall_back_field_by_field(caplog
 
 
 @pytest.mark.parametrize("image, own", [
-    ("opendex-backend.exe", True), ("python.exe", True), ("Python3.11.exe", True),
+    ("opendex-backend.exe", True), ("python.exe", False), ("Python3.11.exe", False),
     ("node.exe", False), ("MyServer.exe", False), (None, False), ("", False),
 ])
 def test_only_a_previous_opendex_backend_may_be_killed_for_holding_the_port(image, own):
-    assert _is_own_backend_image(image) is own
+    assert _is_own_backend_image(image) is own          # no port to ask: an interpreter is never assumed to be ours
+
+
+@pytest.mark.parametrize("image", ["python.exe", "pythonw.exe", "python3.12.exe"])
+def test_a_dev_interpreter_is_killed_only_when_it_answers_as_opendex(image, monkeypatch):
+    monkeypatch.setattr(main_module, "_is_opendex_listening", lambda port: port == 8710)
+    assert _is_own_backend_image(image, 8710) is True
+    assert _is_own_backend_image(image, 5000) is False       # somebody's Flask/uvicorn on another port: left alone
+    assert _is_own_backend_image("node.exe", 8710) is False
+
+
+def test_opendex_listening_recognises_the_health_shape_and_nothing_else(monkeypatch):
+    import io
+    import urllib.request
+
+    def answer(body: bytes):
+        return lambda url, timeout=None: io.BytesIO(body)
+
+    monkeypatch.setattr(urllib.request, "urlopen", answer(b'{"ok": true, "version": "1.0", "auth": "bearer"}'))
+    assert main_module._is_opendex_listening(8710) is True
+    monkeypatch.setattr(urllib.request, "urlopen", answer(b'{"ok": true}'))
+    assert main_module._is_opendex_listening(8710) is False
+    monkeypatch.setattr(urllib.request, "urlopen", answer(b"<html>hi</html>"))
+    assert main_module._is_opendex_listening(8710) is False
+
+    def refuse(url, timeout=None):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(urllib.request, "urlopen", refuse)
+    assert main_module._is_opendex_listening(8710) is False
 
 
 # ---------------------------------------------------------------------------------------------------- WS message size

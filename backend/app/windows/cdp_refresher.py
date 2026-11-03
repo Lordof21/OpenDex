@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 import websockets
 
 from ..events import spawn_background
+from ..privacy import host_only
 from .cdp_locator import LOCATOR_JS, clean_locator
 
 if TYPE_CHECKING:
@@ -788,7 +789,7 @@ async def soft_reload_active_tab(
                 if not res or "error" in res:
                     log.debug("[CDP_RELOAD] Page.reload reddedildi/yanıtsız: %s", res)
                     return None
-                log.info("🔄 [CDP_RELOAD] Aktif sekme yumuşak yenilendi ('%s')", target.get("title", "")[:40])
+                log.info("🔄 [CDP_RELOAD] Aktif sekme yumuşak yenilendi (%s)", host_only(target.get("url", "")))
                 return {"title": target.get("title", ""), "url": target.get("url", "")}
         except Exception as exc:
             log.debug("[CDP_RELOAD] Yumuşak yenileme atlandı/hata: %s", exc)
@@ -1365,7 +1366,7 @@ class BrowserTabAutoAttachWatcher:
                     else:
                         await send("Page.reload", {"ignoreCache": False}, session_id)
                     log.info("🔁 [CDP_WATCHER: SİTE KİPİ] %s sekmesi %s siteye çevriliyor — karar=reload, sebep=%s (video ve kaydırma korunacak)",
-                             str(state.get("url", ""))[:50], "mobil" if want_mobile else "masaüstü", reason)
+                             host_only(state.get("url", "")), "mobil" if want_mobile else "masaüstü", reason)
 
                 async def stale_check(session_id: str, state: dict[str, Any]) -> None:
                     """A tab kept (same page under both identities) after the window became another width: once the new scale has settled, is the
@@ -1479,7 +1480,7 @@ class BrowserTabAutoAttachWatcher:
                                     await start_reload(session_id, state, why)
                                 else:
                                     log.info("✅ [CDP_WATCHER: SİTE KİPİ] %s sekmesi iki kimlikle de aynı sayfa — karar=atla (%s); ölçek ve kimlik yeterli",
-                                             str(state.get("url", ""))[:50], why)
+                                             host_only(state.get("url", "")), why)
                                     if not state.get("playing") and not state.get("dirty"):
                                         spawn_background(stale_check(session_id, state), "cdp-stale-width")
                                 finish(session_id)

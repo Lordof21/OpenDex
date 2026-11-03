@@ -8,7 +8,7 @@ def test_album_art_in_an_event_shows_only_the_first_ten_characters():
     out = truncate_payload({"title": "Ritual", "album_art": ART, "sessions": [{"album_art": ART}]})
     assert out["album_art"] == f"{ART[:10]}…({len(ART)}b)"
     assert out["sessions"][0]["album_art"] == f"{ART[:10]}…({len(ART)}b)"
-    assert out["title"] == "Ritual"                       # short text stays whole
+    assert out["title"] == "<6 karakter>"                 # what a track is called is the user's own: only its length is logged (app/privacy.py)
 
 
 def test_a_data_uri_under_any_key_is_a_picture_too():

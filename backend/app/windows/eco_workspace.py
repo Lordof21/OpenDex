@@ -23,6 +23,7 @@ import contextlib
 import logging
 import math
 import re
+import shlex
 import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable
@@ -139,7 +140,7 @@ def freeform_start_command(display_id: str, component: str, launch_bounds: TaskB
     placement = f"--activity-launch-bounds {','.join(map(str, launch_bounds))} " if launch_bounds else ""
     return (
         f"am start --display {display_id} --windowingMode 5 {placement}"
-        f"-f 0x10000000 --activity-reorder-to-front -n {component}"
+        f"-f 0x10000000 --activity-reorder-to-front -n {shlex.quote(component)}"
     )
 
 

@@ -32,6 +32,8 @@ from dataclasses import dataclass
 from typing import Any, Callable
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from ..privacy import host_only
+
 log = logging.getLogger(__name__)
 
 _PLAYING_STATES = {"PLAYING", "BUFFERING"}
@@ -388,7 +390,7 @@ class PlaybackContinuity:
         if await self._play_at(daemon, package, stopped_ms, play_now=False, wait=self._wait_s) == "gave_up":
             log.info("▶ [PlaybackContinuity] %s sayfa açıldı ama oynamadı — oynat + sar'a düşülüyor", package)
             return False
-        log.info("▶ [PlaybackContinuity] %s sayfası açıldı (%s, display %s)", package, snapshot.url, display_id)
+        log.info("▶ [PlaybackContinuity] %s sayfası açıldı (%s, display %s)", package, host_only(snapshot.url), display_id)
         return True
 
     async def _open_page(self, daemon: Any, snapshot: PlaybackSnapshot, at_ms: int, display_id: int | str | None) -> bool:

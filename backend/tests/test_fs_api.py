@@ -422,6 +422,22 @@ async def test_a_phone_file_is_previewed_from_memory_once_and_never_touches_the_
     assert big.status_code == 413 and big.json()["code"] == "too_large"
 
 
+async def test_a_failed_preview_fetch_leaves_no_lock_behind(env, monkeypatch):
+    """The per-file lock used to be dropped only on success: a failed fetch (cable out, file grew) kept its entry forever,
+    and every later request for that key queued on it."""
+    from app.fs.errors import FsError
+
+    async def broken(phone, path, limit):
+        raise FsError("io", "cable out")
+
+    monkeypatch.setattr(env.ctx.fs, "_fetch_to_memory", broken)
+    loc = env.ctx.fs.locate("phone", "/sdcard/Download/notes.txt")
+    for _ in range(3):
+        with pytest.raises(FsError):
+            await env.ctx.fs.content(loc)
+    assert env.ctx.fs._fetching == {}
+
+
 async def test_a_phone_video_plays_from_the_phone_by_byte_ranges_and_is_never_held_anywhere(env):
     video = bytes(range(256)) * 8192                                                      # 2 MB
     env.dev.add_file(f"{ROOT}/Movies/clip.mp4", video)
