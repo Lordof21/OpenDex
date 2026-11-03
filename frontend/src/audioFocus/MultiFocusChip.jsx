@@ -18,7 +18,9 @@ export default function MultiFocusChip({ className }) {
     <button
       type="button"
       data-testid="multi-focus-chip"
-      title={t('audio_focus.chip_ipucu')}
+      data-tooltip={t('audio_focus.chip_ipucu')}
+      data-tooltip-wrap
+      data-tooltip-align="start"
       onClick={() => openOpenDexSettings(MULTI_FOCUS_TARGET)}
       className={cn(
         'inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-border/70 bg-muted/60 px-2.5 py-1 text-[10px] font-medium',

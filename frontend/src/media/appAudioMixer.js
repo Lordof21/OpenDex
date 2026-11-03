@@ -17,6 +17,7 @@ import { wsUrl } from '../lib/api.js';
 import { logger } from '../lib/logger.js';
 import { deviceClock } from './deviceClock.js';
 import { BACKLOG_SLACK_S, JitterBuffer, MIN_CUSHION_S } from './jitterBuffer.js';
+import { createResumeGate } from './resumeGate.js';
 
 const HEADER_SIZE = 12;
 const SAMPLE_RATE = 48000;
@@ -163,7 +164,7 @@ class Channel {
     // Asleep (output released) and this chunk is silent: nothing to play, and nothing may wake the output for it.
     if (!this.engine.noteChunk(peakOf(pcm))) return;
     if (ctx.state !== 'running') {
-      this.engine.resume();          // autoplay: resumes on the next user gesture at the latest
+      this.engine.resume({ perChunk: true });   // autoplay: resumes on the next user gesture at the latest
       return;
     }
     const ptsUs = Number(head & PTS_MASK);
@@ -314,6 +315,7 @@ export class AppAudioMixer {
     this.masterVolume = 1;
     this.masterMuted = false;
     this._unlockCleanup = null;
+    this._mayResume = createResumeGate();            // resume() per audible chunk was a console warning each time (media/resumeGate.js)
     this._idle = false;              // the output is released because nothing audible plays (see SILENCE_PEAK)
     this._lastAudibleAt = 0;
     this._emptySince = null;         // when the last channel went away (performance.now()), null while one exists
@@ -375,11 +377,11 @@ export class AppAudioMixer {
   }
 
   /** Browsers start an AudioContext suspended until a user gesture: resume now, and on the next gesture if needed. */
-  resume() {
+  resume({ perChunk = false } = {}) {
     const { ctx } = this;
     this._idle = false;
     if (!ctx || ctx.state === 'running' || ctx.state === 'closed') return;
-    ctx.resume?.().catch(() => {});
+    if (this._mayResume(!perChunk)) ctx.resume?.().catch(() => {});   // the per-chunk retry is rate-limited and waits for a gesture
     if (this._unlockCleanup || typeof window === 'undefined') return;
     const events = ['pointerdown', 'keydown', 'touchstart'];
     const unlock = () => {

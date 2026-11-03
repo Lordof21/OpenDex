@@ -394,7 +394,7 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
           title={tt('taskbar.dex_ayarlari')}
           subtitle={tt('taskbar.bu_pencere_ve_tum_pencereler')}
         />
-        <span className="rounded-full bg-muted px-2 py-1 font-mono text-[9px] font-semibold tabular-nums text-muted-foreground" title={tt('taskbar.bu_cihazin_destekleyebildigi_bagimsiz')}>
+        <span className="rounded-full bg-muted px-2 py-1 font-mono text-[9px] font-semibold tabular-nums text-muted-foreground" data-tooltip={tt('taskbar.bu_cihazin_destekleyebildigi_bagimsiz')} data-tooltip-wrap data-tooltip-position="bottom" data-tooltip-align="end">
          {tt('taskbar.16_vd')}
         </span>
       </div>
@@ -884,7 +884,13 @@ function DexTabs({ tabs, active, onChange, windowIcon, windowName }) {
 
 function ScopeLabel({ scope, icon, title, name, hint, active }) {
   return (
-    <div data-scope={scope} title={hint} className={cn('flex min-w-0 items-center gap-1.5 pb-1 pr-2 transition-opacity', active ? 'opacity-100' : 'opacity-55')}>
+    <div
+      data-scope={scope}
+      data-tooltip={hint || undefined}
+      data-tooltip-wrap={hint ? '' : undefined}
+      data-tooltip-position="bottom"
+      data-tooltip-align="start"
+      className={cn('flex min-w-0 items-center gap-1.5 pb-1 pr-2 transition-opacity', active ? 'opacity-100' : 'opacity-55')}>
       {icon}
       <h3 className="flex min-w-0 items-baseline gap-1.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
         <span className="shrink-0">{title}</span>

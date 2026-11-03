@@ -98,4 +98,41 @@ describe('legacy session player', () => {
     expect(ctx.state).toBe('running');
     sessionAudioPlayer.stop();
   });
+
+  // The browser logs "The AudioContext was not allowed to start" for EVERY resume() it refuses: feedPCM called it per audio chunk
+  // (434 console warnings in 35 s on a page nobody had touched yet).
+  describe('a context that is still suspended', () => {
+    const chunk = () => new ArrayBuffer(1920);
+
+    async function playerWithSuspendedContext() {
+      const { sessionAudioPlayer } = await import('../src/media/audioPlayer.js');
+      vi.stubGlobal('WebSocket', class { static OPEN = 1; static CONNECTING = 0; readyState = 0; close() {} });
+      sessionAudioPlayer.start();
+      const ctx = sessionAudioPlayer.ctx;
+      ctx.resume.mockClear();
+      ctx.resume.mockImplementation(() => Promise.resolve());          // refused: it stays suspended
+      ctx.state = 'suspended';
+      return { player: sessionAudioPlayer, ctx };
+    }
+
+    it('is not asked to run before the page has had a user gesture, however many chunks arrive', async () => {
+      vi.stubGlobal('navigator', { ...navigator, userActivation: { hasBeenActive: false } });
+      const { player, ctx } = await playerWithSuspendedContext();
+      for (let i = 0; i < 200; i += 1) player.feedPCM(chunk(), i * 10_000);
+      expect(ctx.resume).not.toHaveBeenCalled();
+      player.stop();
+    });
+
+    it('is asked at most once a second after a gesture, not once per chunk', async () => {
+      vi.stubGlobal('navigator', { ...navigator, userActivation: { hasBeenActive: true } });
+      const { player, ctx } = await playerWithSuspendedContext();
+      await vi.advanceTimersByTimeAsync(1100);                          // start() just tried: the next try is a second away
+      for (let i = 0; i < 200; i += 1) player.feedPCM(chunk(), i * 10_000);
+      expect(ctx.resume).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1100);
+      player.feedPCM(chunk(), 0);
+      expect(ctx.resume).toHaveBeenCalledTimes(2);
+      player.stop();
+    });
+  });
 });

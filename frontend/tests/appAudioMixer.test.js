@@ -161,6 +161,35 @@ describe('appAudioMixer', () => {
     expect(ctx.resume).toHaveBeenCalled();
   });
 
+  // A refused resume() is a console warning per call ("The AudioContext was not allowed to start"): the per-chunk retry must neither fire
+  // before the page has had a user gesture nor fire on every chunk after it.
+  it('does not retry resume() per chunk before a user gesture', () => {
+    vi.stubGlobal('navigator', { ...navigator, userActivation: { hasBeenActive: false } });
+    mixer.attach('w1');
+    ctx.state = 'suspended';
+    ctx.resume.mockClear();
+    for (let i = 0; i < 100; i += 1) sockets[0].onmessage({ data: chunk(10) });
+    expect(ctx.resume).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it('retries resume() at most once a second after a gesture, however many chunks arrive', () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('navigator', { ...navigator, userActivation: { hasBeenActive: true } });
+    mixer.attach('w1');
+    ctx.state = 'suspended';
+    ctx.resume.mockReset();
+    ctx.resume.mockImplementation(() => Promise.resolve());          // the browser keeps refusing: it stays suspended
+    vi.advanceTimersByTime(1100);
+    for (let i = 0; i < 100; i += 1) sockets[0].onmessage({ data: chunk(10) });
+    expect(ctx.resume).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(1100);
+    sockets[0].onmessage({ data: chunk(10) });
+    expect(ctx.resume).toHaveBeenCalledTimes(2);
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
   it('ducks every window but the focused one when enabled', () => {
     mixer.attach('w1', { volume: 1 });
     mixer.attach('w2', { volume: 0.6 });

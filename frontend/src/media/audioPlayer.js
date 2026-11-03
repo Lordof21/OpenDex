@@ -9,6 +9,7 @@
 import { wsUrl } from '../lib/api.js';
 import { logger } from '../lib/logger.js';
 import { JitterBuffer } from './jitterBuffer.js';
+import { createResumeGate } from './resumeGate.js';
 
 const HEADER_SIZE = 12;
 // scrcpy raw audio: 48kHz stereo s16le.
@@ -33,6 +34,17 @@ class SessionAudioPlayer {
     this.scheduledSources = new Set();
     this.jitter = new JitterBuffer();
     this._gestureCleanup = null;
+    this._mayResume = createResumeGate();
+  }
+
+  /**
+   * Asks a suspended context to run — at most once a second and not before a user gesture (media/resumeGate.js: the browser logs a
+   * warning for EVERY refused call, and feedPCM used to call this per audio chunk). The gesture listener resumes it on the first touch.
+   */
+  _tryResume(force = false) {
+    if (!this.ctx || this.ctx.state !== 'suspended') return;
+    if (this._mayResume(force)) this.ctx.resume().catch(() => {});
+    else this._setupGestureUnlock();
   }
 
   _flushScheduled() {
@@ -101,7 +113,7 @@ class SessionAudioPlayer {
 
     if (this.ctx) {
       if (this.ctx.state === 'suspended') {
-        this.ctx.resume().catch(() => {});
+        this._tryResume(true);                        // a deliberate start is not rate-limited
         if (this.ctx.state !== 'running') {
           this._setupGestureUnlock();
         }
@@ -223,7 +235,7 @@ class SessionAudioPlayer {
   feedPCM(pcmBuffer, ptsUs) {
     if (!this.ctx) return;
     if (this.ctx.state === 'suspended') {
-      this.ctx.resume().catch(() => {});
+      this._tryResume();
       return;
     }
     if (this.ctx.state !== 'running') {

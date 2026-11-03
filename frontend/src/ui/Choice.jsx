@@ -65,7 +65,8 @@ export function IconTile({ icon: Icon, title, status, active, onClick, variant =
         type="button"
         onClick={onClick}
         aria-pressed={Boolean(active)}
-        title={`${title}${status ? ` — ${status}` : ''}`}
+        data-tooltip={`${title}${status ? ` — ${status}` : ''}`}
+        data-tooltip-wrap
         className={cn(
           'flex flex-col items-center justify-center gap-1 rounded-[6px] border border-border/70 bg-background px-1.5 text-center transition-colors hover:bg-accent/60 cursor-pointer',
           dense ? 'min-h-[52px] py-1.5' : 'min-h-[64px] py-2',

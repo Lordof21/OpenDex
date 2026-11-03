@@ -544,8 +544,9 @@ function FootprintDetails({ item, sz }) {
         <div className="rounded-md border border-border/60 bg-background/70 px-2 py-1">
           <div className="mb-0.5 text-[8px] font-semibold uppercase tracking-wider text-muted-foreground">{t('footprint.telefondaki_deger')}</div>
           {values.map((row) => (
-            <div key={row.ref} className="flex items-baseline justify-between gap-2 border-b border-border/40 py-0.5 last:border-b-0">
-              <span className="min-w-0 truncate font-mono text-[9px] text-muted-foreground" title={row.ref}>{row.ref}</span>
+            // The tooltip sits on the ROW: the truncated name below has overflow hidden, which would clip a tooltip drawn from it.
+            <div key={row.ref} data-tooltip={row.ref} data-tooltip-wrap data-tooltip-align="start" className="flex items-baseline justify-between gap-2 border-b border-border/40 py-0.5 last:border-b-0">
+              <span className="min-w-0 truncate font-mono text-[9px] text-muted-foreground">{row.ref}</span>
               <span className="flex shrink-0 items-baseline gap-1.5 font-mono text-[9px] tabular-nums">
                 <span className={cn('font-semibold', row.value != null && row.value === row.ours && row.ours !== row.default ? 'text-primary' : 'text-foreground')}>
                   {row.value ?? t('footprint.deger_yok')}

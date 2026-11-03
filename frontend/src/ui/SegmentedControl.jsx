@@ -35,7 +35,7 @@ export function SegmentedControl({
             role={semantics === 'radio' ? 'radio' : undefined}
             aria-checked={semantics === 'radio' ? active : undefined}
             aria-pressed={semantics === 'radio' ? undefined : active}
-            title={title}
+            data-tooltip={title || undefined}
             onPointerDown={stopPropagation ? (e) => e.stopPropagation() : undefined}
             onClick={(e) => {
               if (stopPropagation) e.stopPropagation();
