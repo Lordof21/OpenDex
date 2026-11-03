@@ -9,8 +9,17 @@ Her uygulama kendi penceresinde — boyutlandırılabilir — kendi sesi, görev
 ![Status](https://img.shields.io/badge/status-pre--1.0-orange)
 ![Desktop](https://img.shields.io/badge/desktop-Windows-lightgrey)
 ![Android](https://img.shields.io/badge/Android-10%2B-green)
+[![Son sürüm](https://img.shields.io/github/v/release/Lordof21/OpenDex?label=s%C3%BCr%C3%BCm&color=blue)](https://github.com/Lordof21/OpenDex/releases/latest)
+[![GitHub yıldızları](https://img.shields.io/github/stars/Lordof21/OpenDex?logo=github)](https://github.com/Lordof21/OpenDex/stargazers)
 
 [English](README.md) · [Tanıtım videosu](#tanıtım-videosunu-izle) · [İndir](https://github.com/Lordof21/OpenDex/releases/latest) · [Kurulum](docs/INSTALL.md) · [Dokümantasyon](docs/README.md)
+
+<br>
+
+<a href="https://github.com/Lordof21/OpenDex/stargazers"><img alt="OpenDeX'i GitHub'da yıldızla" src="https://img.shields.io/badge/GitHub'da_y%C4%B1ld%C4%B1zla-24292f?style=for-the-badge&logo=github&logoColor=white"></a>&nbsp;&nbsp;<a href="https://github.com/sponsors/Lordof21"><img alt="Bir kahve ısmarla: OpenDeX'e sponsor ol" src="https://img.shields.io/badge/Bir_kahve_%C4%B1smarla-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white"></a>
+
+**Ücretsiz, açık kaynak ve tek kişi yapıyor.**
+OpenDeX telefonuna masaüstünde ikinci bir hayat verdiyse, ⭐ iki saniye sürer ve başkalarının projeyi bulmasını sağlar. ☕ ise bir sonraki güncellemeyi getiren şeydir.
 
 <img alt="OpenDeX: Windows masaüstünde pencerelerde telefon uygulamaları ve görev çubuğu" src="docs/images/live/hero.webp" width="900">
 
@@ -64,6 +73,8 @@ telefonun ekranına verip geri alabilirsiniz. Telefona uygulama kurulmaz, root g
 * `OpenDeX_0.1.0_windows-x64_portable.zip` — zip'i açıp `opendex.exe`'yi çalıştırın
 
 Sürümler **imzasızdır**; SmartScreen uyarabilir (*Ek bilgi → Yine de çalıştır*).
+
+> **Beğendin mi?** [⭐ Yıldız](https://github.com/Lordof21/OpenDex/stargazers) başkalarının OpenDeX'i bulmasını sağlar, bir [☕ kahve](https://github.com/sponsors/Lordof21) de sıradaki güncellemenin yakıtı olur. Teşekkürler!
 
 ## Başlangıç
 

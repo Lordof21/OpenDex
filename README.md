@@ -9,8 +9,17 @@ Every app in its own resizable window — with its own sound, a taskbar, a file 
 ![Status](https://img.shields.io/badge/status-pre--1.0-orange)
 ![Desktop](https://img.shields.io/badge/desktop-Windows-lightgrey)
 ![Android](https://img.shields.io/badge/Android-10%2B-green)
+[![Latest release](https://img.shields.io/github/v/release/Lordof21/OpenDex?label=release&color=blue)](https://github.com/Lordof21/OpenDex/releases/latest)
+[![GitHub stars](https://img.shields.io/github/stars/Lordof21/OpenDex?logo=github)](https://github.com/Lordof21/OpenDex/stargazers)
 
 [Demo video](#watch-the-demo) · [Download](#download) · [Install](docs/INSTALL.md) · [Documentation](docs/README.md) · [Türkçe](README.tr.md)
+
+<br>
+
+<a href="https://github.com/Lordof21/OpenDex/stargazers"><img alt="Star OpenDeX on GitHub" src="https://img.shields.io/badge/Star_on_GitHub-24292f?style=for-the-badge&logo=github&logoColor=white"></a>&nbsp;&nbsp;<a href="https://github.com/sponsors/Lordof21"><img alt="Buy me a coffee: sponsor OpenDeX" src="https://img.shields.io/badge/Buy_me_a_coffee-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white"></a>
+
+**Free, open source, and built by one person.**
+If OpenDeX gave your phone a second life on your desk, a ⭐ takes two seconds and helps others find it. A ☕ is what keeps the next update coming.
 
 <img alt="OpenDeX: several phone apps in resizable windows on a Windows desktop with a taskbar" src="docs/images/live/hero.webp" width="900">
 
@@ -64,6 +73,8 @@ hands a running app to the phone's screen and back. Nothing is installed on the 
 * `OpenDeX_0.1.0_windows-x64_portable.zip` — unzip and run `opendex.exe`
 
 The builds are **unsigned**, so SmartScreen may warn (*More info → Run anyway*).
+
+> **Enjoying it?** A [⭐ star](https://github.com/Lordof21/OpenDex/stargazers) helps others find OpenDeX, and a [☕ coffee](https://github.com/sponsors/Lordof21) fuels the next update. Thank you!
 
 ## Get started
 
