@@ -58,7 +58,7 @@ hands a running app to the phone's screen and back. Nothing is installed on the 
 
 ## Download
 
-**Windows (x64)** — from the [`download/`](download/) folder or the [Releases page](https://github.com/Lordof21/OpenDex/releases) (checksums in `SHA256SUMS.txt`):
+**Windows (x64)** — from the [Releases page](https://github.com/Lordof21/OpenDex/releases/latest) (checksums in `SHA256SUMS.txt`):
 
 * `OpenDeX_0.1.0_x64_tr-TR.msi` — installer
 * `OpenDeX_0.1.0_windows-x64_portable.zip` — unzip and run `opendex.exe`

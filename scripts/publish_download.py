@@ -1,6 +1,7 @@
 """Puts the finished release into the repo's download/ folder (called by build_release.py after the installer step).
 
-download/ holds what a user downloads, committed with the project:
+download/ holds what a user downloads. It is a build output, NOT committed (.gitignore); scripts/release_github.py uploads it to a
+GitHub Release (derle_tam.bat --release):
   * OpenDeX_<version>_windows-x64_portable.zip — the app folder as the installer ships it (the Tauri exe, its sidecar and vendor/),
     unzipped it runs as-is: the folder layout is the one `tauri build` leaves in frontend/src-tauri/target/release;
   * OpenDeX_<version>_x64_<wix-language>.msi — the installer `tauri build` wrote for the language in tauri.conf.json;

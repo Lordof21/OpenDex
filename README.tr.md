@@ -10,7 +10,7 @@ Her uygulama kendi penceresinde — boyutlandırılabilir — kendi sesi, görev
 ![Desktop](https://img.shields.io/badge/desktop-Windows-lightgrey)
 ![Android](https://img.shields.io/badge/Android-10%2B-green)
 
-[English](README.md) · [Tanıtım videosu](#tanıtım-videosunu-izle) · [İndir](download/) · [Kurulum](docs/INSTALL.md) · [Dokümantasyon](docs/README.md)
+[English](README.md) · [Tanıtım videosu](#tanıtım-videosunu-izle) · [İndir](https://github.com/Lordof21/OpenDex/releases/latest) · [Kurulum](docs/INSTALL.md) · [Dokümantasyon](docs/README.md)
 
 <img alt="OpenDeX: Windows masaüstünde pencerelerde telefon uygulamaları ve görev çubuğu" src="docs/images/live/hero.webp" width="900">
 
@@ -58,7 +58,7 @@ telefonun ekranına verip geri alabilirsiniz. Telefona uygulama kurulmaz, root g
 
 ## İndir
 
-**Windows (x64)** — [`download/`](download/) klasöründen ya da [Releases sayfasından](https://github.com/Lordof21/OpenDex/releases) (sağlama toplamları `SHA256SUMS.txt` içinde):
+**Windows (x64)** — [Releases sayfasından](https://github.com/Lordof21/OpenDex/releases/latest) (sağlama toplamları `SHA256SUMS.txt` içinde):
 
 * `OpenDeX_0.1.0_x64_tr-TR.msi` — kurulum paketi
 * `OpenDeX_0.1.0_windows-x64_portable.zip` — zip'i açıp `opendex.exe`'yi çalıştırın

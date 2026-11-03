@@ -132,6 +132,13 @@ def main():
     else:
         import publish_download
         publish_download.publish(since=t0)
+        # Publishing a GitHub Release is public: only when asked for (derle_tam.bat --release).
+        if "--release" in sys.argv:
+            import release_github
+            if release_github.main([]) != 0:
+                sys.exit(1)
+        else:
+            print("[INFO] Not uploaded to GitHub (add --release, or run: python scripts/release_github.py).")
 
     dt = time.time() - t0
     banner(f"Release build finished in {dt:.1f}s")

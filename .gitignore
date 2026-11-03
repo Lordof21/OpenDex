@@ -18,6 +18,10 @@ frontend/src-tauri/target/
 frontend/src-tauri/binaries/*
 !frontend/src-tauri/binaries/.gitkeep
 
+# Build output a user downloads (installer + portable zip, ~95 MB per build): uploaded to a GitHub Release by
+# scripts/release_github.py, never committed (every commit of it would stay in the history forever).
+download/
+
 # Local state
 .env
 *.db
