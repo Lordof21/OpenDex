@@ -25,6 +25,8 @@ TAURI_DIR = ROOT_DIR / "frontend" / "src-tauri"
 RELEASE_DIR = TAURI_DIR / "target" / "release"
 DOWNLOAD_DIR = ROOT_DIR / "download"
 APP_FOLDER = "OpenDeX"
+LEGAL_FILES = ("LICENSE", "THIRD_PARTY_NOTICES.md")
+LEGAL_DIR = "LICENSES"
 # File times on NTFS are not exact to the second against the clock the build reads: a small slack, not a loophole.
 CLOCK_SLACK_S = 5.0
 
@@ -86,6 +88,12 @@ def build_portable_zip(target: pathlib.Path, since: float, conf: dict) -> None:
             archive.write(sidecar, f"{APP_FOLDER}/{sidecar.name}")
             for path in vendor_files:
                 archive.write(path, f"{APP_FOLDER}/vendor/{path.name}")
+            # The licence texts and notices travel with the binaries (GPL-3.0, and the MIT/BSD/Apache/OFL notices of what is bundled).
+            for name in LEGAL_FILES:
+                archive.write(ROOT_DIR / name, f"{APP_FOLDER}/{name}")
+            for path in sorted((ROOT_DIR / LEGAL_DIR).glob("*")):
+                if path.is_file():
+                    archive.write(path, f"{APP_FOLDER}/{LEGAL_DIR}/{path.name}")
         os.replace(tmp, target)
     finally:
         if tmp.exists():

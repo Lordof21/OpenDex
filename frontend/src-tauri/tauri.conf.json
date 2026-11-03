@@ -32,7 +32,10 @@
     "externalBin": ["binaries/opendex-backend"],
     "icon": ["icons/icon.ico", "icons/icon.png"],
     "resources": {
-      "../../backend/vendor/": "vendor/"
+      "../../backend/vendor/": "vendor/",
+      "../../LICENSE": "LICENSE",
+      "../../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
+      "../../LICENSES/": "LICENSES/"
     },
     "windows": {
       "wix": {

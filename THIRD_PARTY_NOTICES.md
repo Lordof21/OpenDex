@@ -4,6 +4,8 @@ OpenDeX itself is free software under the **GNU General Public License, version 
 It is built on, and ships with, the open-source components below. This file says what they are, under which licence, and where their terms are.
 
 * The full texts of the licences that need to travel with a copy are in [`LICENSES/`](LICENSES) (Apache-2.0, OFL-1.1); the GPL is in [`LICENSE`](LICENSE).
+* **Source code.** The complete corresponding source of every release is the public repository <https://github.com/Lordof21/OpenDex>, at the tag named in the
+  release (a release `v0.9` is the tag `v0.9`). This notice and the licence texts ship inside the installer and the portable zip.
 * Every dependency's exact version is pinned in a lock file: `frontend/package-lock.json` (npm), `frontend/src-tauri/Cargo.lock` (Rust).
   Python dependencies are declared in `backend/pyproject.toml`.
 * **Compatibility.** Every licence below is compatible with distributing OpenDeX under GPL-3.0-or-later: Apache-2.0, MIT, BSD, ISC, PSF, Zlib, OFL, Unicode and

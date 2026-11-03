@@ -26,6 +26,12 @@ def pub(tmp_path, monkeypatch):
     (release / "vendor" / "opendex-tools.jar").write_bytes(b"jar")
     (release / "vendor" / "scrcpy-server-v4.1-opendex").write_bytes(b"scrcpy")
     (release / "bundle" / "msi" / "OpenDeX_0.1.0_x64_tr-TR.msi").write_bytes(b"msi")
+    legal = tmp_path / "repo"
+    (legal / "LICENSES").mkdir(parents=True)
+    (legal / "LICENSE").write_text("gpl", encoding="utf-8")
+    (legal / "THIRD_PARTY_NOTICES.md").write_text("notices", encoding="utf-8")
+    (legal / "LICENSES" / "Apache-2.0.txt").write_text("apache", encoding="utf-8")
+    monkeypatch.setattr(module, "ROOT_DIR", legal)
     monkeypatch.setattr(module, "TAURI_DIR", tauri)
     monkeypatch.setattr(module, "RELEASE_DIR", release)
     monkeypatch.setattr(module, "DOWNLOAD_DIR", tmp_path / "download")
@@ -37,6 +43,7 @@ def test_publishes_zip_installer_and_checksums_of_this_build(pub):
     out = pub.DOWNLOAD_DIR
     with zipfile.ZipFile(out / "OpenDeX_0.1.0_windows-x64_portable.zip") as archive:
         assert sorted(archive.namelist()) == [
+            "OpenDeX/LICENSE", "OpenDeX/LICENSES/Apache-2.0.txt", "OpenDeX/THIRD_PARTY_NOTICES.md",
             "OpenDeX/opendex-backend.exe", "OpenDeX/opendex.exe",
             "OpenDeX/vendor/opendex-tools.jar", "OpenDeX/vendor/scrcpy-server-v4.1-opendex",
         ]

@@ -96,9 +96,10 @@ There is no automated release workflow yet. The manual checklist, in order:
 4. **Run the result on a phone.** Open the app, check that the backend started (the boot screen says so), that the helper's health check passes,
    and walk the relevant parts of [DEVICE_CHECKLIST.md](DEVICE_CHECKLIST.md). Right-click → *Inspect* (or F12) should open the WebView inspector.
 5. **Licences.** Re-check [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) against the lock files (a new dependency, or a changed licence, is added by hand). The Rust crates for Windows/macOS were
-   not inspected when the file was written — run `cargo deny check licenses` (or `cargo about`) on `Cargo.lock`. MIT/BSD/ISC require their notice to accompany a *binary*: ship the notices file and
-   `LICENSES/` with the installer (e.g. as a resource shown in *About*), and attach the dependencies' full licence texts to the release.
-6. Tag `vX.Y.Z`, attach the `.msi` and its SHA-256 to the GitHub release. Sign the installer if you have a certificate (the pipeline does not).
+   not inspected when the file was written — run `cargo deny check licenses` (or `cargo about`) on `Cargo.lock`. MIT/BSD/ISC require their notice to accompany a *binary*: `LICENSE`, `THIRD_PARTY_NOTICES.md` and
+   `LICENSES/` are bundled as resources of the installer (`tauri.conf.json`) and added to the portable zip (`scripts/publish_download.py`), so they travel with every build;
+   keep the files in step with what the build contains.
+6. Tag `vX.Y.Z`, attach the `.msi` and its SHA-256 to the GitHub release (`derle_tam.bat --release` or `python scripts/release_github.py`; the tag must be the commit the build came from). Sign the installer if you have a certificate (the pipeline does not).
 
 ### What is not on record yet
 
