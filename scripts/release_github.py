@@ -23,6 +23,7 @@ import json
 import os
 import pathlib
 import re
+import ssl
 import subprocess
 import sys
 import time
@@ -70,6 +71,16 @@ def find_token() -> str:
     return token
 
 
+def _tls_context() -> ssl.SSLContext | None:
+    """certifi's current root list when the package is there (the Windows store on some machines lacks a root GitHub's chain ends in and
+    answers "unable to get issuer certificate" now and then); otherwise Python's default."""
+    try:
+        import certifi
+    except ImportError:
+        return None
+    return ssl.create_default_context(cafile=certifi.where())
+
+
 def request(method: str, url: str, token: str, body: dict | None = None, file: pathlib.Path | None = None) -> dict | list | None:
     """One GitHub API call. `file`: the request body is that file's bytes (asset upload). Returns the decoded JSON ('' → None)."""
     headers = {
@@ -89,7 +100,7 @@ def request(method: str, url: str, token: str, body: dict | None = None, file: p
         data = handle if handle else (json.dumps(body).encode("utf-8") if body is not None else None)
         try:
             req = urllib.request.Request(url, data=data, headers=headers, method=method)
-            with urllib.request.urlopen(req, timeout=600) as resp:
+            with urllib.request.urlopen(req, timeout=600, context=_tls_context()) as resp:
                 raw = resp.read()
             return json.loads(raw) if raw else None
         except urllib.error.HTTPError as err:

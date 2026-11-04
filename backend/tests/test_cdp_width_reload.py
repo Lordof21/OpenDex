@@ -101,7 +101,7 @@ def test_the_page_side_restore_prefers_the_locator_over_pixels():
     lib = cr._SCROLL_LIB_JS
     assert "const odxLocator" in lib and "const odxApplyLocator" in lib
     assert "'fixed'" in lib and "'sticky'" in lib                  # a fixed bar is not what the screen shows at that point
-    assert "saved.l && odxApplyLocator(saved.l)" in lib and "top: saved.y, behavior: 'instant'" in lib
+    assert "saved.l ? odxApplyLocator(saved.l) : null" in lib and "if (saved.y && !placed" in lib and "top: saved.y, behavior: 'instant'" in lib
     assert "odxAnchor" not in lib and "odxApplyAnchor" not in lib   # one mechanism, not two
 
 

@@ -273,6 +273,199 @@ async def test_the_place_goes_from_the_desktop_site_to_the_mobile_site_by_what_i
         assert await _paragraph_at(tab, yv) in (31, 32, 33)
 
 
+# Mobile Wikipedia's shape: every section after the lead is folded away with `hidden="until-found"` (the browser opens one for find-in-page)
+# and the site keeps its own heading toggle in step through the `beforematch` event.
+_FOLDED_ARTICLE = _page(
+    "<body style='margin:0;font:16px/24px sans-serif'><header style='height:56px'>m.site</header>"
+    + "".join(f"<p style='margin:0 0 16px'>{_paragraph(i)}</p>" for i in range(10))
+    + "".join(
+        f"<h2 class=toggle data-open=0>Section {s}</h2><div class=folded hidden=until-found>"
+        + "".join(f"<p style='margin:0 0 16px'>{_paragraph(i)}</p>" for i in range(10 + s * 10, 20 + s * 10))
+        + "</div>" for s in range(5))
+    + "<script>document.querySelectorAll('.folded').forEach((d) => d.addEventListener('beforematch', "
+      "() => { d.previousElementSibling.dataset.open = '1'; }));</script></body>")
+
+
+async def test_the_place_inside_a_folded_section_is_opened_and_found(routes, tab):
+    """Measured on the phone (2026-11-04): a desktop Wikipedia article read in DeX came back on the phone's mobile site in ANOTHER section —
+    the paragraph was inside a section the mobile site folds away (`hidden="until-found"`, no height), so no probe could be measured and the
+    page fell back to the document fraction. The section is opened the way find-in-page opens it, and the paragraph is where the reader was."""
+    routes["/desktop"], routes["/mobile"] = _DESKTOP_ARTICLE, _FOLDED_ARTICLE
+    await tab.width(1000)
+    await tab.goto("/desktop")
+    await _scroll_to_paragraph(tab, 31, 0.5)
+    assert await _paragraph_at(tab, 0.02) == 31
+    locator = await tab.locator()
+
+    await tab.width(400)
+    await tab.goto("/mobile")
+    assert await tab.run("document.querySelectorAll('.folded')[2].hidden") == "until-found"      # paragraph 31 lives in section 2 (30-39)
+
+    result = await tab.apply(locator)
+    assert result["how"] == "text", result
+    assert await _paragraph_at(tab, 0.02) == 31                                   # the paragraph the reader was in
+    assert await tab.run("document.querySelectorAll('.folded')[2].hidden") is False  # its section opened
+    assert await tab.run("document.querySelectorAll('.toggle')[2].dataset.open") == "1"   # the site was told (beforematch)
+    assert await tab.run("document.querySelectorAll('.folded')[3].hidden") == "until-found"  # the others stay folded
+
+
+def _shadow_reader(extra_wrappers: int) -> tuple[str, bytes]:
+    """A manga reader that draws each page in a CLOSED shadow root (page script sees no picture and no words) and names its pages
+    `aria-label="Sayfa N"`. `extra_wrappers`: boxes the other variant has before the list (they shift every path)."""
+    pages = "".join(f"<div class=wrap><div class=page aria-label='Sayfa {i + 1}' data-h='{900 + (i % 3) * 300}'></div></div>" for i in range(60))
+    return _page(
+        "<body style='margin:0'>" + "<div class=ad style='height:40px'></div>" * extra_wrappers
+        + f"<div class=stage style='max-width:800px;margin:0 auto'>{pages}</div>"
+        + "<script>document.querySelectorAll('.page').forEach((p) => { const root = p.attachShadow({ mode: 'closed' });"
+          " const h = +p.dataset.h; root.innerHTML = `<div style='width:100%;aspect-ratio:800/${h};background:#456'></div>`; });</script>"
+        + "</body>")
+
+
+async def test_a_reader_whose_pictures_hide_in_closed_shadow_roots_is_found_by_the_page_name(routes, tab):
+    """Measured on the phone (2026-11-04): a manga reader draws its pages in CLOSED shadow roots, so there is no picture and no text to find a
+    page by — only its path, and the mobile variant has other boxes before the list: the path pointed at another page and the reader came back
+    50 pages off. Each page carries `aria-label="Sayfa N"`, unique on the page: that name finds it on any variant."""
+    routes["/desktop"], routes["/mobile"] = _shadow_reader(0), _shadow_reader(3)
+    await tab.width(1000)
+    await tab.goto("/desktop")
+    await tab.run("(() => { const p = document.querySelector('[aria-label=\"Sayfa 31\"]'); window.scrollTo(0, p.getBoundingClientRect().top + scrollY + p.offsetHeight * 0.4); })()")
+    await asyncio.sleep(0.2)
+    locator = await tab.locator()
+    assert any(p.get("k") == 'div[aria-label="Sayfa 31"]' for p in locator["probes"]), locator
+
+    await tab.width(400)
+    await tab.goto("/mobile")
+    result = await tab.apply(locator)
+    assert result["how"] == "key", result
+    where = json.loads(await tab.run("(() => { const p = document.querySelector('[aria-label=\"Sayfa 31\"]'); const r = p.getBoundingClientRect();"
+                                     " return JSON.stringify({ f: -r.top / r.height }); })()"))
+    assert abs(where["f"] - 0.4) < 0.02, where                                 # the same place in the same page
+
+
+def _late_reader() -> tuple[str, bytes]:
+    """The same reader, but its pages are mounted 1.2 s after the load event — and it then scrolls ITSELF to a place it kept (page 45)."""
+    page, body = _shadow_reader(3)
+    html = body.decode()
+    start, end = html.index("<div class=stage"), html.index("<script>")
+    stage = html[start:end]
+    late = (html[:start] + "<div class=stage-host style='height:300000px'></div><script>window.addEventListener('load', () => setTimeout(() => {"
+            f" const host = document.querySelector('.stage-host'); host.outerHTML = {json.dumps(stage)};"
+            + html[end + len("<script>"):html.index("</script>")]
+            + " const own = document.querySelector('[aria-label=\"Sayfa 45\"]'); window.scrollTo(0, own.getBoundingClientRect().top + scrollY); }, 1200));"
+            "</script></body></html>")
+    return page, late.encode()
+
+
+async def test_a_page_that_builds_itself_after_load_and_scrolls_itself_still_ends_where_the_reader_was(routes, tab):
+    """Measured on the phone (2026-11-04): after the reload the reader had no pages at its load event (1.2 s later 222 of them, then it
+    scrolled itself to a place it kept). The restore found nothing to name, settled on the document fraction and stopped before the pages came:
+    the reader was left 50 pages off. It now waits for what its probes name and holds the place against the page's own late scroll."""
+    routes["/desktop"], routes["/late"] = _shadow_reader(0), _late_reader()
+    await tab.width(1000)
+    await tab.goto("/desktop")
+    await tab.run("(() => { const p = document.querySelector('[aria-label=\"Sayfa 31\"]'); window.scrollTo(0, p.getBoundingClientRect().top + scrollY + p.offsetHeight * 0.4); })()")
+    await asyncio.sleep(0.2)
+    locator = await tab.locator()
+
+    await tab.width(400)
+    await tab.call("Page.navigate", {"url": tab.site + "/late"})
+    for _ in range(40):
+        if await tab.run("document.readyState") == "complete":
+            break
+        await asyncio.sleep(0.05)
+    state = {"t": None, "playing": None, "y": 40000, "url": tab.site + "/late", "c": [], "l": locator}
+    await tab.run(cr._restore_script(state), await_promise=True)                # returns once it is done (or gave up)
+    where = json.loads(await tab.run("(() => { const p = document.querySelector('[aria-label=\"Sayfa 31\"]'); const r = p.getBoundingClientRect();"
+                                     " return JSON.stringify({ f: -r.top / r.height }); })()"))
+    assert abs(where["f"] - 0.4) < 0.02, where
+
+
+# A full-screen layer pinned over the page (an ad container: `position: fixed`, the highest z-index, a `relative` child covering the screen).
+_OVERLAY = ("<div class=pa-container style='position:fixed;inset:0;z-index:2147483647;pointer-events:none'>"
+            "<div class=pa-inner style='position:relative;width:100%;height:100%'></div></div>")
+
+
+async def test_a_layer_pinned_over_the_page_is_never_taken_for_the_readers_place(routes, tab):
+    """Measured on the phone (2026-11-04, a manga reader): an ad layer fixed over the whole screen took all three probes — its child is
+    `relative`, so the "skip fixed elements" rule did not see it — and the page came back 12 pages off, by the document fraction."""
+    routes["/desktop"] = (_DESKTOP_ARTICLE[0], _DESKTOP_ARTICLE[1].replace(b"</body>", _OVERLAY.encode() + b"</body>"))
+    routes["/mobile"] = (_MOBILE_ARTICLE[0], _MOBILE_ARTICLE[1].replace(b"</body>", _OVERLAY.encode() + b"</body>"))
+    await tab.width(1000)
+    await tab.goto("/desktop")
+    await _scroll_to_paragraph(tab, 31, 0.5)
+    locator = await tab.locator()
+    assert locator and not any("pa-" in (p.get("p") or "") or "div:nth-of-type(2) > div" == p.get("p") for p in locator["probes"]), locator
+    assert any(p.get("t", "").startswith("paragraph 31") for p in locator["probes"]), locator
+
+    await tab.width(400)
+    await tab.goto("/mobile")
+    result = await tab.apply(locator)
+    assert result["how"] == "text", result
+    assert await _paragraph_at(tab, 0.02) == 31
+
+
+async def test_content_scrolling_inside_a_fixed_full_screen_box_still_gives_the_place(routes, tab):
+    """The other side of the same rule: an app that scrolls its content in a full-screen FIXED box (the window itself never scrolls) — what is
+    in that box moves with its scroll, so it is still where the reader is."""
+    routes["/app"] = _page(
+        "<body style='margin:0;font:16px/24px sans-serif'><div class=app style='position:fixed;inset:0;overflow-y:auto'>"
+        + "".join(f"<p style='margin:0 0 16px;padding:0 12px'>{_paragraph(i)}</p>" for i in range(60)) + "</div></body>")
+    await tab.width(800)
+    await tab.goto("/app")
+    await tab.run("(() => { const box = document.querySelector('.app'); box.scrollTop = box.scrollHeight * 0.5; })()")
+    await asyncio.sleep(0.2)
+    locator = await tab.locator()
+    assert locator and any(p.get("t", "").startswith("paragraph") for p in locator["probes"]), locator
+
+
+# A grid of series covers: 6 to a row in a DeX window, 2 to a row on the phone — the same reading order, other rows.
+_COVER_GRID = _page(
+    "<body style='margin:0;font:14px/20px sans-serif'><header style='height:56px'>site</header><div class=grid>"
+    + "".join(f"<a class=card data-i={i}><img src='/c/cover-{i:03d}.svg'><div class=title>Series number {i:02d} with a long title</div></a>"
+              for i in range(60))
+    + "</div></body>",
+    head="<style>.grid{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;padding:12px} .card{display:block}"
+         " .card img{width:100%;aspect-ratio:2/3;display:block} @media (max-width:600px){.grid{grid-template-columns:repeat(2,1fr)}}</style>")
+
+# The first cover the reader sees: the top-left card of the first row that is on screen.
+_FIRST_CARD = """(() => { const cards = [...document.querySelectorAll('.card')].filter((c) => c.getBoundingClientRect().bottom > 4);
+  return +cards[0].dataset.i; })()"""
+
+
+async def test_in_a_grid_the_place_is_the_start_of_the_readers_row_not_the_cover_in_the_middle(routes, tab):
+    """A grid keeps its reading order across widths, not its rows. Anchoring the cover in the middle of the screen (the 4th of 6 in a DeX row)
+    put its 2-cover phone row at the top and skipped the first covers of the reader's row; the row's FIRST cover is where it begins anywhere."""
+    svg = "<svg xmlns='http://www.w3.org/2000/svg' width='200' height='300'><rect width='100%' height='100%' fill='#789'/></svg>".encode()
+    routes.update({f"/c/cover-{i:03d}.svg": ("image/svg+xml", svg) for i in range(60)})
+    routes["/grid"] = _COVER_GRID
+    # As on the phone's DeX window (1336 css px, overlay scrollbars): a symmetric 6-column grid has a column GAP down the middle of the
+    # screen on every row — the line a probe used to read.
+    await tab.call("Emulation.setScrollbarsHidden", {"hidden": True})
+    desk = 1336
+    await tab.width(desk)
+    await tab.goto("/grid")
+    assert await tab.run("document.elementsFromPoint(innerWidth / 2, document.querySelector('.card').getBoundingClientRect().top + 100)"
+                         ".every((e) => e.tagName !== 'IMG')")
+    await tab.run("(() => { const c = document.querySelector('[data-i=\"24\"]'); window.scrollTo(0, c.getBoundingClientRect().top + scrollY - 8); })()")
+    await asyncio.sleep(0.2)
+    assert await tab.run(_FIRST_CARD) == 24                                       # DeX: the row 24..29 at the top
+    locator = await tab.locator()
+    assert locator["probes"][0]["i"] == "cover-024", locator                       # the row's first cover, not the 27th in the middle
+
+    await tab.width(400)
+    await tab.goto("/grid")
+    result = await tab.apply(locator)
+    assert result["how"] in ("path", "image"), result
+    assert await tab.run(_FIRST_CARD) == 24                                       # phone: the reader's row begins at the top (24, 25)
+
+    # ... and back: the phone's top row (24, 25) into DeX puts the DeX row holding 24 at the top
+    locator = await tab.locator()
+    await tab.width(desk)
+    await tab.goto("/grid")
+    await tab.apply(locator)
+    assert await tab.run(_FIRST_CARD) == 24
+
+
 def _gallery_images(base: str):
     svg = lambda w, h: f"<svg xmlns='http://www.w3.org/2000/svg' width='{w}' height='{h}'><rect width='100%' height='100%' fill='#789'/></svg>".encode()  # noqa: E731
     return {f"{base.format(n=f'{i:03d}')}": ("image/svg+xml", svg(800, 1200)) for i in range(20)}

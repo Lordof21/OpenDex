@@ -58,10 +58,40 @@ _RESUME_WINDOW_S = 25.0       # a tab re-created this soon after a watcher start
 _FRESH_LOAD_MS = 8000        # a document younger than this was just (re)loaded: its own restore owns the scroll
 _FRONT_WAIT_MS = 1500         # how long a hidden tab may wait to become visible: the app comes up on a window a second or so after its task moved
 
-# What Chrome multiplies a device-scale override by on top (measured on the phone, Chrome 155: a desktop-mode tab — `mobile: false` — shows
-# dpr 1.2 x the override, a mobile one 1.0 x). Learned from the page's own devicePixelRatio after each override, per phone and mode, so the
-# override can be divided by it and the page ends up at the scale the window really has. Never assumed: 1.0 until measured.
-_dpr_gain: dict[tuple[str, bool], float] = {}
+# Chrome shows a desktop-mode tab (`mobile: false`) at 120% (its desktop-site zoom on a large screen): dpr 1.2 x the override and a layout
+# 1.2 x narrower. Measured on the phone (Chrome 155, 2026-11-04, a 1824 px DeX window at 182 dpi): a cold-started Chrome with NO override
+# lays the page out 1336 css px wide at dpr 1.365; with the override divided by 1.2 the dpr read 1.1375 but the layout stayed 1336 px. So the
+# division only lowered the resolution the page was drawn at (blurrier text, same size) — it is not done: the override is the window's real
+# density and the zoom is Chrome's own, exactly as after a cold start.
+
+# Stamped into every document a watcher's session sees being created: the identity (mobile / desktop site) it was LOADED with. The user agent
+# a page reports later says what the browser would send NOW — after the other watcher's override is gone it is the process's own, not what the
+# document was built for (measured: a mobile Wikipedia page brought back into DeX read `mobile: false` and was kept, drawn at 0.58 zoom).
+_LOADED_AS_JS = (
+    "try{Object.defineProperty(window,'__odxLoadedAs',{value:(navigator.userAgentData?navigator.userAgentData.mobile:"
+    "/Mobi/.test(navigator.userAgent))?'mobile':'desktop',configurable:true});}catch(e){}"
+)
+
+# A document keeps the viewport it was LOADED with: a desktop page kept on the phone stays 972 css px wide on a 380 px screen, a mobile page
+# kept in a DeX window lays out 2302 px wide and is shown zoomed out to 0.58 (both measured 2026-11-04, Chrome 155) — whatever identity and
+# scale it is given afterwards, until it is reloaded. Its layout viewport is then WIDER than the screen; in its right place it never is
+# (phone: = the screen; DeX: the screen / Chrome's 1.2 zoom). That is the check that decides, not what the page says it is.
+_FIT_SLACK = 1.05
+_FIT_JS = (
+    "(async()=>{const ok=()=>innerWidth<=screen.width*" + str(_FIT_SLACK) + "+1;"
+    "for(let i=0;i<8&&!ok();i++)await new Promise(r=>setTimeout(r,150));"     # a new scale reaches the layout a frame or two late
+    "return JSON.stringify({iw:innerWidth,sw:screen.width,ok:ok()});})()"
+)
+_STALE_LOOKS = 6             # how many times a kept page is looked at for boxes still sized for the old width ...
+_STALE_LOOK_EVERY_S = 0.5    # ... and how far apart (the first 0.7 s after the move, the last ~3.2 s)
+_FIT_TIMEOUT_S = 2.5          # no answer to the fit check in this time: the tab is left as it is (a frozen tab must not hold a handoff)
+
+
+def _layout_fits(inner: Any, screen: Any) -> bool | None:
+    """Whether a page's layout viewport (`innerWidth`) is no wider than its screen. None: not measurable."""
+    if not all(isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 for v in (inner, screen)):
+        return None
+    return inner <= screen * _FIT_SLACK + 1
 
 _cdp_locks: dict[str, asyncio.Lock] = {}
 
@@ -174,19 +204,29 @@ const odxRestoreAll = async (saved) => {
   const stop = () => { touched = true; };
   const events = ['wheel', 'touchstart', 'pointerdown', 'keydown'];
   events.forEach((e) => addEventListener(e, stop, { capture: true, passive: true }));
-  let stable = 0, last = '';
+  let stable = 0, last = '', foundFor = 0;
+  // The locator names things on the page (probes); until one of them is found the page is only placed by its document fraction.
+  const named = !!(saved.l && Array.isArray(saved.l.probes) && saved.l.probes.length);
   try {
     if (saved.y && odxPictureHeavy(saved)) await odxWaitForPictures(700, () => touched);
-    for (let i = 0; i < 40 && !touched; i++) {
+    for (let i = 0; i < 100 && !touched; i++) {
       const applied = odxApplyOnce(saved);
       // The page that scrolls as a whole goes back by what was under the probes (right at any width and on another site variant); the
       // pixel offset is the last resort, for a page the locator could not read (or that has nothing resolvable yet).
-      if (saved.y && !(saved.l && odxApplyLocator(saved.l)) && Math.abs(window.scrollY - saved.y) > 4) window.scrollTo({ left: 0, top: saved.y, behavior: 'instant' });
+      const placed = saved.l ? odxApplyLocator(saved.l) : null;
+      if (saved.y && !placed && Math.abs(window.scrollY - saved.y) > 4) window.scrollTo({ left: 0, top: saved.y, behavior: 'instant' });
       if (!want && !saved.y) break;
       const sig = odxScrollers().map((el) => el.scrollHeight).join(',') + '|' + document.documentElement.scrollHeight;
       stable = (applied >= want && sig === last) ? stable + 1 : 0;
       last = sig;
-      if (i >= 6 && stable >= 4) break;
+      foundFor = placed && placed.how !== 'ratio' ? foundFor + 1 : 0;
+      // A page that builds its content after its load event (measured 2026-11-04: a reader mounted its 222 pages 1.2 s after it, then
+      // scrolled ITSELF to a place it kept) is not done when its height stops changing: what the probes name may not exist yet. So a
+      // locator with names waits for one of them (~12 s at most: a bot check loading first held one back 7 s), and once it is placed by it,
+      // holds it ~2 s against the page's own late scroll. A locator with nothing to name, or one that never resolves, ends as before.
+      // The user's first touch ends it at once.
+      const done = !named || i >= 80 ? stable >= 4 : foundFor >= 13 && stable >= 4;
+      if (i >= 6 && done) break;
       await new Promise((r) => setTimeout(r, 150));
     }
   } finally {
@@ -289,6 +329,9 @@ def _probe_verdict(baseline: Any, probe: Any, *, check_layout: bool) -> tuple[bo
         return True, why
     lay = probe.get("lay") or {}
     inner, scroll = lay.get("iw"), lay.get("sw")
+    # The same HTML is not the same page: a document keeps the viewport it was loaded with (see _FIT_JS), on the phone and in a window alike.
+    if _layout_fits(inner, lay.get("scr")) is False:
+        return True, f"sayfa ekrandan geniş yerleşiyor ({inner:.0f} > {lay.get('scr'):.0f} css px)"
     if check_layout and isinstance(inner, (int, float)) and isinstance(scroll, (int, float)) and scroll > inner + _OVERFLOW_PX:
         return True, f"yatay taşma ({scroll:.0f} > {inner:.0f})"
     return False, why
@@ -307,9 +350,11 @@ def _tab_state_js(want_mobile: bool, *, wait_ms: int = 0, with_fp: bool = False)
     document.addEventListener('visibilitychange', () => {{ if (vis()) {{ clearTimeout(t); r(); }} }});
   }});
   const v = [...document.querySelectorAll('video')].find((x) => x.duration > 0 && isFinite(x.duration));
-  const mobile = navigator.userAgentData ? navigator.userAgentData.mobile : /Mobi/.test(navigator.userAgent);
+  // what the document was LOADED as (stamped at its creation by a watcher, `_LOADED_AS_JS`); a page loaded before any watcher: what it says now
+  const loadedAs = window.__odxLoadedAs || null;
+  const mobile = loadedAs ? loadedAs === 'mobile' : (navigator.userAgentData ? navigator.userAgentData.mobile : /Mobi/.test(navigator.userAgent));
   const out = {{
-    mobile, visible: vis(), t: v ? v.currentTime : null, playing: v ? (!v.paused && !v.ended) : null, since: Math.round(performance.now()),
+    mobile, loadedAs, visible: vis(), t: v ? v.currentTime : null, playing: v ? (!v.paused && !v.ended) : null, since: Math.round(performance.now()),
     y: window.scrollY, url: location.href, host: location.hostname, c: odxCapture(), l: odxLocator(), vw: innerWidth,
     dirty: odxTyped(),
   }};
@@ -329,7 +374,9 @@ def _probe_js(want_mobile: bool) -> str:
   const now = () => navigator.userAgentData ? navigator.userAgentData.mobile : /Mobi/.test(navigator.userAgent);
   for (let i = 0; i < 24 && now() !== {'true' if want_mobile else 'false'}; i++) await new Promise((r) => setTimeout(r, 25));
   if (now() !== {'true' if want_mobile else 'false'}) return JSON.stringify({{ err: 'identity-not-applied' }});
-  const out = {{ lay: {{ iw: innerWidth, sw: document.documentElement.scrollWidth }} }};
+  // the layout under the new scale arrives a frame or two after the override: wait (bounded) for it to fit before it is judged
+  for (let i = 0; i < 6 && innerWidth > screen.width * {_FIT_SLACK} + 1; i++) await new Promise((r) => setTimeout(r, 150));
+  const out = {{ lay: {{ iw: innerWidth, sw: document.documentElement.scrollWidth, scr: screen.width }} }};
   try {{ out.fp = await odxFingerprint(); }} catch (e) {{ out.err = String(e).slice(0, 80); }}
   return JSON.stringify(out);
 }})()"""
@@ -1131,14 +1178,23 @@ class BrowserTabAutoAttachWatcher:
     Overrides are scoped to this session: stopping the watcher (or losing the connection) drops them all.
 
     ``phone_dpr``: the density / 160 the watcher's PLACE has — the phone's own (mobile mode) or the window's (desktop mode). It is applied
-    to every tab as a device-scale override because a Chrome process that has lived in a wide window runs ALL its tabs at x1.2 of the
-    real scale (measured on the phone: dpr 3.848 on a 3.206 display, a 1920 px window laid out at 1600 css px instead of 1920) — the
-    page then renders 20% too large, and its layout is sized for a viewport that is not the one on screen. A window that changes size or
-    density hands the new value to ``set_scale``. None: no scale to apply."""
+    to every tab as a device-scale override. On the phone it is what removes the DeX window's scale: Chrome shows a desktop-mode tab at
+    120% (measured: dpr 3.848 on a 3.206 display), and the override with `mobile: true` puts the page at the phone's own 3.206 — text the
+    size the phone's own Chrome shows. In a window the override is the window's density and Chrome's own 120% desktop zoom stays (that is
+    what a cold-started Chrome shows there too; dividing it out only lowered the resolution, see the note above `_LOADED_AS_JS`). Every
+    override is followed by a page-scale reset: no zoom is carried across a move or a resize. A window that changes size or density hands
+    the new value to ``set_scale``. None: no scale to apply.
+
+    What a tab was LOADED as (`__odxLoadedAs`, stamped into every document a watcher sees created) decides whether it is the other site;
+    the tab in front is also checked against its screen (`_FIT_JS`): a document keeps the viewport it was loaded with, so one wider than
+    its screen is reloaded whatever it says it is. A watcher starts reading the tabs only once the previous one of the same browser has
+    closed (`_closing_watchers`)."""
 
     def __init__(self, adb: "Adb", serial: str, socket_name: str, window_id: str, phone_dpr: float | None = None,
-                 mode: str = "mobile", place: str = "phone", resume: dict[str, Any] | None = None):
+                 mode: str = "mobile", place: str = "phone", resume: dict[str, Any] | None = None,
+                 after: asyncio.Task | None = None):
         self._started = time.monotonic()
+        self._after = after                  # the previous watcher of this browser, still closing: its identity must be off the tabs first
         self._resume = resume                # what the front tab showed BEFORE the change that made the app reload it (`capture_browser_scroll_state`)
         self._place = "window" if place == "window" else "phone"      # whose size this watcher follows: the phone's display or a window's
         self._adb = adb
@@ -1217,6 +1273,12 @@ class BrowserTabAutoAttachWatcher:
             return False
 
     async def _run(self) -> None:
+        # One watcher at a time per browser. The previous one clears its overrides as it closes; reading the tabs while its identity is
+        # still on them (or letting its clean-up land after this one's overrides) left a page in the other place's site (measured 2026-11-04:
+        # the phone's watcher stopped 90 ms AFTER the window's started, and a mobile page was judged "desktop" and kept).
+        if self._after is not None and not self._after.done() and self._after.get_loop() is asyncio.get_running_loop():
+            with contextlib.suppress(Exception):
+                await asyncio.wait({self._after}, timeout=_HANDOVER_WAIT_S)
         clean_socket = self._socket_name.lstrip("@")
         port = await self._adb.forward(0, f"localabstract:{clean_socket}", serial=self._serial)
         if not port or port <= 0:
@@ -1252,6 +1314,7 @@ class BrowserTabAutoAttachWatcher:
                 probes: dict[str, dict[str, Any]] = {}         # session -> tab state, while the "does a reload change anything?" measurement runs
                 stale_states: dict[str, dict[str, Any]] = {}   # session -> tab state, while the "is the page still sized for the old width?" read runs
                 watchdogs: dict[str, asyncio.Task] = {}        # session -> the timer that reloads when that measurement never answers
+                fits_pending: dict[str, dict[str, Any]] = {}   # session -> tab state, while the "does the layout fit this place?" check runs
                 awaiting_front: dict[str, str] = {}            # session -> targetId of a hidden tab asked a second time (it may be the front tab)
 
                 front_sessions: set[str] = set()               # sessions of the tab(s) the user is looking at
@@ -1294,22 +1357,19 @@ class BrowserTabAutoAttachWatcher:
                     await ws.send(json.dumps(msg))
                     return req_id
 
-                dpr_checks: dict[str, tuple[bool, float]] = {}     # session -> (the mode's mobile flag, the dpr the page must end up with)
-
-                def gain_of(mobile: bool) -> float:
-                    return _dpr_gain.get((self._serial, mobile), 1.0)
+                stamped: set[str] = set()                          # page sessions whose new documents record what they were loaded as
 
                 def scale_params(mobile: bool) -> dict[str, Any]:
-                    return {"width": 0, "height": 0, "deviceScaleFactor": self._phone_dpr / gain_of(mobile), "mobile": mobile}
+                    # The place's real density, not divided by Chrome's desktop zoom (see the note above `_LOADED_AS_JS`)
+                    return {"width": 0, "height": 0, "deviceScaleFactor": self._phone_dpr, "mobile": mobile}
 
-                async def verify_scale(session_id: str, mobile: bool) -> None:
-                    """Reads the dpr the page really has after the override (Chrome stacks its own factor on a desktop-mode one) and, if it is not
-                    the target, learns the factor and corrects the override once."""
-                    dpr_checks[session_id] = (mobile, self._phone_dpr)
-                    await send("Runtime.evaluate", {
-                        "expression": "new Promise((r) => setTimeout(() => r(window.devicePixelRatio), 150))",
-                        "awaitPromise": True, "returnByValue": True,
-                    }, session_id, tag=("dpr", session_id))
+                async def stamp(session_id: str) -> None:
+                    """Every document this tab creates from now on records the identity it was loaded with (`__odxLoadedAs`)."""
+                    if session_id in stamped:
+                        return
+                    stamped.add(session_id)
+                    await send("Page.enable", {}, session_id)
+                    await send("Page.addScriptToEvaluateOnNewDocument", {"source": _LOADED_AS_JS}, session_id)
 
                 frame_watch_id = 800000        # its own id range: the watch for frames must not shift the ids of the commands a tab's flow counts on
 
@@ -1322,25 +1382,27 @@ class BrowserTabAutoAttachWatcher:
                         "params": {"autoAttach": True, "waitForDebuggerOnStart": True, "flatten": True},
                     }))
 
-                async def put_in_place(session_id: str, tab_mobile: bool, *, reload: bool, verify: bool = True) -> None:
+                async def put_in_place(session_id: str, tab_mobile: bool, *, reload: bool) -> None:
                     """The user agent of this watcher's mode and the scale (phone or window). ``reload``: the tab is the one in front and was
-                    loaded as the other site — it is scaled as THIS mode's site (the decision whether it must also be reloaded follows).
-                    ``verify``: the page is asked for the dpr it really has (not for a tab that is paused at its creation)."""
+                    loaded as the other site — it is scaled as THIS mode's site (the decision whether it must also be reloaded follows)."""
                     if ua_params:
                         await send("Emulation.setUserAgentOverride", ua_params, session_id)
                     if self._phone_dpr:
-                        # A tab that stays the other site (not reloaded) is scaled in the layout it runs in; a window's tab gets the REAL scale
-                        # of its window, not the x1.2 Chrome's tablet mode puts on every tab of its process.
+                        # A tab that stays the other site (not reloaded) is scaled in the layout it runs in; a window's tab gets the real density
+                        # of its window.
                         mobile_flag = (True if reload else tab_mobile) if want_mobile else False
                         await send("Emulation.setDeviceMetricsOverride", scale_params(mobile_flag), session_id)
-                        if verify:
-                            await verify_scale(session_id, mobile_flag)
+                        await send("Emulation.resetPageScaleFactor", {}, session_id)       # see apply_scale: no zoom carried over
+                    await stamp(session_id)
 
                 async def apply_scale() -> None:
                     """The window changed size / density (``set_scale``): every page tab gets the new scale."""
                     try:
                         for page_session in list(self._page_sessions):
                             await send("Emulation.setDeviceMetricsOverride", scale_params(want_mobile), page_session)
+                            # A page keeps its pinch-zoom across a change of width / density: after a resize it could stand zoomed in as if the
+                            # user had pinched it. Back to the page's own initial scale (1, or what its viewport tag asks).
+                            await send("Emulation.resetPageScaleFactor", {}, page_session)
                     except Exception as exc:  # noqa: BLE001 — the socket may be gone; the watcher's own loop reports that
                         log.debug("[CDP_WATCHER] pencere ölçeği güncellenemedi: %s", exc)
 
@@ -1349,11 +1411,14 @@ class BrowserTabAutoAttachWatcher:
                 async def start_reload(session_id: str, state: dict[str, Any], reason: str) -> None:
                     """Gives the tab in front the right site, with its video / scroll put back once it has loaded."""
                     url = str(state.get("url", ""))
-                    # A page the APP just reloaded (Samsung Internet, on a density change) reports the video at 0 and the scroll at the top:
-                    # that is not where the user was. What was read before the change is the truth for the same page.
+                    # Where the user was is what they SAW before the move — read in the place they left (`self._resume`). The state read now
+                    # comes from the page after the move: in the other place's layout (a desktop page kept 972 px wide on a 380 px phone, a
+                    # page the APP just reloaded at the top with its video at 0), so its probes describe something else. The capture is the
+                    # truth for the same page during this transition; later (a window resize, a stale-width check) the live state is.
                     resume = _resume_state(self._resume)
-                    if resume is not None and isinstance(state.get("since"), (int, float)) and state["since"] < _FRESH_LOAD_MS \
-                            and _same_page(resume["url"], url):
+                    fresh = isinstance(state.get("since"), (int, float)) and state["since"] < _FRESH_LOAD_MS
+                    this_move = time.monotonic() - self._started <= _RESUME_WINDOW_S
+                    if resume is not None and (fresh or this_move) and _same_page(resume["url"], url):
                         state = {**state, **{k: resume[k] for k in ("t", "playing", "y", "c", "l")}}
                     reloading[session_id] = state
                     await send("Page.enable", {}, session_id)
@@ -1370,12 +1435,27 @@ class BrowserTabAutoAttachWatcher:
 
                 async def stale_check(session_id: str, state: dict[str, Any]) -> None:
                     """A tab kept (same page under both identities) after the window became another width: once the new scale has settled, is the
-                    page still sized for the old width (sizes it measured in script at load)? The answer arrives as ('stale', session)."""
+                    page still sized for the old width (sizes it measured in script at load)? The answers arrive as ('stale', session).
+
+                    The width it is compared with is the one the user SAW the page at — the capture made before the move (the tab's own state is
+                    read after the task moved and already has the new width: the check never looked). And it is asked a few times: a page's
+                    boxes come back from `content-visibility: auto` and its pictures (a reader that draws them in a closed shadow root) are laid
+                    out again only a moment after the move (measured 2026-11-04: a manga chapter kept its DeX `min-height: 1500px` boxes on the
+                    phone, 787 px of gap under every 713 px page, unseen by a single look 0.7 s after the move)."""
+                    resume = _resume_state(self._resume)
+                    if (resume is not None and resume.get("vw") and _same_page(str(resume["url"]), str(state.get("url", "")))
+                            and time.monotonic() - self._started <= _RESUME_WINDOW_S):
+                        state = {**state, "vw": resume["vw"]}
                     try:
                         await asyncio.sleep(0.7)
                         stale_states[session_id] = state
-                        await send("Runtime.evaluate", {"expression": _STALE_WIDTH_PROBE_JS, "returnByValue": True}, session_id,
-                                   tag=("stale", session_id))
+                        for _ in range(_STALE_LOOKS):
+                            if session_id not in stale_states:
+                                return                     # reloaded already (or the tab went away)
+                            await send("Runtime.evaluate", {"expression": _STALE_WIDTH_PROBE_JS, "returnByValue": True}, session_id,
+                                       tag=("stale", session_id))
+                            await asyncio.sleep(_STALE_LOOK_EVERY_S)
+                        stale_states.pop(session_id, None)
                     except asyncio.CancelledError:
                         raise
                     except Exception as exc:  # noqa: BLE001 — the socket may be gone; the watcher's own loop reports that
@@ -1395,6 +1475,27 @@ class BrowserTabAutoAttachWatcher:
                         raise
                     except Exception as exc:  # noqa: BLE001 — the socket may be gone; the watcher's own loop reports that
                         log.debug("[CDP_WATCHER] ölçüm zamanlayıcısı: %s", exc)
+
+                async def fit_watchdog(session_id: str) -> None:
+                    """The fit check never answered (a frozen renderer): the tab is left as it is and no longer holds the settle."""
+                    try:
+                        await asyncio.sleep(_FIT_TIMEOUT_S)
+                        watchdogs.pop(session_id, None)
+                        if fits_pending.pop(session_id, None) is not None:
+                            finish(session_id)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:  # noqa: BLE001 — the socket may be gone; the watcher's own loop reports that
+                        log.debug("[CDP_WATCHER] yerleşim denetimi zamanlayıcısı: %s", exc)
+
+                async def check_fit(session_id: str, state: dict[str, Any]) -> None:
+                    """The tab in front reads as THIS place's site — but what it says may not be what it was loaded as (a page loaded before any
+                    watcher, or read while the other watcher's identity was still on it). Its layout decides: wider than the screen = it kept
+                    the viewport of the other place, and only a reload gives it this place's (its scroll and video are put back)."""
+                    fits_pending[session_id] = state
+                    await send("Runtime.evaluate", {"expression": _FIT_JS, "awaitPromise": True, "returnByValue": True}, session_id,
+                               tag=("fit", session_id))
+                    watchdogs[session_id] = asyncio.create_task(fit_watchdog(session_id))
 
                 async def decide(session_id: str, state: dict[str, Any]) -> None:
                     """The tab in front was loaded as the other site. Certain reasons reload at once; otherwise the page is asked whether a
@@ -1439,21 +1540,24 @@ class BrowserTabAutoAttachWatcher:
                                         initial.add(info["targetId"])
                                         await send("Target.attachToTarget", {"targetId": info["targetId"], "flatten": True})
                                 maybe_settled()
-                            elif kind == "dpr" and session_id:
-                                check = dpr_checks.pop(session_id, None)
-                                observed = (msg.get("result") or {}).get("result", {}).get("value")
-                                if check is None or isinstance(observed, bool) or not isinstance(observed, (int, float)) or observed <= 0:
-                                    continue
-                                mobile_flag, target = check
-                                if target != self._phone_dpr or abs(observed - target) / target <= 0.02:
-                                    continue                       # the window moved on meanwhile, or the page already has the scale it must
-                                applied = target / gain_of(mobile_flag)
-                                _dpr_gain[(self._serial, mobile_flag)] = observed / applied
-                                log.info("📏 [CDP_WATCHER: ÖLÇEK] sayfa dpr=%.3f (hedef %.3f): Chrome override'ı %.2fx çarpıyor, düzeltiliyor",
-                                         observed, target, observed / applied)
-                                await send("Emulation.setDeviceMetricsOverride", scale_params(mobile_flag), session_id)
+                            elif kind == "fit" and session_id:
+                                state = fits_pending.pop(session_id, None)
+                                watchdog = watchdogs.pop(session_id, None)
+                                if watchdog is not None:
+                                    watchdog.cancel()
+                                if state is None:
+                                    continue                   # the timer already let it go
+                                raw = (msg.get("result") or {}).get("result", {}).get("value")
+                                try:
+                                    now = json.loads(raw) if isinstance(raw, str) else None
+                                except ValueError:
+                                    now = None
+                                if isinstance(now, dict) and _layout_fits(now.get("iw"), now.get("sw")) is False:
+                                    await start_reload(session_id, state, f"sayfa ekrana oturmuyor: yüklendiği kipte kaldı "
+                                                                          f"({now.get('iw')} > {now.get('sw')} css px)")
+                                finish(session_id)
                             elif kind == "stale" and session_id:
-                                state = stale_states.pop(session_id, None)
+                                state = stale_states.get(session_id)
                                 raw = (msg.get("result") or {}).get("result", {}).get("value")
                                 try:
                                     now = json.loads(raw) if isinstance(raw, str) else None
@@ -1462,6 +1566,7 @@ class BrowserTabAutoAttachWatcher:
                                 if state is not None and isinstance(now, dict):
                                     why = _width_reload_verdict(state.get("vw"), now.get("vw"), now.get("c"))
                                     if why:
+                                        stale_states.pop(session_id, None)      # one reload; the looks still out are ignored
                                         await start_reload(session_id, state, why)
                             elif kind == "probe" and session_id:
                                 state = probes.pop(session_id, None)
@@ -1519,6 +1624,9 @@ class BrowserTabAutoAttachWatcher:
                                     await decide(session_id, state)
                                     if session_id in probes:
                                         continue               # the measurement is out; the tab is handled when it answers
+                                elif front:
+                                    await check_fit(session_id, state)
+                                    continue                   # handled when the fit check answers (or its timer runs out)
                                 finish(session_id)
                             continue
 
@@ -1571,7 +1679,7 @@ class BrowserTabAutoAttachWatcher:
                             await watch_frames(session_id)
                             if waiting:
                                 # A tab created now: this mode's user agent + scale BEFORE it loads, then let it run.
-                                await put_in_place(session_id, want_mobile, reload=False, verify=False)
+                                await put_in_place(session_id, want_mobile, reload=False)
                                 log.info("🆕 [CDP_WATCHER: YENİ SEKME] %s yüklenmeden %s kimliğiyle başlatıldı",
                                          str(info.get("url", ""))[:50], "telefon" if want_mobile else "masaüstü")
                                 # A browser that rebuilds its activity on the density change re-creates its tabs (new targets at the old
@@ -1609,6 +1717,8 @@ class BrowserTabAutoAttachWatcher:
 
 
 _active_watchers: dict[str, BrowserTabAutoAttachWatcher] = {}
+_closing_watchers: dict[str, asyncio.Task] = {}      # key -> the task of a watcher that was stopped and may still be clearing its overrides
+_HANDOVER_WAIT_S = 1.5        # how long a new watcher waits for the previous one to close (it clears and closes in ~0.2 s)
 
 
 def start_browser_auto_attach_watcher(
@@ -1627,7 +1737,9 @@ def start_browser_auto_attach_watcher(
     ``window_place``). ``resume``: the front tab's state read before the density change (``capture_browser_scroll_state``), for a
     browser that reloads its pages by itself when it changes."""
     stop_browser_auto_attach_watcher(window_id)
-    watcher = BrowserTabAutoAttachWatcher(adb, serial, socket_name, window_id, phone_dpr, mode, place, resume)
+    previous = _closing_watchers.pop(window_id, None)
+    watcher = BrowserTabAutoAttachWatcher(adb, serial, socket_name, window_id, phone_dpr, mode, place, resume,
+                                          after=previous if previous is not None and not previous.done() else None)
     _active_watchers[window_id] = watcher
     watcher.start()
     return watcher
@@ -1638,6 +1750,8 @@ def stop_browser_auto_attach_watcher(window_id: str) -> None:
     watcher = _active_watchers.pop(window_id, None)
     if watcher:
         watcher.stop()
+        if watcher._task is not None and not watcher._task.done():
+            _closing_watchers[window_id] = watcher._task        # the next watcher of this browser waits for it
 
 
 def get_browser_auto_attach_watcher(window_id: str) -> BrowserTabAutoAttachWatcher | None:

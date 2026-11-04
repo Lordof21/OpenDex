@@ -37,13 +37,6 @@ NATIVE = 513 / 160
 KEY = "reload-decision-pkg"
 
 
-@pytest.fixture(autouse=True)
-def _forget_the_learned_scale_gain():
-    cr._dpr_gain.clear()
-    yield
-    cr._dpr_gain.clear()
-
-
 # --------------------------------------------------------------------------------------------------------------- fingerprints
 
 
@@ -280,7 +273,9 @@ class _ReactiveBrowser:
         elif method == "Runtime.evaluate" and sid:
             expression = params.get("expression", "")
             tab = next(t for t in self.tabs.values() if t["session"] == sid)
-            if "window.devicePixelRatio" in expression:
+            if "ok:ok()" in expression:                                         # the fit check (_FIT_JS): its layout against its screen
+                self._answer(mid, tab.get("fit", {"iw": 380, "sw": 380, "ok": True}))
+            elif "window.devicePixelRatio" in expression:
                 if self.dpr_factor is not None:
                     self._answer_number(mid, self.last_scale.get(sid, 1.0) * self.dpr_factor)
             elif "identity-not-applied" in expression:
@@ -666,45 +661,18 @@ async def test_the_phones_own_watcher_is_not_touched_by_a_window_resize():
 
 
 @pytest.mark.asyncio
-async def test_the_scale_chrome_stacks_on_a_desktop_override_is_measured_learned_and_divided_out():
-    """Measured: a 1920 px window at 160 dpi, override 1.0, showed dpr 1.2 (iw 1600): Chrome multiplies a desktop-mode override by 1.2."""
+async def test_a_window_tab_gets_the_windows_real_density_and_is_never_divided_by_chromes_desktop_zoom():
+    """Measured on the phone (2026-11-04, Chrome 155, a 1824 px DeX window at 182 dpi): Chrome shows a desktop-mode tab at 120% — a cold start
+    with no override lays it out 1336 css px wide at dpr 1.365. Dividing the override by 1.2 made the page REPORT dpr 1.1375 but left the
+    layout at 1336 px: it only drew the page at a lower resolution. The override is the window's density, set once, and the page is never asked
+    for its dpr to "correct" it."""
     browser = _ReactiveBrowser({"TAB_A": _tab({"mobile": True})}, probe=_SAME, dpr_factor=1.2)
     try:
-        await _watch(browser, settle_s=0.3, mode="desktop", window_dpr=1.0, place="window")
+        await _watch(browser, settle_s=0.3, mode="desktop", window_dpr=182 / 160, place="window")
         await asyncio.sleep(0.4)
-        scales = [m["deviceScaleFactor"] for m in _metrics(browser, "S_A")]
-        assert scales[0] == 1.0 and scales[-1] == pytest.approx(1.0 / 1.2)            # first as asked, then corrected by what was measured
-        assert cr._dpr_gain[("SERIAL_123", False)] == pytest.approx(1.2)
-        assert len(scales) == 2                                                          # corrected once, no loop
-    finally:
-        await _stop()
-
-
-@pytest.mark.asyncio
-async def test_a_page_that_already_has_the_scale_is_not_corrected():
-    browser = _ReactiveBrowser({"TAB_A": _tab({"mobile": True})}, probe=_SAME, dpr_factor=1.0)
-    try:
-        await _watch(browser, settle_s=0.3, mode="mobile")
-        await asyncio.sleep(0.4)
-        assert [m["deviceScaleFactor"] for m in _metrics(browser, "S_A")] == [NATIVE]
-        assert cr._dpr_gain == {}
-    finally:
-        await _stop()
-
-
-@pytest.mark.asyncio
-async def test_a_learned_gain_is_applied_at_once_to_the_next_watcher_and_to_a_resize():
-    cr._dpr_gain[("SERIAL_123", False)] = 1.2
-    browser = _ReactiveBrowser({"TAB_A": _tab({"mobile": True})}, probe=_SAME, dpr_factor=1.2)
-    try:
-        await _watch(browser, settle_s=0.3, mode="desktop", window_dpr=1.0, place="window")
-        await asyncio.sleep(0.3)
-        assert [m["deviceScaleFactor"] for m in _metrics(browser, "S_A")] == [pytest.approx(1.0 / 1.2)]   # right the first time
-        urlopen, connect = _with_browser(browser)
-        with urlopen, connect:
-            cr.update_window_place(KEY, 1920, 1080, 186)
-            await asyncio.sleep(0.2)
-        assert _metrics(browser, "S_A")[-1]["deviceScaleFactor"] == pytest.approx((186 / 160) / 1.2)
+        assert [m["deviceScaleFactor"] for m in _metrics(browser, "S_A")] == [pytest.approx(182 / 160)]
+        assert browser.evaluates("S_A", "window.devicePixelRatio") == []
+        assert not hasattr(cr, "_dpr_gain")
     finally:
         await _stop()
 
@@ -788,3 +756,135 @@ def test_a_tab_the_app_re_created_gets_its_state_back_only_soon_after_the_watche
     with patch.object(cr.time, "monotonic", return_value=w._started + cr._RESUME_WINDOW_S + 1):
         assert w._resume_for("https://tr.wikipedia.org/wiki/T") is None            # a tab the user opens later is not the app's rebuild
     assert _watcher_with(None)._resume_for("https://tr.wikipedia.org/wiki/T") is None
+
+
+# ---- 2026-11-04: what a page is LOADED as, whether it fits its place, and one watcher at a time ---------------------------------------
+# Measured on the phone (Chrome 155): a desktop page carried to the phone was KEPT (the same HTML under both identities) and stayed 972 css px
+# wide on a 380 px screen; a mobile page brought back into DeX was kept because it read "desktop" once the phone's watcher had let go, and was
+# drawn 2302 px wide at 0.58 zoom. Both were "fixed by a reload" — which the watcher now does itself, and only for such a page.
+
+
+def test_a_page_wider_than_its_screen_is_reloaded_in_a_window_too():
+    same = {"fp": _fp(), "lay": {"iw": 2302, "sw": 2302, "scr": 1604}}
+    reload, why = _probe_verdict(_fp(), same, check_layout=False)
+    assert reload is True and "ekrandan geniş" in why
+    fits = {"fp": _fp(), "lay": {"iw": 1336, "sw": 1336, "scr": 1604}}           # DeX: Chrome's own 120% zoom, narrower than the screen
+    assert _probe_verdict(_fp(), fits, check_layout=False)[0] is False
+    phone = {"fp": _fp(), "lay": {"iw": 382, "sw": 382, "scr": 380}}             # a rounding pixel is not "wider"
+    assert _probe_verdict(_fp(), phone, check_layout=True)[0] is False
+
+
+def test_the_tab_state_says_what_the_document_was_loaded_as_when_it_was_stamped():
+    script = _tab_state_js(True)
+    assert "window.__odxLoadedAs" in script and "loadedAs ? loadedAs === 'mobile'" in script
+    assert "__odxLoadedAs" in cr._LOADED_AS_JS and "navigator.userAgentData" in cr._LOADED_AS_JS
+
+
+@pytest.mark.asyncio
+async def test_every_tab_records_what_its_next_documents_are_loaded_as():
+    browser = _ReactiveBrowser({"TAB_A": _tab({"mobile": True})}, probe=_SAME)
+    try:
+        await _watch(browser, settle_s=0.5)
+        stamps = [m for m in browser.sent if m.get("sessionId") == "S_A" and m.get("method") == "Page.addScriptToEvaluateOnNewDocument"]
+        assert len(stamps) == 1 and stamps[0]["params"]["source"] == cr._LOADED_AS_JS
+    finally:
+        await _stop()
+
+
+@pytest.mark.asyncio
+async def test_a_front_tab_that_reads_as_this_places_site_but_does_not_fit_it_is_reloaded():
+    kept_desktop_page = _tab({"mobile": True}, fit={"iw": 972, "sw": 380, "ok": False})     # it SAYS mobile; its layout says otherwise
+    browser = _ReactiveBrowser({"TAB_A": kept_desktop_page}, probe=_SAME)
+    try:
+        await _watch(browser, settle_s=0.5)                                       # settles once the reload has loaded (not sent here)
+        assert "Page.reload" in browser.methods("S_A")
+        assert len(browser.evaluates("S_A", "ok:ok()")) == 1
+    finally:
+        await _stop()
+
+
+@pytest.mark.asyncio
+async def test_a_front_tab_that_fits_its_place_is_kept_with_everything_in_it():
+    browser = _ReactiveBrowser({"TAB_A": _tab({"mobile": True})}, probe=_SAME)       # fits (the fake's default answer)
+    try:
+        _, settled = await _watch(browser, settle_s=1.0)
+        assert settled is True
+        assert "Page.reload" not in browser.methods("S_A") and "Page.navigate" not in browser.methods("S_A")
+    finally:
+        await _stop()
+
+
+@pytest.mark.asyncio
+async def test_a_fit_check_that_never_answers_does_not_hold_the_settle_for_ever(monkeypatch):
+    monkeypatch.setattr(cr, "_FIT_TIMEOUT_S", 0.2)
+    browser = _ReactiveBrowser({"TAB_A": _tab({"mobile": True}, fit=None)}, probe=_SAME)
+    try:
+        original_send = browser.send
+
+        async def silent_fit(data):
+            msg = json.loads(data)
+            if msg.get("method") == "Runtime.evaluate" and "ok:ok()" in msg.get("params", {}).get("expression", ""):
+                browser.sent.append(msg)                                   # recorded, never answered (a frozen renderer)
+                return
+            await original_send(data)
+
+        browser.send = silent_fit
+        _, settled = await _watch(browser, settle_s=1.0)
+        assert settled is True and "Page.reload" not in browser.methods("S_A")
+    finally:
+        await _stop()
+
+
+@pytest.mark.asyncio
+async def test_a_reload_during_the_move_puts_back_what_the_user_saw_before_the_move():
+    """The state read after the move comes from the page in the OTHER place's layout; what the user saw is the capture made before it."""
+    before_move = {"url": "https://a.example/watch", "scrollY": 2803, "containers": [],
+                   "locator": {"v": 1, "prog": 0.6, "probes": [{"y": 0.0, "f": 0.58, "t": "his contemporary sheykhi wrote verses"}]}}
+    different = {"lay": {"iw": 380, "sw": 380, "scr": 380}, "fp": _fp(h="m.a.example")}
+    browser = _ReactiveBrowser({"TAB_A": _tab({"y": 1241, "l": {"v": 1, "prog": 0.3, "probes": [{"y": 0.0, "f": 0.7, "t": "battle of vienna"}]}})},
+                               probe=different)
+    with patch("urllib.request.urlopen", return_value=MagicMock(read=lambda: _VERSION.encode())), patch("websockets.connect", return_value=browser):
+        watcher = start_browser_auto_attach_watcher(FakeCdpAdb(), "SERIAL_123", "chrome_devtools_remote", KEY, NATIVE, "mobile", "phone",
+                                                    resume=before_move)
+        try:
+            assert await watcher.wait_ready()
+            await asyncio.sleep(0.4)
+            assert "Page.reload" in browser.methods("S_A")
+            browser.queue.put_nowait({"method": "Page.loadEventFired", "sessionId": "S_A", "params": {}})
+            await asyncio.sleep(0.1)
+            restore = browser.evaluates("S_A", "odxRestoreAll(saved)")[-1]["params"]["expression"]
+            assert "his contemporary sheykhi" in restore and '"y": 2803' in restore
+            assert "battle of vienna" not in restore
+        finally:
+            await _stop()
+
+
+@pytest.mark.asyncio
+async def test_a_new_watcher_reads_the_tabs_only_after_the_previous_one_has_let_go():
+    """Measured: the phone's watcher stopped 90 ms AFTER the window's started; the tab was read while the phone's identity was still on it."""
+    browser = _ReactiveBrowser({"TAB_A": _tab({"mobile": True})}, probe=_SAME)
+    try:
+        await _watch(browser, settle_s=0.5)
+        await _watch(browser, settle_s=0.5, mode="desktop", window_dpr=1.0, place="window")
+        top_level = [i for i, m in enumerate(browser.sent) if m.get("method") == "Target.setAutoAttach" and "sessionId" not in m]
+        clears = [i for i, m in enumerate(browser.sent) if m.get("method") == "Emulation.clearDeviceMetricsOverride"]
+        assert len(top_level) == 2 and clears and max(clears) < top_level[1]
+    finally:
+        await _stop()
+
+
+@pytest.mark.asyncio
+async def test_a_resize_resets_the_pages_zoom_with_its_new_scale():
+    browser = _ReactiveBrowser({"TAB_A": _tab({"mobile": True})}, probe=_SAME)
+    try:
+        await _watch(browser, settle_s=0.3, mode="desktop", window_dpr=1.0, place="window")
+        urlopen, connect = _with_browser(browser)
+        with urlopen, connect:
+            cr.update_window_place(KEY, 1920, 1080, 186)
+            await asyncio.sleep(0.1)
+        methods = browser.methods("S_A")
+        last_scale = len(methods) - 1 - methods[::-1].index("Emulation.setDeviceMetricsOverride")
+        assert methods[last_scale + 1] == "Emulation.resetPageScaleFactor"
+    finally:
+        await _stop()
+

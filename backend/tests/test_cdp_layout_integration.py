@@ -535,7 +535,8 @@ async def test_a_new_tab_is_paused_given_the_phones_identity_and_scale_and_only_
         assert fake_ws.sent_messages[0]["method"] == "Target.setAutoAttach"
         assert fake_ws.sent_messages[0]["params"] == {"autoAttach": True, "waitForDebuggerOnStart": True, "flatten": True}
         methods = _session_methods(fake_ws, "S_NEW")
-        assert methods == ["Emulation.setUserAgentOverride", "Emulation.setDeviceMetricsOverride", "Runtime.runIfWaitingForDebugger"]
+        # ... and it records the identity it was loaded with (`__odxLoadedAs`) for the next watcher to read
+        assert methods == ["Emulation.setUserAgentOverride", "Emulation.setDeviceMetricsOverride", "Emulation.resetPageScaleFactor", "Page.enable", "Page.addScriptToEvaluateOnNewDocument", "Runtime.runIfWaitingForDebugger"]
         by_method = {m["method"]: m["params"] for m in fake_ws.sent_messages if m.get("sessionId") == "S_NEW"}
         assert by_method["Emulation.setUserAgentOverride"]["userAgent"].endswith("Mobile Safari/537.36")
         assert by_method["Emulation.setUserAgentOverride"]["userAgentMetadata"]["mobile"] is True
@@ -749,7 +750,7 @@ async def test_in_a_window_a_new_tab_starts_with_the_desktop_agent():
     ]
     fake_ws, _ = await _run_watcher(events, phone_dpr=None, mode="desktop")
     try:
-        assert _session_methods(fake_ws, "S_NEW") == ["Emulation.setUserAgentOverride", "Runtime.runIfWaitingForDebugger"]
+        assert _session_methods(fake_ws, "S_NEW") == ["Emulation.setUserAgentOverride", "Page.enable", "Page.addScriptToEvaluateOnNewDocument", "Runtime.runIfWaitingForDebugger"]
     finally:
         stop_browser_auto_attach_watcher("chrome-pkg")
 
@@ -786,7 +787,7 @@ async def test_without_a_phone_density_only_the_identity_of_new_tabs_is_set():
     ]
     fake_ws, _ = await _run_watcher(events, phone_dpr=None)
     try:
-        assert _session_methods(fake_ws, "S_NEW") == ["Emulation.setUserAgentOverride", "Runtime.runIfWaitingForDebugger"]
+        assert _session_methods(fake_ws, "S_NEW") == ["Emulation.setUserAgentOverride", "Page.enable", "Page.addScriptToEvaluateOnNewDocument", "Runtime.runIfWaitingForDebugger"]
     finally:
         stop_browser_auto_attach_watcher("chrome-pkg")
 
