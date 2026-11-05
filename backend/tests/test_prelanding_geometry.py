@@ -290,6 +290,24 @@ async def test_reclaim_returns_the_display_to_the_window_geometry_before_the_app
     assert _density_writes(daemon) == []  # the resize carried the density back: no forced write on top of it
 
 
+async def test_reclaim_brings_the_window_back_at_the_size_it_was_dragged_to_on_the_phone__its_own_density(tasks):
+    """A plain drag on a handed-off window sends a size but no density: the display comes back at THAT size with the window's
+    density (not the old size from before the move, and not the phone's density)."""
+    phone = Phone()
+    daemon = FakeDaemon(phone)
+    rec, cfg = _reconciler(phone, daemon)
+    session = _landed_session(phone)
+    handoff = _wired(phone, daemon, rec, cfg, session)
+
+    with patch.object(hm_module, "move_task_to_display", AsyncMock()), patch("app.device.android_shell.bring_to_front", AsyncMock()):
+        assert await handoff.reclaim("win-test", Geometry(1500, 900, 0)) is True
+    await rec.wait_idle()
+
+    assert handoff.resize_calls == [("win-test", 1500, 900, 200, False)]
+    assert (session.target_display_w, session.target_display_h, session.dpi) == (1500, 900, 200)
+    assert session.landing is None
+
+
 async def test_reclaim_leaves_a_geometry_the_user_chose_while_the_app_was_on_the_phone(tasks):
     phone = Phone()
     daemon = FakeDaemon(phone)

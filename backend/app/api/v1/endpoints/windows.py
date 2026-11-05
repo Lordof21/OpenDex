@@ -216,8 +216,8 @@ async def reclaim_window(body: ReclaimWindowRequest, ctx: AppContextDep):
     log.info("[Window:RECLAIM 📲] win=%s PC ekranına geri alınıyor", body.window_id)
     bounds = tuple(body.bounds) if body.bounds else None
     requested = None
-    if body.width and body.height and body.dpi:
-        requested = (body.width, body.height, body.dpi)
+    if body.width and body.height:
+        requested = (body.width, body.height, body.dpi or 0)   # no density: the window's own (handoff_manager._restore_window_geometry)
     try:
         ok = await ctx.window_manager.reclaim_window(body.window_id, bounds, requested)
     except RuntimeError as exc:

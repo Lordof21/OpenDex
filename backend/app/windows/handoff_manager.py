@@ -454,6 +454,10 @@ class HandoffManager:
         landing, session.landing = session.landing, None
         if requested is not None:
             window = requested
+            if not window.dpi:
+                # A plain drag carries no density (the display still has the phone's): the window's own comes back with its size —
+                # the same rule as a window resized without a "geri al" payload (_geometry_to_restore).
+                window = Geometry(window.width, window.height, landing.window.dpi if landing is not None else (session.dpi or 0))
             if self._resize_display is None or (session.target_display_w, session.target_display_h, session.dpi) == (
                 window.width, window.height, window.dpi,
             ):
