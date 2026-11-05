@@ -67,6 +67,7 @@ Var olan anahtarın **Türkçe metni değiştiğinde** ekle; çeviri turunda o a
 | 2026-10-28 | 88 anahtar × 18 dil (1584 metin): Telefon Yükü paneli (telemetry.*, 40), arama içi seçenek eşleşmesi (settings.eslesen_secenekler), uygulama çekmecesi (launcher.*, 50); metni değişen 2 telemetry anahtarı yeniden çevrildi; `i18n:todo` boş | Haiku (dil başına bir ajan, paralel; yer tutucular `i18n:apply` ile doğrulandı) |
 | 2026-10-30 | 117 anahtar × 18 dil (2106 metin): Telefon ayarları (footprint.*, 81) + Telefon Yükü akış paneli: telefonun işi / ağın işi / sıkıştırma / grafik seçici (telemetry.akis_*, telemetry.grafik_ikisi_aria, 36); kullanılmayan 7 telemetry anahtarı silindi; `i18n:todo` boş | Haiku (tek ajan, 18 dil sırayla — önbellekten yararlanmak için dil başına ajan açılmadı; yer tutucular `i18n:apply` ile doğrulandı) |
 | 2026-10-30 | 22 anahtar × 18 dil (396 metin): Telefon Yükü paneli etkileşimi — yakınlaştırma, tepe/ortalama, kopyala, seyir, bulgu kanıtı (telemetry.*); kullanılmayan 4 telemetry anahtarı silindi; `i18n:todo` boş | Sonnet 5.5 (elle, dil dil; kullanıcı isteğiyle Haiku durdurulup elle yapıldı; yer tutucular `i18n:apply` ile doğrulandı) |
+| 2026-11-05 | 1 anahtar × 18 dil: Telefon Yükü olay listesi vurgusu (telemetry.olay_odak_ozet); `i18n:todo` boş | Sonnet 5.5 (elle, dil dil; yer tutucular testle doğrulandı) |
 
 ## Notlar
 
