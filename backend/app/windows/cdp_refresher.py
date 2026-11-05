@@ -84,6 +84,8 @@ _FIT_JS = (
 )
 _STALE_LOOKS = 6             # how many times a kept page is looked at for boxes still sized for the old width ...
 _STALE_LOOK_EVERY_S = 0.5    # ... and how far apart (the first 0.7 s after the move, the last ~3.2 s)
+_RECONNECT_BACKOFF_S = (1.0, 2.0, 4.0, 8.0, 15.0, 30.0)   # a watcher that lost its connection (adb link drop, the browser restarted) retries like this ...
+_RECONNECT_GIVE_UP_S = 600.0  # ... and stops trying when it has been out of reach this long (the browser is gone for good)
 _FIT_TIMEOUT_S = 2.5          # no answer to the fit check in this time: the tab is left as it is (a frozen tab must not hold a handoff)
 
 
@@ -1213,6 +1215,8 @@ class BrowserTabAutoAttachWatcher:
         self._page_sessions: set[str] = set()                         # sessions of page tabs only (a worker takes no scale)
         self._frame_sessions: set[str] = set()                        # cross-origin frames (a bot check, an ad, a player): their own targets
         self._apply_scale: Any = None        # set by the running session: an async callable that re-sends the scale to every page tab
+        self._run_connected = False          # the current connection attempt got as far as listening (a real drop, not a failed try)
+        self._connects = 0                   # how many times it has been connected: more than one = it came back after a loss
 
     def _resume_for(self, url: str) -> dict[str, Any] | None:
         """The state to put back into a tab created now at ``url`` — only within ``_RESUME_WINDOW_S`` of the watcher's start (the app's
@@ -1245,7 +1249,7 @@ class BrowserTabAutoAttachWatcher:
             return
         self._stop_event.clear()
         self._task = asyncio.create_task(
-            self._run(), name=f"cdp_tab_watcher_{self._window_id}"
+            self._supervise(), name=f"cdp_tab_watcher_{self._window_id}"
         )
 
     def stop(self) -> None:
@@ -1272,6 +1276,44 @@ class BrowserTabAutoAttachWatcher:
         except asyncio.TimeoutError:
             return False
 
+    async def _supervise(self) -> None:
+        """Keeps the watcher connected for as long as its window lives. Its overrides (identity, scale, the load stamp) belong to ONE DevTools
+        session: when the adb link drops or the browser restarts, the session ends and every tab silently goes back to the browser's own
+        identity and scale — and nothing ever started a watcher again (measured on the phone, 2026-11-05: the task was dead 3 s after
+        `adb kill-server`, still registered, and still dead 12 s after the link was back). It now reconnects with a back-off, and what a
+        reconnect finds is judged like at a start: a document stamped with what it was loaded as is not reloaded for nothing, a tab that
+        lost its scale gets it again, tabs opened meanwhile get the identity they should have had."""
+        since: float | None = None            # when it was last known to be out of reach
+        attempt = 0
+        try:
+            while not self._stop_event.is_set():
+                self._run_connected = False
+                try:
+                    await self._run()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 — a failed attempt (the phone offline, no DevTools socket) is retried
+                    log.debug("[CDP_WATCHER] bağlantı denemesi başarısız: %s", exc)
+                if self._stop_event.is_set():
+                    return
+                now = time.monotonic()
+                if self._run_connected:
+                    since, attempt = now, 0
+                    log.info("🔌 [CDP_WATCHER: BAĞLANTI KOPTU] %s için sekme izleyicisinin bağlantısı koptu — yeniden bağlanılacak",
+                             self._window_id)
+                elif since is None:
+                    since = now
+                if now - since > _RECONNECT_GIVE_UP_S:
+                    log.info("🔌 [CDP_WATCHER: VAZGEÇİLDİ] %s: tarayıcıya %d sn içinde bağlanılamadı", self._window_id, int(_RECONNECT_GIVE_UP_S))
+                    return
+                delay = _RECONNECT_BACKOFF_S[min(attempt, len(_RECONNECT_BACKOFF_S) - 1)]
+                attempt += 1
+                await asyncio.sleep(delay)
+        finally:
+            log.info("🛑 [CDP_WATCHER: DURDURULDU] %s için tab dinleyicisi kapatıldı", self._window_id)
+            if _active_watchers.get(self._window_id) is self:       # one that gave up must not stay registered as if it were alive
+                _active_watchers.pop(self._window_id, None)
+
     async def _run(self) -> None:
         # One watcher at a time per browser. The previous one clears its overrides as it closes; reading the tabs while its identity is
         # still on them (or letting its clean-up land after this one's overrides) left a page in the other place's site (measured 2026-11-04:
@@ -1279,6 +1321,12 @@ class BrowserTabAutoAttachWatcher:
         if self._after is not None and not self._after.done() and self._after.get_loop() is asyncio.get_running_loop():
             with contextlib.suppress(Exception):
                 await asyncio.wait({self._after}, timeout=_HANDOVER_WAIT_S)
+        # A new connection starts with no sessions of the old one (a reconnect after a drop must not count tabs that are gone)
+        self._sessions.clear()
+        self._page_sessions.clear()
+        self._frame_sessions.clear()
+        self._front_seen = False
+        self._front_done = False
         clean_socket = self._socket_name.lstrip("@")
         port = await self._adb.forward(0, f"localabstract:{clean_socket}", serial=self._serial)
         if not port or port <= 0:
@@ -1519,8 +1567,11 @@ class BrowserTabAutoAttachWatcher:
                 # New tabs are paused at creation; the tabs open now are attached one by one.
                 await send("Target.setAutoAttach", {"autoAttach": True, "waitForDebuggerOnStart": True, "flatten": True})
                 await send("Target.getTargets", tag=("targets", None))
+                self._connects += 1
+                self._run_connected = True
                 log.info(
-                    "👁️ [CDP_WATCHER: BAŞLATILDI] %s için sekme izleyicisi devrede (kip=%s, ölçek=%s, kimlik=%s)",
+                    "%s %s için sekme izleyicisi devrede (kip=%s, ölçek=%s, kimlik=%s)",
+                    "👁️ [CDP_WATCHER: BAŞLATILDI]" if self._connects == 1 else "🔌 [CDP_WATCHER: YENİDEN BAĞLANDI]",
                     self._window_id, self._mode, self._phone_dpr, "ayarlı" if ua_params else "olduğu gibi",
                 )
                 self._ready.set()
@@ -1712,7 +1763,6 @@ class BrowserTabAutoAttachWatcher:
         except Exception as exc:
             log.debug("[CDP_WATCHER] Dinleyici sonlandı: %s", exc)
         finally:
-            log.info("🛑 [CDP_WATCHER: DURDURULDU] %s için tab dinleyicisi kapatıldı", self._window_id)
             await _remove_forward_safe(self._adb, self._serial, port)
 
 
@@ -1756,6 +1806,39 @@ def stop_browser_auto_attach_watcher(window_id: str) -> None:
 
 def get_browser_auto_attach_watcher(window_id: str) -> BrowserTabAutoAttachWatcher | None:
     return _active_watchers.get(window_id)
+
+
+async def land_window_watcher_on_phone(package: str, phone_dpr: float, timeout_s: float = 6.0) -> bool:
+    """A browser WINDOW closed and the browser was parked on the phone: its tabs leave the window's identity for the phone's
+    (the phone watcher reloads, in place, a tab the window loaded as a desktop page — position kept). Without it the window
+    watcher stood on, with the window's overrides on tabs that now live on the phone; when the link then dropped (the user's
+    "disconnect" follows a close at once) the overrides vanished with a desktop-sized page still on the phone screen. Returns
+    True when the phone watcher settled. Never raises."""
+    watcher = _active_watchers.get(package)
+    if watcher is None or watcher.place != "window":
+        return False
+    try:
+        landed = start_browser_auto_attach_watcher(
+            watcher._adb, watcher._serial, watcher._socket_name, package, phone_dpr, "mobile", "phone",
+        )
+        if not await landed.wait_ready(3.0):
+            return False
+        return await asyncio.wait_for(landed.wait_settled(timeout_s), timeout_s + 1.0)
+    except Exception as exc:  # noqa: BLE001 — a nicety on top of a close, never a reason to fail it
+        log.debug("[CDP_WATCHER] telefona iniş tamamlanamadı: %s", exc)
+        return False
+
+
+async def release_all_browser_watchers(timeout_s: float = 1.5) -> None:
+    """The session ends (the user's "disconnect"): every watcher is stopped and given a moment to detach cleanly BEFORE the adb link
+    goes, so the tabs keep the phone's own look instead of losing their overrides to a dead link — and nothing is left trying to
+    reconnect for a session nobody asked to keep."""
+    keys = list(_active_watchers)
+    for key in keys:
+        stop_browser_auto_attach_watcher(key)
+    pending = [t for k in keys if (t := _closing_watchers.get(k)) is not None and not t.done()]
+    if pending:
+        await asyncio.wait(pending, timeout=timeout_s)
 
 
 _TABLET_MIN_DP = 600       # a window at least this wide (in dp) gets the desktop site — the width the page lays out in, as CSS media queries see it

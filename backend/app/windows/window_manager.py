@@ -73,7 +73,12 @@ from .transition_gate import TransitionGate
 from .encoder_stress_test import StressTestBusyError, run_encoder_stress_test  # noqa: F401 (StressTestBusyError re-exported: app/api/v1/endpoints/devices.py imports it from here)
 from .app_presence import AppPresenceMonitor
 from .app_restart import AppRestartOutcome, restart_app
-from .cdp_refresher import stop_browser_auto_attach_watcher, update_window_place
+from .cdp_refresher import (
+    land_window_watcher_on_phone,
+    release_all_browser_watchers,
+    stop_browser_auto_attach_watcher,
+    update_window_place,
+)
 from .handoff_manager import HandoffManager
 from .parked_apps import ParkedAppRefresher
 from .mirror_packages import is_internal_package, is_mirror_package
@@ -231,6 +236,7 @@ class WindowManager:
         # Per-window resize safety belt (resize_gate.py): waited out BEFORE `_lock`, so a window sitting out its
         # interval never delays another window. Keys: window_id (display resize), "task:<window_id>" (Workspace task).
         self._resize_gates: dict[str, ResizeGate] = {}
+        self._browser_landings: set[asyncio.Task] = set()   # browsers being put on the phone's tab identity after their window closed
         # Set between quiesce_for_transport_switch and the rebuild: window_id -> the task parked on display 0 (None:
         # none found) for standalone windows, and the Workspace members parked alongside.
         self._switch_windows: dict[str, str | None] | None = None
@@ -990,6 +996,7 @@ class WindowManager:
         # equalize its density to phone physical DPI.
         # Dipnot: Çarpıya (X) basıldığında Stealth DPI eşitlemesi yapılır; bu sayede kullanıcı telefona geçtiğinde veya son uygulamalardan (Recents) girdiğinde DPI şoku ve reflow yaşanmadan sorunsuz bir deneyim sağlanır. Ancak Display 0'a taşıma (display move) yapılmaz; Display 0'a taşıma yalnızca kullanıcı 'Telefona Geç' (Handoff) yaptığında çalışır.
         park_bracket: tuple[Snapshot | None, float | None] = (None, None)
+        phone_dpr: float | None = None
         if self._adb and self._serial:
             with contextlib.suppress(Exception):
                 disp_id = known_display_id(session)
@@ -997,6 +1004,7 @@ class WindowManager:
                 if disp_id and not is_internal_package(pkg):
                     phys_dpi = await android_shell.phone_density(self._adb, self._serial)
                     if phys_dpi:  # unread → the display closes as it is; a guessed density would be worse
+                        phone_dpr = phys_dpi / 160
                         # The app is about to be parked on the phone: note its process BEFORE the density moves, so that
                         # opening it there can tell whether it kept the window's layout (parked_apps.py).
                         window_dpi = session.dpi or self._settings.VIRTUAL_DISPLAY_DPI
@@ -1015,6 +1023,14 @@ class WindowManager:
         kept = False
         if self._serial and self._adb and self._settings.CLOSE_KEEPS_APP and self._closable_task_is_live(session):
             kept = await self._keep_app_on_phone(session, park_bracket)
+            if kept and phone_dpr:
+                # A browser parked on the phone leaves the window's tab identity for the phone's, here and now: the window watcher must
+                # not stand on over tabs that live on the phone (and, if the link goes next, leave a desktop-sized page behind).
+                # In the background — the close itself does not wait for a reload; a disconnect waits for it (settle_browser_landings).
+                spawn_background(
+                    land_window_watcher_on_phone(pkg, phone_dpr), name=f"browser-landing-{window_id}",
+                    owner=self._browser_landings,
+                )
 
         # Stop the session cleanly (the task, if kept, is on Display 0 already: evacuate=None)
         try:
@@ -1046,6 +1062,11 @@ class WindowManager:
         async with self._lock:
             for window_id in list(self._sessions):
                 await self._close_window_locked(window_id)
+            # The session ends: a browser just parked on the phone finishes landing on the phone's tab identity, then every tab
+            # watcher detaches cleanly — all BEFORE the caller drops the adb link (the user's "disconnect" does it next).
+            if self._browser_landings:
+                await asyncio.wait(set(self._browser_landings), timeout=8.0)
+            await release_all_browser_watchers()
             await cancel_and_wait(self._handoff_monitor_task)
             self._handoff_monitor_task = None
             await cancel_and_wait(self._orphan_reaper_task)

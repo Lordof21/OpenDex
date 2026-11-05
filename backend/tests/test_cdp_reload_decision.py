@@ -289,7 +289,10 @@ class _ReactiveBrowser:
             self.queue.put_nowait({"id": mid, "result": {}})
 
     async def recv(self):
-        return json.dumps(await self.queue.get())
+        item = await self.queue.get()
+        if isinstance(item, Exception):                      # the link dropped under it
+            raise item
+        return json.dumps(item)
 
     async def close(self):
         pass
@@ -888,3 +891,148 @@ async def test_a_resize_resets_the_pages_zoom_with_its_new_scale():
     finally:
         await _stop()
 
+
+
+# ---- a dropped connection (adb link, the browser restarted): the watcher comes back by itself ------------------------------------------
+# Measured on the phone (2026-11-05): `adb kill-server` ended the watcher's task within 3 s; it stayed REGISTERED and dead, and 12 s after the
+# link was back nothing had started it again — every tab was left on the browser's own identity and scale.
+
+
+async def _reconnecting_watcher(browsers, **kw):
+    """A watcher over a series of connections: each `websockets.connect` hands out the next browser (the last one stays)."""
+    def next_browser(*_a, **_k):
+        return browsers.pop(0) if len(browsers) > 1 else browsers[0]
+    patches = (patch("urllib.request.urlopen", return_value=MagicMock(read=lambda: _VERSION.encode())),
+               patch("websockets.connect", side_effect=next_browser))
+    for each in patches:
+        each.start()
+    watcher = start_browser_auto_attach_watcher(FakeCdpAdb(), "SERIAL_123", "chrome_devtools_remote", KEY, kw.get("dpr", NATIVE),
+                                                kw.get("mode", "mobile"), kw.get("place", "phone"))
+    return watcher, patches
+
+
+@pytest.mark.asyncio
+async def test_a_watcher_whose_connection_drops_comes_back_and_puts_its_overrides_on_the_tabs_again(monkeypatch):
+    monkeypatch.setattr(cr, "_RECONNECT_BACKOFF_S", (0.05,))
+    first = _ReactiveBrowser({"TAB_A": _tab({"mobile": True})}, probe=_SAME)
+    second = _ReactiveBrowser({"TAB_A": _tab({"mobile": True, "loadedAs": "mobile"})}, probe=_SAME)
+    watcher, patches = await _reconnecting_watcher([first, second])
+    try:
+        assert await watcher.wait_ready()
+        await asyncio.sleep(0.2)
+        assert _metrics(first, "S_A") and watcher._connects == 1
+        first.queue.put_nowait(ConnectionResetError("the adb link dropped"))
+        await asyncio.sleep(0.6)
+        assert watcher._task is not None and not watcher._task.done()                    # alive, not dead-and-registered
+        assert cr.get_browser_auto_attach_watcher(KEY) is watcher and watcher._connects == 2
+        assert _metrics(second, "S_A")[-1] == {"width": 0, "height": 0, "deviceScaleFactor": NATIVE, "mobile": True}    # scale back on the tab
+        assert "Emulation.setUserAgentOverride" in second.methods("S_A")
+        assert "Page.reload" not in second.methods("S_A")                                # nothing is reloaded for a reconnect alone
+    finally:
+        for each in patches:
+            each.stop()
+        await _stop()
+
+
+@pytest.mark.asyncio
+async def test_a_tab_opened_while_the_link_was_down_gets_the_identity_it_should_have_had(monkeypatch):
+    monkeypatch.setattr(cr, "_RECONNECT_BACKOFF_S", (0.05,))
+    first = _ReactiveBrowser({"TAB_A": _tab({"mobile": True})}, probe=_SAME)
+    second = _ReactiveBrowser({"TAB_A": _tab({"mobile": True}), "TAB_B": {"session": "S_B", "url": "https://b.example/", "state": {**_STATE, "mobile": False, "visible": False}}}, probe=_SAME)
+    watcher, patches = await _reconnecting_watcher([first, second])
+    try:
+        assert await watcher.wait_ready()
+        first.queue.put_nowait(ConnectionResetError("the adb link dropped"))
+        await asyncio.sleep(0.6)
+        assert "Emulation.setUserAgentOverride" in second.methods("S_B") and _metrics(second, "S_B")        # the tab that came meanwhile too
+    finally:
+        for each in patches:
+            each.stop()
+        await _stop()
+
+
+@pytest.mark.asyncio
+async def test_a_watcher_that_cannot_reach_the_browser_for_long_gives_up_and_unregisters(monkeypatch):
+    monkeypatch.setattr(cr, "_RECONNECT_BACKOFF_S", (0.05,))
+    monkeypatch.setattr(cr, "_RECONNECT_GIVE_UP_S", 0.3)
+    first = _ReactiveBrowser({"TAB_A": _tab({"mobile": True})}, probe=_SAME)
+    patches = (patch("urllib.request.urlopen", return_value=MagicMock(read=lambda: _VERSION.encode())),
+               patch("websockets.connect", side_effect=[first] + [ConnectionRefusedError("no DevTools socket")] * 100))
+    for each in patches:
+        each.start()
+    try:
+        watcher = start_browser_auto_attach_watcher(FakeCdpAdb(), "SERIAL_123", "chrome_devtools_remote", KEY, NATIVE, "mobile", "phone")
+        assert await watcher.wait_ready()
+        first.queue.put_nowait(ConnectionResetError("the browser is gone"))
+        await asyncio.sleep(1.0)
+        assert watcher._task is not None and watcher._task.done()
+        assert cr.get_browser_auto_attach_watcher(KEY) is None                            # not left registered as if it were alive
+    finally:
+        for each in patches:
+            each.stop()
+        await _stop()
+
+
+@pytest.mark.asyncio
+async def test_stopping_a_watcher_that_is_waiting_to_reconnect_ends_it_at_once(monkeypatch):
+    monkeypatch.setattr(cr, "_RECONNECT_BACKOFF_S", (30.0,))
+    first = _ReactiveBrowser({"TAB_A": _tab({"mobile": True})}, probe=_SAME)
+    watcher, patches = await _reconnecting_watcher([first])
+    try:
+        assert await watcher.wait_ready()
+        first.queue.put_nowait(ConnectionResetError("the adb link dropped"))
+        await asyncio.sleep(0.3)                                                          # now in its 30 s wait
+        assert not watcher._task.done()
+        cr.stop_browser_auto_attach_watcher(KEY)
+        await asyncio.sleep(0.3)
+        assert watcher._task.done()
+    finally:
+        for each in patches:
+            each.stop()
+
+
+# ---- a browser WINDOW closes (or the user disconnects): the tabs end up on the phone's identity, nothing stands on with the window's ------
+
+
+@pytest.mark.asyncio
+async def test_a_window_watcher_is_replaced_by_the_phone_watcher_when_the_browser_is_parked_on_the_phone():
+    browser = _ReactiveBrowser({"TAB_A": _tab({"mobile": False})}, probe=_SAME)
+    watcher, patches = await _reconnecting_watcher([browser], mode="desktop", place="window")
+    try:
+        assert await watcher.wait_ready()
+        assert await cr.land_window_watcher_on_phone(KEY, NATIVE)
+        landed = cr.get_browser_auto_attach_watcher(KEY)
+        assert landed is not watcher and landed.place == "phone" and landed.mode == "mobile"   # the window's identity is gone
+    finally:
+        for each in patches:
+            each.stop()
+        await _stop()
+
+
+@pytest.mark.asyncio
+async def test_a_watcher_that_is_already_the_phones_is_left_alone_by_the_landing():
+    browser = _ReactiveBrowser({"TAB_A": _tab({"mobile": True})}, probe=_SAME)
+    watcher, patches = await _reconnecting_watcher([browser])
+    try:
+        assert await watcher.wait_ready()
+        assert await cr.land_window_watcher_on_phone(KEY, NATIVE) is False
+        assert cr.get_browser_auto_attach_watcher(KEY) is watcher
+    finally:
+        for each in patches:
+            each.stop()
+        await _stop()
+
+
+@pytest.mark.asyncio
+async def test_releasing_every_watcher_detaches_them_and_leaves_none_registered(monkeypatch):
+    monkeypatch.setattr(cr, "_RECONNECT_BACKOFF_S", (0.05,))
+    browser = _ReactiveBrowser({"TAB_A": _tab({"mobile": True})}, probe=_SAME)
+    watcher, patches = await _reconnecting_watcher([browser])
+    try:
+        assert await watcher.wait_ready()
+        await cr.release_all_browser_watchers()
+        assert watcher._task.done() and cr.get_browser_auto_attach_watcher(KEY) is None
+    finally:
+        for each in patches:
+            each.stop()
+        await _stop()
