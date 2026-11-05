@@ -89,6 +89,7 @@ export function TimeChart({
   detail, // (sample) => string | null — one more line in the tooltip (context the series values alone do not give)
   highlightKey = null, // a series to bring forward (legend / table row hover): the others recede
   pinnedT = null, // a moment the user selected (click / Enter): a solid line on every chart
+  markerTone = null, // (marker) => 'selected' | 'related' | 'dim' | 'normal': which event ticks lead the eye (loadModel.eventFocus)
   onPinT,
   spans = [], // [{ from, to, color }] — stretches of time shaded behind the data (e.g. Android held the phone back)
   peak = null, // { t, value } — the highest reading of the range, ringed and labelled
@@ -254,7 +255,10 @@ export function TimeChart({
       const mx = x(m.t);
       const glyph = mx - lastGlyphX >= 14;
       if (glyph) lastGlyphX = mx;
-      markerMarks.push({ m, mx, glyph, near: Boolean(hovered) && Math.abs(m.t - hovered.t) <= intervalS });
+      markerMarks.push({
+        m, mx, glyph, near: Boolean(hovered) && Math.abs(m.t - hovered.t) <= intervalS,
+        tone: markerTone ? markerTone(m) : 'normal',
+      });
     });
   const tooltipLeft = hovered ? x(hovered.t) : 0;
   const flip = tooltipLeft > width * 0.6;
@@ -360,14 +364,24 @@ export function TimeChart({
 
           {/* event markers: a short rug tick at the top for every event; a glyph where there is room; the full-height
               hairline only for the event(s) under the crosshair — dense bursts never wall off the data */}
-          {markerMarks.map(({ m, mx, glyph, near }) => (
+          {markerMarks.map(({ m, mx, glyph, near, tone }) => (
             <g key={`m${m.id}`}>
               {near && (
                 <line x1={mx} x2={mx} y1={M.top} y2={M.top + plotH} stroke="var(--foreground)" strokeOpacity="0.35" strokeWidth="1" />
               )}
-              <line x1={mx} x2={mx} y1={M.top - 7} y2={M.top - 2} stroke="var(--muted-foreground)" strokeOpacity={near ? 1 : 0.6} strokeWidth="1.5" strokeLinecap="round" />
+              {/* a selected event's tick is the tallest and darkest, the same app's other events are dark, other apps' recede */}
+              <line
+                x1={mx} x2={mx} y1={tone === 'selected' ? M.top - 9 : M.top - 7} y2={M.top - 2}
+                stroke={tone === 'selected' || tone === 'related' ? 'var(--foreground)' : 'var(--muted-foreground)'}
+                strokeOpacity={tone === 'dim' ? 0.18 : near || tone === 'selected' || tone === 'related' ? 1 : 0.6}
+                strokeWidth={tone === 'selected' ? 2.5 : 1.5} strokeLinecap="round"
+              />
               {glyph && (
-                <text x={mx} y={M.top - 10} textAnchor="middle" className="fill-muted-foreground text-[9px] font-semibold">
+                <text
+                  x={mx} y={M.top - 10} textAnchor="middle"
+                  className={tone === 'selected' || tone === 'related' ? 'fill-foreground text-[9px] font-semibold' : 'fill-muted-foreground text-[9px] font-semibold'}
+                  opacity={tone === 'dim' ? 0.25 : 1}
+                >
                   {MARKER_KINDS[m.kind]?.glyph || '•'}
                 </text>
               )}

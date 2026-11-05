@@ -276,6 +276,30 @@ export function sampleAt(samples, t, intervalS) {
   return Math.abs(best.t - t) <= Math.max(1, intervalS) ? best : null;
 }
 
+/**
+ * Which events stand out when a moment is selected. Three tones, so the eye can tell them apart:
+ *   'selected' — the event that was clicked (or, for a moment picked on a chart, the events at that moment),
+ *   'related'  — the other events of the same app (other times),
+ *   'dim'      — events of other apps.
+ * Nothing is dimmed when the selected events name no app (a thermal or link event): there is nothing to compare against.
+ * `pickedId`: the event the user clicked in the list; it only counts while its time is still the selected moment.
+ */
+export function eventFocus(markers, pinned, pickedId, intervalS) {
+  const none = { active: false, packages: new Set(), relatedCount: 0, tone: () => 'normal' };
+  if (!pinned) return none;
+  const near = markers.filter((m) => Math.abs(m.t - pinned.t) <= intervalS);
+  const picked = pickedId != null ? near.find((m) => m.id === pickedId) : null;
+  const selected = picked ? [picked] : near;
+  const selectedIds = new Set(selected.map((m) => m.id));
+  const packages = new Set(selected.map((m) => m.package).filter(Boolean));
+  const tone = (m) => {
+    if (selectedIds.has(m.id)) return 'selected';
+    if (packages.size === 0) return 'normal';
+    return packages.has(m.package) ? 'related' : 'dim';
+  };
+  return { active: true, packages, relatedCount: markers.filter((m) => tone(m) === 'related').length, tone };
+}
+
 /** Process rows sorted by a column ("now" | "avg"), busiest first; an unmeasured value sorts last. */
 export function sortProcesses(rows, by) {
   const v = (r) => (Number.isFinite(r[by]) ? r[by] : -1);

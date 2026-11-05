@@ -64,6 +64,7 @@ import {
   powerLabel,
   processTable,
   rangeStats,
+  eventFocus,
   sampleAt,
   slopePerMin,
   sortProcesses,
@@ -383,6 +384,7 @@ export function DeviceLoadPanel(motionProps) {
   const load = useDeviceLoadStore((s) => s.load);
   const [hoverT, setHoverT] = useSharedHover();
   const [pinnedT, setPinnedT] = useState(null);
+  const [pickedId, setPickedId] = useState(null); // the event clicked in the list: it, not every event at that moment, is "the selected one"
   const [zoom, setZoom] = useState(null); // [from, to] — a window the user dragged out on a chart; null = the live range
   const [copied, setCopied] = useState(false);
   const copiedTimer = useRef(null);
@@ -543,13 +545,19 @@ export function DeviceLoadPanel(motionProps) {
   const groupMeta = Object.fromEntries(GROUPS.map((g) => [g.key, g]));
   const momentLabel = pinned ? t('telemetry.o_an_saat', { time: fmtTime(pinned.t) }) : null;
 
+  // A moment picked anywhere but the event list (a chart click, a peak) clears the clicked event: it is no longer "the" selected one.
+  const pinMoment = useCallback((tm) => { setPickedId(null); setPinnedT(tm); }, []);
+  // Selected event / the same app's other events / other apps' events (loadModel.eventFocus) — in the list and as ticks on the charts.
+  const focusOfEvents = useMemo(() => eventFocus(markers, pinned, pickedId, intervalS), [markers, pinned, pickedId, intervalS]);
+
   // Every chart: one crosshair, one selected moment.
   const chartProps = {
     samples, start, end, markers, intervalS, hoverT, onHoverT: setHoverT,
-    pinnedT: pinned ? pinned.t : null, onPinT: setPinnedT, stale: loading && samples.length > 0,
+    pinnedT: pinned ? pinned.t : null, onPinT: pinMoment, stale: loading && samples.length > 0,
+    markerTone: focusOfEvents.active ? focusOfEvents.tone : undefined,
     onBrush: (win) => setZoom(win),
   };
-  const pinPeak = (stats) => stats.maxT != null && setPinnedT(stats.maxT);
+  const pinPeak = (stats) => stats.maxT != null && pinMoment(stats.maxT);
   const fmtSpan = (a, b) => `${fmtClock(a)}–${fmtClock(b)}`;
 
   // The table as text for a spreadsheet (tab-separated): the numbers of the range, newest first.
@@ -682,7 +690,7 @@ export function DeviceLoadPanel(motionProps) {
             </span>
             <button
               type="button"
-              onClick={() => setPinnedT(null)}
+              onClick={() => pinMoment(null)}
               className="ml-auto inline-flex cursor-pointer items-center gap-1 rounded-full bg-background px-2.5 py-1 text-[10px] font-semibold text-foreground ring-1 ring-border/70 transition-colors hover:bg-accent/60"
             >
               <X className="size-3" aria-hidden="true" />
@@ -994,32 +1002,45 @@ export function DeviceLoadPanel(motionProps) {
             <p className="text-[10px] text-muted-foreground">{t('telemetry.bu_aralikta_olay_yok')}</p>
           ) : (
             <>
+              {focusOfEvents.active && focusOfEvents.packages.size > 0 && (
+                <p className="pb-1 text-[9px] leading-[13px] text-muted-foreground" aria-live="polite">
+                  {t('telemetry.olay_odak_ozet', { app: [...focusOfEvents.packages].join(', '), count: focusOfEvents.relatedCount })}
+                </p>
+              )}
               <SmoothHeight ref={eventsBox} changeKey={eventsOpen}>
                 <ol className="space-y-0.5" aria-label={t('telemetry.olaylar')}>
                   {recentMarkers.map((m) => {
-                    const selected = pinned != null && Math.abs(m.t - pinned.t) <= intervalS;
+                    const tone = focusOfEvents.tone(m);
+                    const selected = tone === 'selected';
                     return (
                       <li key={m.id}>
                         <button
                           type="button"
-                          onClick={() => setPinnedT(selected ? null : m.t)}
+                          onClick={() => {
+                            if (selected) pinMoment(null);
+                            else { setPickedId(m.id); setPinnedT(m.t); }
+                          }}
                           onPointerEnter={() => setHoverT(m.t)}
                           onPointerLeave={() => setHoverT(null)}
                           onFocus={() => setHoverT(m.t)}
                           onBlur={() => setHoverT(null)}
                           aria-pressed={selected}
+                          data-tone={tone}
                           title={t('telemetry.bu_ani_sec')}
                           className={cn(
-                            'flex w-full cursor-pointer items-center gap-2 rounded-md px-1 py-0.5 text-left text-[10px] outline-none transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring',
-                            selected && 'bg-accent text-accent-foreground',
+                            'flex w-full cursor-pointer items-center gap-2 rounded-md px-1 py-0.5 text-left text-[10px] outline-none transition-[background-color,opacity,box-shadow] duration-150 hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring',
+                            // The clicked event is solid; the same app's other events are tinted with a bar on the left; other apps recede.
+                            selected && 'bg-accent text-accent-foreground ring-1 ring-foreground/25',
+                            tone === 'related' && 'bg-accent/40 shadow-[inset_2px_0_0_0_var(--foreground)]',
+                            tone === 'dim' && 'opacity-40 hover:opacity-100',
                           )}
                         >
-                          <span className="grid size-5 shrink-0 place-items-center rounded-md bg-background font-semibold text-foreground ring-1 ring-border/60" aria-hidden="true">
+                          <span className={cn('grid size-5 shrink-0 place-items-center rounded-md bg-background font-semibold text-foreground ring-1 ring-border/60', selected && 'ring-foreground/60')} aria-hidden="true">
                             {MARKER_KINDS[m.kind]?.glyph || '•'}
                           </span>
-                          <span className="min-w-0 flex-1 truncate text-foreground">
+                          <span className={cn('min-w-0 flex-1 truncate text-foreground', selected && 'font-semibold')}>
                             {m.label}
-                            {m.package && <span className="text-muted-foreground"> · {m.package}</span>}
+                            {m.package && <span className={tone === 'related' || selected ? 'font-medium text-foreground' : 'text-muted-foreground'}> · {m.package}</span>}
                             {m.detail && <span className="text-muted-foreground"> · {m.detail}</span>}
                           </span>
                           <span className="shrink-0 font-mono tabular-nums text-muted-foreground">{fmtTime(m.t)}</span>

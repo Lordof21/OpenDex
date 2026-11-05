@@ -22,6 +22,7 @@ import {
   downsample,
   encodeInsight,
   encodeLoad,
+  eventFocus,
   findingSection,
   fmt,
   fmtTime,
@@ -615,6 +616,35 @@ describe('DeviceLoadPanel', () => {
     vi.restoreAllMocks();
   });
 
+  it('clicking one event marks IT (bold), the same app\'s other events (tinted) and dims other apps\' events', () => {
+    wide();
+    seed();
+    useDeviceLoadStore.setState({
+      markers: [
+        { id: 1, t: T0 + 20, kind: 'app_restart', label: 'Yeniden başlatıldı', package: 'com.ntech.app' },
+        { id: 2, t: T0 + 100, kind: 'app_restart', label: 'Yeniden başlatıldı', package: 'com.ntech.app' },
+        { id: 3, t: T0 + 160, kind: 'app_restart', label: 'Yeniden başlatıldı', package: 'com.google.android.youtube' },
+        { id: 4, t: T0 + 200, kind: 'thermal', label: 'Isındı' },
+      ],
+    });
+    render(<DeviceLoadPanel />);
+    const list = () => within(screen.getByRole('list', { name: 'Olaylar' }));
+    const tones = () => Object.fromEntries(list().getAllByRole('button').map((b) => [b.textContent.match(/com\.[\w.]+|Isındı/)[0] + b.textContent.match(/\d\d:\d\d:\d\d/)[0], b.dataset.tone]));
+    expect(Object.values(tones()).every((x) => x === 'normal')).toBe(true);        // nothing selected: nothing is dimmed
+
+    fireEvent.click(list().getAllByRole('button').find((b) => b.textContent.includes(fmtTime(T0 + 100))));
+    const byTime = (id) => list().getAllByRole('button').find((b) => b.textContent.includes(fmtTime(id)));
+    expect(byTime(T0 + 100)).toHaveAttribute('data-tone', 'selected');             // the clicked one
+    expect(byTime(T0 + 20)).toHaveAttribute('data-tone', 'related');               // same app, another time
+    expect(byTime(T0 + 160)).toHaveAttribute('data-tone', 'dim');                  // another app
+    expect(byTime(T0 + 200)).toHaveAttribute('data-tone', 'dim');
+    expect(screen.getByText(/Seçili olay koyu/)).toHaveTextContent(/com\.ntech\.app uygulamasının diğer olayları işaretli \(1\)/);   // the one-line explanation names the app
+
+    fireEvent.click(byTime(T0 + 100));                                             // a second click releases it
+    expect(Object.values(tones()).every((x) => x === 'normal')).toBe(true);
+    vi.restoreAllMocks();
+  });
+
   it('a click on a chart selects that moment: a summary bar on top, the process table at that moment, "Back to live"', () => {
     wide();
     const samples = Array.from({ length: 60 }, (_, i) => sample(i, {
@@ -869,5 +899,36 @@ describe('DeviceLoadPanel', () => {
     render(<DeviceLoadTrayButton open={false} onOpen={() => {}} />);
     const button = screen.getByRole('button', { name: /Telefon yükü, 46,0 derece, kritik/ });
     expect(button).toHaveTextContent('46°');
+  });
+});
+
+describe('eventFocus — which events lead the eye when a moment is selected', () => {
+  const markers = [
+    { id: 1, t: 100, package: 'a' }, { id: 2, t: 200, package: 'a' }, { id: 3, t: 300, package: 'b' }, { id: 4, t: 400 },
+  ];
+  it('nothing selected: every event is normal', () => {
+    const f = eventFocus(markers, null, null, 5);
+    expect(f.active).toBe(false);
+    expect(markers.map(f.tone)).toEqual(['normal', 'normal', 'normal', 'normal']);
+  });
+  it('the clicked event is selected, the same app\'s others related, the rest dim', () => {
+    const f = eventFocus(markers, { t: 200 }, 2, 5);
+    expect(markers.map(f.tone)).toEqual(['related', 'selected', 'dim', 'dim']);
+    expect(f.relatedCount).toBe(1);
+    expect([...f.packages]).toEqual(['a']);
+  });
+  it('a moment picked on a chart selects every event at that moment', () => {
+    const f = eventFocus([...markers, { id: 5, t: 201, package: 'b' }], { t: 200 }, null, 5);
+    expect(['selected', 'selected']).toEqual([2, 5].map((id) => f.tone({ id, t: 0, package: 'x' }) === 'dim' ? 'dim' : 'selected'));
+    expect(f.tone(markers[0])).toBe('related');
+    expect(f.tone(markers[2])).toBe('related');                                   // package b is selected too
+  });
+  it('a clicked event whose moment is no longer selected stops counting', () => {
+    const f = eventFocus(markers, { t: 300 }, 1, 5);                             // id 1 is at t=100, not near 300
+    expect(f.tone(markers[2])).toBe('selected');
+  });
+  it('events without an app: the selection stands, nothing is dimmed', () => {
+    const f = eventFocus(markers, { t: 400 }, 4, 5);
+    expect(markers.map(f.tone)).toEqual(['normal', 'normal', 'normal', 'selected']);
   });
 });
