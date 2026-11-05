@@ -15,6 +15,7 @@ from app.api.deps import ActiveSerialDep, AppContextDep, RequireDevice
 from app.device import android_shell, bluetooth, wifi
 from app.schemas import DeviceInfo, DeviceProfile, EncoderStressTestResult, KnownDeviceInfo
 from app.storage import settings_db
+from app.windows import display_limits
 from app.windows.window_manager import StressTestBusyError
 
 log = logging.getLogger(__name__)
@@ -62,7 +63,7 @@ async def get_device_profile(ctx: AppContextDep):
     profile = ctx.window_manager.profile
     if profile is None:
         raise HTTPException(status_code=409, detail="Henüz bağlı bir cihaz yok.")
-    return profile
+    return profile.model_copy(update={"max_display_pixels": display_limits.max_display_pixels()})
 
 
 @router.post("/device/encoder-stress-test", response_model=EncoderStressTestResult)

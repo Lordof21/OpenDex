@@ -31,6 +31,12 @@ def max_display_pixels() -> int:
     return min(PIXELS_4K, max(PIXELS_2_5K, _phone_pixels))
 
 
+def exceeds_limit(width: int, height: int) -> bool:
+    """Would ``cap_display_size`` scale this size down? (A pure question: nothing is logged.)"""
+    width, height = int(width), int(height)
+    return width > 0 and height > 0 and width * height > max_display_pixels()
+
+
 def cap_display_size(width: int, height: int) -> tuple[int, int]:
     """(width, height) scaled down — aspect kept, aligned to SIZE_ALIGN — until it has no more pixels than allowed; a size
     within the ceiling is returned untouched (0 = "keep the size" passes too)."""

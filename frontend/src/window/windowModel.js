@@ -14,6 +14,7 @@ import {
   AUTO_DENSITY_DEFAULT,
   clampDragY,
   normalizeAutoDensity,
+  customResolutionOf,
   targetDisplaySizeForMode,
 } from './windowMath.js';
 import { isMirrorPackage } from './mirrorPackage.js';
@@ -145,7 +146,7 @@ export const RESOLUTION_MODES = Object.freeze([
 ]);
 
 const OVERRIDE_VALIDATORS = {
-  resolution_mode: (v) => RESOLUTION_MODES.includes(v),
+  resolution_mode: (v) => RESOLUTION_MODES.includes(v) || customResolutionOf(v) != null,
   dp_lock_enabled: (v) => typeof v === 'boolean',
 };
 export const WINDOW_OVERRIDE_KEYS = Object.freeze(Object.keys(OVERRIDE_VALIDATORS));

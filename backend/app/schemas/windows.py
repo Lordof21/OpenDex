@@ -68,6 +68,10 @@ class WindowHandle(BaseModel):
     # A resize request that a newer one for the same window overtook while it waited for its turn (windows/resize_gate.py):
     # nothing reached the phone; display_w/h are the window's CURRENT stream. Not an error — the newer request applies.
     superseded: bool = False
+    # The asked size was over the phone's pixel ceiling (windows/display_limits.py) and was scaled down: display_w/h are what the
+    # display really got. The interface tells the user.
+    capped_by_limit: bool = False
+    max_display_pixels: int | None = None
     # The window's video pump ended while this resize waited for its confirmation (server stopped/died): nothing was
     # applied now; the asked size and density become the target of the window's next encoder start. Not an error.
     deferred: bool = False

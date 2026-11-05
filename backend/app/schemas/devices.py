@@ -38,6 +38,9 @@ class DeviceProfile(BaseModel):
     android_api: int
     keyboard_layout_configured: bool = False
     flex_display_supported: bool | None = None
+    # The pixel ceiling of any display OpenDeX asks of this phone (windows/display_limits.py). Filled in by GET /api/device/profile
+    # for the interface (so it can warn BEFORE a size is asked); never stored.
+    max_display_pixels: int | None = None
     encoder_limit_verified: bool = False
     # Eco Workspace freeform launch sırasında `--activity-launch-bounds` CLI
     # flag'inin bu cihazda fiilen işe yarayıp yaramadığı (Karar: Hibrit

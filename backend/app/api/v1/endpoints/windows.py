@@ -12,6 +12,7 @@ from app.api.deps import AppContextDep
 from app.schemas import PackageName, VisibilityState, WindowHandle, WindowState
 from app.device.device_manager import DeviceNotBoundError
 from app.storage import settings_db
+from app.windows import display_limits
 from app.windows.window_manager import EncoderLimitError, UnsupportedDeviceError
 
 log = logging.getLogger(__name__)
@@ -260,9 +261,13 @@ async def resize_window(body: ResizeRequest, ctx: AppContextDep):
             status_code=403, detail="Dinamik çözünürlük ayarı kapalı."
         )
     try:
-        return await ctx.window_manager.resize_window(
+        handle = await ctx.window_manager.resize_window(
             body.window_id, body.w, body.h, dpi=body.dpi, project=project
         )
+        if display_limits.exceeds_limit(body.w, body.h):
+            # The size was scaled down on its way to the phone (display_limits): the reply says so, the interface tells the user.
+            handle = handle.model_copy(update={"capped_by_limit": True, "max_display_pixels": display_limits.max_display_pixels()})
+        return handle
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Pencere bulunamadı.") from exc
     except Exception as exc:

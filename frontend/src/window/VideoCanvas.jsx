@@ -6,7 +6,7 @@
 // handoff-to-phone) are split into window/canvas-overlays/*.jsx — each is
 // purely presentational, taking only the props it actually needs.
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { WindowVideoDecoder } from '../media/videoDecoder.js';
 import {
@@ -39,21 +39,10 @@ import { useSystemStore } from '../state/systemStore.js';
 import { logger } from '../lib/logger.js';
 import { newOpId } from '../lib/opId.js';
 import { resolveFit } from './fitModes.js';
-import { pixelExactBox } from './windowMath.js';
+import { fitRect, morphProgress, morphRect, pixelExactBox } from './windowMath.js';
 import { t } from '../i18n/index.js';
 
 const DRAG_MIN_PX = 8;
-
-const ANCHOR_OBJECT_POSITION_MAP = {
-  se: 'object-left-top',     // Sağ-alttan çekildi -> Üst ve Sol kenarlar sabit (0% 0%)
-  nw: 'object-right-bottom', // Sol-üstten çekildi -> Alt ve Sağ kenarlar sabit (100% 100%)
-  ne: 'object-left-bottom',  // Sağ-üstten çekildi -> Alt ve Sol kenarlar sabit (0% 100%)
-  sw: 'object-right-top',    // Sol-alttan çekildi -> Üst ve Sağ kenarlar sabit (100% 0%)
-  n: 'object-bottom',        // Üstten çekildi -> Alt kenar sabit (50% 100%)
-  s: 'object-top',           // Alttan çekildi -> Üst kenar sabit (50% 0%)
-  e: 'object-left',          // Sağdan çekildi -> Sol kenar sabit (0% 50%)
-  w: 'object-right',         // Soldan çekildi -> Sağ kenar sabit (100% 50%)
-};
 
 const ANCHOR_ORIGIN_MAP = {
   se: 'top left',
@@ -96,12 +85,54 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
 
   const trans = win.pendingResizeTransition;
   const isTransitioning = Boolean(trans?.isAwaitingFirstFrame || trans?.isAnimating || isResizing);
-  const activeObjectPosition = (isTransitioning && trans?.edgeId && ANCHOR_OBJECT_POSITION_MAP[trans.edgeId])
-    ? ANCHOR_OBJECT_POSITION_MAP[trans.edgeId]
-    : 'object-center';
+  // The picture is no longer pinned to the dragged edge while the window resizes (the old object-position anchors made it stick to a
+  // side): the resize morph below stretches it from its old fit to its new one. Only the zoom modes keep an anchored transform origin.
   const activeTransformOrigin = (isTransitioning && trans?.edgeId && ANCHOR_ORIGIN_MAP[trans.edgeId])
     ? ANCHOR_ORIGIN_MAP[trans.edgeId]
     : 'center center';
+
+  // Resize morph: while the window springs to its new size the picture is stretched from how the OLD frame sat in the start box to how the NEW
+  // frame sits in the target box (windowMath.resizeMorph, computed when the first new frame arrived) — instead of being re-fitted into a box
+  // whose shape changes every frame (side bars opening and closing). Zoom modes keep their own transform and are left alone.
+  const morph = trans?.isAnimating && trans.morph && zoomScale === 1 ? trans.morph : null;
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current;
+    const surface = surfaceRef.current;
+    if (!morph || !canvas || !surface) return undefined;
+    const freeze = freezeCanvasRef.current;
+    const start = fitRect(effectiveFitMode, morph.fromBox.w, morph.fromBox.h, morph.fromFrame.w, morph.fromFrame.h);
+    const end = fitRect(effectiveFitMode, morph.toBox.w, morph.toBox.h, morph.toFrame.w, morph.toFrame.h);
+    const place = (el, r) => {
+      el.style.position = 'absolute';
+      el.style.objectFit = 'fill';
+      el.style.left = `${r.l * 100}%`;
+      el.style.top = `${r.t * 100}%`;
+      el.style.width = `${r.w * 100}%`;
+      el.style.height = `${r.h * 100}%`;
+    };
+    const release = (el) => {
+      el.style.position = '';
+      el.style.objectFit = '';
+      el.style.left = '';
+      el.style.top = '';
+      el.style.width = '';
+      el.style.height = '';
+    };
+    if (freeze) place(freeze, start); // the copy of the old frame (a 120 ms cross-fade) stays where the old picture was
+    let raf = null;
+    const tick = () => {
+      const px = morphProgress(surface.clientWidth, morph.fromBox.w, morph.toBox.w);
+      const py = morphProgress(surface.clientHeight, morph.fromBox.h, morph.toBox.h);
+      place(canvas, morphRect(start, end, px, py));
+      raf = requestAnimationFrame(tick);
+    };
+    tick(); // synchronously, before the first paint of the new frame: no flash of the plain fit
+    return () => {
+      if (raf != null) cancelAnimationFrame(raf);
+      release(canvas);
+      if (freeze) release(freeze);
+    };
+  }, [morph, effectiveFitMode]);
 
   const editWindowId = useKeymapStore((s) => s.editWindowId);
   const setEditWindowId = useKeymapStore((s) => s.setEditWindowId);
@@ -379,7 +410,8 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
       x = cx + (x - cx) / zoomScale;
       y = cy + (y - cy) / zoomScale;
     }
-    return mapClickToDeviceCoords(x, y, rect, cw, ch, effectiveFitMode);
+    // During the resize morph the canvas box IS the picture (object-fit: fill), whatever the window's fit mode.
+    return mapClickToDeviceCoords(x, y, rect, cw, ch, morph ? 'object-fill' : effectiveFitMode);
   };
 
   const toDevice = (e) => {
@@ -554,7 +586,7 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
         ref={canvasRef}
         data-window-id={win.id}
         data-pixel-exact={exactBox ? '' : undefined}
-        className={`${exactBox ? 'absolute' : 'relative h-full w-full'} z-10 touch-none select-none cursor-default dex-canvas-sharp ${effectiveFitMode} ${activeObjectPosition}`}
+        className={`${exactBox ? 'absolute' : 'relative h-full w-full'} z-10 touch-none select-none cursor-default dex-canvas-sharp ${effectiveFitMode} object-center`}
         style={{
           ...(exactBox ? { left: exactBox.left, top: exactBox.top, width: exactBox.width, height: exactBox.height } : null),
           imageRendering: sharpeningMode === 'off' ? 'auto' : '-webkit-optimize-contrast',
@@ -585,7 +617,7 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
       <canvas
         ref={freezeCanvasRef}
         aria-hidden="true"
-        className={`pointer-events-none absolute inset-0 z-20 h-full w-full select-none ${effectiveFitMode} ${activeObjectPosition} transition-opacity duration-120 ease-out will-change-[opacity] ${
+        className={`pointer-events-none absolute inset-0 z-20 h-full w-full select-none ${effectiveFitMode} object-center transition-opacity duration-120 ease-out will-change-[opacity] ${
           isFreezeActive ? 'opacity-100' : 'opacity-0'
         }`}
         style={{

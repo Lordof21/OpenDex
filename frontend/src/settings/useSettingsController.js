@@ -88,7 +88,8 @@ export function useSettingsController() {
   const saveGeometry = useCallback((patch) => {
     const saved = save(patch);
     if (smartResize || patch.dynamic_resolution_enabled === true) {
-      saved.then(() => useWindowStore.getState().applyDynamicResolutionToOpenWindows()).catch(() => {});
+      // A resolution MODE the user picked reaches DP-locked windows too (the lock holds the density only).
+      saved.then(() => useWindowStore.getState().applyDynamicResolutionToOpenWindows({ explicitMode: 'resolution_mode' in patch })).catch(() => {});
     }
     return saved;
   }, [save, smartResize]);

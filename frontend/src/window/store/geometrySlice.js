@@ -25,6 +25,7 @@ import {
   getLastResizeBucket,
   isDynamicFitMode,
   isFixedMode,
+  resizeMorph,
   saveAppGeometry,
   setLastResizeBucket,
 } from '../windowMath.js';
@@ -83,6 +84,9 @@ function bookkeepingOf(patch) {
   const { x, y, w, h, maximized, fullscreen, snapZone, ...rest } = patch;
   return rest;
 }
+
+// Windows whose last resize was already reported as over the phone's pixel ceiling: one message per episode, not one per drag step.
+const cappedNotified = new Set();
 
 export function createGeometrySlice(set, get) {
   const patchWindow = (id, patch) =>
@@ -393,7 +397,9 @@ export function createGeometrySlice(set, get) {
       saveAppGeometry(win.package, { overrides: next });
       patchWindow(id, { overrides: next });
       // `apply: false` («Gerçek Çözünürlük» kapalı): tercih kalıcı olur, akış bir sonraki müzakerede uygulanır.
-      if (apply) await get().applyDynamicResolutionToOpenWindows({ onlyId: id });
+      // A resolution MODE chosen by the user reaches the stream even under the DP lock (the lock holds the DENSITY, see
+      // applyDynamicResolutionToOpenWindows `explicitMode`); other overrides keep the lock's rule.
+      if (apply) await get().applyDynamicResolutionToOpenWindows({ onlyId: id, explicitMode: key === 'resolution_mode' });
     },
 
     setWindowFitMode(id, mode) {
@@ -459,6 +465,12 @@ export function createGeometrySlice(set, get) {
                     x: Math.round(to.x ?? 0),
                     y: Math.round(to.y ?? 0),
                     borderRadius: to.borderRadius ?? 7,
+                  },
+                  // The picture area the window has at the START (measured; the chrome around it does not change with the size):
+                  // the resize morph (windowMath.resizeMorph) needs it to know what the old frame was fitted into.
+                  fromCanvas: {
+                    w: Math.max(1, Math.round(win.canvasW || (from.w - FRAME_BORDER_PX))),
+                    h: Math.max(1, Math.round(win.canvasH || (from.h - FRAME_CHROME_H_PX))),
                   },
                   edgeId: options.edgeId || null,
                   expectedW: options.expectedW || to.w,
@@ -555,6 +567,9 @@ export function createGeometrySlice(set, get) {
                   isStabilizing: false,
                   isAnimating: true,
                   timeoutId: null,
+                  // How the picture stretches while the window springs to its new size (VideoCanvas). A forced settle passes the WINDOW box
+                  // as width/height, so the stream's own size is read from the window then.
+                  morph: resizeMorph(trans, force ? { w: win.deviceW, h: win.deviceH } : { w: width, h: height }),
                 },
               }
             : w,
@@ -586,9 +601,12 @@ export function createGeometrySlice(set, get) {
     // settings change.
     //
     // `onlyId`: yalnızca o pencere (odaktaki pencerenin DPI politikası / başlık kipi değişince).
+    // `explicitMode`: kullanıcı çözünürlük KİPİNİ seçti (DeX Ayarları › Çözünürlük Stratejisi): "DP kilidi" yoğunluğu tutar, kipin akışa
+    // ulaşmasını engellemez — kilitli pencere de yeni kipin boyutunu alır (yoğunluğu aynı kalır). Eskiden kilitli pencere atlanır,
+    // kip ancak bir sonraki elle boyutlandırmada etki ederdi.
     // `explicitDpi`: değişiklik kullanıcının AÇIK yoğunluk isteği (DPI politikası). "DP kilidi" yoğunluğu boyutlandırmada
     // sabit tutar; kullanıcının kendi isteğini engellemez — istek uygulanır, kilit yeni değeri tutar.
-    async applyDynamicResolutionToOpenWindows({ onlyId = null, explicitDpi = false } = {}) {
+    async applyDynamicResolutionToOpenWindows({ onlyId = null, explicitDpi = false, explicitMode = false } = {}) {
       const globalSettings = await settingsOrNull();
       if (!globalSettings) return;
       const ctx = viewportCtx();
@@ -647,7 +665,7 @@ export function createGeometrySlice(set, get) {
       // shortcut Grip.commitBucket already relies on for a manual drag.
       const targets = get().windows
         .filter((win) => !onlyId || win.id === onlyId)
-        .filter((win) => !win.minimized && !win.frozen && !win.resolutionLocked && (explicitDpi || !effective(win)?.dp_lock_enabled))
+        .filter((win) => !win.minimized && !win.frozen && !win.resolutionLocked && (explicitDpi || explicitMode || !effective(win)?.dp_lock_enabled))
         .filter((win) => !isMirrorPackage(win.package))
         .map((win) => ({ win, target: targetFor(win) }))
         .filter(({ win, target }) => {
@@ -774,6 +792,10 @@ export function createGeometrySlice(set, get) {
       if (win.handoffToPhone) {
         const pending = { w, h, dpi: dpi ?? null };
         set((state) => ({ windows: state.windows.map((x) => (x.id === id ? { ...x, pendingDisplay: pending } : x)) }));
+        // The drag released a "waiting for the first frame of the new size" transition (ResizeHandle.onPointerUp), and no frame of any
+        // new size is coming — the stream is not resized now. Left open it timed out after 5 s ("cihaz yanıt vermedi" toast) and the
+        // window jumped back to where the drag started. Settle it now: the window takes the box the user dragged it to.
+        get().onNewResolutionFrameArrived(id, { width: w, height: h, force: true });
         return;
       }
 
@@ -801,6 +823,20 @@ export function createGeometrySlice(set, get) {
           logger.trace(`[OpenDeX Resize:DEFERRED] win=${id} req=${w}x${h} — sonraki encoder başlangıcına ertelendi`);
           get().onNewResolutionFrameArrived(id, { width: w, height: h, force: true });
           return;
+        }
+
+        // The asked size was over the phone's pixel ceiling (backend display_limits) and went out smaller: say so, once per episode.
+        if (handle?.capped_by_limit) {
+          if (!cappedNotified.has(id)) {
+            cappedNotified.add(id);
+            useSystemStore.getState().pushToast?.(t('window.cozunurluk_siniri_asildi', {
+              requested: `${w}×${h}`,
+              applied: `${handle.display_w}×${handle.display_h}`,
+              limit: ((handle.max_display_pixels || 0) / 1e6).toFixed(1),
+            }));
+          }
+        } else {
+          cappedNotified.delete(id);
         }
 
         // --- OpenDeX Precision Pixel Audit (React Window vs Phone Virtual Display) ---

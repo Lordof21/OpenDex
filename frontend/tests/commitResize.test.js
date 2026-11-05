@@ -138,6 +138,25 @@ describe('commitResize — a window whose app stands on the phone', () => {
     await useWindowStore.getState().commitResize('w1', 1200, 800, 180, { settings: SETTINGS });
     expect(api.post).not.toHaveBeenCalled();
   });
+
+  it('the resize the drag released is settled at once: the window takes its dragged box, no 5 s timeout toast, no jump back', async () => {
+    vi.useFakeTimers();
+    const pushToast = vi.fn();
+    useSystemStore.setState({ pushToast });
+    useWindowStore.setState({ windows: [{ ...WIN, handoffToPhone: true }], nextZ: 2 });
+    // What ResizeHandle.onPointerUp does before it asks for the commit.
+    useWindowStore.getState().setPendingResizeTransition('w1', { x: 10, y: 10, w: 800, h: 600 }, { x: 40, y: 30, w: 1100, h: 700 });
+    expect(win().pendingResizeTransition.isAwaitingFirstFrame).toBe(true);
+
+    await useWindowStore.getState().commitResize('w1', 1656, 1016, null, { settings: SETTINGS });
+
+    expect(win().pendingResizeTransition.isAwaitingFirstFrame).toBe(false);
+    expect(win()).toMatchObject({ w: 1100, h: 700, x: 40, y: 30 });
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(pushToast).not.toHaveBeenCalled();
+    expect(win()).toMatchObject({ w: 1100, h: 700 });
+    expect(win().pendingDisplay).toEqual({ w: 1656, h: 1016, dpi: null });   // no density: the backend gives the window's own back
+  });
 });
 
 describe('telefondayken boyut değişimi: geri alınca tam piksel gider', () => {

@@ -6610,6 +6610,17 @@
             ],
             "title": "Flex Display Supported"
           },
+          "max_display_pixels": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Display Pixels"
+          },
           "encoder_limit_verified": {
             "type": "boolean",
             "title": "Encoder Limit Verified",
@@ -8512,6 +8523,22 @@
             "type": "boolean",
             "title": "Superseded",
             "default": false
+          },
+          "capped_by_limit": {
+            "type": "boolean",
+            "title": "Capped By Limit",
+            "default": false
+          },
+          "max_display_pixels": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Display Pixels"
           },
           "deferred": {
             "type": "boolean",

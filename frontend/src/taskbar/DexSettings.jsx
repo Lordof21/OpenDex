@@ -31,6 +31,9 @@ import { subviewMotion } from '../ui/motion.js';
 import Button from '../ui/Button.jsx';
 import { SettingsGroup } from '../ui/Card.jsx';
 import { ChoiceChip, ChoiceGrid, IconTile } from '../ui/Choice.jsx';
+import { CustomResolutionRow } from './CustomResolutionRow.jsx';
+import { customResolutionLabel } from '../window/customResolutions.js';
+import { customResolutionOf } from '../window/windowMath.js';
 import { SegmentedControl } from '../ui/SegmentedControl.jsx';
 import { SwitchRow } from '../ui/Switch.jsx';
 import { PanelHeader } from '../ui/Typography.jsx';
@@ -282,7 +285,8 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
   const resolutionLocked = Boolean(activeWindow?.resolutionLocked) || headerLocked;
   // Kilit iki ayrı nedenle olabilir: ayna penceresi (akışı telefonun kendi ekranı) ya da kullanıcının Hub'daki "Ekran kilidi".
   const userDisplayLock = resolutionLocked && !headerLocked;
-  const resolutionLabelOf = (value) => RESOLUTION_OPTIONS.find((item) => item.value === value)?.label ?? value;
+  const resolutionLabelOf = (value) => RESOLUTION_OPTIONS.find((item) => item.value === value)?.label
+    ?? (customResolutionOf(value) ? `${tt('taskbar.ozel_boyut')} ${customResolutionLabel(value)}` : value);
   const windowScopeHint = !activeWindow
     ? tt('taskbar.acik_pencere_yok_bir_pencere_secince')
     : tt('taskbar.calisma_alani_gorevlerinin_yogunlugu');
@@ -305,9 +309,9 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
 
   // Ayar kaydedildikten sonra açık pencerelerin akışı yeniden hesaplanır — her pencere KENDİ DPI politikası ve
   // başlık kipiyle (tek karar noktası: store.applyDynamicResolutionToOpenWindows).
-  const applyGeometryChangeToWindows = () => {
+  const applyGeometryChangeToWindows = (opts) => {
     if (!smartResize) return;
-    useWindowStore.getState().applyDynamicResolutionToOpenWindows().catch(() => {});
+    useWindowStore.getState().applyDynamicResolutionToOpenWindows(opts).catch(() => {});
   };
 
   // DPI burada bilerek saveSettings() ile YAZILMAZ: genel ayar yalnız yeni pencerelerin varsayılanıdır ve
@@ -353,7 +357,7 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
   const handleWindowModeChange = (val) => save({ windowing_mode: val === 'hybrid' ? 'hybrid_auto' : val });
   // Akış yeniden hesabı KAYDEDİLMİŞ ayarı okur → kayıt bittikten sonra.
   const handleResolutionChange = (val) =>
-    updateSettings({ resolution_mode: val }).then(applyGeometryChangeToWindows).catch(() => {});
+    updateSettings({ resolution_mode: val }).then(() => applyGeometryChangeToWindows({ explicitMode: true })).catch(() => {});
 
   // "Bu pencere": yalnız odaktaki pencerenin kendi değeri yazılır; genel ayar ve diğer pencereler değişmez.
   // Kaydedilir her zaman; akış yalnız «Gerçek Çözünürlük» açıkken yeniden müzakere edilir (DPI ile aynı kural).
@@ -577,6 +581,9 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
                       />
                     ))}
                   </div>
+                )}
+                {!resolutionLocked && (
+                  <CustomResolutionRow active={windowResolution} onPick={(mode) => setWindowOverride('resolution_mode', mode)} />
                 )}
               </SettingsGroup>
 

@@ -256,7 +256,47 @@ export function applySubpixelRule(x, y, w, h) {
 }
 
 export function isFixedMode(mode) {
-  return ['fixed_1080p', 'fixed_1200p', 'fixed_1440p', 'fixed_1600p', '1080p', 'tablet', '2k', '2.5k'].includes(mode);
+  return ['fixed_1080p', 'fixed_1200p', 'fixed_1440p', 'fixed_1600p', '1080p', 'tablet', '2k', '2.5k'].includes(mode)
+    || customResolutionOf(mode) != null;
+}
+
+// ── "Özel boyut": a fixed stream size the USER names (a window's own resolution mode, `custom_<w>x<h>`). The mode string carries the
+// size, so it travels through every place that stores or compares a mode (window overrides, streamMode) without a new field.
+export const CUSTOM_RESOLUTION_MIN = 320;
+export const CUSTOM_RESOLUTION_MAX = 8192;
+const CUSTOM_MODE_RE = /^custom_(\d{3,4})x(\d{3,4})$/;
+
+/** `custom_600x700` → { w: 600, h: 700 }; anything else (or a size out of range) → null. */
+export function customResolutionOf(mode) {
+  const m = typeof mode === 'string' ? CUSTOM_MODE_RE.exec(mode) : null;
+  if (!m) return null;
+  const w = Number(m[1]);
+  const h = Number(m[2]);
+  const ok = (n) => n >= CUSTOM_RESOLUTION_MIN && n <= CUSTOM_RESOLUTION_MAX && n % 2 === 0;
+  return ok(w) && ok(h) ? { w, h } : null;
+}
+
+/**
+ * The mode string of a size, made even (the encoder aligns to 2 px). null: not a number, or a side outside
+ * CUSTOM_RESOLUTION_MIN..MAX — never silently clamped: the user is told (customSizeIssue) instead of getting another size.
+ */
+export function customModeOf(w, h) {
+  const fix = (n) => {
+    if (n === '' || n == null) return null;
+    const v = Math.round(Number(n));
+    return Number.isFinite(v) && v > 0 ? v - (v % 2) : null;
+  };
+  const cw = fix(w);
+  const ch = fix(h);
+  const inRange = (n) => n >= CUSTOM_RESOLUTION_MIN && n <= CUSTOM_RESOLUTION_MAX;
+  return cw && ch && inRange(cw) && inRange(ch) ? `custom_${cw}x${ch}` : null;
+}
+
+/** What is wrong with a typed size: 'range' (a side outside the allowed range), or null (empty / fine). */
+export function customSizeIssue(w, h) {
+  const filled = (n) => n !== '' && n != null && Number(n) > 0;
+  if (!filled(w) || !filled(h)) return null;
+  return customModeOf(w, h) ? null : 'range';
 }
 
 export const FIXED_MODE_DEFAULT_DPI = {
@@ -504,6 +544,8 @@ export function targetDisplaySizeForMode(
     target = isPortrait ? { w: 1440, h: 2560 } : { w: 2560, h: 1440 };
   } else if (resolutionMode === 'fixed_1600p' || resolutionMode === '2.5k') {
     target = isPortrait ? { w: 1600, h: 2560 } : { w: 2560, h: 1600 };
+  } else if (customResolutionOf(resolutionMode)) {
+    target = { ...customResolutionOf(resolutionMode) }; // exactly what the user named: no orientation flip
   } else if (isDynamicFitMode(resolutionMode)) {
     let cw = canvasW;
     let ch = canvasH;
@@ -617,6 +659,55 @@ export function awaitingFrameBox(trans) {
   if (!trans?.isAwaitingFirstFrame) return null;
   const box = trans.instant ? trans.to : trans.from;
   return box ? { ...box, ghost: !trans.instant } : null;
+}
+
+/**
+ * Where a frame of `frameW`×`frameH` lies inside a box of `boxW`×`boxH` under a CSS fit mode, as fractions of the box
+ * (`l`/`t` = offset, `w`/`h` = size; cover may exceed 1). The same geometry the browser's object-fit computes — needed in numbers
+ * to stretch a picture from one such rectangle to another (resize morph).
+ */
+export function fitRect(cssMode, boxW, boxH, frameW, frameH) {
+  if (!(boxW > 0 && boxH > 0 && frameW > 0 && frameH > 0) || cssMode === 'object-fill') return { l: 0, t: 0, w: 1, h: 1 };
+  const sx = boxW / frameW;
+  const sy = boxH / frameH;
+  const s = cssMode === 'object-cover' ? Math.max(sx, sy) : Math.min(sx, sy);
+  const w = (frameW * s) / boxW;
+  const h = (frameH * s) / boxH;
+  return { l: (1 - w) / 2, t: (1 - h) / 2, w, h };
+}
+
+/** How far a window's own size is on its way from `from` to `to` (0..~1.15: a spring may overshoot a little). No distance → done. */
+export function morphProgress(current, from, to) {
+  if (!(Math.abs(to - from) >= 1)) return 1;
+  return Math.min(1.15, Math.max(0, (current - from) / (to - from)));
+}
+
+/** The rectangle between two fit rectangles: each AXIS follows its own progress (the window's width and height spring separately). */
+export function morphRect(a, b, px, py) {
+  return {
+    l: a.l + (b.l - a.l) * px,
+    w: a.w + (b.w - a.w) * px,
+    t: a.t + (b.t - a.t) * py,
+    h: a.h + (b.h - a.h) * py,
+  };
+}
+
+/**
+ * The resize morph of a transition (stored in the transition when the first frame of the new size arrives): the picture goes from the old
+ * frame fitted into the START box to the new frame fitted into the TARGET box, stretched on the way — no side bars opening and closing
+ * while the window grows. Fixed-resolution windows morph too: the stream keeps its size, the box around it changes, and the picture goes
+ * from its old fit to its new one (with the old edge-pinning gone). null when there is nothing to morph: an instant resize (the window
+ * is at the target at once), a box that did not change, or sizes that are unknown.
+ */
+export function resizeMorph(trans, toFrame) {
+  if (!trans || trans.instant || !trans.from || !trans.to || !trans.fromCanvas || !toFrame) return null;
+  const fromFrame = { w: trans.from.deviceW, h: trans.from.deviceH };
+  const fromBox = { w: trans.fromCanvas.w, h: trans.fromCanvas.h };
+  const toBox = { w: fromBox.w + (trans.to.w - trans.from.w), h: fromBox.h + (trans.to.h - trans.from.h) };
+  const ok = [fromFrame.w, fromFrame.h, toFrame.w, toFrame.h, fromBox.w, fromBox.h, toBox.w, toBox.h].every((n) => n > 0);
+  if (!ok) return null;
+  if (fromBox.w === toBox.w && fromBox.h === toBox.h) return null;
+  return { fromBox, toBox, fromFrame, toFrame: { w: toFrame.w, h: toFrame.h } };
 }
 
 export function clampDragY(y) {
