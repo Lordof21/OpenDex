@@ -153,7 +153,15 @@ NO_DAEMON = "no_daemon"                  # the RPC lives in the on-device daemon
 NO_TASK = "no_task"                      # no task of the package on the target display
 UNSUPPORTED = "unsupported"              # this Android release has no usable process-restart API (Android 11)
 KEPT_PLAYING = "kept_playing"            # the app holds a media session (playing or paused): its process was NOT killed (see "Media is never cut")
+KEPT_BROWSER = "kept_browser"            # a browser in a window after a resize: its tab watcher scales the tabs, the process (and every page in it) was NOT killed
 INVALID = "invalid_package"
+
+
+def _stands_in_a_window_as_a_browser(package: str) -> bool:
+    """Does a DevTools tab watcher serve ``package`` for a window right now? (cdp_refresher's registry is the one place that knows.)"""
+    from .cdp_refresher import get_browser_auto_attach_watcher
+    watcher = get_browser_auto_attach_watcher(package)
+    return watcher is not None and watcher.place == "window"
 
 
 @dataclass(frozen=True)
@@ -561,6 +569,14 @@ class DensityReconciler:
                          "ek yenileme yapılmadı", package, reason, adapted)
                 return RefreshOutcome(ADAPTED, package, detail=adapted, identity=after)
             hard = escalate
+        if not hard and reason.startswith("resize") and _stands_in_a_window_as_a_browser(package):
+            # A browser in a WINDOW that only changed size: its tab watcher (cdp_refresher) has already given every tab the window's real
+            # scale and identity, and the page's own place is put back after the resize. The restart this ladder ends in kills the process:
+            # every page reloads from the top (measured on the phone, 2026-11-10: a chapter half way down came back at its first page after
+            # 1440 -> 448 px at another density, the restart ran 1.2 s after the resize). Handoffs and reclaims are not touched.
+            log.info("[DENSITY] %s (%s): tarayıcı penceresi — sekmeleri pencerenin ölçeğine DevTools izleyicisi getiriyor, süreç yeniden "
+                     "başlatılmadı (sayfa konumu ve durumu kaybolmasın)", package, reason)
+            return RefreshOutcome(KEPT_BROWSER, package, detail="window_watcher", identity=after)
         daemon = self._daemon_getter()
         connected = daemon is not None and getattr(daemon, "is_connected", False)
 

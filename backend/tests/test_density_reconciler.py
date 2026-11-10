@@ -1111,3 +1111,61 @@ def test_outcome_flags():
     assert Snapshot(PKG, None).identity is None
 
 
+
+
+# ---------------------------------------------------------------- a browser in a window that only changed size
+
+
+class _WindowWatcher:
+    place = "window"
+
+
+async def test_a_browser_window_that_only_changed_size_is_not_process_restarted(tasks, monkeypatch):
+    """Measured on the phone (2026-11-10): a chapter half way down came back at its first page after a resize at another density —
+    the settle restarted Chrome 1.2 s after the resize and every page reloaded from the top. Its tab watcher already gives the tabs
+    the window's scale; the process is left alive."""
+    from app.windows import cdp_refresher
+
+    phone = FakePhone("com.android.chrome")
+    daemon = FakeDaemon(phone)
+    rec = make(phone, daemon)
+    monkeypatch.setattr(cdp_refresher, "get_browser_auto_attach_watcher", lambda pkg: _WindowWatcher() if pkg == "com.android.chrome" else None)
+    before = await rec.snapshot("com.android.chrome")
+
+    outcome = await rec.settle("com.android.chrome", before=before, display="9", reason="resize")
+
+    assert outcome.action == dr.KEPT_BROWSER and outcome.ok and daemon.restarts == []
+    assert (phone.pid, phone.ticks) == (4000, 90_000)
+
+
+@pytest.mark.parametrize("reason, watcher", [
+    ("reclaim", _WindowWatcher()),          # a move between screens keeps its own ladder
+    ("resize", None),                       # no window watcher: not a DevTools browser in a window
+])
+async def test_only_a_resize_of_a_browser_window_skips_the_restart(tasks, monkeypatch, reason, watcher):
+    from app.windows import cdp_refresher
+
+    phone = FakePhone("com.android.chrome")
+    daemon = FakeDaemon(phone)
+    rec = make(phone, daemon)
+    monkeypatch.setattr(cdp_refresher, "get_browser_auto_attach_watcher", lambda pkg: watcher)
+    before = await rec.snapshot("com.android.chrome")
+
+    outcome = await rec.settle("com.android.chrome", before=before, display="9", reason=reason)
+
+    assert outcome.action == RESTARTED and daemon.restarts == ["42"]
+
+
+async def test_the_hard_refresh_policy_still_restarts_a_browser_window(tasks, monkeypatch):
+    from app.windows import cdp_refresher
+
+    phone = FakePhone("com.android.chrome")
+    daemon = FakeDaemon(phone)
+    rec = make(phone, daemon)
+    monkeypatch.setattr(cdp_refresher, "get_browser_auto_attach_watcher", lambda pkg: _WindowWatcher())
+    monkeypatch.setattr(rec, "_policy", AsyncMock(return_value=(True, True)))   # the user asked for it
+    before = await rec.snapshot("com.android.chrome")
+
+    outcome = await rec.settle("com.android.chrome", before=before, display="9", reason="resize")
+
+    assert outcome.action == RESTARTED
