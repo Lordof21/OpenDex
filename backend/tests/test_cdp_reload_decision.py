@@ -285,6 +285,13 @@ class _ReactiveBrowser:
                 state = tab.get("state2") if f"setTimeout(r, {cr._FRONT_WAIT_MS})" in expression else tab["state"]
                 if state is not None:
                     self._answer(mid, state)
+            elif expression == cr._STALE_WIDTH_PROBE_JS:                        # "are you still sized for the old width?": one answer per look
+                looks = tab.get("stale")
+                if looks:
+                    self._answer(mid, looks.pop(0) if len(looks) > 1 else looks[0])
+            elif expression == "document.visibilityState":                      # "are you the tab in front?" (after a resize)
+                if tab.get("front") is not None:
+                    self.queue.put_nowait({"id": mid, "result": {"result": {"value": tab["front"]}}})
         else:
             self.queue.put_nowait({"id": mid, "result": {}})
 
@@ -321,10 +328,11 @@ _STATE = {"mobile": False, "visible": True, "t": None, "playing": None, "y": 0, 
 _SAME = {"lay": {"iw": 380, "sw": 380}, "fp": _fp()}
 
 
-async def _watch(browser, *, settle_s=2.0, mode="mobile", phone_dpr=NATIVE, window_dpr=None, place="phone"):
+async def _watch(browser, *, settle_s=2.0, mode="mobile", phone_dpr=NATIVE, window_dpr=None, place="phone", resume=None):
     with patch("urllib.request.urlopen", return_value=MagicMock(read=lambda: _VERSION.encode())), patch("websockets.connect", return_value=browser):
         watcher = start_browser_auto_attach_watcher(
             FakeCdpAdb(), "SERIAL_123", "chrome_devtools_remote", KEY, phone_dpr if mode == "mobile" and place == "phone" else window_dpr, mode, place,
+            resume,
         )
         assert await watcher.wait_ready()
         settled = await watcher.wait_settled(settle_s)
@@ -718,7 +726,7 @@ def test_resume_state_advances_a_playing_video_by_the_time_that_passed():
     with patch.object(cr.time, "time", return_value=1004.5):
         state = cr._resume_state(saved)
     assert state == {"t": 94.5, "playing": True, "y": 120, "url": "https://m.youtube.com/watch?v=1", "c": [{"p": None, "r": 0.3}],
-                     "l": None, "vw": None}
+                     "l": None, "vw": None, "dirty": False, "media": False, "stale": None}
 
 
 def test_resume_state_leaves_a_paused_video_where_it_was():
@@ -1035,4 +1043,187 @@ async def test_releasing_every_watcher_detaches_them_and_leaves_none_registered(
     finally:
         for each in patches:
             each.stop()
+        await _stop()
+
+
+# ------------------------------------------------------------------ a change of width: the place of before, and sizes kept from the old width
+_FULL = {"vw": 380, "gaps": 0, "over": 0, "slack": []}
+_GAPPED = {"vw": 325, "c": {"vw": 325, "gaps": 0, "over": 0, "slack": [0.856, 0.856]}}      # 102 px under each drawn page: 610 of 713 filled
+_FILLED = {"vw": 325, "c": {"vw": 325, "gaps": 0, "over": 0, "slack": []}}
+_LOCATOR_30 = {"v": 1, "prog": 0.27, "probes": [{"y": 0.0, "f": 0.5, "k": 'div[aria-label="Sayfa 30"]'}]}
+
+
+def _capture(**kw):
+    """What the tab in front showed just before the change (capture_browser_scroll_state): a reader half way down its page 30, 380 css px wide."""
+    return {"url": "https://a.example/watch", "vw": 380, "scrollY": 20648, "isTop": False, "containers": [], "locator": _LOCATOR_30,
+            "stale": _FULL, "dirty": False, "hasMedia": False, "captured_at": cr.time.time(), **kw}
+
+
+def _looks(browser, session="S_A"):
+    return len([m for m in browser.sent if m.get("sessionId") == session and m.get("params", {}).get("expression") == cr._STALE_WIDTH_PROBE_JS])
+
+
+def _restores(browser, session="S_A"):
+    return [m["params"]["expression"] for m in browser.sent if m.get("sessionId") == session and "odxRestoreAll" in m.get("params", {}).get("expression", "")
+            and "__odxRestored=true" in m["params"]["expression"]]
+
+
+@pytest.mark.asyncio
+async def test_a_page_that_is_already_this_places_site_is_still_watched_for_sizes_of_the_old_width():
+    """The phone and a phone-sized window are both the mobile site: nothing about the identity changes, the tab keeps its document — and its
+    reader keeps the heights of the 380 px it had. Measured on the phone (2026-11-10): 102 px of nothing under every page drawn near the
+    reader. Nothing looked at such a tab; now it is looked at, and reloaded to the place of BEFORE the move."""
+    browser = _ReactiveBrowser({"TAB_A": _tab({"mobile": True}, fit={"iw": 325, "sw": 325, "ok": True}, stale=[_GAPPED])}, probe=_SAME)
+    try:
+        await _watch(browser, settle_s=0.3, mode="mobile", window_dpr=1.375, place="window", resume=_capture())
+        assert "Page.reload" not in browser.methods("S_A")                 # not for its identity
+        await asyncio.sleep(1.5)                                             # the looks start 0.7 s after and come 0.5 s apart
+        assert browser.methods("S_A").count("Page.reload") == 1
+        assert _looks(browser) == 2                                          # the second look agreed; none after the reload
+        browser.queue.put_nowait({"method": "Page.loadEventFired", "sessionId": "S_A", "params": {}})
+        await asyncio.sleep(0.1)
+        assert 'Sayfa 30' in _restores(browser)[-1]                          # back to where the reader was before the move
+    finally:
+        await _stop()
+
+
+@pytest.mark.asyncio
+async def test_a_gap_seen_once_while_the_page_was_still_adjusting_itself_is_not_a_reason_to_reload():
+    browser = _ReactiveBrowser({"TAB_A": _tab({"mobile": True}, fit={"iw": 325, "sw": 325, "ok": True},
+                                              stale=[_GAPPED, _FILLED, _GAPPED, _FILLED, _FILLED])}, probe=_SAME)
+    try:
+        await _watch(browser, settle_s=0.3, mode="mobile", window_dpr=1.375, place="window", resume=_capture())
+        await asyncio.sleep(2.9)
+        assert _looks(browser) >= 4 and "Page.reload" not in browser.methods("S_A")
+    finally:
+        await _stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("capture, state", [
+    (_capture(dirty=True), {}),                       # text was typed into the page: a reload would lose it
+    (_capture(hasMedia=True), {}),                    # something is playing
+    (_capture(), {"playing": True}),
+    (None, {}),                                       # no capture: a window that just opened, nothing changed for the page
+])
+async def test_a_page_that_a_reload_would_cost_something_or_that_did_not_move_is_not_watched(capture, state):
+    browser = _ReactiveBrowser({"TAB_A": _tab({"mobile": True, **state}, fit={"iw": 325, "sw": 325, "ok": True}, stale=[_GAPPED])}, probe=_SAME)
+    try:
+        await _watch(browser, settle_s=0.3, mode="mobile", window_dpr=1.375, place="window", resume=capture)
+        await asyncio.sleep(1.0)
+        assert _looks(browser) == 0 and "Page.reload" not in browser.methods("S_A")
+    finally:
+        await _stop()
+
+
+@pytest.mark.asyncio
+async def test_a_window_that_only_changed_size_has_its_front_tab_watched_and_reloaded_to_the_place_of_before():
+    """The watcher lives on (the same size class): the tab in front NOW is found by asking, and it is the capture taken before the resize
+    that says where the reader was and what the boxes were like."""
+    tabs = {
+        "TAB_A": _tab({"mobile": True}, fit={"iw": 380, "sw": 380, "ok": True}, stale=[_GAPPED], front="visible"),
+        "TAB_B": {"session": "S_B", "url": "https://b.example/", "state": {**_STATE, "mobile": True, "visible": False, "url": "https://b.example/"},
+                  "stale": [_GAPPED], "front": "hidden"},
+    }
+    browser = _ReactiveBrowser(tabs, probe=_SAME)
+    try:
+        watcher, _ = await _watch(browser, settle_s=0.3, mode="mobile", window_dpr=513 / 160, place="window")
+        assert _looks(browser) == 0                                          # a window that just opened: nothing to compare with
+        urlopen, connect = _with_browser(browser)
+        with urlopen, connect:
+            cr.update_window_place(KEY, 1040, 2400, 513, resume=_capture())      # 325 css px wide now: still a phone-sized window
+            await asyncio.sleep(1.5)
+        assert cr.get_browser_auto_attach_watcher(KEY) is watcher
+        assert browser.methods("S_A").count("Page.reload") == 1
+        assert _looks(browser, "S_B") == 0 and "Page.reload" not in browser.methods("S_B")     # the tab behind is not woken for it
+        browser.queue.put_nowait({"method": "Page.loadEventFired", "sessionId": "S_A", "params": {}})
+        await asyncio.sleep(0.1)
+        assert 'Sayfa 30' in _restores(browser)[-1]
+    finally:
+        await _stop()
+
+
+@pytest.mark.asyncio
+async def test_a_resize_without_a_capture_asks_no_tab_anything():
+    browser = _ReactiveBrowser({"TAB_A": _tab({"mobile": True}, fit={"iw": 380, "sw": 380, "ok": True}, stale=[_GAPPED], front="visible")}, probe=_SAME)
+    try:
+        await _watch(browser, settle_s=0.3, mode="mobile", window_dpr=513 / 160, place="window")
+        urlopen, connect = _with_browser(browser)
+        with urlopen, connect:
+            cr.update_window_place(KEY, 1040, 2400, 513)
+            await asyncio.sleep(0.3)
+        asked = [m for m in browser.sent if m.get("params", {}).get("expression") == "document.visibilityState"]
+        assert not asked and _looks(browser) == 0
+    finally:
+        await _stop()
+
+
+@pytest.mark.asyncio
+async def test_a_window_that_changes_its_size_class_hands_the_capture_to_the_watcher_that_takes_over():
+    browser = _ReactiveBrowser({"TAB_A": _tab({"mobile": False})}, probe={"lay": {"iw": 380, "sw": 380}, "fp": _fp(h="m.a.example")})
+    try:
+        watcher, _ = await _watch(browser, settle_s=0.3, mode="desktop", window_dpr=1.0, place="window")
+        capture = _capture(vw=1067)
+        urlopen, connect = _with_browser(browser)
+        with urlopen, connect:
+            cr.update_window_place(KEY, 1220, 2712, 513, resume=capture)        # DeX window -> phone-sized window
+            await asyncio.sleep(0.5)
+            now = cr.get_browser_auto_attach_watcher(KEY)
+            assert now is not watcher and now._resume is capture
+            browser.queue.put_nowait({"method": "Page.loadEventFired", "sessionId": "S_A", "params": {}})
+            await asyncio.sleep(0.1)
+        assert 'Sayfa 30' in _restores(browser)[-1]                          # the reload as the mobile site goes back to the reader's place
+    finally:
+        await _stop()
+
+
+@pytest.mark.asyncio
+async def test_a_stopped_watcher_does_not_wait_ten_seconds_for_its_socket_to_close():
+    """Chrome drops the session when it hears the close but does not close the socket back (measured: the default 10 s were spent, and the
+    next watcher of the browser waited its whole hand-over time for the old one, on every handoff, reclaim and change of size class)."""
+    seen = {}
+
+    def connect(url, **kw):
+        seen.update(kw)
+        return _ReactiveBrowser({"TAB_A": _tab()}, probe=_SAME)
+
+    with patch("urllib.request.urlopen", return_value=MagicMock(read=lambda: _VERSION.encode())), patch("websockets.connect", side_effect=connect):
+        watcher = start_browser_auto_attach_watcher(FakeCdpAdb(), "SERIAL_123", "chrome_devtools_remote", KEY, NATIVE)
+        assert await watcher.wait_ready()
+    await _stop()
+    assert seen.get("close_timeout") is not None and seen["close_timeout"] <= 0.5
+
+
+@pytest.mark.asyncio
+async def test_a_page_the_app_reloaded_by_itself_during_the_change_gets_the_place_of_before_back():
+    """The document is younger than the change (the browser reloaded it while the window changed): it stands at its top. The capture
+    of before goes back, once — and no width check runs on a page laid out for the width it has now."""
+    fresh = {"mobile": True, "since": 900}                  # loaded 0.9 s ago, the capture was read 5 s ago
+    browser = _ReactiveBrowser({"TAB_A": _tab(fresh, fit={"iw": 325, "sw": 325, "ok": True}, stale=[_GAPPED])}, probe=_SAME)
+    try:
+        await _watch(browser, settle_s=0.3, mode="mobile", window_dpr=1.375, place="window",
+                     resume=_capture(captured_at=cr.time.time() - 5.0))
+        await asyncio.sleep(0.2)
+        restores = [m["params"]["expression"] for m in browser.sent if m.get("sessionId") == "S_A"
+                    and m.get("params", {}).get("expression", "").startswith("window.__odxRestored ? 0 : ")]
+        assert len(restores) == 1 and "Sayfa 30" in restores[0]
+        await asyncio.sleep(1.0)
+        assert _looks(browser) == 0 and "Page.reload" not in browser.methods("S_A")
+    finally:
+        await _stop()
+
+
+
+@pytest.mark.asyncio
+async def test_a_page_loaded_shortly_before_the_capture_is_the_document_the_user_saw_and_is_watched_for_old_sizes():
+    """Measured on the phone (2026-11-10): a chapter opened a few seconds before the move was taken for one the app had reloaded during
+    it — its width check was skipped and three pages kept 78-103 px of nothing under them."""
+    young = {"mobile": True, "since": 6000}                 # 6 s old, the capture was read 2 s ago: loaded BEFORE it
+    browser = _ReactiveBrowser({"TAB_A": _tab(young, fit={"iw": 325, "sw": 325, "ok": True}, stale=[_GAPPED])}, probe=_SAME)
+    try:
+        await _watch(browser, settle_s=0.3, mode="mobile", window_dpr=1.375, place="window",
+                     resume=_capture(captured_at=cr.time.time() - 2.0))
+        await asyncio.sleep(1.5)
+        assert browser.methods("S_A").count("Page.reload") == 1
+    finally:
         await _stop()

@@ -87,6 +87,7 @@ _STALE_LOOK_EVERY_S = 0.5    # ... and how far apart (the first 0.7 s after the 
 _RECONNECT_BACKOFF_S = (1.0, 2.0, 4.0, 8.0, 15.0, 30.0)   # a watcher that lost its connection (adb link drop, the browser restarted) retries like this ...
 _RECONNECT_GIVE_UP_S = 600.0  # ... and stops trying when it has been out of reach this long (the browser is gone for good)
 _FIT_TIMEOUT_S = 2.5          # no answer to the fit check in this time: the tab is left as it is (a frozen tab must not hold a handoff)
+_WATCHER_CLOSE_TIMEOUT_S = 0.3   # how long a stopped watcher waits for its socket to close (see BrowserTabAutoAttachWatcher._run)
 
 
 def _layout_fits(inner: Any, screen: Any) -> bool | None:
@@ -217,7 +218,9 @@ const odxRestoreAll = async (saved) => {
       // pixel offset is the last resort, for a page the locator could not read (or that has nothing resolvable yet).
       const placed = saved.l ? odxApplyLocator(saved.l) : null;
       if (saved.y && !placed && Math.abs(window.scrollY - saved.y) > 4) window.scrollTo({ left: 0, top: saved.y, behavior: 'instant' });
-      if (!want && !saved.y) break;
+      // nothing to hold: no box, no place by name, the window at its top. (A page that scrolls a box of its own has `y` 0 at any place — its
+      // locator is what says where it was.)
+      if (!want && !saved.y && !saved.l) break;
       const sig = odxScrollers().map((el) => el.scrollHeight).join(',') + '|' + document.documentElement.scrollHeight;
       stable = (applied >= want && sig === last) ? stable + 1 : 0;
       last = sig;
@@ -262,8 +265,36 @@ const odxFingerprint = async () => {
 };
 """
 
-# helpers (paths, scrollers) | the locator (cdp_locator.py) | restore / fingerprint — one library, one place for each concern
-_SCROLL_LIB_JS = _PAGE_HELPERS_JS + LOCATOR_JS + _PAGE_RESTORE_JS
+# Sizes a page's own script wrote in px for the width the page had then (see `_width_reload_verdict` / `_narrowed_verdict` for what they mean).
+# `gaps` / `over`: the coarse symptoms, certain by themselves. `slack`: every px-sized box that its content does not fill, as how much of it
+# is filled (0..1) — small ones too; what they mean is decided against the same read taken BEFORE the width changed.
+_STALE_FN_JS = r"""
+const odxStale = () => {
+  let gaps = 0, over = 0;
+  const slack = [];
+  const vw = innerWidth;
+  const els = document.querySelectorAll('[style*="height"], [style*="width"]');
+  for (let i = 0; i < els.length && i < 4000; i++) {
+    const el = els[i], st = el.style, r = el.getBoundingClientRect();
+    const px = (v) => (v && /px$/.test(v) ? parseFloat(v) : 0);
+    if (r.height > 0 && (px(st.minHeight) >= 100 || px(st.height) >= 100)) {
+      let bottom = -1;
+      for (const c of el.children) { const cr = c.getBoundingClientRect(); if (cr.height > 0) bottom = Math.max(bottom, cr.bottom); }
+      // content that is not laid out (content-visibility: auto, off screen) says nothing: only boxes that have content count
+      if (bottom >= 0) {
+        const content = bottom - r.top, room = r.height - content;
+        if (px(st.minHeight) >= 200 && content < r.height * 0.7 && room > 120) gaps++;
+        if (room > 8 && room > r.height * 0.01 && slack.length < 60) slack.push(+(content / r.height).toFixed(3));
+      }
+    }
+    if (/px$/.test(st.width) && r.right > vw + 2 && r.width > vw * 0.4) over++;
+  }
+  return { vw, gaps, over, slack };
+};
+"""
+
+# helpers (paths, scrollers) | the locator (cdp_locator.py) | restore / fingerprint | stale sizes — one library, one place for each concern
+_SCROLL_LIB_JS = _PAGE_HELPERS_JS + LOCATOR_JS + _PAGE_RESTORE_JS + _STALE_FN_JS
 
 
 def _variants_differ(a: Any, b: Any) -> tuple[bool | None, str]:
@@ -384,9 +415,12 @@ def _probe_js(want_mobile: bool) -> str:
 }})()"""
 
 
-def _build_nudge_script(saved_scroll: dict[str, Any] | None) -> str:
+def _build_nudge_script(saved_scroll: dict[str, Any] | None, *, blur: bool = True) -> str:
     """The in-place nudge after a display / density / width change: the page is told its viewport changed (at every phase of Android's
-    settle window) and, unless it was just loaded, scrolled back to where the user was — by the LOCATOR (cdp_locator.py), pixels last."""
+    settle window) and, unless it was just loaded, scrolled back to where the user was — by the LOCATOR (cdp_locator.py), pixels last.
+    The place is then HELD until the page's layout has been still (a page draws itself again a moment after it hears its new width) and
+    let go at the user's first touch. ``blur``: the focused field is left (a move to another screen: the keyboard's ghost goes with it);
+    False for a window that only changed size — its user may be typing in it."""
     saved_is_top = "null"
     saved_x = "null"
     saved_y = "null"
@@ -445,9 +479,16 @@ def _build_nudge_script(saved_scroll: dict[str, Any] | None) -> str:
         }}
 
         // 1b. Dismiss stale active input focus to release soft keyboard (IME) ghost layers
-        if (document.activeElement && document.activeElement !== document.body && typeof document.activeElement.blur === 'function') {{
+        if ({'true' if blur else 'false'} && document.activeElement && document.activeElement !== document.body && typeof document.activeElement.blur === 'function') {{
             try {{ document.activeElement.blur(); }} catch (e) {{}}
         }}
+
+        // The user's own scroll wins: from their first touch the place is no longer put back (the page is still told about its viewport).
+        let touched = false;
+        const stop = () => {{ touched = true; }};
+        const inputs = ['wheel', 'touchstart', 'pointerdown', 'keydown'];
+        const listens = typeof addEventListener === 'function';
+        if (listens) inputs.forEach((e) => addEventListener(e, stop, {{ capture: true, passive: true }}));
 
         // 2. Back to the top when it was there; else to what the user was looking at (the locator), pixels only when it cannot be read
         const lockScroll = () => {{
@@ -456,12 +497,17 @@ def _build_nudge_script(saved_scroll: dict[str, Any] | None) -> str:
                 window.dispatchEvent(new Event('orientationchange'));
                 return;
             }}
-            if (isTop) {{
-                window.scrollTo({{ left: 0, top: 0, behavior: 'instant' }});
-            }} else if (!(savedLocator && odxApplyLocator(savedLocator))) {{
-                window.scrollTo({{ left: targetX, top: targetY, behavior: 'instant' }});
+            if (!touched) {{
+                // The boxes inside the page first (by how far down each was), then the place itself: the locator moves whatever scrolls
+                // what the user was looking at — the window, or the box a page scrolls instead of it — and has the last word there.
+                if (savedContainers.length) odxApplyOnce({{ c: savedContainers }});
+                if (isTop) {{
+                    window.scrollTo({{ left: 0, top: 0, behavior: 'instant' }});
+                    try {{ const main = odxMain(); if (main) odxScrollTo(main, 0); }} catch (e) {{}}
+                }} else if (!(savedLocator && odxApplyLocator(savedLocator))) {{
+                    window.scrollTo({{ left: targetX, top: targetY, behavior: 'instant' }});
+                }}
             }}
-            if (savedContainers.length) odxApplyOnce({{ c: savedContainers }});
             window.dispatchEvent(new Event('resize'));
             window.dispatchEvent(new Event('orientationchange'));
         }};
@@ -475,6 +521,13 @@ def _build_nudge_script(saved_scroll: dict[str, Any] | None) -> str:
             lockScroll();
             if (root) root.style.overflowAnchor = prevRootAnchor;
             if (body) body.style.overflowAnchor = prevBodyAnchor;
+            if (listens) inputs.forEach((e) => removeEventListener(e, stop, true));
+            // 4. A page may lay itself out again well after the last phase (measured 2026-11-10: a reader draws its pages for the new width
+            // 350 ms after it hears of it, and every page above the reader then changes height). The place is held the way a reload's
+            // restore holds it: put back until the layout has been still, ended at once by the user's touch.
+            if (!fresh && !isTop && !touched && (savedLocator || savedContainers.length)) {{
+                odxRestoreAll({{ c: savedContainers, l: savedLocator, y: savedY }});
+            }}
         }}, 600);
 
         return "OK";
@@ -530,11 +583,6 @@ async def _probe_tab_state(port: int, page: dict[str, Any]) -> bool | None:
         return None
 
 
-async def _probe_tab_visible(port: int, page: dict[str, Any]) -> dict[str, Any] | None:
-    """The page if its document is visible and focused-capable right now, else None. One short websocket, never raises."""
-    return page if await _probe_tab_state(port, page) else None
-
-
 async def _web_pages(port: int) -> list[dict[str, Any]]:
     """The open http(s) page tabs of the browser behind the forwarded DevTools ``port`` (raises on a dead socket)."""
     loop = asyncio.get_running_loop()
@@ -551,8 +599,9 @@ async def _find_active_page_target(port: int, valid_pages: list[dict[str, Any]],
 
     With many tabs open (a browser can hold 16+, most of them frozen or discarded and never answering) the tabs are
     probed IN PARALLEL under one overall budget: the old one-by-one probe cost up to ~0.4 s per unresponsive tab, i.e.
-    several seconds of a handoff that holds the window lifecycle lock. The first visible tab (in browser order) wins;
-    no answer in time falls back to the first page."""
+    several seconds of a handoff that holds the window lifecycle lock. The first tab that says it is visible wins AT ONCE —
+    the frozen ones are not waited for (they cost the whole budget on every capture: 0.4 s with one frozen tab open, and a
+    capture now also runs before every resize of a browser window); no answer in time falls back to the first page."""
     if len(valid_pages) <= 1:
         return valid_pages[0] if valid_pages else {}
 
@@ -564,15 +613,18 @@ async def _find_active_page_target(port: int, valid_pages: list[dict[str, Any]],
     for round_no in range(3):
         probes = [asyncio.ensure_future(_probe_tab_state(port, page)) for page in candidates]
         try:
-            await asyncio.wait(probes, timeout=max(0.05, deadline - loop.time()))
-            answered_hidden: list[dict[str, Any]] = []
-            for page, probe in zip(candidates, probes):
-                if not probe.done() or probe.cancelled() or probe.exception() is not None:
-                    continue
-                if probe.result():
-                    return page
-                if probe.result() is False:
-                    answered_hidden.append(page)
+            def answer(probe: asyncio.Future) -> bool | None:
+                return probe.result() if probe.done() and not probe.cancelled() and probe.exception() is None else None
+
+            waiting = set(probes)
+            while waiting:
+                done, waiting = await asyncio.wait(waiting, timeout=max(0.05, deadline - loop.time()), return_when=asyncio.FIRST_COMPLETED)
+                if not done:
+                    break                  # the budget is spent
+                visible = [page for page, probe in zip(candidates, probes) if probe in done and answer(probe)]
+                if visible:
+                    return visible[0]      # in browser order among the ones that answered together
+            answered_hidden = [page for page, probe in zip(candidates, probes) if answer(probe) is False]
         finally:
             for probe in probes:
                 if not probe.done():
@@ -612,12 +664,15 @@ async def capture_browser_scroll_state(
                     return None
 
                 ws_url = re.sub(r"ws://[^/]+/", f"ws://127.0.0.1:{port}/", target_ws_raw)
-                async with websockets.connect(ws_url, close_timeout=0.3) as ws:
+                # The short open timeout of every tab socket (websockets' own is 10 s): when no tab said "visible" the target is the first of
+                # the list, which may be a frozen one — and this runs at the start of a handoff, under the window lifecycle lock.
+                async with websockets.connect(ws_url, open_timeout=_TAB_OPEN_TIMEOUT_S, close_timeout=0.3) as ws:
                     capture_js = (
                         "(() => {"
                         "  const scrollY = window.scrollY;"
                         "  const scrollX = window.scrollX;"
-                        "  const isTop = (scrollY <= 2);"
+                        # at its top: by what the page scrolls with — a page that scrolls a box of its own has the window at 0 at any place
+                        "  const isTop = (odxPos(odxMain()) <= 2);"
                         "  const vid = Array.from(document.querySelectorAll('video')).find(x => x.duration > 0 && isFinite(x.duration));"
                         "  return JSON.stringify({"
                         "    t: vid ? vid.currentTime : null, "
@@ -631,6 +686,7 @@ async def capture_browser_scroll_state(
                         "    locator: odxLocator(), "
                         "    vw: window.innerWidth, "
                         "    dirty: odxTyped(), "
+                        "    stale: odxStale(), "       # the px-sized boxes as they are BEFORE the change (see _narrowed_verdict)
                         "    hasMedia: Array.from(document.querySelectorAll('video, audio')).some(el => !el.paused && !el.ended && el.readyState > 2)"
                         "  });"
                         "})()"
@@ -657,6 +713,7 @@ async def refresh_browser_layout_inplace(
     *,
     saved_scroll: dict[str, Any] | None = None,
     timeout_s: float = 2.5,
+    moved: bool = True,
 ) -> bool:
     """Connects to the browser's CDP abstract socket, flushes stale cache, and triggers layout re-evaluation.
 
@@ -664,6 +721,9 @@ async def refresh_browser_layout_inplace(
     Dynamically identifies the active foreground tab across multi-tab sessions,
     instantly enforces scale factor 1.0 (eliminates 1.55x zoom oscillation), clears cache,
     and stabilizes scroll position across the entire transition window.
+
+    ``moved``: the browser went to another screen (a handoff, a reclaim). False for a window that only changed size: the field
+    its user may be typing in keeps its focus, and the background tabs (which the tab watcher scales anyway) are left asleep.
 
     Returns True if successfully delivered to the active page tab, False otherwise.
     Never raises; cleans up adb port forward unconditionally.
@@ -687,7 +747,7 @@ async def refresh_browser_layout_inplace(
 
                 # Normalize ws URL to ephemeral localhost port
                 ws_url = re.sub(r"ws://[^/]+/", f"ws://127.0.0.1:{port}/", target_ws_raw)
-                nudge_script = _build_nudge_script(saved_scroll)
+                nudge_script = _build_nudge_script(saved_scroll, blur=moved)
 
                 # Connect via WebSocket to the active visible tab
                 remaining = max(0.5, deadline - loop.time())
@@ -743,19 +803,15 @@ async def refresh_browser_layout_inplace(
                                 log.info("♻️ [CDP_REFRESH] Uygulama sayfayı kendisi yeniden yükledi — video (%s sn) ve kaydırma geri konuyor",
                                          resume.get("t"))
 
-                # 3c. The window is another width than the page was laid out for, and the page shows it (sizes it measured once, in script,
-                # at the old width): reloaded, the content point it was on goes back. Background: the load takes seconds.
-                if resume is not None:
-                    with contextlib.suppress(Exception):
-                        reason = await _stale_width_reason(ws, saved_scroll)
-                        if reason and _same_page(str(resume["url"]), str(target_page.get("url", ""))):
-                            spawn_background(_reload_and_restore(adb, serial, socket_name, resume, reason), "cdp-width-reload")
+                    # (A page that keeps sizes it measured at the OLD width is not judged here: the symptom shows a moment after the
+                    # change and must be looked for more than once — the tab watcher does that over its own session and reloads the
+                    # page to where the user was, see BrowserTabAutoAttachWatcher / _narrowed_verdict. One place decides, not two.)
 
                 # 4. Scale factor 1.0 on the background tabs: best effort, in parallel, under one overall budget — a frozen tab
                 # must never hold the caller (a handoff, under the window lifecycle lock) for seconds.
                 background = [
                     page for page in pages
-                    if page.get("id") != target_page.get("id") and page.get("webSocketDebuggerUrl")
+                    if moved and page.get("id") != target_page.get("id") and page.get("webSocketDebuggerUrl")
                 ]
                 await _reset_scale_on_background_tabs(port, background)
 
@@ -983,7 +1039,9 @@ def _resume_state(saved: dict[str, Any] | None) -> dict[str, Any] | None:
         t = t + max(0.0, time.time() - stamp)
     containers = saved.get("containers")
     return {"t": t, "playing": saved.get("playing"), "y": saved.get("scrollY"), "url": saved["url"],
-            "c": containers if isinstance(containers, list) else [], "l": clean_locator(saved.get("locator")), "vw": saved.get("vw")}
+            "c": containers if isinstance(containers, list) else [], "l": clean_locator(saved.get("locator")), "vw": saved.get("vw"),
+            # what a reload must not cost (text typed in, something playing) and the px-sized boxes as they were at the old width
+            "dirty": bool(saved.get("dirty")), "media": bool(saved.get("hasMedia")), "stale": saved.get("stale")}
 
 
 # A page that sized itself in script at ITS load width keeps those sizes when the window is another width: a reader that put
@@ -991,30 +1049,18 @@ def _resume_state(saved: dict[str, Any] | None) -> dict[str, Any] | None:
 # in-place nudge (a `resize` event) cannot make such a page measure again; a reload can. Only when the width really changed and the page
 # shows the symptom — a responsive site that handles the resize itself is never reloaded for it.
 _WIDTH_RELOAD_RATIO = 1.3
-_STALE_LAYOUT_JS = r"""(() => {
-  let gaps = 0, over = 0;
-  const vw = innerWidth;
-  const els = document.querySelectorAll('[style*="min-height"], [style*="width"]');
-  for (let i = 0; i < els.length && i < 4000; i++) {
-    const el = els[i], st = el.style, r = el.getBoundingClientRect();
-    if (st.minHeight && /px$/.test(st.minHeight) && parseFloat(st.minHeight) >= 200 && r.height > 0) {
-      let bottom = -1;
-      for (const c of el.children) { const cr = c.getBoundingClientRect(); if (cr.height > 0) bottom = Math.max(bottom, cr.bottom); }
-      // content that is not laid out (content-visibility: auto, off screen) says nothing: only boxes that have content count
-      if (bottom >= 0 && (bottom - r.top) < r.height * 0.7 && r.height - (bottom - r.top) > 120) gaps++;
-    }
-    if (/px$/.test(st.width) && r.right > vw + 2 && r.width > vw * 0.4) over++;
-  }
-  return JSON.stringify({ vw, gaps, over });
-})()"""
-
+_NARROWER = 0.98              # a width at most this share of the old one counts as narrower (not a rounding of the same width)
+_NARROW_LOOKS = 2             # a small gap must be seen this many looks in a row (a page that is still adjusting itself is not stale)
+_ALIKE = 0.03                 # two boxes "filled alike": their filled shares this close (see _narrowed_verdict)
+_STALE_LAYOUT_JS = "(() => {" + _STALE_FN_JS + " return JSON.stringify(odxStale()); })()"
 
 # The width the page has NOW and the symptom, read in one go (the tab watcher asks after its scale is in place).
-_STALE_WIDTH_PROBE_JS = "(() => { const c = JSON.parse(" + _STALE_LAYOUT_JS + "); return JSON.stringify({ vw: innerWidth, c }); })()"
+_STALE_WIDTH_PROBE_JS = "(() => {" + _STALE_FN_JS + " return JSON.stringify({ vw: innerWidth, c: odxStale() }); })()"
 
 
 def _width_reload_verdict(before_vw: Any, now_vw: Any, check: Any) -> str | None:
-    """Why a page whose window changed width must be reloaded (a short reason for the log), or None. ``check``: what ``_STALE_LAYOUT_JS`` read."""
+    """Why a page whose window changed width must be reloaded (a short reason for the log), or None. ``check``: what ``_STALE_LAYOUT_JS`` read.
+    The coarse rule: a big change of width and a symptom nobody could take for design (a box a third empty, an element off the screen)."""
     nums = (before_vw, now_vw)
     if not all(isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 for v in nums):
         return None
@@ -1028,55 +1074,40 @@ def _width_reload_verdict(before_vw: Any, now_vw: Any, check: Any) -> str | None
     return None
 
 
-async def _stale_width_reason(ws: Any, saved: dict[str, Any] | None) -> str | None:
-    """After a move that changed the window's width: does the page keep sizes it measured at the old width? Waits (at most ~0.3 s) for the
-    new width to settle, then reads the symptom. None: not reloaded for this (media playing, text typed in, width the same, no symptom)."""
-    if not isinstance(saved, dict) or saved.get("hasMedia") or saved.get("dirty"):
-        return None
-    before = saved.get("vw")
-    if not isinstance(before, (int, float)) or isinstance(before, bool) or before <= 0:
-        return None
-    now: float | None = None
-    for i in range(3):
-        res = await _send_cdp(ws, "Runtime.evaluate", {"expression": "innerWidth", "returnByValue": True}, req_id=140 + i, timeout_s=0.3)
-        value = ((res or {}).get("result") or {}).get("result", {}).get("value")
-        value = float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
-        if value is not None and value == now:
-            break
-        now = value
-        if i < 2:
-            await asyncio.sleep(0.15)
-    if now is None or max(before / now, now / before) < _WIDTH_RELOAD_RATIO:
-        return None
-    res = await _send_cdp(ws, "Runtime.evaluate", {"expression": _STALE_LAYOUT_JS, "returnByValue": True}, req_id=145, timeout_s=0.8)
-    raw = ((res or {}).get("result") or {}).get("result", {}).get("value")
-    check = json.loads(raw) if isinstance(raw, str) else None
-    return _width_reload_verdict(before, now, check)
+def _fills(check: Any) -> list[float]:
+    values = check.get("slack") if isinstance(check, dict) else None
+    return [v for v in values if isinstance(v, (int, float)) and not isinstance(v, bool)] if isinstance(values, list) else []
 
 
-async def _reload_and_restore(adb: "Adb", serial: str, socket_name: str, resume: dict[str, Any], reason: str) -> None:
-    """Reloads the tab in front and puts back the content point the user was on (the state read BEFORE the move). Runs after the handoff
-    has let go of the DevTools lock: the load takes seconds and the handoff must not wait for it. Never raises."""
-    async with _get_cdp_lock(serial):
-        try:
-            async with open_cdp_session(adb, serial, socket_name, timeout_s=2.5) as port:
-                pages = await _web_pages(port)
-                if not pages:
-                    return
-                target = await _find_active_page_target(port, pages, timeout_s=0.4)
-                ws_raw = target.get("webSocketDebuggerUrl")
-                if not ws_raw or not _same_page(str(resume["url"]), str(target.get("url", ""))):
-                    return
-                ws_url = re.sub(r"ws://[^/]+/", f"ws://127.0.0.1:{port}/", ws_raw)
-                async with websockets.connect(ws_url, open_timeout=_TAB_OPEN_TIMEOUT_S, close_timeout=0.4) as ws:
-                    await _send_cdp(ws, "Page.enable", req_id=130, timeout_s=0.3)
-                    nav = await _send_cdp(ws, "Page.reload", {"ignoreCache": False}, req_id=131, timeout_s=1.0)
-                    if not nav or "error" in nav:
-                        return
-                    log.info("🔄 [CDP_REFRESH] Sayfa yeniden yükleniyor (%s) — kaldığı içerik noktasına dönülecek", reason)
-                    await _restore_after_load(ws, resume, timeout_s=8.0)
-        except Exception as exc:  # noqa: BLE001 — a nicety on top of the in-place nudge
-            log.debug("[CDP_REFRESH] Genişlik değişimi yenilemesi atlandı: %s", exc)
+def _narrowed_verdict(before_vw: Any, now_vw: Any, check: Any, before_check: Any) -> str | None:
+    """The fine rule, for what the coarse one cannot see: a gap of 70 or 300 px under a picture after a modest change of width.
+
+    Measured on the phone (2026-11-10, a manga reader): each page box keeps the tallest height it ever measured as an inline `min-height`
+    (its script only lets the value grow), the picture inside is drawn again for the new width — so after the window got NARROWER every
+    page drawn near the reader's place has a strip of nothing under it, old height minus new: 102 px going from 380 to 325 css px. Only
+    pages near the place are drawn, so only they show it; nothing on the page ever takes the height back, a reload does.
+
+    That is a gap a page may also have by design, so it counts only against the same read taken BEFORE the change (``before_check``): the
+    width got narrower, MORE boxes are unfilled than were, and each of the new ones is filled about as far as the narrowing explains (content
+    scales with the width; a box emptier than that is something else). Widening never leaves this trace — content grows past a minimum."""
+    nums = (before_vw, now_vw)
+    if not all(isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 for v in nums):
+        return None
+    if now_vw > before_vw * _NARROWER or not isinstance(check, dict) or not isinstance(before_check, dict):
+        return None
+    scale = now_vw / before_vw
+    unfilled = sorted(f for f in _fills(check) if f >= scale * 0.9)
+    new = len(unfilled) - len(_fills(before_check))
+    # Boxes of one kind shrink by ONE ratio (every page of a reader is drawn for the same new width): at least two new ones filled alike.
+    # A single box, or boxes all filled differently, is a page that lays itself out another way at the new width (measured 2026-11-10: a
+    # home page's mobile layout has one px-sized box its desktop layout has not — it was reloaded for nothing).
+    alike = max((sum(1 for g in unfilled if abs(g - f) <= _ALIKE) for f in unfilled), default=0)
+    if new >= 2 and alike >= 2:
+        return f"{new} kutu eski genişliğin yüksekliğinde kaldı, içeriği kısaldı (genişlik {before_vw:.0f} → {now_vw:.0f})"
+    over = int(check.get("over") or 0) - int(before_check.get("over") or 0)
+    if over > 0:
+        return f"{over} öğe sabit pikselle ekrandan taşıyor (genişlik {before_vw:.0f} → {now_vw:.0f})"
+    return None
 
 
 def _same_page(a: str, b: str) -> bool:
@@ -1198,6 +1229,8 @@ class BrowserTabAutoAttachWatcher:
         self._started = time.monotonic()
         self._after = after                  # the previous watcher of this browser, still closing: its identity must be off the tabs first
         self._resume = resume                # what the front tab showed BEFORE the change that made the app reload it (`capture_browser_scroll_state`)
+        self._resume_at = self._started      # when that change happened: the start, or the last resize this watcher lived through (`moved`)
+        self._on_moved: Any = None           # set by the running session: an async callable that looks at the front tab after a resize
         self._place = "window" if place == "window" else "phone"      # whose size this watcher follows: the phone's display or a window's
         self._adb = adb
         self._serial = serial
@@ -1219,9 +1252,9 @@ class BrowserTabAutoAttachWatcher:
         self._connects = 0                   # how many times it has been connected: more than one = it came back after a loss
 
     def _resume_for(self, url: str) -> dict[str, Any] | None:
-        """The state to put back into a tab created now at ``url`` — only within ``_RESUME_WINDOW_S`` of the watcher's start (the app's
-        own rebuild follows the density change at once; a tab the user opens later is not one of its re-created ones)."""
-        if self._resume is None or time.monotonic() - self._started > _RESUME_WINDOW_S:
+        """The state to put back into a tab created now at ``url`` — only within ``_RESUME_WINDOW_S`` of the change it was captured for (the
+        app's own rebuild follows the density change at once; a tab the user opens later is not one of its re-created ones)."""
+        if self._resume is None or not self._this_move():
             return None
         state = _resume_state(self._resume)
         return state if state is not None and _same_page(state["url"], url) else None
@@ -1243,6 +1276,22 @@ class BrowserTabAutoAttachWatcher:
         apply = self._apply_scale
         if apply is not None:
             asyncio.get_running_loop().create_task(apply())
+
+    def _this_move(self) -> bool:
+        """Is the change the capture (``_resume``) was taken for still going on?"""
+        return time.monotonic() - self._resume_at <= _RESUME_WINDOW_S
+
+    def moved(self, resume: dict[str, Any] | None) -> None:
+        """The window changed size and stays the same class (this watcher lives on): ``resume`` is what its front tab showed just BEFORE.
+        The tab in front is then watched for sizes it keeps from the old width, exactly like after a handoff, and reloaded to that place
+        if it does. Safe to call from any async context; without a capture nothing is done."""
+        if not isinstance(resume, dict):
+            return
+        self._resume = resume
+        self._resume_at = time.monotonic()
+        hook = self._on_moved
+        if hook is not None:
+            asyncio.get_running_loop().create_task(hook())
 
     def start(self) -> None:
         if self._task and not self._task.done():
@@ -1352,7 +1401,10 @@ class BrowserTabAutoAttachWatcher:
             else:
                 ua_params = _desktop_ua(browser)
 
-            async with websockets.connect(browser_ws, max_size=None) as ws:
+            # The short close timeout: Chrome lets go of this session the moment it hears the close (measured on the phone, 2026-11-10: the
+            # overrides were off the tabs 0.6 s after the stop), but the socket itself is not closed back — the default 10 s were spent
+            # waiting for that, with the next watcher of the browser held back its whole `_HANDOVER_WAIT_S` every time.
+            async with websockets.connect(browser_ws, max_size=None, close_timeout=_WATCHER_CLOSE_TIMEOUT_S) as ws:
                 req_id = 0
                 pending: dict[int, tuple[str, str | None]] = {}
                 reloading: dict[str, dict[str, Any]] = {}      # session -> the state to put back once its reload has loaded
@@ -1462,10 +1514,10 @@ class BrowserTabAutoAttachWatcher:
                     # Where the user was is what they SAW before the move — read in the place they left (`self._resume`). The state read now
                     # comes from the page after the move: in the other place's layout (a desktop page kept 972 px wide on a 380 px phone, a
                     # page the APP just reloaded at the top with its video at 0), so its probes describe something else. The capture is the
-                    # truth for the same page during this transition; later (a window resize, a stale-width check) the live state is.
+                    # truth for the same page during this transition (a handoff, a reclaim, a resize — each brings its own capture).
                     resume = _resume_state(self._resume)
                     fresh = isinstance(state.get("since"), (int, float)) and state["since"] < _FRESH_LOAD_MS
-                    this_move = time.monotonic() - self._started <= _RESUME_WINDOW_S
+                    this_move = self._this_move()
                     if resume is not None and (fresh or this_move) and _same_page(resume["url"], url):
                         state = {**state, **{k: resume[k] for k in ("t", "playing", "y", "c", "l")}}
                     reloading[session_id] = state
@@ -1481,33 +1533,59 @@ class BrowserTabAutoAttachWatcher:
                     log.info("🔁 [CDP_WATCHER: SİTE KİPİ] %s sekmesi %s siteye çevriliyor — karar=reload, sebep=%s (video ve kaydırma korunacak)",
                              host_only(state.get("url", "")), "mobil" if want_mobile else "masaüstü", reason)
 
-                async def stale_check(session_id: str, state: dict[str, Any]) -> None:
-                    """A tab kept (same page under both identities) after the window became another width: once the new scale has settled, is the
-                    page still sized for the old width (sizes it measured in script at load)? The answers arrive as ('stale', session).
+                def watch_width(session_id: str, state: dict[str, Any]) -> None:
+                    """Starts ``stale_check`` for a tab that keeps its document across a change of width (the same page under both identities, a
+                    page that already is this place's site, a window that only changed size). The tab is registered HERE, before the check's
+                    first step runs: from this moment a new document in the tab (Page.frameNavigated) ends the check.
 
-                    The width it is compared with is the one the user SAW the page at — the capture made before the move (the tab's own state is
-                    read after the task moved and already has the new width: the check never looked). And it is asked a few times: a page's
-                    boxes come back from `content-visibility: auto` and its pictures (a reader that draws them in a closed shadow root) are laid
-                    out again only a moment after the move (measured 2026-11-04: a manga chapter kept its DeX `min-height: 1500px` boxes on the
-                    phone, 787 px of gap under every 713 px page, unseen by a single look 0.7 s after the move)."""
+                    What it is compared with is what the user SAW the page as — the capture made before the change (the tab's own state is read
+                    after it and already has the new width: the check never looked): its width, and its px-sized boxes as they were."""
+                    if state.get("playing") or state.get("dirty") or state.get("media"):
+                        return                             # a reload would cut what is playing or lose what was typed
                     resume = _resume_state(self._resume)
                     if (resume is not None and resume.get("vw") and _same_page(str(resume["url"]), str(state.get("url", "")))
-                            and time.monotonic() - self._started <= _RESUME_WINDOW_S):
-                        state = {**state, "vw": resume["vw"]}
+                            and self._this_move()):
+                        if resume.get("dirty") or resume.get("media"):
+                            return
+                        state = {**state, "vw": resume["vw"], "stale": resume.get("stale")}
+                    else:
+                        state = dict(state)                # its own copy: the looks keep a count in it
+                    stale_states[session_id] = state
+                    spawn_background(stale_check(session_id, state), "cdp-stale-width")
+
+                async def stale_check(session_id: str, state: dict[str, Any]) -> None:
+                    """A tab that keeps its document after the window became another width: once the new scale has settled, is the page still
+                    sized for the old width (sizes it measured in script at load)? The answers arrive as ('stale', session).
+
+                    It is asked a few times: a page's boxes come back from `content-visibility: auto` and its pictures (a reader that draws them
+                    in a closed shadow root) are laid out again only a moment after the move (measured 2026-11-04: a manga chapter kept its DeX
+                    `min-height: 1500px` boxes on the phone, 787 px of gap under every 713 px page, unseen by a single look 0.7 s after the move)."""
                     try:
                         await asyncio.sleep(0.7)
-                        stale_states[session_id] = state
                         for _ in range(_STALE_LOOKS):
-                            if session_id not in stale_states:
-                                return                     # reloaded already (or the tab went away)
+                            if stale_states.get(session_id) is not state:
+                                return                     # reloaded already, the tab went away, or a newer change watches it now
                             await send("Runtime.evaluate", {"expression": _STALE_WIDTH_PROBE_JS, "returnByValue": True}, session_id,
                                        tag=("stale", session_id))
                             await asyncio.sleep(_STALE_LOOK_EVERY_S)
-                        stale_states.pop(session_id, None)
+                        if stale_states.get(session_id) is state:
+                            stale_states.pop(session_id, None)
                     except asyncio.CancelledError:
                         raise
                     except Exception as exc:  # noqa: BLE001 — the socket may be gone; the watcher's own loop reports that
                         log.debug("[CDP_WATCHER] genişlik denetimi: %s", exc)
+
+                async def on_moved() -> None:
+                    """The window changed size (``moved``) and this watcher lives on: which tab is in front NOW is asked of every page tab (the
+                    one that was in front when the watcher started may be another by now); the one that says so is watched like after a move."""
+                    try:
+                        for page_session in list(self._page_sessions):
+                            await send("Runtime.evaluate", {"expression": "document.visibilityState", "returnByValue": True}, page_session,
+                                       tag=("front", page_session))
+                    except Exception as exc:  # noqa: BLE001 — the socket may be gone; the watcher's own loop reports that
+                        log.debug("[CDP_WATCHER] boyut değişimi sonrası denetim başlatılamadı: %s", exc)
+
+                self._on_moved = on_moved
 
                 async def probe_watchdog(session_id: str) -> None:
                     """The measurement never answered (a page that blocks fetch, a frozen renderer): reload — the safe answer."""
@@ -1606,7 +1684,35 @@ class BrowserTabAutoAttachWatcher:
                                 if isinstance(now, dict) and _layout_fits(now.get("iw"), now.get("sw")) is False:
                                     await start_reload(session_id, state, f"sayfa ekrana oturmuyor: yüklendiği kipte kaldı "
                                                                           f"({now.get('iw')} > {now.get('sw')} css px)")
+                                elif self._resume is not None:
+                                    before = _resume_state(self._resume)
+                                    # Younger than the CAPTURE, not merely young: a page loaded a few seconds before the move is the very
+                                    # document the user saw (measured 2026-11-10: taken for a reload, its width check was skipped and three
+                                    # pages kept 78-103 px of nothing under them). Ages, not clocks: the phone's and this machine's differ.
+                                    stamp = self._resume.get("captured_at") if isinstance(self._resume, dict) else None
+                                    since = state.get("since")
+                                    fresh = (isinstance(since, (int, float)) and not isinstance(since, bool)
+                                             and isinstance(stamp, (int, float)) and since / 1000 < time.time() - stamp)
+                                    if (before is not None and fresh and self._this_move()
+                                            and _same_page(before["url"], str(state.get("url", "")))):
+                                        # The document is younger than the change: the app (or the browser) reloaded the page by itself
+                                        # while the window changed — it stands at its top. What was read before goes back, once
+                                        # (`__odxRestored`: a restore that already ran is not run again).
+                                        await send("Runtime.evaluate", {"expression": "window.__odxRestored ? 0 : " + _restore_script(before),
+                                                                        "userGesture": True}, session_id)
+                                        log.info("♻️ [CDP_WATCHER] %s sayfası pencere değişirken yeniden yüklenmiş — kaldığı yer geri konuyor",
+                                                 host_only(state.get("url", "")))
+                                    else:
+                                        # The right site at the right viewport — and still the document of before the change: it may keep
+                                        # sizes it measured at the width it had then (a phone-sized window and the phone are both the
+                                        # mobile site).
+                                        watch_width(session_id, state)
                                 finish(session_id)
+                            elif kind == "front" and session_id:
+                                if (msg.get("result") or {}).get("result", {}).get("value") == "visible":
+                                    before = _resume_state(self._resume)
+                                    if before is not None and self._this_move():
+                                        watch_width(session_id, before)
                             elif kind == "stale" and session_id:
                                 state = stale_states.get(session_id)
                                 raw = (msg.get("result") or {}).get("result", {}).get("value")
@@ -1616,6 +1722,11 @@ class BrowserTabAutoAttachWatcher:
                                     now = None
                                 if state is not None and isinstance(now, dict):
                                     why = _width_reload_verdict(state.get("vw"), now.get("vw"), now.get("c"))
+                                    if not why:
+                                        # the small gaps: only against the read of before the change, and only when a second look agrees
+                                        narrow = _narrowed_verdict(state.get("vw"), now.get("vw"), now.get("c"), state.get("stale"))
+                                        state["narrow_looks"] = state.get("narrow_looks", 0) + 1 if narrow else 0
+                                        why = narrow if narrow and state["narrow_looks"] >= _NARROW_LOOKS else None
                                     if why:
                                         stale_states.pop(session_id, None)      # one reload; the looks still out are ignored
                                         await start_reload(session_id, state, why)
@@ -1637,8 +1748,7 @@ class BrowserTabAutoAttachWatcher:
                                 else:
                                     log.info("✅ [CDP_WATCHER: SİTE KİPİ] %s sekmesi iki kimlikle de aynı sayfa — karar=atla (%s); ölçek ve kimlik yeterli",
                                              host_only(state.get("url", "")), why)
-                                    if not state.get("playing") and not state.get("dirty"):
-                                        spawn_background(stale_check(session_id, state), "cdp-stale-width")
+                                    watch_width(session_id, state)      # (not for a page that is playing or was typed into)
                                 finish(session_id)
                             elif kind in ("state", "state2") and session_id:
                                 if kind == "state2" and session_id not in awaiting_front:
@@ -1682,6 +1792,13 @@ class BrowserTabAutoAttachWatcher:
                             continue
 
                         method = msg.get("method")
+                        if method == "Page.frameNavigated":
+                            # The tab's main frame holds a NEW document (the one-shot width reload after a handoff, the user's own reload, the
+                            # site itself): it is laid out for the width it has now. The looks still out were for the old one — judging the
+                            # new document while it loads (its boxes have no content yet) would reload it a second time.
+                            if not ((msg.get("params") or {}).get("frame") or {}).get("parentId"):
+                                stale_states.pop(msg.get("sessionId"), None)
+                            continue
                         if method == "Page.loadEventFired" and msg.get("sessionId") in reloading:
                             state = reloading.pop(msg["sessionId"])
                             await send("Runtime.evaluate", {"expression": _restore_script(state), "userGesture": True},
@@ -1748,6 +1865,7 @@ class BrowserTabAutoAttachWatcher:
                             await send("Runtime.runIfWaitingForDebugger", {}, session_id)   # EVERY paused target, or it hangs
                 finally:
                     self._apply_scale = None
+                    self._on_moved = None
                     for timer in watchdogs.values():
                         timer.cancel()
                     # The overrides die with the session anyway; clearing first makes the return to a DeX window immediate.
@@ -1873,10 +1991,12 @@ def start_window_watcher(adb: "Adb", serial: str, socket_name: str, package: str
     return start_browser_auto_attach_watcher(adb, serial, socket_name, package, dpr, mode, place="window", resume=resume)
 
 
-def update_window_place(package: str, width: int | None, height: int | None, dpi: int | None) -> None:
+def update_window_place(package: str, width: int | None, height: int | None, dpi: int | None,
+                        resume: dict[str, Any] | None = None) -> None:
     """A browser window changed size or density. Same size class: its tabs just follow the new scale. A different class (a phone-sized window
     grew into a tablet one, or the other way): the watcher starts again in the other mode — it reads the tabs while the old identity is still
-    on them, so the ones that are now the wrong site are reloaded (their video and scroll put back). Never raises."""
+    on them, so the ones that are now the wrong site are reloaded (their video and scroll put back). ``resume``: what the tab in front showed
+    just before the resize (``capture_window_place``) — the place a reload goes back to, and what its sizes are compared with. Never raises."""
     watcher = _active_watchers.get(package)
     if watcher is None or watcher.place != "window" or not width or not height or not dpi:
         return
@@ -1884,11 +2004,55 @@ def update_window_place(package: str, width: int | None, height: int | None, dpi
         mode, dpr = window_place(width, height, dpi, watcher.mode)
         if mode == watcher.mode:
             watcher.set_scale(dpr)
+            watcher.moved(resume)
             return
         log.info("📐 [CDP_WATCHER: PENCERE SINIFI] %s penceresi %dx%d @ %d dpi: %s siteye geçiyor", package, width, height, dpi,
                  "mobil" if mode == "mobile" else "masaüstü")
-        start_browser_auto_attach_watcher(watcher._adb, watcher._serial, watcher._socket_name, package, dpr, mode, place="window")
+        start_browser_auto_attach_watcher(watcher._adb, watcher._serial, watcher._socket_name, package, dpr, mode, place="window",
+                                          resume=resume)
     except Exception as exc:  # noqa: BLE001 — a nicety, never a reason to fail a resize
         log.debug("[CDP_WATCHER] pencere yeri güncellenemedi: %s", exc)
+
+
+# A window that changes SIZE is a move for the page in it, the same as a handoff: its width changes, everything above the reader changes
+# height, and nothing put the reader back (measured on the phone, 2026-11-10: page 30 of a chapter, half way down — after the window went
+# from 1440 to 448 px the screen showed page 24). So a resize gets what a move gets: the place is read before, put back after.
+_PLACE_CAPTURE_TIMEOUT_S = 1.2      # the resize does not wait longer than this for the page to say where it is
+
+
+def has_window_place(package: str) -> bool:
+    """Is this package a browser that stands in a window right now (its tab watcher is the window's)?"""
+    watcher = _active_watchers.get(package)
+    return watcher is not None and watcher.place == "window"
+
+
+async def capture_window_place(package: str) -> dict[str, Any] | None:
+    """Where the tab in front of a browser WINDOW is, read just before the window changes size. None: not a browser window, or the page did
+    not answer in time (the resize goes on without it). Never raises."""
+    watcher = _active_watchers.get(package)
+    if watcher is None or watcher.place != "window":
+        return None
+    try:
+        return await asyncio.wait_for(
+            capture_browser_scroll_state(watcher._adb, watcher._serial, watcher._socket_name), _PLACE_CAPTURE_TIMEOUT_S,
+        )
+    except Exception as exc:  # noqa: BLE001 — includes the timeout: a resize is never held up by a page
+        log.debug("[CDP_WATCHER] boyut değişimi öncesi yer okunamadı: %s", exc)
+        return None
+
+
+async def settle_window_place(package: str, saved: dict[str, Any] | None) -> None:
+    """After the resize: the page is told about its new viewport and put back where ``saved`` says (the same in-place nudge a handoff ends
+    with). When the watcher started again for the window's new class, its own work on the tab in front (a reload as the other site) comes
+    first. Runs in the background — the resize itself does not wait for a page. Never raises."""
+    watcher = _active_watchers.get(package)
+    if watcher is None or watcher.place != "window" or not isinstance(saved, dict):
+        return
+    try:
+        if await watcher.wait_ready(2.0):
+            await watcher.wait_settled(4.0)
+        await refresh_browser_layout_inplace(watcher._adb, watcher._serial, watcher._socket_name, saved_scroll=saved, moved=False)
+    except Exception as exc:  # noqa: BLE001 — a nicety, never a reason to fail a resize
+        log.debug("[CDP_WATCHER] boyut değişimi sonrası yer geri konamadı: %s", exc)
 
 

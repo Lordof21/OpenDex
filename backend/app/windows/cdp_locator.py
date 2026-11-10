@@ -13,6 +13,10 @@ a LOCATOR: a few probe points in the viewport, each described by what is under i
 
 and put back by resolving each probe to an element in the NEW page, in this order of trust:
 
+    0. (before any of them) WHAT SCROLLS: a page does not always scroll its window — an app shell keeps html / body at the screen's height and
+       scrolls one box inside (the mobile variant of a site can do it while its desktop variant scrolls the window: 7728 px of range in
+       the box, 56 px in the window, measured 2026-11-10). `odxMain` finds that scroller, `prog` is how far down IT was, and the place is
+       put back by moving the boxes around the element and then the window (`odxMove`), each taking what it can;
     1. its path — but only when it still shows the same text / picture (a re-rendered list can put other content on the same path);
     2. its picture (the file name survives a mobile / desktop switch; lazy-loaded pictures carry it in `data-src`);
     3. its text (found among the page's text nodes; of several equal ones the one nearest to where the page was in the document).
@@ -36,6 +40,44 @@ PROBE_COUNT_MAX = 3
 LOCATOR_JS = r"""
 // ---- locator: see backend/app/windows/cdp_locator.py -------------------------------------------------------------------------------
 const odxNorm = (s) => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+// ---- what scrolls ----------------------------------------------------------------------------------------------------------------------
+// A page does not always scroll its window. An app shell keeps html / body at the screen's height and scrolls ONE box inside — and the same
+// site can do it in one variant only (measured on the phone, 2026-11-10: a home page scrolled the window as the desktop site, 4594 px of
+// document, and a `h-full overflow-y-auto` div as the mobile site: 7728 px of range in the box, 56 px in the window. The place was found
+// and `window.scrollTo` moved nothing: the page came back at its top). So a place is put back through whatever scrolls it.
+// `null` stands for the window everywhere below.
+const odxRange = (s) => (s ? s.scrollHeight - s.clientHeight : Math.max(0, document.documentElement.scrollHeight - innerHeight));
+const odxPos = (s) => (s ? s.scrollTop : scrollY);
+const odxScrollTo = (s, top) => (s ? s.scrollTo({ top, behavior: 'instant' }) : window.scrollTo({ left: scrollX, top, behavior: 'instant' }));
+// The scroller the page is read by: the window, unless a box that covers most of the screen has more room to scroll than the window has.
+const odxMain = () => {
+  let best = null, range = odxRange(null);
+  for (const el of odxScrollers()) {
+    const r = el.getBoundingClientRect();
+    if (r.width < innerWidth * 0.6 || el.clientHeight < innerHeight * 0.5) continue;        // a list inside the page is not the page
+    if (odxRange(el) > range) { best = el; range = odxRange(el); }
+  }
+  return best;
+};
+// Moves what is on screen up by `dy` px (down when negative) for an element: by the page's main scroller when the element is in it, then by
+// the boxes around the element (nearest first), then by the window — each takes what it can and the next takes the rest. Returns what is left.
+const odxMove = (el, dy, main) => {
+  const boxes = [];
+  for (let n = el.parentElement; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
+    if (n.scrollHeight > n.clientHeight + 1 && /(auto|scroll|overlay)/.test(getComputedStyle(n).overflowY)) boxes.push(n);
+  }
+  boxes.push(null);
+  const first = boxes.indexOf(main === undefined ? odxMain() : main);
+  if (first > 0) boxes.unshift(boxes.splice(first, 1)[0]);
+  let left = dy;
+  for (const s of boxes) {
+    if (Math.abs(left) < 1) break;
+    const before = odxPos(s);
+    odxScrollTo(s, before + left);
+    left -= odxPos(s) - before;
+  }
+  return left;
+};
 // What picture an element is: its file name without extension and size suffix (the file name is what a desktop and a mobile variant of a
 // site share; the host and path usually differ). A lazy-loaded picture is not in `src` yet: its data attribute carries it.
 const odxImageKey = (el) => {
@@ -171,6 +213,7 @@ const odxProbe = (yv) => {
   // item that starts just below it, in the container the line crosses.
   for (const el of document.elementsFromPoint(Math.round(innerWidth / 2), py)) {
     if (el === document.documentElement || el === document.body || el.childElementCount < 2 || odxPinned(el)) continue;
+    if (odxFrame && el.contains(odxFrame)) continue;
     const next = [...el.children].find((c) => { const cr = c.getBoundingClientRect(); return cr.height >= 1 && cr.bottom > py; });
     const described = next && odxDescribe(odxRowStart(next) || next, py, yv);
     if (described) return described;
@@ -183,10 +226,15 @@ const odxFromItem = (found, yv) => {
   const moved = start && odxDescribe(start, found.py, yv);
   return moved || found.probe;
 };
+// The box the page scrolls by while a locator is being read (odxLocator sets it). An element that CONTAINS it is the app's frame around
+// the content, not content: measured on the phone (2026-11-10), a probe line falling in the gap between two columns ran through the
+// scroller and its fixed layer down to `main` — one child, no words, a few screens tall — and that empty frame became all three probes.
+let odxFrame = null;
 const odxProbeAt = (yv, x, py) => {
   const picture = odxPictureAt(x, py);
   for (const el of (picture ? [picture] : document.elementsFromPoint(x, py))) {
     if (el === document.documentElement || el === document.body || odxPinned(el)) continue;
+    if (odxFrame && el.contains(odxFrame)) continue;
     const image = odxImageKey(el);
     const text = image ? null : odxTextAt(x, py);
     const anchor = text && el.contains(text.node) ? odxBlockOf(text.node.parentElement) : el;
@@ -207,9 +255,10 @@ const odxProbeAt = (yv, x, py) => {
 };
 const odxLocator = () => {
   try {
+    const main = odxMain();                                        // how far down the page was: in what the page scrolls by
+    odxFrame = main;
     const probes = [0, 1 / 3, 2 / 3].map(odxProbe).filter(Boolean);
-    const max = Math.max(1, document.documentElement.scrollHeight - innerHeight);
-    return probes.length ? { v: 1, prog: +Math.min(1, scrollY / max).toFixed(4), probes } : null;
+    return probes.length ? { v: 1, prog: +Math.min(1, odxPos(main) / Math.max(1, odxRange(main))).toFixed(4), probes } : null;
   } catch (e) { return null; }
 };
 // Content the page keeps folded away: a section with `hidden="until-found"` (mobile Wikipedia folds every section of an article this way)
@@ -238,15 +287,16 @@ const odxReveal = (el) => {
   }
   return opened;
 };
-// One probe → an element of the page as it is NOW, and how it was found.
-const odxResolve = (pr, expectedTop) => {
+// One probe → an element of the page as it is NOW, and how it was found. `expectedTop`: where the page was, in the main scroller's own
+// coordinates; `base`: what turns a place on screen into those coordinates (the scroller's position, less where its box starts on screen).
+const odxResolve = (pr, expectedTop, base) => {
   const nearest = (els) => {        // of several equal candidates: the one whose place in the document is closest to where the page was
     let best = null, bd = Infinity, folded = null;
     for (const el of els) {
       if (odxConcealer(el)) { folded = folded || el; continue; }      // no real place yet: only when nothing visible matches
       const r = el.getBoundingClientRect();
       if (r.height < 1) continue;
-      const d = Math.abs(scrollY + r.top - expectedTop);
+      const d = Math.abs(base + r.top - expectedTop);
       if (d < bd) { bd = d; best = el; }
     }
     return best || folded;
@@ -277,26 +327,28 @@ const odxResolve = (pr, expectedTop) => {
   }
   return null;
 };
-// Scrolls the window so the page is where the locator says. Returns { how, votes, of } or null (nothing to go by: the caller falls back).
+// Puts the page where the locator says, by whatever scrolls it (see odxMove). Returns { how, votes, of } or null (nothing to go by: the
+// caller falls back).
 // The resolved probes must AGREE on the order of the page: probe k+1 lies below probe k, by about what it did on screen — content scales
 // with the width (pictures) and reflows (text), so "about" is a factor of ten either way, but a probe that resolved to the other end of the
 // document (a path that now shows other content, a text that appears twice) is far outside that and is left out. The largest agreeing set
 // wins (the one that starts nearest the top of the screen on a tie) and the page is placed by its first probe.
 const odxApplyLocator = (l) => {
   if (!l || l.v !== 1 || !Array.isArray(l.probes)) return null;
-  const maxScroll = Math.max(1, document.documentElement.scrollHeight - innerHeight);
-  const expectedTop = (l.prog || 0) * maxScroll;
+  const main = odxMain();
+  const expectedTop = (l.prog || 0) * Math.max(1, odxRange(main));
+  const base = odxPos(main) - (main ? main.getBoundingClientRect().top : 0);
   const found = [];
   l.probes.forEach((pr) => {
-    const hit = odxResolve(pr, expectedTop);
+    const hit = odxResolve(pr, expectedTop, base);
     if (!hit) return;
     odxReveal(hit.el);                                                   // a folded section is opened before it is measured
     const r = hit.el.getBoundingClientRect();
     if (r.height < 1) return;
-    found.push({ pr, how: hit.how, docY: scrollY + r.top + pr.f * r.height });
+    found.push({ pr, how: hit.how, el: hit.el, at: r.top + pr.f * r.height });     // where the probe's point is on screen now
   });
   const agree = (a, b) => {
-    const gap = b.docY - a.docY, onScreen = (b.pr.y - a.pr.y) * innerHeight;
+    const gap = b.at - a.at, onScreen = (b.pr.y - a.pr.y) * innerHeight;
     return gap > 0 && gap >= onScreen * 0.1 && gap <= onScreen * 10 + 4;
   };
   let best = [];
@@ -305,18 +357,18 @@ const odxApplyLocator = (l) => {
     if (set.length < best.length || !set.every((a, i) => set.slice(i + 1).every((b) => agree(a, b)))) continue;
     if (set.length > best.length || (set.length === best.length && found.indexOf(set[0]) < found.indexOf(best[0]))) best = set;
   }
-  let to = null, how = 'ratio';
   if (best.length) {
-    to = best[0].docY - best[0].pr.y * innerHeight;
-    how = best[0].how;
-  } else if (typeof l.prog === 'number') {
-    to = expectedTop;
+    // The point goes back to the height of the screen it was seen at. A scroller clamps at its ends by itself (a page that got shorter,
+    // a section opened above), so nothing is clamped here.
+    const dy = best[0].at - best[0].pr.y * innerHeight;
+    if (Math.abs(dy) > 2) odxMove(best[0].el, dy, main);
+    return { how: best[0].how, votes: best.length, of: l.probes.length };
   }
-  if (to === null) return null;
-  // the page may have grown meanwhile (a folded section was opened above): clamp to the document as it is now
-  to = Math.max(0, Math.min(Math.max(1, document.documentElement.scrollHeight - innerHeight), to));
-  if (Math.abs(scrollY - to) > 2) window.scrollTo({ left: scrollX, top: to, behavior: 'instant' });
-  return { how, votes: best.length, of: l.probes.length };
+  if (typeof l.prog !== 'number') return null;
+  // nothing resolvable: how far down the page was, in what the page scrolls by NOW (it may have grown: measured again)
+  const to = Math.max(0, Math.min(odxRange(main), l.prog * Math.max(1, odxRange(main))));
+  if (Math.abs(odxPos(main) - to) > 2) odxScrollTo(main, to);
+  return { how: 'ratio', votes: 0, of: l.probes.length };
 };
 """
 

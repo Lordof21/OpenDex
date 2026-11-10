@@ -900,9 +900,10 @@ def test_the_phones_client_hints_carry_its_real_model_and_android_release():
 class _AnsweringWebSocket(FakeBrowserWatcherWebSocket):
     """After the scripted events, answers the watcher's page questions by what they ask (the ids depend on how many commands came before)."""
 
-    def __init__(self, target_events, answers):
+    def __init__(self, target_events, answers, then=None):
         super().__init__(target_events)
         self._answers = answers          # [(substring of the expression, the page's answer)]
+        self._then = dict(then or {})    # substring of an expression -> an event the browser sends right after answering it (once)
         self._done: set[int] = set()
 
     async def recv(self) -> str:
@@ -916,6 +917,8 @@ class _AnsweringWebSocket(FakeBrowserWatcherWebSocket):
                 for needle, answer in self._answers:
                     if needle in expr:
                         self._done.add(msg["id"])
+                        for key in [k for k in self._then if k in expr]:
+                            self.target_events.append(self._then.pop(key))
                         return json.dumps({"id": msg["id"], "result": {"result": {"value": json.dumps(answer)}}})
             await asyncio.sleep(0.02)
         await asyncio.sleep(10.0)
@@ -925,8 +928,9 @@ class _AnsweringWebSocket(FakeBrowserWatcherWebSocket):
 _FP = {"s": 200, "h": "a.example", "u": "/r", "vp": "width=device-width", "tags": {"div": 100, "img": 20}, "words": {"a": 5}, "res": ["x.js"], "n": 5000}
 
 
-async def _run_same_page_tab(state: dict, now: dict):
-    """A desktop-site tab in front that answers 'the same page under both identities': the watcher keeps it, then asks how it is sized now."""
+async def _run_same_page_tab(state: dict, now: dict, then: dict | None = None):
+    """A desktop-site tab in front that answers 'the same page under both identities': the watcher keeps it, then asks how it is sized now.
+    ``then``: events the browser sends right after answering a question (see _AnsweringWebSocket)."""
     events = [
         {"id": 1, "result": {}},
         {"id": 2, "result": {"targetInfos": [{"targetId": "TAB_A", "type": "page", "url": "https://a.example/r"}]}},
@@ -937,7 +941,7 @@ async def _run_same_page_tab(state: dict, now: dict):
     fake_ws = _AnsweringWebSocket(events, [
         ("odxFingerprint()", {"fp": _FP, "lay": {"iw": 380, "sw": 380}}),
         (cr._STALE_WIDTH_PROBE_JS, now),
-    ])
+    ], then)
     with (
         patch("urllib.request.urlopen", return_value=MagicMock(read=lambda: _VERSION.encode())),
         patch("websockets.connect", return_value=fake_ws),
@@ -962,6 +966,20 @@ async def test_a_kept_tab_that_is_still_sized_for_the_old_width_is_reloaded_to_w
     fake_ws = await _run_same_page_tab(_FRONT, {"vw": 380, "c": {"vw": 380, "gaps": 2, "over": 0}})
     methods = _session_methods(fake_ws, "S_A")
     assert "Page.reload" in methods, [(m.get("method"), m.get("sessionId"), (m.get("params") or {}).get("expression", "")[:40]) for m in fake_ws.sent_messages]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("frame, reloads", [
+    ({"id": "MAIN", "url": "https://a.example/r"}, False),                           # the tab's own document was replaced
+    ({"id": "AD", "parentId": "MAIN", "url": "https://ads.example/x"}, True),        # a frame inside it navigated: the page is the same one
+])
+async def test_a_kept_tab_whose_document_was_replaced_meanwhile_is_not_reloaded_a_second_time(frame, reloads):
+    """Somebody else reloaded the kept tab (the one-shot width reload after a handoff, the user): the new document is laid out for the width it
+    has now. The watcher's looks were for the old one — a half-loaded page shows the same 'boxes without content' and would be reloaded again."""
+    navigated = {"method": "Page.frameNavigated", "sessionId": "S_A", "params": {"frame": frame}}
+    # 'identity-not-applied' stands only in the question asked AFTER the identity changed: the answer to it is what makes the watcher keep the tab
+    fake_ws = await _run_same_page_tab(_FRONT, {"vw": 380, "c": {"vw": 380, "gaps": 2, "over": 0}}, then={"identity-not-applied": navigated})
+    assert ("Page.reload" in _session_methods(fake_ws, "S_A")) is reloads
 
 
 @pytest.mark.asyncio

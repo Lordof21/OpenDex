@@ -711,3 +711,192 @@ async def test_the_nudge_goes_back_to_the_place_not_to_the_top_of_the_picture(ta
     await asyncio.sleep(0.9)                                  # its phases run at 0 / 80 / 250 / 600 ms
     after = await _where(tab)
     assert after["i"] == 5 and abs(after["f"] - 0.5) < 0.05, after
+
+
+# ------------------------------------------------------------------------------------------------ a page that scrolls a box, not the window
+
+# The mobile variant as an app shell: html / body are as tall as the screen and ONE box scrolls. Measured on the phone (2026-11-10): a home
+# page scrolled the window as the desktop site and a full-height `overflow-y: auto` div as the mobile site — the place was found, the
+# window had nothing to scroll, and the page came back at its top.
+_SHELL_ARTICLE = _page(
+    "<body style='margin:0;height:100vh;overflow:hidden;font:16px/24px sans-serif'><header style='height:56px'>m.site</header>"
+    "<div id=shell style='height:calc(100vh - 56px);overflow-y:auto'><section class=feed>"
+    + "".join(f"<div class=card style='padding:8px 12px'><div class=body><span>{_paragraph(i)}</span></div></div>" for i in range(60))
+    + "</section></div></body>")
+
+
+async def _shell_to_paragraph(tab: Tab, index: int, fraction: float):
+    await tab.run(f"""(() => {{ const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT); let n;
+      while ((n = w.nextNode())) if (n.data.startsWith('Paragraph {index:02d}')) break;
+      const r = n.parentElement.getBoundingClientRect(); document.getElementById('shell').scrollBy(0, r.top - 56 + r.height * {fraction}); }})()""")
+    await asyncio.sleep(0.2)
+
+
+async def test_the_place_goes_into_a_page_that_scrolls_a_box_of_its_own(routes, tab):
+    routes["/desktop"], routes["/shell"] = _DESKTOP_ARTICLE, _SHELL_ARTICLE
+    await tab.width(1000)
+    await tab.goto("/desktop")
+    await _scroll_to_paragraph(tab, 31, 0.5)
+    locator = await tab.locator()
+
+    await tab.width(400)
+    await tab.goto("/shell")
+    assert await tab.run("document.documentElement.scrollHeight - innerHeight") <= 2      # the window has nowhere to go
+    result = await tab.apply(locator)
+    assert result["how"] == "text" and result["votes"] >= 2, result
+    assert await _paragraph_at(tab, 0.02 + 56 / 700) in (31, 32)         # under the site's bar: the paragraph the reader was in
+    assert await tab.run("document.getElementById('shell').scrollTop") > 1000 and await tab.run("window.scrollY") == 0
+
+
+async def test_the_place_comes_out_of_a_page_that_scrolls_a_box_of_its_own(routes, tab):
+    routes["/desktop"], routes["/shell"] = _DESKTOP_ARTICLE, _SHELL_ARTICLE
+    await tab.width(400)
+    await tab.goto("/shell")
+    await _shell_to_paragraph(tab, 31, 0.5)
+    seen = await _paragraph_at(tab, 0.4)
+    locator = await tab.locator()
+    assert 0.3 < locator["prog"] < 0.8                        # how far down the page was: by the box (the window stands at 0 at any place)
+    assert await tab.lib("odxPos(odxMain())") > 1000 and await tab.run("window.scrollY") == 0     # ... and it is not "at the top"
+
+    await tab.width(1000)
+    await tab.goto("/desktop")
+    result = await tab.apply(locator)
+    assert result["how"] == "text", result
+    assert abs(await _paragraph_at(tab, 0.4) - seen) <= 1     # what was a third of the way down the screen still is
+
+
+async def test_a_page_that_scrolls_a_box_falls_back_to_how_far_down_the_box_was(routes, tab):
+    routes["/shell"] = _SHELL_ARTICLE
+    await tab.width(400)
+    await tab.goto("/shell")
+    result = await tab.apply({"v": 1, "prog": 0.5, "probes": [{"y": 0.3, "f": 0.5, "p": "div#gone > p:nth-of-type(9)"}]})
+    assert result["how"] == "ratio"
+    top, room = await tab.run("document.getElementById('shell').scrollTop"), await tab.run("(() => { const s = document.getElementById('shell'); return s.scrollHeight - s.clientHeight; })()")
+    assert abs(top - room * 0.5) < 4
+
+
+async def test_the_nudge_keeps_the_place_of_a_page_that_scrolls_a_box_when_its_width_changes(routes, tab):
+    routes["/shell"] = _SHELL_ARTICLE
+    await tab.width(400)
+    await tab.goto("/shell")
+    await _shell_to_paragraph(tab, 31, 0.5)
+    seen = await _paragraph_at(tab, 0.4)
+    saved = json.loads(await tab.lib("JSON.stringify({ isTop: odxPos(odxMain()) <= 2, scrollX: 0, scrollY: scrollY, locator: odxLocator(), containers: odxCapture() })"))
+    assert saved["isTop"] is False
+
+    await tab.width(330)                                      # every paragraph above is taller now
+    await tab.run("performance.now = () => 60000")
+    await tab.run(cr._build_nudge_script(saved))
+    await asyncio.sleep(0.9)
+    assert abs(await _paragraph_at(tab, 0.4) - seen) <= 1
+
+
+# ------------------------------------------------------------------------------------------------ a reader that only lets its heights grow
+
+# The reader measured on the phone (2026-11-10): each page is drawn again for the new width a moment (350 ms) after the page hears of it, and
+# the box around it keeps the TALLEST height it ever had as an inline min-height. Narrower: a strip of nothing under every drawn page.
+# Wider: every page above the reader grows — after the last thing that put the reader back.
+_GROWING_READER = """<!doctype html><html><head><meta name=viewport content="width=device-width">
+<style>body{margin:0} .pg{width:100%} .pic{width:100%}
+.pg:nth-child(odd) .pic{background:linear-gradient(#e33,#33e)} .pg:nth-child(even) .pic{background:linear-gradient(#3e3,#ee3)}</style></head>
+<body>""" + "".join(f'<div class="pg" data-i="{i}"><div class="pic" data-i="{i}"></div></div>' for i in range(12)) + """
+<script>
+const tallest = new Map();
+const draw = () => document.querySelectorAll('.pg').forEach((box) => {
+  const h = Math.round(box.clientWidth * 1.5);
+  box.firstElementChild.style.height = h + 'px';
+  const kept = Math.max(tallest.get(box) || 0, h);
+  tallest.set(box, kept);
+  box.style.minHeight = kept + 'px';
+});
+draw();
+let timer; addEventListener('resize', () => { clearTimeout(timer); timer = setTimeout(draw, 350); });
+</script></body></html>"""
+
+
+async def _stale(tab: Tab) -> dict:
+    return json.loads(await tab.lib("JSON.stringify(odxStale())"))
+
+
+async def test_small_gaps_left_by_a_narrower_window_are_seen_against_the_read_of_before_and_a_wider_one_leaves_none(tab):
+    await tab.width(380)
+    await tab.load(_GROWING_READER)
+    before = await _stale(tab)
+    assert before["slack"] == [] and before["gaps"] == 0
+
+    await tab.width(325)
+    at_once = await _stale(tab)                               # the page has not drawn itself again yet: nothing to see (why one look is not enough)
+    assert cr._narrowed_verdict(380, 325, at_once, before) is None
+    await asyncio.sleep(0.6)
+    now = await _stale(tab)
+    assert len(now["slack"]) == 12 and all(0.78 < f < 0.9 for f in now["slack"]), now      # about 325 / 380 of each box is filled (the scrollbar takes a little)
+    assert cr._width_reload_verdict(380, 325, now) is None    # under the coarse rule's 120 px and its 1.3 ratio: it never saw this
+    assert cr._narrowed_verdict(380, 325, now, before) is not None
+
+    await tab.width(325)
+    await tab.load(_GROWING_READER)
+    before = await _stale(tab)
+    await tab.width(380)
+    await asyncio.sleep(0.6)
+    wider = await _stale(tab)
+    assert wider["slack"] == [] and cr._narrowed_verdict(325, 380, wider, before) is None
+
+
+async def test_the_nudge_holds_the_place_while_the_page_draws_itself_again_and_lets_go_at_the_users_touch(tab):
+    """Every page above the reader grows 350 ms after the LAST resize the page hears — the nudge's own last phase. Its four placements
+    were all before that: the reader ended five pages' growth (410 px) away from where they were."""
+    await tab.width(325)
+    await tab.load(_GROWING_READER)
+    await _scroll_into_picture(tab, 5, 0.5)
+    saved = {"isTop": False, "scrollY": await tab.run("window.scrollY"), "scrollX": 0, "locator": await tab.locator()}
+
+    await tab.width(380)
+    await tab.run("performance.now = () => 60000")
+    await tab.run(cr._build_nudge_script(saved))
+    await asyncio.sleep(2.2)                                  # phases, the page's own redraw, and the hold that follows it
+    after = await _where(tab)
+    assert after["i"] == 5 and abs(after["f"] - 0.5) < 0.05, after
+
+    # the user's own scroll wins at once
+    await tab.run(cr._build_nudge_script(saved))
+    await tab.run("window.dispatchEvent(new WheelEvent('wheel', { deltaY: -400 })); window.scrollTo(0, 0)")
+    await asyncio.sleep(1.5)
+    assert await tab.run("window.scrollY") == 0
+
+
+async def test_a_window_that_only_changed_size_keeps_the_focus_of_the_field_being_typed_in(tab):
+    await tab.width(800)
+    await tab.load("<!doctype html><body style='margin:0'><input id=q><div style='height:3000px'></div></body>")
+    await tab.run("document.getElementById('q').focus()")
+    await tab.run("performance.now = () => 60000")
+    await tab.run(cr._build_nudge_script(None, blur=False))
+    assert await tab.run("document.activeElement.id") == "q"
+    await tab.run(cr._build_nudge_script(None))               # a move to another screen: the keyboard's ghost goes with the focus
+    assert await tab.run("document.activeElement.id") != "q"
+
+
+# The phone layout of a home page measured 2026-11-10: a fixed full-screen layer, a scroller in it, a grid of covers in two columns.
+# The middle of the screen is the gap between the columns: the probe line ran through the scroller and its fixed layer down to `main`
+# (one child, no words) and that empty frame became every probe — nothing of it could be found on the desktop variant.
+_SHELL_GRID = _page(
+    "<body style='margin:0'><div id=root><main style='height:100vh'><div style='position:fixed;inset:0;overflow:hidden'>"
+    "<div id=shell style='height:100%;overflow-y:auto'><div style='display:grid;grid-template-columns:1fr 1fr;column-gap:24px;padding:0 12px'>"
+    + "".join(f"<div class=card><img src='/covers/cover-{i:02d}_medium.png' style='width:100%;height:240px;display:block'>"
+              f"<div style='height:40px'>Series {i:02d}</div></div>" for i in range(40))
+    + "</div></div></div></main></div></body>")
+
+
+async def test_a_probe_never_names_the_frame_around_the_page_that_scrolls(routes, tab):
+    routes["/grid"] = _SHELL_GRID
+    for i in range(40):
+        routes[f"/covers/cover-{i:02d}_medium.png"] = ("image/png", base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="))
+    await tab.width(380)
+    await tab.goto("/grid")
+    await tab.run("document.getElementById('shell').scrollTo(0, 2000)")
+    await asyncio.sleep(0.2)
+    locator = await tab.locator()
+    assert len(locator["probes"]) == 3, locator
+    # a cover, or its row's words — never the frame around the scroller (`main`, the fixed layer, the scroller itself)
+    assert all(p.get("i") or p.get("t") or "div#shell > " in (p.get("p") or "") for p in locator["probes"]), locator
+    assert sum(1 for p in locator["probes"] if (p.get("i") or "").startswith("cover-")) >= 2, locator
