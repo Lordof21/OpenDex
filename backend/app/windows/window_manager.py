@@ -74,11 +74,15 @@ from .encoder_stress_test import StressTestBusyError, run_encoder_stress_test  #
 from .app_presence import AppPresenceMonitor
 from .app_restart import AppRestartOutcome, restart_app
 from .cdp_refresher import (
+    capture_window_place,
+    has_window_place,
     land_window_watcher_on_phone,
     release_all_browser_watchers,
+    settle_window_place,
     stop_browser_auto_attach_watcher,
     update_window_place,
 )
+from .display_limits import cap_display_size
 from .handoff_manager import HandoffManager
 from .parked_apps import ParkedAppRefresher
 from .mirror_packages import is_internal_package, is_mirror_package
@@ -1456,13 +1460,32 @@ class WindowManager:
                     if session is None:
                         raise KeyError(window_id)
                     return session.handle(superseded=True)
+            # A browser window: where its page is, read BEFORE the display changes — outside the global lock (it asks the phone's
+            # browser), inside the window's own gate (one resize of this window at a time).
+            place = await self._browser_place_before_resize(window_id, width, height, dpi)
             async with self._lock:
                 handle = await self._reconfigure.resize(window_id, width, height, dpi, project=project)
                 session = self._sessions.get(window_id)
                 if session is not None and session.dpi and not getattr(handle, "superseded", False):
                     # A browser window's tabs follow the window's size: its real scale, and the site (mobile / desktop) its size class needs
-                    update_window_place(session.state.package, session.target_display_w, session.target_display_h, session.dpi)
+                    package = session.state.package
+                    update_window_place(package, session.target_display_w, session.target_display_h, session.dpi, resume=place)
+                    if place is not None:
+                        # ... and its page goes back to where the user was reading (in the background: a resize never waits for a page)
+                        spawn_background(settle_window_place(package, place), name=f"browser-place-{window_id}")
                 return handle
+
+    async def _browser_place_before_resize(self, window_id: str, width: int, height: int, dpi: int | None) -> dict | None:
+        """What the page in front of a browser window shows, when this resize is going to change it (cdp_refresher.capture_window_place).
+        None for every other window, for a window whose app is on the phone (its display is not being resized now) and for a request
+        that changes nothing. Never raises."""
+        session = self._sessions.get(window_id)
+        if session is None or session.state.handoff_to_phone or not has_window_place(session.state.package):
+            return None
+        target = cap_display_size(width, height)
+        if target == (session.target_display_w, session.target_display_h) and (dpi is None or dpi == session.dpi):
+            return None
+        return await capture_window_place(session.state.package)
 
     def _resize_gate(self, key: str) -> ResizeGate:
         gate = self._resize_gates.get(key)

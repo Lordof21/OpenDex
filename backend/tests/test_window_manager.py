@@ -1546,3 +1546,81 @@ async def test_a_windows_broadcaster_asks_its_own_server_for_a_keyframe(manager)
     await asyncio.sleep(0)
 
     assert sent == [serialize_reset_video()]
+
+
+# ------------------------------------------------------------------ a browser window that changes size: its page is put back where it was
+@pytest.fixture
+def browser_place(monkeypatch):
+    """The browser side of a resize, recorded in the order it happens. `browser_place.window = False`: the package has no window watcher."""
+    class Place:
+        window = True
+        capture = {"url": "https://x.test/a", "vw": 800, "scrollY": 900}
+        calls: list = []
+
+    place = Place()
+    place.calls = []
+
+    async def capture(package):
+        place.calls.append(("capture", package))
+        return place.capture
+
+    def update(package, width, height, dpi, resume=None):
+        place.calls.append(("update", package, width, height, dpi, resume))
+
+    async def settle(package, saved):
+        place.calls.append(("settle", package, saved))
+
+    monkeypatch.setattr(wm_module, "has_window_place", lambda package: place.window)
+    monkeypatch.setattr(wm_module, "capture_window_place", capture)
+    monkeypatch.setattr(wm_module, "update_window_place", update)
+    monkeypatch.setattr(wm_module, "settle_window_place", settle)
+    return place
+
+
+async def test_a_browser_window_reads_where_its_page_is_before_it_changes_size_and_puts_it_back_after(manager, browser_place):
+    """Measured on the phone (2026-11-10): a chapter at page 30 showed page 24 after its window went from 1440 to 448 px — a resize moved
+    the page as much as a handoff does and nothing kept the place."""
+    await manager.bind_device("SER", "android-1")
+    handle = await manager.open_window("com.android.chrome")
+    session = manager.get_session(handle.window_id)
+    resized_at_capture = []
+    capture = wm_module.capture_window_place
+
+    async def capture_and_note(package):
+        resized_at_capture.append((session.target_display_w, session.target_display_h))
+        return await capture(package)
+
+    wm_module.capture_window_place = capture_and_note
+    before = (session.target_display_w, session.target_display_h)
+    await manager.resize_window(handle.window_id, 448, 984, dpi=220)
+    await asyncio.sleep(0.05)                                       # the settle runs in the background
+
+    assert resized_at_capture == [before]                           # read BEFORE the display changed
+    kinds = [c[0] for c in browser_place.calls]
+    assert kinds == ["capture", "update", "settle"]
+    assert browser_place.calls[1] == ("update", "com.android.chrome", 448, 984, 220, browser_place.capture)
+    assert browser_place.calls[2] == ("settle", "com.android.chrome", browser_place.capture)
+
+
+async def test_a_resize_that_is_not_a_browser_windows_or_changes_nothing_asks_no_page(manager, browser_place):
+    await manager.bind_device("SER", "android-1")
+    handle = await manager.open_window("com.android.chrome")
+    session = manager.get_session(handle.window_id)
+
+    await manager.resize_window(handle.window_id, session.target_display_w, session.target_display_h, dpi=session.dpi)    # the same size
+    browser_place.window = False
+    await manager.resize_window(handle.window_id, 448, 984, dpi=220)                                                        # not a browser window
+    await asyncio.sleep(0.05)
+    assert [c[0] for c in browser_place.calls] == ["update", "update"]          # the tabs still follow the size; no capture, nothing to settle
+    assert all(c[5] is None for c in browser_place.calls)
+
+
+async def test_a_page_that_does_not_answer_does_not_hold_the_resize(manager, browser_place):
+    browser_place.capture = None                                    # capture_window_place gives up (frozen tab, no DevTools socket)
+    await manager.bind_device("SER", "android-1")
+    handle = await manager.open_window("com.android.chrome")
+    await manager.resize_window(handle.window_id, 448, 984, dpi=220)
+    await asyncio.sleep(0.05)
+    session = manager.get_session(handle.window_id)
+    assert (session.target_display_w, session.target_display_h) == (448, 984)
+    assert [c[0] for c in browser_place.calls] == ["capture", "update"]
