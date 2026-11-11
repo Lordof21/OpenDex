@@ -121,12 +121,17 @@ class ParkedAppRefresher:
             # The tab watcher keeps every tab (open and future) at the phone's native scale for as long as the browser stands
             # here; it ends when the browser gets a window again (window_manager) or the connection drops.
             phys_dpi = await android_shell.phone_density(self._adb, serial)
+            watcher = None
             with contextlib.suppress(Exception):
                 watcher = start_browser_auto_attach_watcher(
                     self._adb, serial, profile.cdp_socket, package, phys_dpi / 160 if phys_dpi else None,
                 )
-                await watcher.wait_ready()
-                await watcher.wait_settled()
+                if await watcher.wait_ready():
+                    await watcher.wait_settled()
+            if watcher is not None and watcher.reloaded_front:
+                # its tab in front was reloaded as the phone's site: laid out anew, its place put back by its own restore
+                log.info("✨ [PARKED] %s ön sekmesi telefon sitesiyle yeniden yüklendi — süreç korundu", package)
+                return
             if await refresh_browser_layout_inplace(self._adb, serial, profile.cdp_socket):
                 log.info("✨ [PARKED] %s web düzeni CDP ile canlı tazelendi — süreç ve sekmeler korundu", package)
                 return

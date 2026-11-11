@@ -1485,7 +1485,7 @@ class WindowManager:
         target = cap_display_size(width, height)
         if target == (session.target_display_w, session.target_display_h) and (dpi is None or dpi == session.dpi):
             return None
-        return await capture_window_place(session.state.package)
+        return await capture_window_place(session.state.package, target[0], target[1], dpi or session.dpi)
 
     def _resize_gate(self, key: str) -> ResizeGate:
         gate = self._resize_gates.get(key)

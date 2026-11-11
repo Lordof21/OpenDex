@@ -63,7 +63,7 @@ def stubs(monkeypatch):
 
     def start_watcher(adb, serial, socket, key, phone_dpr=None):
         watchers.append((key, phone_dpr))
-        return SimpleNamespace(wait_ready=AsyncMock(return_value=True))
+        return SimpleNamespace(wait_ready=AsyncMock(return_value=True), wait_settled=AsyncMock(return_value=True), reloaded_front=False)
 
     monkeypatch.setattr(parked_apps, "start_browser_auto_attach_watcher", start_watcher)
     cdp.watchers = watchers

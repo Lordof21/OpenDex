@@ -31,7 +31,7 @@ from app.windows.cdp_refresher import (
     stop_browser_auto_attach_watcher,
 )
 
-from test_cdp_layout_integration import FakeCdpAdb, FakeWebSocket
+from test_cdp_layout_integration import FakeCdpAdb, FakeWebSocket, document_ready
 
 NATIVE = 513 / 160
 KEY = "reload-decision-pkg"
@@ -105,6 +105,16 @@ def _node():
     return shutil.which("node")
 
 
+def _capture_expression(**kw) -> str:
+    """The script capture_browser_scroll_state sends (it is put together inside the function), as a tab receives it."""
+    tabs_json = json.dumps([{"id": "t", "title": "T", "type": "page", "url": "https://a.example/",
+                             "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/page/t"}])
+    ws = FakeWebSocket("t", is_visible=True, custom_eval_response=json.dumps({"scrollY": 0}))
+    with patch("urllib.request.urlopen", return_value=MagicMock(read=lambda: tabs_json.encode())), patch("websockets.connect", return_value=ws):
+        asyncio.run(capture_browser_scroll_state(FakeCdpAdb(), "SER", "chrome_devtools_remote", **kw))
+    return [m["params"]["expression"] for m in ws.sent_messages if m.get("method") == "Runtime.evaluate"][-1]
+
+
 @pytest.mark.skipif(_node() is None, reason="node is needed to compile the generated page scripts")
 def test_every_generated_page_script_compiles():
     """The scripts are built in Python strings (f-strings, escaped braces) and only run on the phone: a typo fails silently there."""
@@ -117,6 +127,11 @@ def test_every_generated_page_script_compiles():
                                       "containers": [{"p": "main > div:nth-of-type(2)", "r": 0.3}]}),
         "nudge_empty": _build_nudge_script(None),
         "restore": _restore_script({"t": 12.5, "playing": True, "y": 3, "url": "https://a.example/watch?v=1", "c": [{"p": None, "r": 0.3}]}),
+        "restore_held": _restore_script({"t": None, "y": 3, "url": "https://a.example/", "c": [], "sr": "auto"}),
+        "hold": cr._HOLD_SCROLL_RESTORATION_JS,
+        "probe_layout_only": _probe_js(True, fetch=False),
+        "state_known_same": _tab_state_js(True, with_fp=True, fetch=False),
+        "capture": _capture_expression(baseline_for=True),
     }
     check = "const vm=require('vm');const s=JSON.parse(require('fs').readFileSync(0,'utf8'));for(const v of Object.values(s)){new vm.Script(v);}"
     done = subprocess.run([_node(), "-e", check], input=json.dumps(scripts), capture_output=True, text=True, timeout=30)
@@ -190,7 +205,7 @@ async def test_a_tab_that_turns_visible_a_moment_late_is_still_found_as_the_one_
 
 
 class _ReloadingWebSocket:
-    """A tab that answers the scroll capture and, after Page.reload, announces its load event."""
+    """A tab that answers the scroll capture and, after Page.reload, announces its new document being ready."""
 
     def __init__(self, capture):
         self.capture = capture
@@ -206,7 +221,8 @@ class _ReloadingWebSocket:
         else:
             self.queue.put_nowait({"id": msg["id"], "result": {}})
         if msg["method"] == "Page.reload":
-            self.queue.put_nowait({"method": "Page.loadEventFired", "params": {}})
+            for event in document_ready():
+                self.queue.put_nowait(event)
 
     async def recv(self):
         return json.dumps(await self.queue.get())
@@ -278,9 +294,14 @@ class _ReactiveBrowser:
             elif "window.devicePixelRatio" in expression:
                 if self.dpr_factor is not None:
                     self._answer_number(mid, self.last_scale.get(sid, 1.0) * self.dpr_factor)
+            elif "identity-not-applied" in expression and "const [fp, base]" not in expression:     # the layout only (a known site)
+                if self.probe is not None:
+                    self._answer(mid, {"lay": self.probe.get("lay", {"iw": 380, "sw": 380})})
             elif "identity-not-applied" in expression:
                 if self.probe is not None:
                     self._answer(mid, self.probe)
+            elif expression == cr._HOLD_SCROLL_RESTORATION_JS:                  # the page's own setting, as it is held off
+                self.queue.put_nowait({"id": mid, "result": {"result": {"value": "auto"}}})
             elif "const vis = " in expression:
                 state = tab.get("state2") if f"setTimeout(r, {cr._FRONT_WAIT_MS})" in expression else tab["state"]
                 if state is not None:
@@ -340,6 +361,12 @@ async def _watch(browser, *, settle_s=2.0, mode="mobile", phone_dpr=NATIVE, wind
     return watcher, settled
 
 
+def _ready(browser, session="S_A"):
+    """The tab's reload has brought its new document and it is ready (frameNavigated, then DOMContentLoaded)."""
+    for event in document_ready(session):
+        browser.queue.put_nowait(event)
+
+
 async def _stop():
     """Stops the watcher and lets its clean-up finish before the test's event loop goes away."""
     stop_browser_auto_attach_watcher(KEY)
@@ -374,7 +401,7 @@ async def test_a_page_that_differs_under_the_new_identity_is_reloaded_and_its_sc
         await _watch(browser, settle_s=0.3)
         assert "Page.reload" in browser.methods("S_A")
         # once it has loaded, the container position goes back (the state the tab reported before the reload)
-        browser.queue.put_nowait({"method": "Page.loadEventFired", "sessionId": "S_A", "params": {}})
+        _ready(browser)
         await asyncio.sleep(0.1)
         restore = browser.evaluates("S_A", "odxRestoreAll(saved)")
         assert len(restore) == 1 and '"r": 0.3' in restore[0]["params"]["expression"]
@@ -861,7 +888,7 @@ async def test_a_reload_during_the_move_puts_back_what_the_user_saw_before_the_m
             assert await watcher.wait_ready()
             await asyncio.sleep(0.4)
             assert "Page.reload" in browser.methods("S_A")
-            browser.queue.put_nowait({"method": "Page.loadEventFired", "sessionId": "S_A", "params": {}})
+            _ready(browser)
             await asyncio.sleep(0.1)
             restore = browser.evaluates("S_A", "odxRestoreAll(saved)")[-1]["params"]["expression"]
             assert "his contemporary sheykhi" in restore and '"y": 2803' in restore
@@ -1080,7 +1107,7 @@ async def test_a_page_that_is_already_this_places_site_is_still_watched_for_size
         await asyncio.sleep(1.5)                                             # the looks start 0.7 s after and come 0.5 s apart
         assert browser.methods("S_A").count("Page.reload") == 1
         assert _looks(browser) == 2                                          # the second look agreed; none after the reload
-        browser.queue.put_nowait({"method": "Page.loadEventFired", "sessionId": "S_A", "params": {}})
+        _ready(browser)
         await asyncio.sleep(0.1)
         assert 'Sayfa 30' in _restores(browser)[-1]                          # back to where the reader was before the move
     finally:
@@ -1136,7 +1163,7 @@ async def test_a_window_that_only_changed_size_has_its_front_tab_watched_and_rel
         assert cr.get_browser_auto_attach_watcher(KEY) is watcher
         assert browser.methods("S_A").count("Page.reload") == 1
         assert _looks(browser, "S_B") == 0 and "Page.reload" not in browser.methods("S_B")     # the tab behind is not woken for it
-        browser.queue.put_nowait({"method": "Page.loadEventFired", "sessionId": "S_A", "params": {}})
+        _ready(browser)
         await asyncio.sleep(0.1)
         assert 'Sayfa 30' in _restores(browser)[-1]
     finally:
@@ -1170,7 +1197,7 @@ async def test_a_window_that_changes_its_size_class_hands_the_capture_to_the_wat
             await asyncio.sleep(0.5)
             now = cr.get_browser_auto_attach_watcher(KEY)
             assert now is not watcher and now._resume is capture
-            browser.queue.put_nowait({"method": "Page.loadEventFired", "sessionId": "S_A", "params": {}})
+            _ready(browser)
             await asyncio.sleep(0.1)
         assert 'Sayfa 30' in _restores(browser)[-1]                          # the reload as the mobile site goes back to the reader's place
     finally:
@@ -1204,9 +1231,9 @@ async def test_a_page_the_app_reloaded_by_itself_during_the_change_gets_the_plac
         await _watch(browser, settle_s=0.3, mode="mobile", window_dpr=1.375, place="window",
                      resume=_capture(captured_at=cr.time.time() - 5.0))
         await asyncio.sleep(0.2)
-        restores = [m["params"]["expression"] for m in browser.sent if m.get("sessionId") == "S_A"
-                    and m.get("params", {}).get("expression", "").startswith("window.__odxRestored ? 0 : ")]
+        restores = _restores(browser)
         assert len(restores) == 1 and "Sayfa 30" in restores[0]
+        assert "(async (saved)=>{if(window.__odxRestored)return;" in restores[0]      # a restore that already ran is not run again
         await asyncio.sleep(1.0)
         assert _looks(browser) == 0 and "Page.reload" not in browser.methods("S_A")
     finally:
@@ -1227,3 +1254,183 @@ async def test_a_page_loaded_shortly_before_the_capture_is_the_document_the_user
         assert browser.methods("S_A").count("Page.reload") == 1
     finally:
         await _stop()
+
+
+# --------------------------------------------------------------------------------------------------------------- faster handoff (2026-11-11)
+
+_DIFFERENT = {"lay": {"iw": 380, "sw": 380}, "fp": _fp(vp='<meta name="viewport" content="width=1024">')}
+
+
+def test_two_fetches_under_one_identity_measure_nothing():
+    """Measured on the phone: a baseline fetched after the old identity was gone said "0.0%" — the same request twice. Each fetch says which
+    identity it went out with; two alike are "cannot tell" (reload), never "same page"."""
+    assert _variants_differ(_fp(m=False), _fp(m=False))[0] is None
+    assert _variants_differ(_fp(m=True), _fp(m=True))[0] is None
+    assert _variants_differ(_fp(m=False), _fp(m=True))[0] is False
+    assert _variants_differ(_fp(), _fp(m=True))[0] is False                          # one side unmarked: compared as before
+
+
+def test_with_the_sites_answer_known_only_the_layout_is_judged():
+    fits = {"lay": {"iw": 380, "sw": 380}}
+    assert _probe_verdict(None, fits, check_layout=True, known=(False, "metin farkı %0.4")) == (False, "önbellek: metin farkı %0.4")
+    assert _probe_verdict(None, fits, check_layout=True, known=(True, "viewport etiketi farklı"))[0] is True
+    assert _probe_verdict(None, {"lay": {"iw": 380, "sw": 900}}, check_layout=True, known=(False, "x"))[0] is True   # does not fit
+    assert _probe_verdict(None, {"err": "identity-not-applied"}, check_layout=True, known=(False, "x"))[0] is True
+
+
+def test_a_sites_answer_is_kept_per_site_and_direction_and_forgotten_after_its_time(monkeypatch):
+    cr._learn_variants("https://www.a.example/x", True, True, "viewport etiketi farklı")
+    assert cr._known_variants("https://m.a.example/other/page", True) == (True, "viewport etiketi farklı")   # the site, not the page
+    assert cr._known_variants("https://a.example/", False) is None                   # the other direction is its own measurement
+    cr._learn_variants("https://b.example/", True, None, "ölçüm yok")                 # "cannot tell" is never kept
+    assert cr._known_variants("https://b.example/", True) is None
+    now = cr.time.monotonic()
+    monkeypatch.setattr(cr.time, "monotonic", lambda: now + cr._VARIANTS_TTL_S + 1)
+    assert cr._known_variants("https://a.example/x", True) is None
+
+
+@pytest.mark.asyncio
+async def test_a_site_measured_as_another_page_is_reloaded_at_once_on_the_next_handoff():
+    browser = _ReactiveBrowser({"TAB_A": _tab()}, probe=_DIFFERENT)
+    try:
+        await _watch(browser, settle_s=0.3)
+        assert "Page.reload" in browser.methods("S_A")
+    finally:
+        await _stop()
+    assert cr._known_variants("https://a.example/watch", True) == (True, "viewport etiketi farklı")
+
+    again = _ReactiveBrowser({"TAB_A": _tab({"fp": None})}, probe=_DIFFERENT)
+    try:
+        await _watch(again, settle_s=0.3)
+        assert "Page.reload" in again.methods("S_A")
+        assert again.evaluates("S_A", "identity-not-applied") == []                  # nothing measured while the user waits
+        state_question = again.evaluates("S_A", "const vis = ")[0]["params"]["expression"]
+        assert "if (false && vis()" in state_question                                  # and no baseline fetched either
+    finally:
+        await _stop()
+
+
+@pytest.mark.asyncio
+async def test_a_site_measured_as_the_same_page_has_its_layout_judged_and_is_measured_again_behind_the_decision():
+    cr._learn_variants("https://a.example/", True, False, "metin farkı %0.4")
+    browser = _ReactiveBrowser({"TAB_A": _tab()}, probe=_SAME)
+    try:
+        watcher, settled = await _watch(browser, settle_s=0.3)
+        assert settled is True and "Page.reload" not in browser.methods("S_A")
+        probes = [m["params"]["expression"] for m in browser.evaluates("S_A", "identity-not-applied")]
+        assert len(probes) == 2
+        assert "const [fp, base]" not in probes[0]                                   # the decision: the layout only
+        assert "const [fp, base]" in probes[1]                                       # the recheck behind it
+        assert watcher.reloaded_front is False
+    finally:
+        await _stop()
+
+
+@pytest.mark.asyncio
+async def test_a_stored_same_page_answer_that_went_stale_is_corrected_in_the_same_handoff():
+    cr._learn_variants("https://a.example/", True, False, "metin farkı %0.4")
+    browser = _ReactiveBrowser({"TAB_A": _tab()}, probe=_DIFFERENT)                  # the site serves another page now
+    try:
+        watcher, _ = await _watch(browser, settle_s=0.3)
+        await asyncio.sleep(0.1)
+        assert browser.methods("S_A").count("Page.reload") == 1
+        assert watcher.reloaded_front is True
+    finally:
+        await _stop()
+    assert cr._known_variants("https://a.example/", True) == (True, "viewport etiketi farklı")
+
+
+@pytest.mark.asyncio
+async def test_the_baseline_the_capture_started_is_what_the_page_is_compared_with():
+    """The capture before the handoff started the page's fetch under the identity it was loaded with; the state answer only says so (it
+    does not wait for it) and the probe brings it back next to the new one."""
+    probe = {"lay": {"iw": 380, "sw": 380}, "fp": _fp(m=True, vp='<meta name="viewport" content="width=device-width">'),
+             "base": _fp(m=False, vp='<meta name="viewport" content="width=1024">')}
+    browser = _ReactiveBrowser({"TAB_A": _tab({"fp": None, "base": True})}, probe=probe)
+    try:
+        await _watch(browser, settle_s=0.3)
+        assert len(browser.evaluates("S_A", "identity-not-applied")) == 1
+        assert "Page.reload" in browser.methods("S_A")
+    finally:
+        await _stop()
+    assert cr._known_variants("https://a.example/watch", True) == (True, "viewport etiketi farklı")
+
+
+@pytest.mark.asyncio
+async def test_a_reload_of_ours_is_restored_at_its_new_documents_dom_with_the_browsers_own_restoration_held_off():
+    browser = _ReactiveBrowser({"TAB_A": _tab()}, probe=_DIFFERENT)
+    try:
+        watcher, settled = await _watch(browser, settle_s=0.2)
+        hold = [i for i, m in enumerate(browser.sent) if m.get("sessionId") == "S_A"
+                and m.get("params", {}).get("expression") == cr._HOLD_SCROLL_RESTORATION_JS]
+        reload_at = next(i for i, m in enumerate(browser.sent) if m.get("method") == "Page.reload")
+        assert len(hold) == 1 and hold[0] < reload_at                               # held off in the document being left
+        assert settled is False and watcher.reloaded_front is True
+        # the ready event of the document that was still there when the reload was sent: not ours
+        browser.queue.put_nowait({"method": "Page.domContentEventFired", "sessionId": "S_A", "params": {}})
+        await asyncio.sleep(0.05)
+        assert _restores(browser) == []
+        _ready(browser)
+        assert await watcher.wait_settled(0.5) is True                              # settled at its DOM, not at its load event
+        restores = _restores(browser)
+        assert len(restores) == 1 and '"sr": "auto"' in restores[0]                  # the page's setting goes back at the end
+    finally:
+        await _stop()
+
+
+@pytest.mark.asyncio
+async def test_a_tab_the_app_re_created_is_restored_at_its_load_event_after_the_browsers_own_restoration():
+    """A tab the browser rebuilt from its saved state restores its own scroll at the load event: ours goes after it, never under it."""
+    browser = _ReactiveBrowser({}, probe=_SAME)
+    try:
+        watcher, _ = await _watch(browser, settle_s=0.2, resume=_capture())
+        browser.queue.put_nowait({"method": "Target.attachedToTarget", "params": {
+            "sessionId": "S_NEW", "waitingForDebugger": True,
+            "targetInfo": {"targetId": "T_NEW", "type": "page", "url": "https://a.example/watch"}}})
+        await asyncio.sleep(0.05)
+        for event in document_ready("S_NEW"):
+            browser.queue.put_nowait(event)
+        await asyncio.sleep(0.05)
+        assert _restores(browser, "S_NEW") == []                                     # its DOM is not the cue ...
+        browser.queue.put_nowait({"method": "Page.loadEventFired", "sessionId": "S_NEW", "params": {}})
+        await asyncio.sleep(0.05)
+        restores = _restores(browser, "S_NEW")
+        assert len(restores) == 1 and "Sayfa 30" in restores[0]                      # ... its load event is
+        assert watcher.reloaded_front is False                                       # not a reload of ours
+    finally:
+        await _stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("baseline_for, known, started", [
+    (True, None, "odxStartBaseline(true)"),
+    (False, None, "odxStartBaseline(false)"),
+    (None, None, "odxStartBaseline(null)"),                                          # a capture before a resize of the same class
+    (True, (True, "viewport etiketi farklı"), "odxStartBaseline(null)"),              # known to differ: it is reloaded, nothing to measure
+    (True, (False, "metin farkı %0.4"), "odxStartBaseline(true)"),                    # known the same: measured again behind the decision
+])
+async def test_the_capture_starts_the_baseline_of_the_site_measurement_when_the_identity_is_going_to_change(baseline_for, known, started):
+    if known is not None:
+        cr._learn_variants("https://claude.ai/chat/1", True, *known)
+    tabs_json = json.dumps([{"id": "t", "title": "Chat", "type": "page", "url": "https://claude.ai/chat/1",
+                             "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/page/t"}])
+    ws = FakeWebSocket("t", is_visible=True, custom_eval_response=json.dumps({"scrollY": 0, "isTop": True, "containers": []}))
+    with patch("urllib.request.urlopen", return_value=MagicMock(read=lambda: tabs_json.encode())), patch("websockets.connect", return_value=ws):
+        await capture_browser_scroll_state(FakeCdpAdb(), "SER", "chrome_devtools_remote", baseline_for=baseline_for)
+    sent = [m["params"]["expression"] for m in ws.sent_messages if m.get("method") == "Runtime.evaluate"][-1]
+    assert f"baseline: {started}" in sent
+
+
+@pytest.mark.asyncio
+async def test_a_watcher_that_cannot_reach_the_browser_does_not_hold_anyone_for_its_whole_timeout():
+    """Measured 2026-11-11: a watcher that failed every connection attempt held a handoff 3.5 s before the move and 6 s after it (ready
+    timed out, then settled waited anyway): 11.9 s. A failed attempt ends the wait at once; the watcher keeps retrying behind it."""
+    def refuse(*_a, **_k):
+        raise OSError("no DevTools socket")
+
+    with patch("urllib.request.urlopen", return_value=MagicMock(read=lambda: _VERSION.encode())), patch("websockets.connect", side_effect=refuse):
+        watcher = start_browser_auto_attach_watcher(FakeCdpAdb(), "SERIAL_123", "chrome_devtools_remote", KEY, NATIVE)
+        started = asyncio.get_running_loop().time()
+        assert await watcher.wait_ready(2.0) is False
+        assert asyncio.get_running_loop().time() - started < 0.5
+    await _stop()

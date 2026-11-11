@@ -103,7 +103,7 @@ class _Site(http.server.ThreadingHTTPServer):
 
 @pytest.fixture
 def routes():
-    """path -> (content type, bytes): what the test site serves."""
+    """path -> (content type, bytes), or a callable(request headers) -> (content type, bytes): what the test site serves."""
     return {}
 
 
@@ -117,7 +117,8 @@ async def tab(routes):
             delay = next((float(v[2:]) for v in query.split("&") if v.startswith("d=")), 0)
             if delay:
                 time.sleep(delay / 1000)                         # a picture that arrives late
-            kind, body = served.get(path, ("text/plain", b"not found"))
+            route = served.get(path, ("text/plain", b"not found"))
+            kind, body = route(self.headers) if callable(route) else route        # a route may answer by the request (its user agent)
             self.send_response(200 if path in served else 404)
             self.send_header("Content-Type", kind)
             self.send_header("Content-Length", str(len(body)))
@@ -900,3 +901,76 @@ async def test_a_probe_never_names_the_frame_around_the_page_that_scrolls(routes
     # a cover, or its row's words — never the frame around the scroller (`main`, the fixed layer, the scroller itself)
     assert all(p.get("i") or p.get("t") or "div#shell > " in (p.get("p") or "") for p in locator["probes"]), locator
     assert sum(1 for p in locator["probes"] if (p.get("i") or "").startswith("cover-")) >= 2, locator
+
+
+# ------------------------------------------------------------------------------------------------ a reload of ours, restored at its DOM
+
+async def _until(tab: Tab, condition: str, seconds: float = 5.0):
+    for _ in range(int(seconds / 0.05)):
+        if await tab.run(condition):
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"never: {condition}")
+
+
+async def test_a_reload_of_ours_is_put_back_at_its_document_and_the_browser_does_not_move_it_at_load(routes, tab):
+    """Measured here first (2026-11-11): the browser puts a reloaded page back to the offset it had in its OLD layout AT the load event —
+    over a restore that started at DOMContentLoaded and had finished (a page whose last picture landed late jumped from the reader's place
+    to the old offset). Held off in the document being left, it does not; the page's own setting comes back once it has loaded."""
+    routes["/late"] = ("text/html", _PICTURES.replace("</body>", '<img src="/late.png?d=2500" width=1 height=1></body>').encode())
+    routes["/late.png"] = ("image/png", base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="))
+    await tab.width(800)
+    await tab.goto("/late")
+    await _scroll_into_picture(tab, 2, 0.5)
+    saved = {"y": await tab.run("scrollY"), "url": tab.site + "/late", "c": [], "l": await tab.locator()}
+    await _scroll_into_picture(tab, 8, 0.5)                 # where the browser's own restoration would take the reloaded page
+    saved["sr"] = await tab.run(cr._HOLD_SCROLL_RESTORATION_JS)
+    assert saved["sr"] == "auto"
+    await tab.call("Page.reload", {})
+    await _until(tab, "document.readyState !== 'loading'")
+    assert await tab.run("document.readyState") == "interactive"     # the DOM is there, the late picture is not: the restore starts now
+    await tab.run(cr._restore_script(saved))
+    await _until(tab, "document.readyState === 'complete'", 8)
+    await asyncio.sleep(0.8)
+    where = await _where(tab)
+    assert where["i"] == 2 and abs(where["f"] - 0.5) < 0.05, where
+    # the page's own setting is given back once the restore has ended (it looks for a video ~3 s on a page that had none) and it loaded
+    await _until(tab, "history.scrollRestoration === 'auto'", 4)
+
+
+# ------------------------------------------------------------------------------------------------ the site measurement, started at the capture
+
+_DESKTOP = cr._desktop_ua("Chrome/155.0.8059.39")
+_MOBILE = {"userAgent": "Mozilla/5.0 (Linux; Android 15; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Mobile Safari/537.36",
+           "userAgentMetadata": cr._mobile_ua_metadata("Chrome/155.0.8059.39", "K", "15")}
+
+
+def _by_identity(headers) -> tuple[str, bytes]:
+    """A site that serves another page to a phone (its viewport tag, as GitHub's does)."""
+    phone = "Mobi" in (headers.get("User-Agent") or "")
+    viewport = "width=device-width, initial-scale=1" if phone else "width=1024"
+    body = "".join(f"<p>paragraph {i} of the article</p>" for i in range(40))
+    return "text/html", f"<!doctype html><html><head><meta name=viewport content=\"{viewport}\"></head><body>{body}</body></html>".encode()
+
+
+async def _measure(tab: Tab, path: str) -> tuple[bool | None, str]:
+    """The baseline started under the identity the page was loaded with, the identity switched, the probe run: what they say."""
+    await tab.call("Emulation.setUserAgentOverride", _DESKTOP)
+    await tab.goto(path)
+    assert await tab.lib("odxStartBaseline(true)") is True                # started, not waited for
+    await tab.call("Emulation.setUserAgentOverride", _MOBILE)
+    answer = json.loads(await tab.run(cr._probe_js(True), await_promise=True))
+    assert answer["base"]["m"] is False and answer["fp"]["m"] is True, answer      # two identities, really
+    return cr._measured_variants(None, answer)
+
+
+async def test_the_site_measurement_started_at_the_capture_tells_another_page_from_the_same_page(routes, tab):
+    routes["/v"] = _by_identity
+    routes["/same"] = _page("".join(f"<p>paragraph {i} of the article</p>" for i in range(40)))
+    await tab.width(380)
+    assert await _measure(tab, "/v") == (True, "viewport etiketi farklı")
+    differs, why = await _measure(tab, "/same")
+    assert differs is False, why
+    # a baseline for the identity the page already has would compare nothing: it is not started
+    assert await tab.lib("odxStartBaseline(true)") is False

@@ -239,9 +239,12 @@ const odxRestoreAll = async (saved) => {
   }
   return touched ? 'user' : 'ok';
 };
-const odxFingerprint = async () => {
+// The identity the page has NOW (the user agent override is the page's: its requests go out with it too).
+const odxIdentity = () => (navigator.userAgentData ? navigator.userAgentData.mobile : /Mobi/.test(navigator.userAgent));
+const odxFingerprint = async (ms = 1200) => {
+  const m = odxIdentity();       // which identity this request goes out with: two fetches under ONE identity compare nothing
   const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), 1200);
+  const timer = setTimeout(() => ctl.abort(), ms);
   try {
     const r = await fetch(location.href, { cache: 'no-store', credentials: 'same-origin', redirect: 'follow', signal: ctl.signal });
     const body = await r.text();
@@ -256,12 +259,25 @@ const odxFingerprint = async () => {
     const words = Object.fromEntries(Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 300));
     // The scripts and stylesheets the page loads (query removed): the two variants of a site almost always load different bundles.
     const res = [...new Set((slice.match(/<(?:script[^>]+src|link[^>]+href)=["'][^"']+/gi) || []).map((m) => m.replace(/^[\s\S]*=["']/, '').replace(/[?#].*$/, '')))].sort().slice(0, 120);
-    const vp = (body.match(/<meta[^>]+name=["']viewport["'][^>]*>/i) || [''])[0].replace(/\s+/g, ' ').slice(0, 160);
+    const vp = (body.match(/<meta[^>]+name=["']?viewport\b[^>]*>/i) || [''])[0].replace(/\s+/g, ' ').slice(0, 160);   // quoted or not
     const u = new URL(r.url);
-    return { s: r.status, h: u.host, u: u.pathname, v: r.headers.get('vary') || '', n: body.length, vp, tags, words, res };
+    return { s: r.status, h: u.host, u: u.pathname, v: r.headers.get('vary') || '', n: body.length, vp, tags, words, res, m };
   } finally {
     clearTimeout(timer);
   }
+};
+// The BEFORE half of that measurement, started by the capture that precedes a handoff: there the page still has the identity it was
+// loaded with, and the fetch runs in the page while the display is prepared — the decision later reads it instead of fetching then.
+// `want`: the identity the page is going to (nothing to measure when it already has it).
+const odxStartBaseline = (want) => {
+  if (typeof want !== 'boolean' || !/^https?:$/.test(location.protocol) || odxIdentity() === want) return false;
+  const b = { url: location.href, at: Date.now(), p: odxFingerprint(4000).catch(() => null) };
+  try { Object.defineProperty(window, '__odxBaseline', { value: b, configurable: true }); } catch (e) { return false; }
+  return true;
+};
+const odxBaseline = () => {
+  const b = window.__odxBaseline;
+  return b && b.url === location.href && Date.now() - b.at < 60000 ? b : null;
 };
 """
 
@@ -303,6 +319,11 @@ def _variants_differ(a: Any, b: Any) -> tuple[bool | None, str]:
     claude.ai sends it and serves one page (measured: 0.22% apart, a bot-detection script) — so the structure is compared."""
     if not isinstance(a, dict) or not isinstance(b, dict):
         return None, "ölçüm yok"
+    ma, mb = a.get("m"), b.get("m")
+    if isinstance(ma, bool) and isinstance(mb, bool) and ma == mb:
+        # Both went out under the same identity (the old override was already gone, or the new one not yet on): they are the same page
+        # by construction — the "0.0%" the measurement once read in one direction only. Nothing was measured.
+        return None, "iki ölçüm de aynı kimlikle alındı"
     if a.get("s") != 200 or b.get("s") != 200:
         return None, f"yanıt kodu {a.get('s')}/{b.get('s')}"
     if a.get("h") != b.get("h") or a.get("u") != b.get("u"):
@@ -350,14 +371,59 @@ def _count(value: Any) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
 
-def _probe_verdict(baseline: Any, probe: Any, *, check_layout: bool) -> tuple[bool, str]:
+# Whether a site serves another page to the other identity is a property of the SITE, not of the visit: GitHub's viewport tag differs on
+# every handoff, a responsive reader is the same page on every handoff — and each handoff measured it again, two page fetches (1.3-2.9 s
+# of a 7 s handoff, measured 2026-11-10). A measured answer is kept per site and direction. A stored "differs" only reloads (what anything
+# uncertain does anyway); a stored "same" still has the page's LAYOUT checked on every visit, and the page is measured again behind the
+# decision, so an answer that went stale is corrected in the same handoff (see the watcher's "recheck").
+_VARIANTS_TTL_S = 24 * 3600.0
+_site_variants: dict[tuple[str, bool], tuple[bool, str, float]] = {}
+
+
+def _known_variants(url: str, want_mobile: bool) -> tuple[bool, str] | None:
+    """What was measured on this site for this direction (differs, why), or None: never measured, or measured too long ago."""
+    site = _site_key(url)
+    hit = _site_variants.get((site, want_mobile)) if site else None
+    if hit is None:
+        return None
+    differs, why, at = hit
+    if time.monotonic() - at > _VARIANTS_TTL_S:
+        _site_variants.pop((site, want_mobile), None)
+        return None
+    return differs, why
+
+
+def _learn_variants(url: str, want_mobile: bool, differs: bool | None, why: str) -> None:
+    """Keeps a real measurement (two fingerprints under two identities compared); "cannot tell" is never kept."""
+    site = _site_key(url)
+    if differs is None or not site or not url.startswith(("http://", "https://")):
+        return
+    _site_variants[(site, want_mobile)] = (differs, why, time.monotonic())
+
+
+def _measured_variants(state_fp: Any, probe: Any) -> tuple[bool | None, str]:
+    """Do the page's two fetches differ? The BEFORE one is the capture's when the capture started it (``probe["base"]``, taken under the
+    identity the page was loaded with), else the one the tab's state answer fetched (``state_fp``)."""
+    if not isinstance(probe, dict):
+        return None, "ölçüm yanıtı yok"
+    if probe.get("err") and not isinstance(probe.get("fp"), dict):
+        return None, f"ölçüm alınamadı ({probe['err']})"
+    baseline = probe.get("base") if isinstance(probe.get("base"), dict) else state_fp
+    return _variants_differ(baseline, probe.get("fp"))
+
+
+def _probe_verdict(baseline: Any, probe: Any, *, check_layout: bool, known: tuple[bool, str] | None = None) -> tuple[bool, str]:
     """The measurement taken after the user agent changed against the one before it. True: reload (different page, a page that does not
-    fit the viewport, or anything that could not be measured); False: the reload would change nothing."""
+    fit the viewport, or anything that could not be measured); False: the reload would change nothing. ``known``: the site's stored
+    answer (`_known_variants`) — then the probe carries the layout only and the fetches are not compared."""
     if not isinstance(probe, dict):
         return True, "ölçüm yanıtı yok"
-    if probe.get("err") and not isinstance(probe.get("fp"), dict):
-        return True, f"ölçüm alınamadı ({probe['err']})"
-    differs, why = _variants_differ(baseline, probe.get("fp"))
+    if known is not None:
+        if not isinstance(probe.get("lay"), dict):
+            return True, f"ölçüm alınamadı ({probe.get('err') or 'yerleşim okunamadı'})"
+        differs, why = known[0], f"önbellek: {known[1]}"
+    else:
+        differs, why = _measured_variants(baseline, probe)
     if differs is None or differs:
         return True, why
     lay = probe.get("lay") or {}
@@ -370,12 +436,13 @@ def _probe_verdict(baseline: Any, probe: Any, *, check_layout: bool) -> tuple[bo
     return False, why
 
 
-def _tab_state_js(want_mobile: bool, *, wait_ms: int = 0, with_fp: bool = False) -> str:
+def _tab_state_js(want_mobile: bool, *, wait_ms: int = 0, with_fp: bool = False, fetch: bool = True) -> str:
     """What a tab says about itself before it is switched: the site it was loaded as (mobile / desktop), whether it is the tab the
     user sees, and what must survive a reload — the video's second and play state, where the page scrolls (window AND inner
     containers), the address. ``wait_ms``: a hidden tab may wait that long for its visibility (the browser lags a moment after the app's
-    task moved). ``with_fp``: the visible tab that is the other site also fetches its own address once, BEFORE the user agent changes
-    (the baseline the reload decision compares with)."""
+    task moved). ``with_fp``: the visible tab that is the other site brings the baseline the reload decision compares with — the one
+    the capture started (`odxStartBaseline`: reported as ``base``, read by the probe, never waited for here) or, without one and when
+    ``fetch``, its own address fetched once now, BEFORE the user agent changes."""
     return "(async () => {" + _SCROLL_LIB_JS + f"""
   const vis = () => document.visibilityState === 'visible';
   if ({int(wait_ms)} > 0 && !vis()) await new Promise((r) => {{
@@ -392,25 +459,31 @@ def _tab_state_js(want_mobile: bool, *, wait_ms: int = 0, with_fp: bool = False)
     dirty: odxTyped(),
   }};
   if ({'true' if with_fp else 'false'} && vis() && mobile !== {'true' if want_mobile else 'false'} && /^https?:$/.test(location.protocol)) {{
-    try {{ out.fp = await odxFingerprint(); }} catch (e) {{}}
+    if (odxBaseline()) out.base = true;
+    else if ({'true' if fetch else 'false'}) {{ try {{ out.fp = await odxFingerprint(); }} catch (e) {{}} }}
   }}
   return JSON.stringify(out);
 }})()"""
 
 
-def _probe_js(want_mobile: bool) -> str:
+def _probe_js(want_mobile: bool, *, fetch: bool = True) -> str:
     """Run after the user agent (and scale) changed: the same address again under the NEW identity, plus whether the page fits.
     A user-agent override reaches the page a moment after its command was sent, and a fetch made before that still goes out under the OLD
     identity (two identical answers, "same page" — measured). So the page first waits until it itself reports the new identity; if it never
-    does, there is no fingerprint and the tab is reloaded."""
+    does, there is no fingerprint and the tab is reloaded. The capture's baseline, when it started one, comes back with it (``base``).
+    ``fetch`` False: the layout only (the site's answer is already known, see `_known_variants`)."""
+    want = 'true' if want_mobile else 'false'
+    measure = """
+  const b = odxBaseline();
+  const [fp, base] = await Promise.all([odxFingerprint().catch((e) => { out.err = String(e).slice(0, 80); return null; }), b ? b.p : null]);
+  if (fp) out.fp = fp;
+  if (base) out.base = base;""" if fetch else ""
     return "(async () => {" + _SCROLL_LIB_JS + f"""
-  const now = () => navigator.userAgentData ? navigator.userAgentData.mobile : /Mobi/.test(navigator.userAgent);
-  for (let i = 0; i < 24 && now() !== {'true' if want_mobile else 'false'}; i++) await new Promise((r) => setTimeout(r, 25));
-  if (now() !== {'true' if want_mobile else 'false'}) return JSON.stringify({{ err: 'identity-not-applied' }});
+  for (let i = 0; i < 24 && odxIdentity() !== {want}; i++) await new Promise((r) => setTimeout(r, 25));
+  if (odxIdentity() !== {want}) return JSON.stringify({{ err: 'identity-not-applied' }});
   // the layout under the new scale arrives a frame or two after the override: wait (bounded) for it to fit before it is judged
   for (let i = 0; i < 6 && innerWidth > screen.width * {_FIT_SLACK} + 1; i++) await new Promise((r) => setTimeout(r, 150));
-  const out = {{ lay: {{ iw: innerWidth, sw: document.documentElement.scrollWidth, scr: screen.width }} }};
-  try {{ out.fp = await odxFingerprint(); }} catch (e) {{ out.err = String(e).slice(0, 80); }}
+  const out = {{ lay: {{ iw: innerWidth, sw: document.documentElement.scrollWidth, scr: screen.width }} }};{measure}
   return JSON.stringify(out);
 }})()"""
 
@@ -645,8 +718,14 @@ async def capture_browser_scroll_state(
     socket_name: str,
     *,
     timeout_s: float = 0.8,
+    baseline_for: bool | None = None,
 ) -> dict[str, Any] | None:
     """Captures the current active browser tab's scroll position, element anchor, and media state.
+
+    ``baseline_for``: the identity the page is about to get (True: the mobile site — a handoff to the phone; False: the desktop site). The
+    page then starts the BEFORE half of the "would a reload change anything?" measurement here, under the identity it has now, and keeps it
+    running in the background (`odxStartBaseline`): the watcher on the other side reads it instead of fetching the page while the user
+    waits. Not started when the site's answer is already known to be "differs" (nothing to measure: it is reloaded).
 
     Thread-safe and process-isolated via dynamic ephemeral port forwarding.
     Scans all open tabs to target the active visible tab. Never raises.
@@ -664,6 +743,9 @@ async def capture_browser_scroll_state(
                     return None
 
                 ws_url = re.sub(r"ws://[^/]+/", f"ws://127.0.0.1:{port}/", target_ws_raw)
+                known = _known_variants(str(target_page.get("url", "")), baseline_for) if baseline_for is not None else None
+                start_baseline = (baseline_for is not None and _SKIP_REDUNDANT_RELOAD and not (known is not None and known[0]))
+                baseline_js = ("true" if baseline_for else "false") if start_baseline else "null"
                 # The short open timeout of every tab socket (websockets' own is 10 s): when no tab said "visible" the target is the first of
                 # the list, which may be a frozen one — and this runs at the start of a handoff, under the window lifecycle lock.
                 async with websockets.connect(ws_url, open_timeout=_TAB_OPEN_TIMEOUT_S, close_timeout=0.3) as ws:
@@ -687,7 +769,8 @@ async def capture_browser_scroll_state(
                         "    vw: window.innerWidth, "
                         "    dirty: odxTyped(), "
                         "    stale: odxStale(), "       # the px-sized boxes as they are BEFORE the change (see _narrowed_verdict)
-                        "    hasMedia: Array.from(document.querySelectorAll('video, audio')).some(el => !el.paused && !el.ended && el.readyState > 2)"
+                        "    baseline: odxStartBaseline(" + baseline_js + "), "     # started, not waited for
+                        "    hasMedia:Array.from(document.querySelectorAll('video, audio')).some(el => !el.paused && !el.ended && el.readyState > 2)"
                         "  });"
                         "})()"
                     )
@@ -838,15 +921,32 @@ async def _capture_scroll_over(ws: Any) -> dict[str, Any] | None:
     return None
 
 
+# When a page WE reloaded or navigated gets what it showed back: its DOM is there (DOMContentLoaded), not every picture and script (the load
+# event — 1-1.5 s later on a heavy page, measured on YouTube 2026-11-10). The restore waits for what it needs itself (named places, pictures,
+# the player). Safe only because nothing else writes the scroll at the load event: a navigation is a new history entry (nothing to restore),
+# a reload has the browser's own restoration held off first (`_HOLD_SCROLL_RESTORATION_JS`).
+_DOCUMENT_READY_EVENT = "Page.domContentEventFired"
+
+
+def _main_frame_navigated(msg: dict[str, Any]) -> bool:
+    """A tab's main frame now holds a NEW document (frames inside it report a parent). Only after it does a document-ready event belong to
+    the document a reload or navigation asked for — not to the one still loading when it was sent."""
+    return msg.get("method") == "Page.frameNavigated" and not ((msg.get("params") or {}).get("frame") or {}).get("parentId")
+
+
 async def _restore_after_load(ws: Any, state: dict[str, Any], *, timeout_s: float = 5.0, user_gesture: bool = False) -> None:
-    """The reload was sent over ``ws`` (Page domain enabled): once the page has loaded, its scroll goes back — the same single-writer
-    restore the tab watcher uses. ``user_gesture``: the restore may start a video (the page was loaded by us, nobody touched it). Never raises."""
+    """The reload / navigation was sent over ``ws`` (Page domain enabled; a reload with the browser's own restoration held off and its
+    setting in ``state["sr"]``): once its document is ready, the scroll goes back — the same single-writer restore the tab watcher uses.
+    ``user_gesture``: the restore may start a video (the page was loaded by us, nobody touched it). Never raises."""
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout_s
+    committed = False
     with contextlib.suppress(Exception):
         while loop.time() < deadline:
             msg = json.loads(await asyncio.wait_for(ws.recv(), max(0.05, deadline - loop.time())))
-            if msg.get("method") == "Page.loadEventFired":
+            if _main_frame_navigated(msg):
+                committed = True
+            elif committed and msg.get("method") == _DOCUMENT_READY_EVENT:
                 params: dict[str, Any] = {"expression": _restore_script(state)}
                 if user_gesture:
                     params["userGesture"] = True
@@ -888,6 +988,10 @@ async def soft_reload_active_tab(
                     if scroll:
                         with contextlib.suppress(Exception):
                             await _send_cdp(ws, "Page.enable", req_id=29, timeout_s=0.3)
+                            # the browser's own restoration of the reload would land at the load event, over ours: held off, given back after
+                            held = await _send_cdp(ws, "Runtime.evaluate", {"expression": _HOLD_SCROLL_RESTORATION_JS, "returnByValue": True},
+                                                   req_id=28, timeout_s=0.3)
+                            scroll["sr"] = ((held or {}).get("result") or {}).get("result", {}).get("value")
                     res = await _send_cdp(ws, "Page.reload", {"ignoreCache": False}, req_id=31, timeout_s=1.0)
                     if scroll and res and "error" not in res:
                         await _restore_after_load(ws, scroll)
@@ -1151,10 +1255,13 @@ def _restore_script(state: dict[str, Any]) -> str:
     and play state it had. The two run side by side — a page with no video no longer waits for one — and this is the ONLY writer of
     the scroll after a reload (the layout nudge leaves a fresh page alone). It gives up the moment the user touches the page."""
     containers = state.get("c")
+    held = state.get("sr")
     saved = json.dumps({
         "t": state.get("t"), "playing": state.get("playing"), "y": state.get("y"), "url": state.get("url"),
         "c": containers if isinstance(containers, list) else [],
         "l": clean_locator(state.get("l")),
+        # the page's own scroll-restoration setting, held off by `_HOLD_SCROLL_RESTORATION_JS` before our reload: given back at the end
+        "sr": held if held in ("auto", "manual") else None,
     })
     # The page starts its own player (autoplay) a moment after it loads: the saved play state is held for a few seconds, not set once.
     # The video is put at its second once, the play state is held for ~4 s, and for 12 s the video is watched: a site that starts at the
@@ -1175,7 +1282,27 @@ def _restore_script(state: dict[str, Any]) -> str:
     scroll = (
         "const scroll=async()=>{if(new URL(saved.url).pathname!==location.pathname)return;await odxRestoreAll(saved);};"
     )
-    return "(async (saved)=>{window.__odxRestored=true;" + _SCROLL_LIB_JS + video + scroll + "await Promise.all([video(),scroll()]);})(" + saved + ")"
+    # Once per document (`__odxRestored`): whoever sends it — the watcher after its reload, the nudge on a page the app reloaded — the
+    # first one is the restore, a second would be another writer. After a reload of OURS it starts at DOMContentLoaded, with the
+    # browser's own restoration of that reload held off (see `_HOLD_SCROLL_RESTORATION_JS`); the page's setting goes back once the page
+    # has loaded and the restore is done — the browser would otherwise have restored at the load event, not before.
+    give_back = (
+        "const giveBack=async()=>{if(saved.sr===null)return;if(document.readyState!=='complete')"
+        "await new Promise(r=>addEventListener('load',r,{once:true}));await new Promise(r=>setTimeout(r,300));"
+        "try{history.scrollRestoration=saved.sr;}catch(e){}};"
+    )
+    return ("(async (saved)=>{if(window.__odxRestored)return;window.__odxRestored=true;" + _SCROLL_LIB_JS + give_back + video + scroll
+            + "try{await Promise.all([video(),scroll()]);}finally{await giveBack();}})(" + saved + ")")
+
+
+# Run in the document a reload of OURS is about to replace. Measured in a real Chrome (2026-11-11): a reload puts the scroll back to the
+# offset the page had in its OLD layout at the load event — over a restore that started at DOMContentLoaded and had finished (a page whose
+# last picture landed 3.5 s later jumped from the reader's place to the old offset). Setting 'manual' in the NEW document is too late (the
+# browser decided when the navigation began); set in the document being left, it holds for the reload. Answers the page's own setting,
+# which the restore gives back (`saved.sr`); null when it could not be read (then nothing was changed and nothing is given back).
+_HOLD_SCROLL_RESTORATION_JS = (
+    "(() => { try { const sr = history.scrollRestoration; history.scrollRestoration = 'manual'; return sr; } catch (e) { return null; } })()"
+)
 
 
 class BrowserTabAutoAttachWatcher:
@@ -1242,6 +1369,7 @@ class BrowserTabAutoAttachWatcher:
         self._stop_event = asyncio.Event()
         self._sessions: set[str] = set()
         self._ready = asyncio.Event()
+        self._unreachable = asyncio.Event()  # the last connection attempt failed (it retries in the background): nobody should wait for it
         self._settled = asyncio.Event()      # the tabs open when it started are in their mode (reloads loaded, video put back)
         self._front_seen = False             # a tab reported itself visible: the others cannot be the one in front
         self._front_done = False             # the tab in front has been handled (mode set, reload decided): settling no longer waits for hidden tabs
@@ -1250,6 +1378,7 @@ class BrowserTabAutoAttachWatcher:
         self._apply_scale: Any = None        # set by the running session: an async callable that re-sends the scale to every page tab
         self._run_connected = False          # the current connection attempt got as far as listening (a real drop, not a failed try)
         self._connects = 0                   # how many times it has been connected: more than one = it came back after a loss
+        self._reloaded_front = False         # this change reloaded the tab in front (see `reloaded_front`)
 
     def _resume_for(self, url: str) -> dict[str, Any] | None:
         """The state to put back into a tab created now at ``url`` — only within ``_RESUME_WINDOW_S`` of the change it was captured for (the
@@ -1266,6 +1395,13 @@ class BrowserTabAutoAttachWatcher:
     @property
     def place(self) -> str:
         return self._place
+
+    @property
+    def reloaded_front(self) -> bool:
+        """The change this watcher serves (its start, or the last ``moved``) reloaded the tab in front: that page gets what it showed back
+        from its own restore, once its document is ready (`_restore_script`, one writer per document). A layout nudge after it has nothing
+        left to do — the callers skip it."""
+        return self._reloaded_front
 
     def set_scale(self, dpr: float | None) -> None:
         """The window this watcher serves changed density: its tabs follow at once (a window's watcher only — the phone's density is
@@ -1289,6 +1425,7 @@ class BrowserTabAutoAttachWatcher:
             return
         self._resume = resume
         self._resume_at = time.monotonic()
+        self._reloaded_front = False
         hook = self._on_moved
         if hook is not None:
             asyncio.get_running_loop().create_task(hook())
@@ -1308,17 +1445,23 @@ class BrowserTabAutoAttachWatcher:
 
     async def wait_ready(self, timeout_s: float = 2.0) -> bool:
         """True once the session is attached and listening (the handoff starts it BEFORE its layout nudge, so the scale is in
-        place when the nudge anchors the scroll)."""
-        try:
-            await asyncio.wait_for(self._ready.wait(), timeout_s)
+        place when the nudge anchors the scroll). False after ``timeout_s`` — or at once when a connection attempt failed: a handoff
+        must not hold its move for a browser it cannot reach (the watcher keeps retrying in the background)."""
+        if self._ready.is_set():
             return True
-        except asyncio.TimeoutError:
-            return False
+        waits = [asyncio.ensure_future(self._ready.wait()), asyncio.ensure_future(self._unreachable.wait())]
+        try:
+            await asyncio.wait(waits, timeout=timeout_s, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for w in waits:
+                w.cancel()
+        return self._ready.is_set()
 
     async def wait_settled(self, timeout_s: float = 4.0) -> bool:
         """True once every tab that was open at the start has been put in this watcher's mode — including the reload of the tab
-        in front (loaded, its video and scroll sent back). The handoff waits for this before it anchors the scroll: a layout nudge
-        into a page that is reloading is what left a half-desktop, half-phone page."""
+        in front (its new document ready, its video and scroll sent back). The handoff waits for this before it anchors the scroll — and,
+        on a pre-landed handoff, before the task moves: a layout nudge into a page that is reloading is what left a half-desktop,
+        half-phone page."""
         try:
             await asyncio.wait_for(self._settled.wait(), timeout_s)
             return True
@@ -1337,6 +1480,7 @@ class BrowserTabAutoAttachWatcher:
         try:
             while not self._stop_event.is_set():
                 self._run_connected = False
+                self._unreachable.clear()
                 try:
                     await self._run()
                 except asyncio.CancelledError:
@@ -1345,6 +1489,8 @@ class BrowserTabAutoAttachWatcher:
                     log.debug("[CDP_WATCHER] bağlantı denemesi başarısız: %s", exc)
                 if self._stop_event.is_set():
                     return
+                if not self._run_connected:
+                    self._unreachable.set()
                 now = time.monotonic()
                 if self._run_connected:
                     since, attempt = now, 0
@@ -1416,6 +1562,8 @@ class BrowserTabAutoAttachWatcher:
                 watchdogs: dict[str, asyncio.Task] = {}        # session -> the timer that reloads when that measurement never answers
                 fits_pending: dict[str, dict[str, Any]] = {}   # session -> tab state, while the "does the layout fit this place?" check runs
                 awaiting_front: dict[str, str] = {}            # session -> targetId of a hidden tab asked a second time (it may be the front tab)
+                committed: set[str] = set()                    # reloading / re-created tabs whose NEW document has arrived (its ready event is theirs)
+                rechecks: dict[str, dict[str, Any]] = {}       # session -> tab state, while a stored "same page" answer is measured again behind the decision
 
                 front_sessions: set[str] = set()               # sessions of the tab(s) the user is looking at
 
@@ -1471,6 +1619,13 @@ class BrowserTabAutoAttachWatcher:
                     await send("Page.enable", {}, session_id)
                     await send("Page.addScriptToEvaluateOnNewDocument", {"source": _LOADED_AS_JS}, session_id)
 
+                def state_question(url: str, wait_ms: int = 0) -> str:
+                    """The state question for a tab at ``url``. A site whose answer is stored is not fetched while the user waits: "differs"
+                    needs no baseline at all, "same" only reports the one the capture started (for the recheck behind the decision)."""
+                    known = _known_variants(url, want_mobile)
+                    return _tab_state_js(want_mobile, wait_ms=wait_ms, with_fp=_SKIP_REDUNDANT_RELOAD and not (known is not None and known[0]),
+                                         fetch=known is None)
+
                 frame_watch_id = 800000        # its own id range: the watch for frames must not shift the ids of the commands a tab's flow counts on
 
                 async def watch_frames(session_id: str) -> None:
@@ -1521,14 +1676,20 @@ class BrowserTabAutoAttachWatcher:
                     if resume is not None and (fresh or this_move) and _same_page(resume["url"], url):
                         state = {**state, **{k: resume[k] for k in ("t", "playing", "y", "c", "l")}}
                     reloading[session_id] = state
+                    committed.discard(session_id)          # its restore waits for the document this reload brings
+                    rechecks.pop(session_id, None)         # a measurement behind a kept page has nothing left to correct
+                    self._reloaded_front = True
                     await send("Page.enable", {}, session_id)
                     target_url = _mobile_site_url(url) if want_mobile else None
                     # A site that starts at its address' own `t=` would send the video back to that second after the restore: the address
                     # gets the second the video is at (a different address, so a navigation, not a reload — the cache is not an issue)
                     resume_url = _retime_url(target_url or url, state.get("t"))
                     if resume_url or target_url:
-                        await send("Page.navigate", {"url": resume_url or target_url}, session_id)
+                        await send("Page.navigate", {"url": resume_url or target_url}, session_id)     # a new entry: nothing restores it
                     else:
+                        # the browser's own scroll restoration of this reload would land at the load event, over ours: held off first
+                        await send("Runtime.evaluate", {"expression": _HOLD_SCROLL_RESTORATION_JS, "returnByValue": True}, session_id,
+                                   tag=("held", session_id))
                         await send("Page.reload", {"ignoreCache": False}, session_id)
                     log.info("🔁 [CDP_WATCHER: SİTE KİPİ] %s sekmesi %s siteye çevriliyor — karar=reload, sebep=%s (video ve kaydırma korunacak)",
                              host_only(state.get("url", "")), "mobil" if want_mobile else "masaüstü", reason)
@@ -1625,7 +1786,9 @@ class BrowserTabAutoAttachWatcher:
 
                 async def decide(session_id: str, state: dict[str, Any]) -> None:
                     """The tab in front was loaded as the other site. Certain reasons reload at once; otherwise the page is asked whether a
-                    reload would change anything (it fetched its own address before the identity changed, it does so again now)."""
+                    reload would change anything (its own address fetched under the old identity — by the capture, or by its state answer —
+                    and again now). A site measured before (`_known_variants`) is not fetched on the critical path: "differs" reloads at
+                    once, "same" has only its layout checked — and is measured again behind the decision when a baseline exists."""
                     url, host = str(state.get("url", "")), str(state.get("host", ""))
                     if want_mobile and _mobile_site_url(url) is not None:
                         sure = "adreste masaüstü bayrağı var"
@@ -1633,11 +1796,19 @@ class BrowserTabAutoAttachWatcher:
                         sure = "mobil site (m.) pencerede"
                     else:
                         sure = None
-                    if sure is None and _SKIP_REDUNDANT_RELOAD and isinstance(state.get("fp"), dict):
-                        probes[session_id] = state
-                        await send("Runtime.evaluate", {"expression": _probe_js(want_mobile), "awaitPromise": True, "returnByValue": True},
-                                   session_id, tag=("probe", session_id))
+                    known = _known_variants(url, want_mobile) if sure is None and _SKIP_REDUNDANT_RELOAD else None
+                    if known is not None and known[0]:
+                        sure = f"önbellek: {known[1]}"
+                    has_baseline = isinstance(state.get("fp"), dict) or state.get("base") is True
+                    if sure is None and _SKIP_REDUNDANT_RELOAD and (known is not None or has_baseline):
+                        probes[session_id] = {**state, "known": known}
+                        await send("Runtime.evaluate", {"expression": _probe_js(want_mobile, fetch=known is None), "awaitPromise": True,
+                                                        "returnByValue": True}, session_id, tag=("probe", session_id))
                         watchdogs[session_id] = asyncio.create_task(probe_watchdog(session_id))
+                        if known is not None and has_baseline:
+                            rechecks[session_id] = state
+                            await send("Runtime.evaluate", {"expression": _probe_js(want_mobile), "awaitPromise": True, "returnByValue": True},
+                                       session_id, tag=("recheck", session_id))
                         return
                     await start_reload(session_id, state, sure or ("ölçüm kapalı" if not _SKIP_REDUNDANT_RELOAD else "ölçüm alınamadı"))
                     finish(session_id)
@@ -1698,8 +1869,8 @@ class BrowserTabAutoAttachWatcher:
                                         # The document is younger than the change: the app (or the browser) reloaded the page by itself
                                         # while the window changed — it stands at its top. What was read before goes back, once
                                         # (`__odxRestored`: a restore that already ran is not run again).
-                                        await send("Runtime.evaluate", {"expression": "window.__odxRestored ? 0 : " + _restore_script(before),
-                                                                        "userGesture": True}, session_id)
+                                        await send("Runtime.evaluate", {"expression": _restore_script(before), "userGesture": True},
+                                                   session_id)
                                         log.info("♻️ [CDP_WATCHER] %s sayfası pencere değişirken yeniden yüklenmiş — kaldığı yer geri konuyor",
                                                  host_only(state.get("url", "")))
                                     else:
@@ -1742,7 +1913,10 @@ class BrowserTabAutoAttachWatcher:
                                     answer = json.loads(raw) if isinstance(raw, str) else None
                                 except ValueError:
                                     answer = None
-                                must_reload, why = _probe_verdict(state.get("fp"), answer, check_layout=want_mobile)
+                                known = state.get("known")
+                                if known is None:       # a real measurement: the site's answer for the next handoff
+                                    _learn_variants(str(state.get("url", "")), want_mobile, *_measured_variants(state.get("fp"), answer))
+                                must_reload, why = _probe_verdict(state.get("fp"), answer, check_layout=want_mobile, known=known)
                                 if must_reload:
                                     await start_reload(session_id, state, why)
                                 else:
@@ -1750,6 +1924,31 @@ class BrowserTabAutoAttachWatcher:
                                              host_only(state.get("url", "")), why)
                                     watch_width(session_id, state)      # (not for a page that is playing or was typed into)
                                 finish(session_id)
+                            elif kind == "held" and session_id:
+                                # the page's own scroll-restoration setting, read as it was held off: its restore gives it back
+                                value = (msg.get("result") or {}).get("result", {}).get("value")
+                                held = reloading.get(session_id)
+                                if held is not None and value in ("auto", "manual"):
+                                    held["sr"] = value
+                            elif kind == "recheck" and session_id:
+                                # The stored "same page" answer, measured again behind the decision: kept fresh, and corrected where the site
+                                # changed — the page is then reloaded in this very handoff, never later than the measurement alone would have.
+                                state = rechecks.pop(session_id, None)
+                                if state is None:
+                                    continue               # reloaded meanwhile (or a new document): nothing to correct
+                                raw = (msg.get("result") or {}).get("result", {}).get("value")
+                                try:
+                                    answer = json.loads(raw) if isinstance(raw, str) else None
+                                except ValueError:
+                                    answer = None
+                                differs, why = _measured_variants(state.get("fp"), answer)
+                                _learn_variants(str(state.get("url", "")), want_mobile, differs, why)
+                                if differs:
+                                    if session_id in probes:
+                                        probes[session_id]["known"] = (True, why)     # the layout answer still to come must reload
+                                    elif session_id not in reloading:
+                                        stale_states.pop(session_id, None)
+                                        await start_reload(session_id, state, f"önbellekteki karar eskimiş — {why}")
                             elif kind in ("state", "state2") and session_id:
                                 if kind == "state2" and session_id not in awaiting_front:
                                     continue                   # the tab in front was found meanwhile; this one is not it
@@ -1777,7 +1976,7 @@ class BrowserTabAutoAttachWatcher:
                                     if target_id:
                                         awaiting_front[session_id] = target_id
                                         await send("Runtime.evaluate", {
-                                            "expression": _tab_state_js(want_mobile, wait_ms=_FRONT_WAIT_MS, with_fp=_SKIP_REDUNDANT_RELOAD),
+                                            "expression": state_question(str(state.get("url", "")), wait_ms=_FRONT_WAIT_MS),
                                             "awaitPromise": True, "returnByValue": True,
                                         }, session_id, tag=("state2", session_id))
                                         continue
@@ -1795,19 +1994,29 @@ class BrowserTabAutoAttachWatcher:
                         if method == "Page.frameNavigated":
                             # The tab's main frame holds a NEW document (the one-shot width reload after a handoff, the user's own reload, the
                             # site itself): it is laid out for the width it has now. The looks still out were for the old one — judging the
-                            # new document while it loads (its boxes have no content yet) would reload it a second time.
-                            if not ((msg.get("params") or {}).get("frame") or {}).get("parentId"):
-                                stale_states.pop(msg.get("sessionId"), None)
+                            # new document while it loads (its boxes have no content yet) would reload it a second time. A measurement
+                            # behind a kept page has nothing left to correct either.
+                            if _main_frame_navigated(msg):
+                                sid = msg.get("sessionId")
+                                stale_states.pop(sid, None)
+                                rechecks.pop(sid, None)
+                                if sid in reloading or sid in resume_on_load:
+                                    committed.add(sid)
                             continue
-                        if method == "Page.loadEventFired" and msg.get("sessionId") in reloading:
-                            state = reloading.pop(msg["sessionId"])
-                            await send("Runtime.evaluate", {"expression": _restore_script(state), "userGesture": True},
-                                       msg["sessionId"])
+                        sid = msg.get("sessionId")
+                        if method == _DOCUMENT_READY_EVENT and sid in committed and sid in reloading:
+                            # The document OUR reload asked for is ready: what it showed goes back now (the restore waits for whatever it
+                            # names itself; the browser's own restoration of the reload was held off) — and the watcher is settled, the
+                            # handoff need not wait for every picture of the page.
+                            committed.discard(sid)
+                            await send("Runtime.evaluate", {"expression": _restore_script(reloading.pop(sid)), "userGesture": True}, sid)
                             maybe_settled()
                             continue
-                        if method == "Page.loadEventFired" and msg.get("sessionId") in resume_on_load:
-                            await send("Runtime.evaluate", {"expression": _restore_script(resume_on_load.pop(msg["sessionId"])), "userGesture": True},
-                                       msg["sessionId"])
+                        if method == "Page.loadEventFired" and sid in committed and sid in resume_on_load:
+                            # A tab the APP re-created: its own restoration (the browser's saved tab state) lands at the load event — ours
+                            # goes after it, never under it.
+                            committed.discard(sid)
+                            await send("Runtime.evaluate", {"expression": _restore_script(resume_on_load.pop(sid)), "userGesture": True}, sid)
                             continue
                         if method == "Target.detachedFromTarget":
                             gone = (msg.get("params") or {}).get("sessionId")
@@ -1858,7 +2067,7 @@ class BrowserTabAutoAttachWatcher:
                                     await send("Page.enable", {}, session_id)
                             else:
                                 await send("Runtime.evaluate", {
-                                    "expression": _tab_state_js(want_mobile, with_fp=_SKIP_REDUNDANT_RELOAD),
+                                    "expression": state_question(str(info.get("url", ""))),
                                     "awaitPromise": True, "returnByValue": True,
                                 }, session_id, tag=("state", session_id))
                         if waiting:
@@ -1970,7 +2179,7 @@ def window_place(width: int | None, height: int | None, dpi: int | None, current
     smallest side, because a display's orientation must not flip the site; a resizable window has no such thing, and what a page lays out in
     is its width: a 1920 x 300 strip is a desktop page, a 400 x 1500 column is a phone one.) ``current``: the mode the window's tabs are in
     now (hysteresis). Unknown size or density: the desktop site and no scale (the way windows always were)."""
-    if not width or not height or not dpi:
+    if not all(isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 for v in (width, height, dpi)):
         return "desktop", None
     dpr = dpi / 160
     width_dp = width / dpr
@@ -2026,15 +2235,20 @@ def has_window_place(package: str) -> bool:
     return watcher is not None and watcher.place == "window"
 
 
-async def capture_window_place(package: str) -> dict[str, Any] | None:
+async def capture_window_place(package: str, width: int | None = None, height: int | None = None,
+                               dpi: int | None = None) -> dict[str, Any] | None:
     """Where the tab in front of a browser WINDOW is, read just before the window changes size. None: not a browser window, or the page did
-    not answer in time (the resize goes on without it). Never raises."""
+    not answer in time (the resize goes on without it). ``width`` / ``height`` / ``dpi``: the size it is going to — when that is the other
+    size class, the page also starts the baseline of the site measurement (see ``capture_browser_scroll_state``). Never raises."""
     watcher = _active_watchers.get(package)
     if watcher is None or watcher.place != "window":
         return None
+    mode = window_place(width, height, dpi, watcher.mode)[0] if width and height and dpi else watcher.mode
     try:
         return await asyncio.wait_for(
-            capture_browser_scroll_state(watcher._adb, watcher._serial, watcher._socket_name), _PLACE_CAPTURE_TIMEOUT_S,
+            capture_browser_scroll_state(watcher._adb, watcher._serial, watcher._socket_name,
+                                         baseline_for=(mode == "mobile") if mode != watcher.mode else None),
+            _PLACE_CAPTURE_TIMEOUT_S,
         )
     except Exception as exc:  # noqa: BLE001 — includes the timeout: a resize is never held up by a page
         log.debug("[CDP_WATCHER] boyut değişimi öncesi yer okunamadı: %s", exc)
@@ -2051,6 +2265,8 @@ async def settle_window_place(package: str, saved: dict[str, Any] | None) -> Non
     try:
         if await watcher.wait_ready(2.0):
             await watcher.wait_settled(4.0)
+        if watcher.reloaded_front:
+            return                       # reloaded as the other site: its own restore puts it back, a nudge would be a second writer
         await refresh_browser_layout_inplace(watcher._adb, watcher._serial, watcher._socket_name, saved_scroll=saved, moved=False)
     except Exception as exc:  # noqa: BLE001 — a nicety, never a reason to fail a resize
         log.debug("[CDP_WATCHER] boyut değişimi sonrası yer geri konamadı: %s", exc)

@@ -53,6 +53,30 @@ def _no_settings_db_outlives_its_test():
 
 
 @pytest.fixture(autouse=True)
+def _no_site_answer_outlives_its_test():
+    """A browser site's measured "does the other identity get another page?" answer is kept per site (cdp_refresher._site_variants):
+    one test's measurement must not decide the next test's tab."""
+    from app.windows import cdp_refresher
+
+    cdp_refresher._site_variants.clear()
+    yield
+    cdp_refresher._site_variants.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_tab_watcher_outlives_its_test():
+    """A browser's tab watcher is registered per package in a module-global (cdp_refresher._active_watchers) and keeps reconnecting until it
+    is stopped. One a test started and left behind belongs to that test's event loop, which is closed by now: the next test in the same
+    worker that stops every watcher (`close_all` -> `release_all_browser_watchers`) then failed with "Event loop is closed" — a different
+    test each run, depending on how the workers were filled."""
+    from app.windows import cdp_refresher
+
+    yield
+    cdp_refresher._active_watchers.clear()
+    cdp_refresher._closing_watchers.clear()
+
+
+@pytest.fixture(autouse=True)
 def _no_background_workspace_arrival_check(monkeypatch):
     """A task that joins the Workspace is re-checked a second or two later by a background task (WindowManager.
     _guard_workspace_arrival). Tests that do not exercise it must not leave a sleeping task behind; the ones that do set

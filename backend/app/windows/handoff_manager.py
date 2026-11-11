@@ -31,11 +31,13 @@ from ..events import EventBus, spawn_background
 from ..logging_config import window_logger
 from ..telemetry import markers as load_markers
 from .cdp_refresher import (
+    BrowserTabAutoAttachWatcher,
     capture_browser_scroll_state,
     refresh_browser_layout_inplace,
     start_browser_auto_attach_watcher,
     start_window_watcher,
     stop_browser_auto_attach_watcher,
+    window_place,
 )
 from .display_ids import is_virtual_display_id, known_display_id
 from .mirror_packages import is_internal_package, is_launcher_package, is_mirror_package
@@ -240,6 +242,50 @@ class HandoffManager:
     _SIZE_LANDING_BUDGET_S = 5.0
     _GEOMETRY_WAIT_S = 1.5
     _GEOMETRY_POLL_S = 0.12
+    # A browser landed on the phone's exact geometry gets its phone identity BEFORE the move, behind the veil (`_site_before_move`). The
+    # move waits this long at most for the tab in front to be the right site; past it the move goes on and the watcher finishes on the
+    # phone (what every handoff did before). Measured cost of the work: decision 0.1-2.9 s + a reload to its document 0.5-1.5 s.
+    _SITE_BEFORE_MOVE_BUDGET_S = 3.5
+
+    @staticmethod
+    def _landed_as_phone(session: "WindowSession", phone_size: tuple[int, int] | None, phys_dpi: int | None) -> bool:
+        """The window's display has the phone's own size AND density right now (a pre-landing put it there): a page laid out on it is laid
+        out exactly as it will be on the phone, so the phone's site can be given to it here."""
+        return (bool(phone_size) and bool(phys_dpi)
+                and (session.target_display_w, session.target_display_h) == tuple(phone_size) and session.dpi == phys_dpi)
+
+    def _start_phone_watcher(self, serial: str, socket: str, pkg: str, phys_dpi: int | None,
+                             saved_scroll: dict[str, Any] | None) -> BrowserTabAutoAttachWatcher | None:
+        """The browser's tab watcher for the PHONE (its identity, its own scale; the window's watcher is replaced). Never raises."""
+        try:
+            return start_browser_auto_attach_watcher(
+                self._adb, serial, socket, pkg, phys_dpi / 160 if phys_dpi else None, resume=saved_scroll,
+            )
+        except Exception as exc:  # noqa: BLE001 — the in-place nudge after the move still runs
+            log.warning("⚠️ [HANDOFF] %s sekme izleyicisi başlatılamadı: %s", pkg, exc)
+            return None
+
+    async def _site_before_move(self, watcher: BrowserTabAutoAttachWatcher, pkg: str) -> None:
+        """Waits — bounded — until the tab in front is the phone's site: decided, and reloaded to its new document when it had to be. Its
+        restore goes on by itself; the move that follows changes nothing the page could see (same size, same density). Never raises."""
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        deadline = started + self._SITE_BEFORE_MOVE_BUDGET_S
+        try:
+            ready = await watcher.wait_ready(self._SITE_BEFORE_MOVE_BUDGET_S)
+            settled = ready and await watcher.wait_settled(max(0.05, deadline - loop.time()))
+        except Exception as exc:  # noqa: BLE001 — the move goes on; the watcher keeps working on the phone
+            log.debug("[HANDOFF] taşıma öncesi site hazırlığı: %s", exc)
+            return
+        if not ready:
+            log.warning("⚠️ [HANDOFF: SİTE TAŞIMADAN ÖNCE] %s: tarayıcının DevTools soketine bağlanılamadı (%d ms) — taşıma beklemeden "
+                        "yapılıyor, izleyici arka planda yeniden deniyor", pkg, int((loop.time() - started) * 1000))
+            return
+        log.info(
+            "🌐 [HANDOFF: SİTE TAŞIMADAN ÖNCE] %s: ön sekme %s %d ms'de (%s) — görev telefona doğru siteyle iner",
+            pkg, "telefon kimliğinde hazır" if settled else "henüz hazır değil, telefonda bitirilecek",
+            int((loop.time() - started) * 1000), "yeniden yüklendi" if watcher.reloaded_front else "yeniden yükleme gerekmedi",
+        )
 
     @staticmethod
     def _window_geometry(session: "WindowSession") -> Geometry:
@@ -650,6 +696,9 @@ class HandoffManager:
         if windowing is None and source != "pc":
             windowing = "fullscreen"
         veiled = False  # PC penceresinin üstündeki "Görünüm Optimize Ediliyor" perdesi açıldı mı (ön-iniş)
+        browser_socket: str | None = None                          # the app is a browser with a DevTools socket
+        phone_watcher: BrowserTabAutoAttachWatcher | None = None   # its tab watcher for the phone, once started
+        saved_scroll: dict[str, Any] | None = None                 # what its tab in front showed before the handoff
         try:
             from app.device.deep_navigator import find_task_id_for_package
 
@@ -682,13 +731,12 @@ class HandoffManager:
                 with contextlib.suppress(Exception):
                     await android_shell.wake_and_unlock(self._adb, serial)
 
-            # Geçiş öncesi runtime profili ve tarayıcı scroll çıpası (0,0) tespiti
-            saved_scroll = None
+            # Geçiş öncesi runtime profili ve tarayıcı scroll çıpası (0,0) tespiti. Tarayıcı sayfası telefon kimliğine geçecek: "yeniden
+            # yükleme bir şey değiştirir mi?" ölçümünün ÖNCE yarısı burada, sayfanın yüklendiği kimlikle başlar ve arka planda sürer.
             _, runtime_profile = await asyncio.gather(wake(), inspect_app_runtime(self._adb, serial, pkg))
             if runtime_profile.is_browser_cdp and runtime_profile.cdp_socket:
-                saved_scroll = await capture_browser_scroll_state(
-                    self._adb, serial, runtime_profile.cdp_socket,
-                )
+                browser_socket = runtime_profile.cdp_socket
+                saved_scroll = await capture_browser_scroll_state(self._adb, serial, browser_socket, baseline_for=True)
 
             # ÖN-İNİŞ (yalnız PC'den aktarım): yoğunluk değişimi perdenin arkasında, sanal ekranda yaşanır; taşıma nötr olur.
             prelanded = False
@@ -705,10 +753,18 @@ class HandoffManager:
                 # uzlaştırıcının "adapted" kanıtı ~0,1 sn'de gelip taşımayı erkene çekiyordu. Perde hâlâ açık. Yeniden
                 # KURULMAYAN uygulama (yalnız boyut, medya oturumu korunan) yalnız yerleşimini yeniler: kısa bekleme yeter —
                 # 0,8 sn her aktarımda (oynayan YouTube dahil) boşa gidiyordu.
-                await asyncio.sleep(
+                quiet = asyncio.sleep(
                     self._settings.HANDOFF_PRELANDING_STABILIZE_S if rebuilt
                     else self._settings.HANDOFF_PRELANDING_QUIET_STABILIZE_S
                 )
+                if browser_socket and self._landed_as_phone(session, phone_size, phys_dpi):
+                    # Sayfa sanal ekranda artık telefondakiyle aynı genişlik ve yoğunlukta: site kararı ve gerekirse yeniden yükleme
+                    # BURADA, perdenin arkasında yapılır — görev telefona doğru siteyle iner (eskiden telefonda önce masaüstü sayfası
+                    # görünüyor, 2-5 sn sonra yeniden yükleniyordu). Bekleme, yukarıdaki sessizlikle aynı anda geçer.
+                    phone_watcher = self._start_phone_watcher(serial, browser_socket, pkg, phys_dpi, saved_scroll)
+                    await asyncio.gather(quiet, self._site_before_move(phone_watcher, pkg) if phone_watcher else asyncio.sleep(0))
+                else:
+                    await quiet
                 if prelanded:
                     density_before, changed_at = None, None  # nothing left for the move to answer
             if not prelanded and density_before is None:
@@ -740,6 +796,11 @@ class HandoffManager:
                         timeout_s=2.0,
                     )
             session.state.handoff_to_phone = True
+            if browser_socket and phone_watcher is None:
+                # Tarayıcı telefonda ama kimliği henüz verilmedi (ön-iniş yok ya da ekran telefonun geometrisine çekilemedi): izleyici
+                # ŞİMDİ başlar ve bağlantısını aşağıdaki öne alma / odak adımlarıyla aynı anda kurar. Arkadaki sekmenin "görünmüyorum"
+                # yanıtı beklenir (`_FRONT_WAIT_MS`), uygulama öne gelince karar verilir.
+                phone_watcher = self._start_phone_watcher(serial, browser_socket, pkg, phys_dpi, saved_scroll)
 
             # 2. Android'in tam ekran yığınına oturmasını sağla & HyperOS Jest Kilidini Çöz
             launch_mode = None
@@ -808,21 +869,26 @@ class HandoffManager:
             # 3. View Ağacı Re-Inflate / Canlı Web Layout Yenileme (Evrensel Sıfır State Kaybı)
             restarted = False
 
-            if runtime_profile.is_browser_cdp and runtime_profile.cdp_socket:
+            if browser_socket:
                 # ── KADEME 1: CDP Destekli Tarayıcı (Chrome, Chromium, Brave, Edge vb.) ──
-                # Süreci ÖLDÜRME! Önce sekme izleyicisi: tüm sekmeler (açık olanlar ve sonradan açılacaklar) telefonun yerel ölçeğine
-                # oturur — Chrome'un tablet kipi sürece bağlı, telefonda ×1,2 ölçek ve masaüstü sitesi taşır (cdp_refresher.py). Sonra
-                # web sayfasına canlı layout re-evaluation ve (0,0) scroll çıpalama dürtmesi: ölçek zaten yerinde olduğundan çıpa tutar.
-                with contextlib.suppress(Exception):
-                    watcher = start_browser_auto_attach_watcher(
-                        self._adb, serial, runtime_profile.cdp_socket, pkg, phys_dpi / 160 if phys_dpi else None,
-                        resume=saved_scroll,
+                # Süreci ÖLDÜRME! Sekme izleyicisi (yukarıda başladı: ön-inişte taşımadan önce, yoksa taşımayla birlikte): tüm sekmeler
+                # (açık olanlar ve sonradan açılacaklar) telefonun yerel ölçeğine ve kimliğine oturur — Chrome'un tablet kipi sürece bağlı,
+                # telefonda ×1,2 ölçek ve masaüstü sitesi taşır (cdp_refresher.py). Sonra web sayfasına canlı layout re-evaluation ve
+                # (0,0) scroll çıpalama dürtmesi: ölçek zaten yerinde olduğundan çıpa tutar.
+                if phone_watcher is not None:
+                    with contextlib.suppress(Exception):
+                        if await phone_watcher.wait_ready():   # not reachable: nothing to wait for (it retries in the background)
+                            await phone_watcher.wait_settled()   # the tab in front is the right site first; the scroll anchor comes after
+                if phone_watcher is not None and phone_watcher.reloaded_front:
+                    # Ön sekme yeni kimliğiyle yeniden yüklendi: kaldığı yeri kendi geri koyması getirir (belge başına tek yazıcı).
+                    # Dürtme ikinci bir yazıcı olurdu; atlanır, aktarım beklemeden biter.
+                    cdp_ok = True
+                    log.info("⏭️ [HANDOFF: DÜRTME ATLANDI] %s ön sekmesi telefon sitesiyle yeniden yüklendi — kaldığı yer kendi geri "
+                             "koymasıyla dönüyor", pkg)
+                else:
+                    cdp_ok = await refresh_browser_layout_inplace(
+                        self._adb, serial, browser_socket, saved_scroll=saved_scroll,
                     )
-                    await watcher.wait_ready()
-                    await watcher.wait_settled()   # the tab in front is reloaded as the other site first; the scroll anchor comes after
-                cdp_ok = await refresh_browser_layout_inplace(
-                    self._adb, serial, runtime_profile.cdp_socket, saved_scroll=saved_scroll,
-                )
                 if cdp_ok:
                     log.info(
                         "✨ [HANDOFF: CANLI DÜRTME] %s web sitesi layout'u CDP ile canlı tazelendi — süreç ve sekmeler korundu",
@@ -880,6 +946,12 @@ class HandoffManager:
             log.info("✨ [HANDOFF BAŞARILI] %s Display 0'a aktarıldı", pkg)
         except Exception as exc:
             log.error("❌ [HANDOFF KRİTİK HATA] %s için geçiş hatası: %s", pkg, exc, exc_info=True)
+            if phone_watcher is not None and not session.state.handoff_to_phone:
+                # The phone's identity was given before the move and the move never came: the browser still stands in its window —
+                # the window's watcher (its size class, its scale) comes back.
+                with contextlib.suppress(Exception):
+                    start_window_watcher(self._adb, serial, browser_socket, pkg, session.target_display_w, session.target_display_h,
+                                         session.dpi, resume=saved_scroll)
         finally:
             if veiled:  # perde ne olursa olsun kalkar (başarısız aktarımda pencere donuk kalmasın)
                 with contextlib.suppress(Exception):
@@ -1035,8 +1107,11 @@ class HandoffManager:
                 saved_scroll = None
                 runtime_profile = await inspect_app_runtime(self._adb, serial, pkg)
                 if runtime_profile.is_browser_cdp and runtime_profile.cdp_socket:
+                    # The site the window's size needs (its watcher's mode): the page starts the baseline of the site measurement here,
+                    # still under the phone's identity (see capture_browser_scroll_state).
+                    window_mode, _ = window_place(session.target_display_w, session.target_display_h, target_dpi)
                     saved_scroll = await capture_browser_scroll_state(
-                        self._adb, serial, runtime_profile.cdp_socket,
+                        self._adb, serial, runtime_profile.cdp_socket, baseline_for=window_mode == "mobile",
                     )
 
                 if task_id:
@@ -1080,17 +1155,23 @@ class HandoffManager:
                 if runtime_profile.is_browser_cdp and runtime_profile.cdp_socket:
                     # Pencere kipi: telefonda MOBİL siteyle yüklenmiş sekmeler pencerede MASAÜSTÜ siteye geçer (video ve kaydırma korunur),
                     # sonradan açılanlar da masaüstü kimliğiyle başlar; pencere yaşadıkça kalır (cdp_refresher.BrowserTabAutoAttachWatcher).
+                    desktop_watcher = None
                     with contextlib.suppress(Exception):
                         window_dpi = session.dpi or self._settings.VIRTUAL_DISPLAY_DPI
                         desktop_watcher = start_window_watcher(
                             self._adb, serial, runtime_profile.cdp_socket, pkg,
                             session.target_display_w, session.target_display_h, window_dpi, resume=saved_scroll,
                         )
-                        await desktop_watcher.wait_ready()
-                        await desktop_watcher.wait_settled()
-                    cdp_ok = await refresh_browser_layout_inplace(
-                        self._adb, serial, runtime_profile.cdp_socket, saved_scroll=saved_scroll,
-                    )
+                        if await desktop_watcher.wait_ready():
+                            await desktop_watcher.wait_settled()
+                    if desktop_watcher is not None and desktop_watcher.reloaded_front:
+                        cdp_ok = False       # reloaded as the window's site: its own restore puts it back (one writer per document)
+                        wlog.info("⏭️ [RECLAIM: DÜRTME ATLANDI] %s ön sekmesi pencerenin sitesiyle yeniden yüklendi — kaldığı yer kendi "
+                                  "geri koymasıyla dönüyor", pkg)
+                    else:
+                        cdp_ok = await refresh_browser_layout_inplace(
+                            self._adb, serial, runtime_profile.cdp_socket, saved_scroll=saved_scroll,
+                        )
                     if cdp_ok:
                         wlog.info("✨ [RECLAIM: CANLI DÜRTME] %s web sitesi layout'u ve (0,0) çıpası CDP ile tazelendi", pkg)
 

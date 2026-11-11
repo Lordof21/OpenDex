@@ -490,7 +490,7 @@ async def test_browser_with_cdp_triggers_live_nudge_without_restarting_process(m
     def start_watcher(adb, serial, socket, key, phone_dpr=None, resume=None):
         order.append("watcher")
         start_watcher.args = (socket, key, phone_dpr)
-        return MagicMock(wait_ready=AsyncMock(return_value=True))
+        return MagicMock(wait_ready=AsyncMock(return_value=True), wait_settled=AsyncMock(return_value=True), reloaded_front=False)
 
     async def nudge(*args, **kwargs):
         order.append("nudge")
@@ -970,3 +970,91 @@ def test_adopting_the_window_geometry_of_a_frozen_display_keeps_a_resize_too():
     HandoffManager._adopt_window_geometry(session)
     assert (session.target_display_w, session.target_display_h, session.dpi) == (1656, 1016, 180)
     assert session.landing is None
+
+
+# ---------------------------------------------------------------------------------------- a browser gets the phone's site before the move
+
+
+def _browser_rig(mock_adb, events, settings, monkeypatch, *, reloaded_front=False, landing=True):
+    """A browser window handed to the phone. ``landing``: the display can be resized to the phone's size AND density (a pre-landing that
+    leaves the page laid out exactly as it will be on the phone); False: the pre-landing setting is off."""
+    handoff, session, density, log, _phases, patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=landing)
+    session.state.package = "com.android.chrome"
+    session.target_display_w, session.target_display_h = 1496, 968
+
+    async def resize_display(window_id, width, height, dpi, *, in_place_only):
+        session.target_display_w, session.target_display_h, session.dpi = width, height, dpi
+        return True
+
+    handoff._resize_display = resize_display
+    monkeypatch.setattr(settings, "HANDOFF_PRELANDING_STABILIZE_S", 0.0)
+    monkeypatch.setattr(settings, "HANDOFF_PRELANDING_QUIET_STABILIZE_S", 0.0)
+    monkeypatch.setattr("app.windows.handoff_manager.android_shell.phone_size", AsyncMock(return_value=(1220, 2712)))
+    monkeypatch.setattr("app.windows.handoff_manager.android_shell.sync_display0_focus",
+                        AsyncMock(side_effect=lambda *a, **k: log.append("FOCUS")))
+    monkeypatch.setattr("app.windows.handoff_manager.inspect_app_runtime", AsyncMock(
+        return_value=MagicMock(is_browser_cdp=True, cdp_socket="chrome_devtools_remote", is_pure_native=False, has_web_engine=True)))
+    capture = AsyncMock(return_value={"url": "https://a.example/", "scrollY": 900})
+    monkeypatch.setattr("app.windows.handoff_manager.capture_browser_scroll_state", capture)
+
+    async def settled(*_a, **_k):
+        log.append("SETTLED")
+        return True
+
+    watcher = MagicMock(wait_ready=AsyncMock(return_value=True), wait_settled=AsyncMock(side_effect=settled), reloaded_front=reloaded_front)
+
+    def start_watcher(adb, serial, socket, key, phone_dpr=None, resume=None):
+        log.append("WATCHER")
+        start_watcher.args = (key, phone_dpr, resume)
+        return watcher
+
+    monkeypatch.setattr("app.windows.handoff_manager.start_browser_auto_attach_watcher", start_watcher)
+    nudge = AsyncMock(side_effect=lambda *a, **k: log.append("NUDGE") or True)
+    monkeypatch.setattr("app.windows.handoff_manager.refresh_browser_layout_inplace", nudge)
+    return handoff, session, log, patches, capture, start_watcher, nudge
+
+
+@pytest.mark.asyncio
+async def test_a_browser_landed_on_the_phones_geometry_gets_the_phones_site_before_its_task_moves(mock_adb, events, settings, monkeypatch):
+    """Measured 2026-11-10: the task moved in 65 ms, then the phone showed the DESKTOP page for 2-5 s until the watcher's reload. Landed on
+    the phone's own size and density, the page is the phone's page already: the site is decided (and reloaded) behind the veil."""
+    handoff, session, log, patches, capture, start_watcher, nudge = _browser_rig(mock_adb, events, settings, monkeypatch)
+    with patches[0], patches[1], patches[2]:
+        assert await handoff.handoff_to_phone("win-3") is True
+
+    assert capture.await_args.kwargs["baseline_for"] is True                  # the site measurement starts at the capture
+    assert log.index("WATCHER") < log.index("SETTLED") < log.index("MOVE_WCT")
+    key, phone_dpr, resume = start_watcher.args
+    assert key == "com.android.chrome" and phone_dpr == pytest.approx(520 / 160) and resume == capture.return_value
+    assert log.count("WATCHER") == 1                                          # one watcher: the one that was ready before the move
+    assert log.index("MOVE_WCT") < log.index("NUDGE")                         # a page that was kept still gets its place held
+
+
+@pytest.mark.asyncio
+async def test_a_front_tab_the_watcher_reloaded_gets_no_second_writer_after_the_move(mock_adb, events, settings, monkeypatch):
+    handoff, _session, log, patches, _capture, _start, nudge = _browser_rig(mock_adb, events, settings, monkeypatch, reloaded_front=True)
+    with patches[0], patches[1], patches[2]:
+        assert await handoff.handoff_to_phone("win-3") is True
+    nudge.assert_not_awaited()                                                # its own restore puts it back (one writer per document)
+    assert "MOVE_WCT" in log
+
+
+@pytest.mark.asyncio
+async def test_without_a_landing_the_watcher_starts_with_the_move_and_connects_during_the_focus_steps(mock_adb, events, settings, monkeypatch):
+    handoff, _session, log, patches, _capture, _start, _nudge = _browser_rig(mock_adb, events, settings, monkeypatch, landing=False)
+    with patches[0], patches[1], patches[2]:
+        assert await handoff.handoff_to_phone("win-3") is True
+    assert log.index("MOVE_WCT") < log.index("WATCHER") < log.index("FOCUS") < log.index("SETTLED") < log.index("NUDGE")
+
+
+@pytest.mark.asyncio
+async def test_a_handoff_that_fails_before_the_move_gives_the_window_its_own_watcher_back(mock_adb, events, settings, monkeypatch):
+    handoff, session, log, patches, _capture, _start, _nudge = _browser_rig(mock_adb, events, settings, monkeypatch)
+    monkeypatch.setattr(handoff, "_phone_foreground_task", AsyncMock(side_effect=RuntimeError("phone gone")))
+    window_watcher = MagicMock()
+    monkeypatch.setattr("app.windows.handoff_manager.start_window_watcher", window_watcher)
+    with patches[0], patches[1], patches[2]:
+        await handoff.handoff_to_phone("win-3")
+    assert "WATCHER" in log and "MOVE_WCT" not in log
+    args = window_watcher.call_args.args
+    assert args[3:7] == ("com.android.chrome", 1220, 2712, 520)               # the window's watcher, for what its display is now

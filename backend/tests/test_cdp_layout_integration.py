@@ -87,6 +87,16 @@ class FakeWebSocket:
         await self.close()
 
 
+def document_ready(session_id: str | None = None) -> list[dict]:
+    """What a tab sends when a reload / navigation has brought its NEW document and that document is ready: the main frame navigated,
+    then DOMContentLoaded — the restore's cue (cdp_refresher._DOCUMENT_READY_EVENT)."""
+    extra = {"sessionId": session_id} if session_id else {}
+    return [
+        {"method": "Page.frameNavigated", "params": {"frame": {"id": "F", "url": "https://a.example/"}}, **extra},
+        {"method": "Page.domContentEventFired", "params": {}, **extra},
+    ]
+
+
 class FakeCdpAdb:
     """Simulates ADB port forwarding and shell commands for CDP tests."""
 
@@ -317,7 +327,7 @@ def test_a_tab_the_app_rebuilt_from_an_older_address_is_recognised(saved, landed
 
 
 class _NavigatingWebSocket(FakeWebSocket):
-    """An active tab that was rebuilt by the app: it answers the freshness probe with 'fresh' and fires the load event after a navigation."""
+    """An active tab that was rebuilt by the app: it answers the freshness probe with 'fresh' and announces its new document after a navigation."""
 
     def __init__(self, tab_id: str):
         super().__init__(tab_id, is_visible=True)
@@ -326,7 +336,7 @@ class _NavigatingWebSocket(FakeWebSocket):
     async def send(self, data: str):
         await super().send(data)
         if json.loads(data).get("method") == "Page.navigate":
-            self._events.append(json.dumps({"method": "Page.loadEventFired", "params": {}}))
+            self._events.extend(json.dumps(e) for e in document_ready())
 
     async def recv(self) -> str:
         last = self.sent_messages[-1]
@@ -588,7 +598,7 @@ async def test_a_desktop_site_tab_in_front_is_reloaded_as_the_mobile_site_with_i
     """A tab carried onto the phone as the DESKTOP site cannot be fixed by layout alone (the site differs): the tab the user
     looks at is reloaded under the phone's user agent, and once loaded its video and scroll are put back."""
     fake_ws, _ = await _run_watcher(_tab_events(
-        {**_TAB, "mobile": False}, then=[{"method": "Page.loadEventFired", "sessionId": "S_A", "params": {}}],
+        {**_TAB, "mobile": False}, then=document_ready("S_A"),
     ))
     try:
         attach = [m for m in fake_ws.sent_messages if m.get("method") == "Target.attachToTarget"]
@@ -630,7 +640,7 @@ async def test_a_tab_the_browser_auto_attached_and_we_attached_is_handled_once()
 
 @pytest.mark.asyncio
 async def test_the_watcher_settles_after_the_reload_of_the_tab_in_front_has_loaded_and_its_state_was_sent_back():
-    events = _tab_events({**_TAB, "mobile": False}, then=[{"method": "Page.loadEventFired", "sessionId": "S_A", "params": {}}])
+    events = _tab_events({**_TAB, "mobile": False}, then=document_ready("S_A"))
     fake_ws = FakeBrowserWatcherWebSocket(events)
     with (
         patch("urllib.request.urlopen", return_value=MagicMock(read=lambda: _VERSION.encode())),
@@ -674,7 +684,7 @@ async def test_a_tab_whose_address_forces_the_desktop_site_is_navigated_without_
     """YouTube's `app=desktop` wins over the user agent: a reload kept the desktop layout on the phone (half-desktop page)."""
     url = "https://www.youtube.com/watch?app=desktop&v=1"
     fake_ws, _ = await _run_watcher(_tab_events(
-        {**_TAB, "mobile": False, "url": url}, then=[{"method": "Page.loadEventFired", "sessionId": "S_A", "params": {}}],
+        {**_TAB, "mobile": False, "url": url}, then=document_ready("S_A"),
     ))
     try:
         methods = _session_methods(fake_ws, "S_A")

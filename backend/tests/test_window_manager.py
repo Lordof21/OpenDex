@@ -1560,8 +1560,8 @@ def browser_place(monkeypatch):
     place = Place()
     place.calls = []
 
-    async def capture(package):
-        place.calls.append(("capture", package))
+    async def capture(package, width=None, height=None, dpi=None):
+        place.calls.append(("capture", package, width, height, dpi))
         return place.capture
 
     def update(package, width, height, dpi, resume=None):
@@ -1586,18 +1586,23 @@ async def test_a_browser_window_reads_where_its_page_is_before_it_changes_size_a
     resized_at_capture = []
     capture = wm_module.capture_window_place
 
-    async def capture_and_note(package):
+    async def capture_and_note(package, *size):
         resized_at_capture.append((session.target_display_w, session.target_display_h))
-        return await capture(package)
+        return await capture(package, *size)
 
     wm_module.capture_window_place = capture_and_note
     before = (session.target_display_w, session.target_display_h)
     await manager.resize_window(handle.window_id, 448, 984, dpi=220)
-    await asyncio.sleep(0.05)                                       # the settle runs in the background
+    for _ in range(100):                                            # the settle runs in the background (a busy machine takes longer)
+        if any(c[0] == "settle" for c in browser_place.calls):
+            break
+        await asyncio.sleep(0.02)
 
     assert resized_at_capture == [before]                           # read BEFORE the display changed
     kinds = [c[0] for c in browser_place.calls]
     assert kinds == ["capture", "update", "settle"]
+    # the size it is going to: a capture before a change of size class starts the site measurement's baseline there
+    assert browser_place.calls[0] == ("capture", "com.android.chrome", 448, 984, 220)
     assert browser_place.calls[1] == ("update", "com.android.chrome", 448, 984, 220, browser_place.capture)
     assert browser_place.calls[2] == ("settle", "com.android.chrome", browser_place.capture)
 
