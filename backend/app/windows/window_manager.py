@@ -1142,11 +1142,12 @@ class WindowManager:
     # `_sessions` dict by reference and reads `_serial` live via a getter, so
     # it always observes the exact state these locked wrappers are guarding.
 
-    async def handoff_window_to_phone(self, window_id: str, windowing: str | None = None) -> bool:
+    async def handoff_window_to_phone(self, window_id: str, windowing: str | None = None, prelanding: str | None = None) -> bool:
         """PC ➔ phone handoff, Stealth DPI (see HandoffManager.handoff_to_phone).
 
         `windowing` ("fullscreen" | "freeform"): how THIS handoff lands on the phone; None = the user's setting
-        (`phone_handoff_windowing`).
+        (`phone_handoff_windowing`). `prelanding` ("auto" | "on" | "off"): the window's own pre-landing choice; None = the
+        user's setting (`handoff_prelanding`). A Workspace member has no display of its own to land: it never pre-lands.
 
         Eco Workspace üyesi ise TEK fark: görev telefona "park edilir" (yeri korunur) —
         bkz. TaskTeleporter.workspace_to_phone. Çağıran için fiil aynıdır (tek buton)."""
@@ -1154,7 +1155,7 @@ class WindowManager:
             session = self._sessions.get(window_id)
             if session is not None and session.state.workspace_id == "eco":
                 return await self._teleporter.workspace_to_phone(window_id, windowing=windowing)
-            return await self._handoff.handoff_to_phone(window_id, windowing=windowing)
+            return await self._handoff.handoff_to_phone(window_id, windowing=windowing, prelanding=prelanding)
 
     async def reclaim_window(
         self, window_id: str, bounds: tuple[int, int, int, int] | None = None, requested: tuple[int, int, int] | None = None,

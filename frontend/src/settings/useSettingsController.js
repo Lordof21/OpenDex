@@ -5,7 +5,7 @@
 import { useCallback, useRef } from 'react';
 import { useTheme } from '../state/ThemeContext.jsx';
 import { useSystemStore } from '../state/systemStore.js';
-import { modeOf, targetDisplaySizeForWindow, useWindowStore } from '../window/windowStore.js';
+import { modeOf, normalizePrelanding, targetDisplaySizeForWindow, useWindowStore } from '../window/windowStore.js';
 import { isLegacyAudioMode, useAudioMixerStore } from '../state/audioMixerStore.js';
 import { sessionAudioPlayer } from '../media/audioPlayer.js';
 import { updateSettings, useLiveSettings } from './liveSettings.js';
@@ -41,7 +41,7 @@ export function useSettingsController() {
     stealth: flag('stealth_dpi_enabled', true),
     densityRefresh: flag('density_refresh_enabled', true),
     densityRefreshHard: flag('density_refresh_hard', false),
-    handoffPrelanding: flag('handoff_prelanding', true),
+    handoffPrelanding: normalizePrelanding(live.handoff_prelanding),
     fps: live.max_fps ? String(live.max_fps) : '60',
     bitrate: live.video_bit_rate !== undefined ? String(Math.round(live.video_bit_rate / 1_000_000)) : '8',
     windowLimit: live.custom_encoder_limit > 0 ? String(live.custom_encoder_limit) : 'auto',
@@ -144,6 +144,7 @@ export function useSettingsController() {
     setAudioCodec: (val) => save({ audio_codec: val === 'pcm' ? 'raw' : val }),
     setWindowingMode: (val) => save({ windowing_mode: val === 'hybrid' ? 'hybrid_auto' : val }),
     setHandoffWindowing: (val) => save({ phone_handoff_windowing: val }),
+    setHandoffPrelanding: (val) => save({ handoff_prelanding: val }),
     setAppClosed: (val) => save({ app_closed_behavior: val }),
     setTheme: (val) => setTheme(val === 'dark' ? 'dark' : 'light'),
     toggle: (key, current) => save({ [key]: !current }),

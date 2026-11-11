@@ -16,7 +16,9 @@ import { layoutKey, useKeymapStore } from '../../keymapper/keymapStore.js';
 import {
   HEADER_MODE_LABELS,
   dynamicDpStatusOf,
+  effectivePrelanding,
   fitLabel,
+  prelandingModeOf,
   nextFitMode,
   nextHeaderMode,
   normalizeHeaderMode,
@@ -166,6 +168,11 @@ export function useWindowHub({
     keymapCount,
     keymapEnabled,
     onToggleKeymap: hasKeymapEditor ? toggleKeymapEnabled : undefined,
+    // Telefona aktarırken ön-iniş: pencerenin kendi seçimi ve bu pencerede geçerli olan (özel > genel). Yalnız telefona aktarılabilen
+    // pencere (arkasında gerçek bir uygulama ve kendi akışı olan) sunar.
+    prelandingMode: prelandingModeOf(win),
+    prelandingEffective: effectivePrelanding(win, effectiveSettings),
+    onCyclePrelanding: hasAppSession ? () => useWindowStore.getState().cyclePrelanding(win.id) : undefined,
     headerModeLabel: HEADER_MODE_LABELS[normalizeHeaderMode(win.headerMode)],
     headerModeActive: normalizeHeaderMode(win.headerMode) !== 'follow',
     onCycleHeader: cycleHeaderMode,

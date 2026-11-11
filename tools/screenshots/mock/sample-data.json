@@ -29,7 +29,7 @@
     "stealth_dpi_enabled": true,
     "density_refresh_enabled": true,
     "density_refresh_hard": false,
-    "handoff_prelanding": true,
+    "handoff_prelanding": "auto",
     "windowing_mode": "hybrid_auto",
     "remember_devices": true,
     "usb_stability_guard": true,

@@ -228,7 +228,8 @@ describe('DexSettings — kapsam bölümleri', () => {
     const heading = getByText('Telefona Aktarma Kipi');
     const all = scopeHeading(container, 'global');
     expect(Boolean(all.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-    expect(getByText('Önerilen')).toBeInTheDocument(); // varsayılan tam ekran
+    // varsayılan tam ekran (grubun kendi içinde: ön-inişin "Otomatik" seçeneği de "Önerilen" der)
+    expect(within(heading.closest('section')).getByText('Önerilen')).toBeInTheDocument();
 
     fireEvent.click(getByText('Serbest pencere'));
     expect(saveSettings).toHaveBeenCalledWith({ phone_handoff_windowing: 'freeform' });

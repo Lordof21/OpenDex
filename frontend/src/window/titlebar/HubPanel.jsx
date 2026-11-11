@@ -11,11 +11,13 @@ import {
   PanelTop,
   PictureInPicture2,
   Pin,
+  PlaneLanding,
   RotateCw,
   Send,
 } from 'lucide-react';
 import { cn } from '../../lib/utils.js';
 import { t } from '../../i18n/index.js';
+import { PRELANDING_LABELS } from '../windowModel.js';
 
 
 export const HubPanel = forwardRef(function HubPanel(
@@ -58,6 +60,11 @@ export const HubPanel = forwardRef(function HubPanel(
     keymapCount = 0,
     keymapEnabled = true,
     onToggleKeymap,
+    // "Ön-iniş" (telefona aktarırken): `prelandingMode` = pencerenin kendi seçimi ('follow' Genele uy | 'auto' | 'on' | 'off'),
+    // `prelandingEffective` = bu pencerede geçerli olan. Satır döner (Dinamik DP gibi). Verilmezse (telefona aktarılamayan pencere) yok.
+    prelandingMode = 'follow',
+    prelandingEffective = 'auto',
+    onCyclePrelanding,
     headerModeLabel = t('window.genele_uy'),
     headerModeActive = false,
     onCycleHeader,
@@ -80,6 +87,10 @@ export const HubPanel = forwardRef(function HubPanel(
         ? `${dynamicDpChoice} · ${dynamicDp ? t('common.acik_2') : t('common.kapali_2')}`
         : dynamicDpChoice;
   const isCrop = variant === 'workspace-crop';
+  // Aynı kural: pencerenin kendi seçimi yazılır, "Genele uy"da yanına o an geçerli olan.
+  const prelandingDetail = prelandingMode === 'follow'
+    ? `${PRELANDING_LABELS.follow} · ${PRELANDING_LABELS[prelandingEffective] ?? PRELANDING_LABELS.auto}`
+    : PRELANDING_LABELS[prelandingMode];
   return (
     <motion.div
       ref={effectiveRef}
@@ -200,6 +211,24 @@ export const HubPanel = forwardRef(function HubPanel(
           <p className="px-2 pt-1.5 text-[10px] leading-[14px] text-muted-foreground" data-testid="display-lock-hint">
             {t('window.goruntu_boyutu_px_ve_dpi_sabit')}
           </p>
+        )}
+
+        {onCyclePrelanding && !isCrop && (
+          <>
+            <div className="my-2 h-px bg-border" />
+            <p className="px-2 pb-1 text-[9px] font-semibold uppercase text-muted-foreground">
+              {t('window.telefona_aktarim')}
+            </p>
+            <HubAction
+              icon={<PlaneLanding className="size-4" />}
+              label={t('common.on_inis')}
+              detail={prelandingDetail}
+              onClick={onCyclePrelanding}
+              trailing={<span className="font-mono text-[10px]">{t('window.dondur')}</span>}
+              compact={compact}
+              testId="hub-prelanding"
+            />
+          </>
         )}
 
         {(onReloadPage || onRestartApp) && (

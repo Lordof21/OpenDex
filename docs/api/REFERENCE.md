@@ -675,6 +675,7 @@ density equalization; see HandoffManager.handoff_to_phone).
 |---|---|---|---|
 | `window_id` | string | yes |  |
 | `windowing` | `"fullscreen"` \| `"freeform"` (nullable) | no |  |
+| `prelanding` | `"auto"` \| `"on"` \| `"off"` (nullable) | no |  |
 
 **Responses:** `200` Successful Response · `422` Validation Error · `401` token missing/wrong · `403` foreign Origin/Host · `411` chunked body · `413` body too large
 
@@ -1008,7 +1009,7 @@ Updates settings and applies live quality/audio reconfigurations.
 | `stealth_dpi_enabled` | boolean | no | default `true` |
 | `density_refresh_enabled` | boolean | no | default `true` |
 | `density_refresh_hard` | boolean | no | default `false` |
-| `handoff_prelanding` | boolean | no | default `true` |
+| `handoff_prelanding` | `"auto"` \| `"on"` \| `"off"` | no | default `"auto"` |
 | `windowing_mode` | `"eco"` \| `"independent"` \| `"hybrid_auto"` | no | default `"hybrid_auto"` |
 | `remember_devices` | boolean | no | default `true` |
 | `usb_stability_guard` | boolean | no | default `true` |

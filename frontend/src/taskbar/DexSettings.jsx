@@ -15,6 +15,7 @@ import {
   MonitorCog,
   MonitorOff,
   Palette,
+  PlaneLanding,
   Equal,
   Ruler,
   ScanSearch,
@@ -49,13 +50,16 @@ import {
   GLOBAL_FIT_CHOICES,
   HEADER_MODES,
   HEADER_MODE_LABELS,
+  PRELANDING_LABELS,
   dpiPolicyOf,
   globalFitFromBackend,
   modeOf,
   normalizeAutoDensity,
   normalizeFitMode,
   normalizeHeaderMode,
+  normalizePrelanding,
   normalizeWindowOverrides,
+  prelandingModeOf,
   targetDisplaySizeForWindow,
   useWindowStore,
 } from '../window/windowStore.js';
@@ -68,6 +72,7 @@ import { PrecisionSlider } from '../ui/PrecisionSlider.jsx';
 import { ChoiceMenu } from '../ui/ChoiceMenu.jsx';
 import AppIcon from '../ui/AppIcon.jsx';
 import { isMirrorPackage } from '../window/mirrorPackage.js';
+import { isFrontendOnlyWindow } from '../window/frontendOnly.js';
 import { t as tt } from '../i18n/index.js';
 
 const WINDOW_MODES = [
@@ -144,6 +149,13 @@ const HANDOFF_WINDOWING = [
   { value: 'freeform', label: tt('common.serbest_pencere'), hint: tt('common.kucuk_pencere') },
 ];
 
+// Telefona aktarırken ön-iniş: genel ayar (Sistem) ve pencerenin kendi seçimi (Pencere) aynı üç değeri kullanır (windowModel PRELANDING_MODES).
+const PRELANDING_CHOICES = [
+  { value: 'auto', label: PRELANDING_LABELS.auto, hint: tt('common.onerilen') },
+  { value: 'on', label: PRELANDING_LABELS.on, hint: tt('settings.her_aktarimda') },
+  { value: 'off', label: PRELANDING_LABELS.off, hint: tt('settings.tek_adim') },
+];
+
 // Pencerenin uygulaması TELEFONDA kapatılınca: pencere kapanır ya da yeniden açma kartı gösterir.
 const APP_CLOSED_BEHAVIOR = [
   { value: 'close', label: tt('common.pencereyi_kapat'), hint: tt('common.varsayilan') },
@@ -178,6 +190,7 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
   const phoneScreenOff = Boolean(live.screen_off_while_mirroring);
   const handoffWindowing = live.phone_handoff_windowing || 'fullscreen';
   const appClosedBehavior = live.app_closed_behavior || 'close';
+  const globalPrelanding = normalizePrelanding(live.handoff_prelanding);
   const save = (patch) => updateSettings(patch).catch(() => {});
 
   const { settingsOpen, openSettings, restoreSettings, focusSettings, setDisplayPowerState } = useSystemStore();
@@ -281,6 +294,9 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
   const windowResolution = windowOverrides.resolution_mode ?? FOLLOW;
   const windowDpLock = 'dp_lock_enabled' in windowOverrides ? windowOverrides.dp_lock_enabled : FOLLOW;
   const windowFit = normalizeFitMode(activeWindow?.videoFitMode);
+  // Telefona aktarılabilen pencere (arkasında gerçek bir uygulama ve kendi akışı var): ayna, Dosyalar ve kırpma penceresinde yok.
+  const canHandOff = canTuneWindow && !headerLocked && !isFrontendOnlyWindow(activeWindow);
+  const windowPrelanding = prelandingModeOf(activeWindow);
   // Ayna (telefon ekranı) penceresinin akışı telefonun kendi ekranıdır: çözünürlük/DP kilidi ona uygulanmaz.
   const resolutionLocked = Boolean(activeWindow?.resolutionLocked) || headerLocked;
   // Kilit iki ayrı nedenle olabilir: ayna penceresi (akışı telefonun kendi ekranı) ya da kullanıcının Hub'daki "Ekran kilidi".
@@ -354,6 +370,7 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
 
   const handleHandoffWindowingChange = (val) => save({ phone_handoff_windowing: val });
   const handleAppClosedBehaviorChange = (val) => save({ app_closed_behavior: val });
+  const handlePrelandingChange = (val) => save({ handoff_prelanding: val });
   const handleWindowModeChange = (val) => save({ windowing_mode: val === 'hybrid' ? 'hybrid_auto' : val });
   // Akış yeniden hesabı KAYDEDİLMİŞ ayarı okur → kayıt bittikten sonra.
   const handleResolutionChange = (val) =>
@@ -367,6 +384,11 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
       .getState()
       .setWindowOverride(activeWindow.id, key, value === FOLLOW ? null : value, { apply: smartResize })
       .catch(() => {});
+  };
+  // Ön-iniş akışı etkilemez: kalıcı seçim, bir sonraki «Telefona aktar» isteğiyle gider (yeniden müzakere yok).
+  const setWindowPrelanding = (mode) => {
+    if (!activeWindow || activeWindow.isEcoWorkspace) return;
+    useWindowStore.getState().setWindowPrelanding(activeWindow.id, mode).catch(() => {});
   };
   const setWindowFit = (mode) => {
     if (!activeWindow) return;
@@ -633,6 +655,39 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
                   </div>
                 )}
               </SettingsGroup>
+
+              {canHandOff && (
+                <SettingsGroup
+                  dense
+                  icon={PlaneLanding}
+                  title={tt('settings.telefona_aktarirken_on_inis')}
+                  value={windowPrelanding === FOLLOW
+                    ? `${PRELANDING_LABELS.follow} · ${PRELANDING_LABELS[globalPrelanding]}`
+                    : PRELANDING_LABELS[windowPrelanding]}
+                >
+                  <div className="grid grid-cols-4 gap-1" data-window-setting="handoff_prelanding">
+                    <ChoiceChip
+                      dense
+                      label={tt('taskbar.genele_uy')}
+                      hint={tt('taskbar.genel_value', { value: PRELANDING_LABELS[globalPrelanding] })}
+                      active={windowPrelanding === FOLLOW}
+                      onClick={() => setWindowPrelanding(FOLLOW)}
+                    />
+                    {PRELANDING_CHOICES.map((item) => (
+                      <ChoiceChip
+                        dense
+                        key={item.value}
+                        label={item.label}
+                        active={windowPrelanding === item.value}
+                        onClick={() => setWindowPrelanding(item.value)}
+                      />
+                    ))}
+                  </div>
+                  <p className="mt-1.5 text-[9px] leading-[12px] text-muted-foreground">
+                    {tt('taskbar.on_inis_bu_pencere')}
+                  </p>
+                </SettingsGroup>
+              )}
             </>
           ) : (
             <p className="rounded-md border border-dashed border-border/70 px-2.5 py-2 text-[10px] leading-[14px] text-muted-foreground">
@@ -748,6 +803,13 @@ export const DexSettings = forwardRef(function DexSettings({ onClose, ...motionP
                   <ChoiceGrid dense columns={2} options={HANDOFF_WINDOWING} value={handoffWindowing} onChange={handleHandoffWindowingChange} />
                   <p className="mt-1.5 text-[9px] leading-[12px] text-muted-foreground">
                    {tt('taskbar.yalniz_telefona_aktar_dugmesinin')}
+                  </p>
+                </SettingsGroup>
+
+                <SettingsGroup dense icon={PlaneLanding} title={tt('settings.telefona_aktarirken_on_inis')} value={PRELANDING_LABELS[globalPrelanding]}>
+                  <ChoiceGrid dense columns={3} options={PRELANDING_CHOICES} value={globalPrelanding} onChange={handlePrelandingChange} />
+                  <p className="mt-1.5 text-[9px] leading-[12px] text-muted-foreground">
+                    {tt('settings.pencere_kendi_on_inis_secimini')}
                   </p>
                 </SettingsGroup>
 

@@ -189,7 +189,7 @@ export const SETTING_ITEMS = {
     section: 'windows',
     title: t('settings.telefona_aktarirken_on_inis'),
     description: t('settings.boyut_ve_dpi_degisimi_telefonda_degil'),
-    keywords: [t('settings.on_inis'), 'prelanding', 'aktar', t('settings.gecis'), t('settings.yanlis_yerlesim')],
+    keywords: [t('settings.on_inis'), 'prelanding', 'aktar', t('settings.gecis'), t('settings.yanlis_yerlesim'), 'otomatik', 'pencere'],
   },
   densityRefresh: {
     section: 'windows',
@@ -483,6 +483,13 @@ export const HANDOFF_OPTIONS = [
   { value: 'freeform', label: t('common.serbest_pencere'), description: t('settings.hyperos_un_kendi_kucuk_penceresi'), tag: t('common.kucuk_pencere') },
 ];
 
+/** Telefona aktarırken ön-iniş (windowModel PRELANDING_MODES): genel ayar; bir pencere kendi seçimini DeX Ayarları / Hub'da yapar. */
+export const PRELANDING_OPTIONS = [
+  { value: 'auto', label: t('common.otomatik_2'), description: t('settings.on_inis_otomatik_aciklama'), tag: t('common.onerilen') },
+  { value: 'on', label: t('common.acik_2'), description: t('settings.on_inis_acik_aciklama'), tag: t('settings.her_aktarimda') },
+  { value: 'off', label: t('common.kapali_2'), description: t('settings.on_inis_kapali_aciklama'), tag: t('settings.tek_adim') },
+];
+
 export const APP_CLOSED_OPTIONS = [
   { value: 'close', label: t('common.pencereyi_kapat'), description: t('settings.telefondan_kapatilan_uygulamanin'), tag: t('common.varsayilan') },
   { value: 'badge', label: t('common.pencerede_goster'), description: t('settings.pencere_kalir_ustunde_yeniden_ac'), tag: t('common.yeniden_ac') },
@@ -520,6 +527,7 @@ export const SETTING_OPTIONS = {
   audioCodec: AUDIO_CODEC_OPTIONS,
   windowingMode: WINDOWING_MODE_OPTIONS,
   handoffWindowing: HANDOFF_OPTIONS,
+  handoffPrelanding: PRELANDING_OPTIONS,
   appClosed: APP_CLOSED_OPTIONS,
   theme: THEME_OPTIONS,
   gpuPreference: GPU_OPTIONS,

@@ -1,9 +1,32 @@
 # Changelog
 
-All notable changes are recorded here, in the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format. The project is pre-1.0 and has no published release yet; the history before this file
+All notable changes are recorded here, in the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format. The project is pre-1.0 (first public build: 0.9); the history before this file
 is in `git log` (mostly in Turkish).
 
 ## [Unreleased]
+
+## [0.9.2] - 2026-11-11
+
+### Added
+- **Pre-landing is now a choice: Automatic / On / Off**, for every window and for the whole system. Before a window goes to the phone, OpenDeX can bring its virtual display to the phone's own size and density, so the app is rebuilt behind the PC veil instead of on the phone. *Automatic* (the default, what the old switch did when it was on) skips it for an app that would be rebuilt both at the pre-landing and at the move, so its page is not reloaded twice; *On* does it on every eligible send; *Off* never does it (size and DPI change on the phone in one step, with the move). Where to set it: the window's Hub (a new "Pre-landing" row under the window tiles, cycling *Follow general → Automatic → On → Off*), DeX Settings › Window (this window only) and › System (general), and Settings › Windows. A window's own choice wins over the general one and travels with the hand-off request (`POST /api/windows/handoff` takes `prelanding`); the `handoff_prelanding` setting is now `"auto" | "on" | "off"` (an old `true` / `false` is read as `auto` / `off`). Why it exists: X keeps a separate feed position for the wide and the compact layout, so a hand-off that switches between them loses the place wherever the switch happens.
+
+### Changed
+- A browser window that only changes size keeps its process: after a resize at another density the settle no longer restarts Chrome (every page used to reload from its top); the tab watcher already gives every tab the window's scale.
+- Resizing a browser window keeps the place of the page in front: the place is read before the display changes and put back afterwards (measured: 1440 → 448 → 1440 px kept page 30 of a chapter at 50 / 50.2 / 50.5 %).
+- The desktop UI shows the app's real version (v0.9.2) on the start screen; the installer and the portable package carry it in their file names (`OpenDeX_0.9.2_…`), so a new installer upgrades an installed one.
+
+### Fixed
+- A reader's place on pages that scroll an inner box (a site's mobile layout scrolled a full-height box while the window had 56 px, so the page came back at its top) is found and restored by whatever scrolls the page.
+- A manga reader that keeps the tallest height a page ever had left 78–103 px of nothing under every page after a narrower width: the tab watcher now notices pages left at the old width's heights and reloads them to the place of before.
+- A watcher that cannot reach the browser no longer holds a hand-off for its whole timeout; its socket closes in 0.3 s instead of waiting 10 s for a close frame Chrome never sends.
+
+### Performance
+- Handing a browser to the phone no longer shows the desktop page for 2–5 s first. The site is decided before the move: when the pre-landing put the window's display at the phone's own size and density, the phone's tab watcher starts there and the move waits (at most 3.5 s) until the tab in front is the right site. Whether a site serves another page to the other identity is remembered per site and direction (24 h), re-checked behind the decision so a stale answer is corrected in the same hand-off; a page the watcher reloads is restored at DOMContentLoaded with the browser's own scroll restoration held off.
+
+### Translations
+- The new strings are translated into 18 languages.
+
+## [0.9.1] and earlier
 
 ### Added
 - Multi-app sound (the phone's "several apps play at once" flag): Settings › Sound card with the live state, the time of the last reading and a **Check again** button; one-click, read-back-verified **Turn on** (policy *Ask* by default, *Always*, *Never*); restored when the last window closes; a once-per-run offer when one app pauses another; a mixer pill and a DeX panel shortcut. New daemon command `audio_multi_focus` (rebuild the helper jar), `GET/POST/PUT /api/audio/multi-focus`, event `multi_audio_focus_update`, setting `multi_audio_focus_policy` ([design/MULTI_APP_SOUND.md](docs/design/MULTI_APP_SOUND.md)).

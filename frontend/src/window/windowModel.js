@@ -138,16 +138,25 @@ export function policyArgs(policy) {
 
 // ───────────────────────────────────────────────────────────────── 4. Pencere başına ayarlar
 // DeX Ayarları'nın "Bu pencere" bölümü, genel ayarların pencereye özgü üst katmanını yazar: `win.overrides`.
-// Anahtar YOKSA pencere genel ayarı izler ("Genele uy"). Backend bundan habersizdir — pencere için hesaplanan
-// sonuç (akış w×h ve dpi) zaten pencereye özgü gönderilir; hangi ayardan çıktığını bilmesi gerekmez.
+// Anahtar YOKSA pencere genel ayarı izler ("Genele uy"). Backend akış ayarlarından habersizdir — pencere için hesaplanan
+// sonuç (akış w×h ve dpi) zaten pencereye özgü gönderilir. Tek istisna ön-iniş: pencerenin kendi seçimi telefona aktarma
+// isteğiyle birlikte gider (continuitySlice.handoffWindowToPhone), yoksa backend genel ayarı kullanır.
 export const RESOLUTION_MODES = Object.freeze([
   'dynamic', 'dynamic_fit', 'dynamic_fix', 'phone_scale',
   '1080p', 'tablet', '2k', '2.5k', 'fixed_1080p', 'fixed_1200p', 'fixed_1440p', 'fixed_1600p',
 ]);
 
+/**
+ * Telefona aktarırken ön-iniş (backend handoff_manager._prelanding_choice): genel ayar ve pencerenin kendi seçimi aynı sözlüğü
+ * kullanır. 'auto': yapılır — ekranı hem ön-inişte hem taşımada yeniden kurulacak bir uygulama dışında; 'on': her uygun aktarımda;
+ * 'off': hiç (taşıma boyut ve yoğunluğu telefonda tek adımda değiştirir).
+ */
+export const PRELANDING_MODES = Object.freeze(['auto', 'on', 'off']);
+
 const OVERRIDE_VALIDATORS = {
   resolution_mode: (v) => RESOLUTION_MODES.includes(v) || customResolutionOf(v) != null,
   dp_lock_enabled: (v) => typeof v === 'boolean',
+  handoff_prelanding: (v) => PRELANDING_MODES.includes(v),
 };
 export const WINDOW_OVERRIDE_KEYS = Object.freeze(Object.keys(OVERRIDE_VALIDATORS));
 
@@ -174,6 +183,34 @@ export function settingsForWindow(win, settings) {
 /** Pencerenin bu ayarı kendisi mi belirliyor (true), yoksa genel ayarı mı izliyor (false)? */
 export function hasWindowOverride(win, key) {
   return key in normalizeWindowOverrides(win?.overrides);
+}
+
+/** Genel ön-iniş ayarı: eski açık/kapalı anahtar da okunur (açık = 'auto', o zamanki davranış; kapalı = 'off'); bilinmeyen = 'auto'. */
+export function normalizePrelanding(value) {
+  if (value === true) return 'auto';
+  if (value === false) return 'off';
+  return PRELANDING_MODES.includes(value) ? value : 'auto';
+}
+
+/** Pencerenin kendi ön-iniş seçimi: 'follow' (Genele uy) | 'auto' | 'on' | 'off'. */
+export function prelandingModeOf(win) {
+  return normalizeWindowOverrides(win?.overrides).handoff_prelanding ?? 'follow';
+}
+
+/** Bu pencerenin telefona aktarımında GEÇERLİ olan ön-iniş (özel > genel). */
+export function effectivePrelanding(win, settings) {
+  const own = prelandingModeOf(win);
+  return own === 'follow' ? normalizePrelanding(settings?.handoff_prelanding) : own;
+}
+
+/** Ön-iniş seçiminin adı — Hub, DeX Ayarları ve Ayarlar aynı sözcükleri kullanır. */
+export const PRELANDING_LABELS = {
+  follow: t('window.genele_uy'), auto: t('common.otomatik_2'), on: t('common.acik_2'), off: t('common.kapali_2'),
+};
+
+/** Hub satırının döngüsü: Genele uy → Otomatik → Açık → Kapalı → Genele uy. */
+export function nextPrelandingMode(mode) {
+  return mode === 'follow' ? 'auto' : mode === 'auto' ? 'on' : mode === 'on' ? 'off' : 'follow';
 }
 
 /**

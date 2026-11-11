@@ -59,10 +59,13 @@ class ProjectSettings(BaseModel):
     # hiçbir durumda otomatik öldürülmez.
     density_refresh_hard: bool = False
     # PC'den "Telefona Aktar": yoğunluk değişimi telefonda değil, PC penceresinin perdesi arkasında sanal ekranda yaşanır
-    # (ön-iniş: sanal ekran telefonun yoğunluğuna çekilir, uygulama orada uzlaştırılır, görev ondan sonra taşınır). Kapalı
-    # ise taşıma boyut + yoğunluk değişimini tek adımda taşır, uzlaştırma telefonda çalışır. `density_refresh_enabled`
-    # kapalıysa ön-iniş de yapılmaz (uzlaştıracak bir şey yok).
-    handoff_prelanding: bool = True
+    # (ön-iniş: sanal ekran telefonun boyutuna ve yoğunluğuna çekilir, uygulama orada uzlaştırılır, görev ondan sonra taşınır).
+    # "auto": yapılır — ekranı hem ön-inişte hem taşımada yeniden kurulacak bir uygulama dışında (iki yeniden kurulum, sayfa
+    # kaybı: handoff_manager._rebuilt_on_landing_and_move). "on": o kural sorulmaz, her uygun aktarımda yapılır (yeniden kurulumu
+    # kaldırabilen bir uygulamanın düzen değişimi perdenin arkasında kalsın). "off": hiç yapılmaz; taşıma boyut + yoğunluk
+    # değişimini tek adımda taşır, uzlaştırma telefonda çalışır. Bir pencere kendi seçimini aktarım isteğiyle gönderebilir (özel >
+    # genel). `density_refresh_enabled` kapalıysa ön-iniş de yapılmaz (uzlaştıracak bir şey yok).
+    handoff_prelanding: Literal["auto", "on", "off"] = "auto"
     # Kullanıcının Control Center'dan seçtiği varsayılan pencereleme
     # davranışı (Karar: Hibrit Pencereleme Faz 1). Pencere başına manuel
     # tomurcuklama/dock (TitleBar eylemi) bunu HER ZAMAN geçersiz kılabilir;
@@ -92,3 +95,9 @@ class ProjectSettings(BaseModel):
     def _legacy_audio_output_mode(cls, value: object) -> object:
         """Kayıtlı eski adlar (ses çıkışı "Laptop"/"Çift") yeni sözlüğe çevrilir; bilinmeyen değer doğrulamada reddedilir."""
         return {"laptop": "pc", "dual": "both"}.get(value, value) if isinstance(value, str) else value
+
+    @field_validator("handoff_prelanding", mode="before")
+    @classmethod
+    def _legacy_handoff_prelanding(cls, value: object) -> object:
+        """Kayıtlı eski açık/kapalı anahtar: açık = "auto" (o zamanki davranış), kapalı = "off"."""
+        return ("auto" if value else "off") if isinstance(value, bool) else value

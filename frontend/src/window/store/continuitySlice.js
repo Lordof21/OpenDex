@@ -7,6 +7,7 @@ import { logger } from '../../lib/logger.js';
 import { newOpId } from '../../lib/opId.js';
 import { resolveAppDisplayName } from '../../desktop/appRegistry.js';
 import { t as tt } from '../../i18n/index.js';
+import { prelandingModeOf } from '../windowModel.js';
 
 const reclaimingWindows = new Set();
 
@@ -148,7 +149,10 @@ export function createContinuitySlice(set, get) {
     // A/B karşılaştırıldı, Stealth bir tık daha iyi sonuç verdi (bkz. backend
     // handoff_manager.py'nin dosya başındaki Karar notu). Aktif sistem artık
     // sadece bunu kullanıyor.
-    /** `windowing` ('fullscreen' | 'freeform'): bu aktarımın telefondaki kipi; verilmezse Ayarlar'daki varsayılan. */
+    /**
+     * `windowing` ('fullscreen' | 'freeform'): bu aktarımın telefondaki kipi; verilmezse Ayarlar'daki varsayılan. Pencerenin kendi
+     * ön-iniş seçimi (DeX Ayarları › Pencere / Hub) varsa istekle gider; yoksa backend genel ayarı kullanır (özel > genel).
+     */
     async handoffWindowToPhone(windowId, windowing) {
       // Akış numarası: tık → istek → backend logu tek zaman çizelgesinde eşleşir (Sistem & Teşhis → Logları kopyala).
       const op = newOpId();
@@ -160,7 +164,10 @@ export function createContinuitySlice(set, get) {
         get().setHandoff(windowId, true, tt('window.uygulama_telefonunuza_aktariliyor'));
         // /api/windows/handoff responds with a bare {ok} object — api.post()
         // already returns the parsed body itself, never {data: ...}.
-        const body = windowing ? { window_id: windowId, windowing } : { window_id: windowId };
+        const body = { window_id: windowId };
+        if (windowing) body.windowing = windowing;
+        const ownPrelanding = prelandingModeOf(get().windows.find((w) => w.id === windowId));
+        if (ownPrelanding !== 'follow') body.prelanding = ownPrelanding;
         const res = await api.post('/api/windows/handoff', body, { opId: op });
         if (!res?.ok) {
           L.warn('handoff', 'to_phone_rejected', { windowId, res });

@@ -353,6 +353,15 @@ describe('ayar davranışı korunur', () => {
     expect(saveSettings).toHaveBeenLastCalledWith({ windowing_mode: 'independent' });
   });
 
+  it('Pencereler & Geçiş: ön-iniş Otomatik / Açık / Kapalı; eski açık/kapalı kayıt doğru seçimle açılır', async () => {
+    await mount({ handoff_prelanding: false });              // an older backend's on/off value
+    fireEvent.click(navButton('Pencereler & Geçiş'));
+    const group = document.querySelector('[data-setting-id="handoffPrelanding"]');
+    expect(within(group).getByRole('button', { name: /^Kapalı/ })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(within(group).getByRole('button', { name: /^Açık/ }));
+    expect(saveSettings).toHaveBeenLastCalledWith({ handoff_prelanding: 'on' });
+  });
+
   it('sert yenileme, nazik yenileme kapalıyken devre dışıdır', async () => {
     await mount({ density_refresh_enabled: false });
     fireEvent.click(navButton('Pencereler & Geçiş'));

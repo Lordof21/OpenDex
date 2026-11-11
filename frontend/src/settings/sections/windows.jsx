@@ -17,6 +17,7 @@ import {
   RefreshCw,
   RotateCw,
   ShieldCheck,
+  PlaneLanding,
   Smartphone,
   Sparkles,
   Sun,
@@ -29,6 +30,7 @@ import {
   APP_CLOSED_OPTIONS,
   GPU_OPTIONS,
   HANDOFF_OPTIONS,
+  PRELANDING_OPTIONS,
   SECTIONS,
   THEME_OPTIONS,
   WINDOWING_MODE_OPTIONS,
@@ -38,6 +40,7 @@ import { useGpuPreference } from '../useGpuPreference.js';
 import { t } from '../../i18n/index.js';
 
 const WINDOWING_ICONS = { eco: Zap, independent: Monitor, hybrid: Sparkles };
+const PRELANDING_ICONS = { auto: Sparkles, on: PlaneLanding, off: Smartphone };
 const HANDOFF_ICONS = { fullscreen: Maximize2, freeform: AppWindow };
 const THEME_ICONS = { light: Sun, dark: Moon };
 
@@ -116,6 +119,19 @@ export function WindowsSection({ ctl }) {
         <Callout tone="tip" title={t('settings.gecis_uyumlulugu_ileri_duzey')}>
           {t('settings.telefon_pc_gecisinde_uygulamalarin')}
         </Callout>
+        <ChoiceGroup
+          item="handoffPrelanding"
+          icon={PlaneLanding}
+          options={PRELANDING_OPTIONS}
+          optionIcons={PRELANDING_ICONS}
+          value={v.handoffPrelanding}
+          onChange={a.setHandoffPrelanding}
+          columns={3}
+        >
+          <p className="mt-2 text-[11px] leading-[15px] text-muted-foreground">
+            {t('settings.telefona_aktar_denince_sanal_ekran_pc')} {t('settings.pencere_kendi_on_inis_secimini')}
+          </p>
+        </ChoiceGroup>
         <Group>
           <ToggleRow
             item="stealth"
@@ -123,13 +139,6 @@ export function WindowsSection({ ctl }) {
             checked={v.stealth}
             onToggle={() => a.toggle('stealth_dpi_enabled', v.stealth)}
             detail={t('settings.telefonda_zaten_calisan_bir_uygulama')}
-          />
-          <ToggleRow
-            item="handoffPrelanding"
-            icon={Smartphone}
-            checked={v.handoffPrelanding}
-            onToggle={() => a.toggle('handoff_prelanding', v.handoffPrelanding)}
-            detail={t('settings.telefona_aktar_denince_sanal_ekran_pc')}
           />
           <ToggleRow
             item="densityRefresh"

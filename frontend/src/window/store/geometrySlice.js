@@ -36,6 +36,7 @@ import {
   isHeaderHidden,
   modeOf,
   nextDynamicDpMode,
+  nextPrelandingMode,
   normalizeDpiPolicy,
   normalizeHeaderMode,
   normalizeWindowOverrides,
@@ -45,6 +46,7 @@ import {
   planMaximizeToggle,
   planSnap,
   policyArgs,
+  prelandingModeOf,
   settingsForWindow,
   targetDisplaySizeForWindow,
   viewportBoxes,
@@ -368,6 +370,23 @@ export function createGeometrySlice(set, get) {
       if (next === 'on') return get().setWindowDpiPolicy(id, { mode: 'auto' });
       if (next === 'off' && Number(win.dpi) > 0) return get().setWindowDpiPolicy(id, { mode: 'custom', dpi: Math.round(Number(win.dpi)) });
       return get().setWindowDpiPolicy(id, DPI_FOLLOW);
+    },
+
+    // ---------------------------------------------------------------- telefona aktarım
+
+    /**
+     * Pencerenin kendi ön-iniş seçimi (DeX Ayarları › Pencere, Hub): 'follow' (Genele uy: anahtar silinir) | 'auto' | 'on' | 'off'.
+     * Paket başına kalıcıdır; akışı etkilemez (yeniden müzakere yok) — seçim bir sonraki «Telefona aktar» isteğiyle gider.
+     */
+    async setWindowPrelanding(id, mode) {
+      return get().setWindowOverride(id, 'handoff_prelanding', mode === 'follow' ? null : mode, { apply: false });
+    },
+
+    /** Hub "Ön-iniş" satırı: Genele uy → Otomatik → Açık → Kapalı → Genele uy. */
+    async cyclePrelanding(id) {
+      const win = get().windows.find((w) => w.id === id);
+      if (!win) return;
+      return get().setWindowPrelanding(id, nextPrelandingMode(prelandingModeOf(win)));
     },
 
     // ---------------------------------------------------------------- başlık

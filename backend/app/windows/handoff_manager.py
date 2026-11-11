@@ -299,14 +299,33 @@ class HandoffManager:
     def _landing_size_needed(session: "WindowSession", phone_size: tuple[int, int] | None) -> bool:
         return phone_size is not None and (session.target_display_w, session.target_display_h) != tuple(phone_size)
 
+    @staticmethod
+    async def _prelanding_choice(own: str | None) -> str:
+        """'auto' | 'on' | 'off' for this handoff: the window's own choice (özel > genel), else the user's setting
+        (`handoff_prelanding`). 'off' whatever was chosen when density refresh is off: there is nothing to reconcile on the
+        display. An unreadable settings store means the defaults."""
+        try:
+            from app.storage import settings_db
+
+            project = await settings_db.get_project_settings()
+        except Exception:  # noqa: BLE001 — the defaults: density refresh on, pre-landing automatic
+            return own if own in ("auto", "on", "off") else "auto"
+        if not getattr(project, "density_refresh_enabled", True):
+            return "off"
+        if own in ("auto", "on", "off"):
+            return own
+        setting = getattr(project, "handoff_prelanding", "auto")
+        return setting if setting in ("auto", "on", "off") else "auto"
+
     async def _prelanding_wanted(
         self, session: "WindowSession", pkg: str, disp_id: str | None, task_id: str | int | None,
-        window_dpi: int, phys_dpi: int | None, phone_size: tuple[int, int] | None, source: str,
+        window_dpi: int, phys_dpi: int | None, phone_size: tuple[int, int] | None, source: str, choice: str = "auto",
     ) -> bool:
         """Only the PC-initiated handoff of a live app on a real window: elsewhere there is no PC window to hide the
         rebuild behind (the app already stands on the phone) or nothing to reconcile. Wanted when the display differs
-        from the phone in Target DP (Smallest Width dp), density, OR size."""
-        if source != "pc" or not task_id or not is_virtual_display_id(disp_id):
+        from the phone in Target DP (Smallest Width dp), density, OR size. ``choice`` (`_prelanding_choice`): 'off' never;
+        'auto' and 'on' differ only later — whether an app rebuilt by both steps skips it (`_rebuilt_on_landing_and_move`)."""
+        if choice == "off" or source != "pc" or not task_id or not is_virtual_display_id(disp_id):
             return False
         if not phys_dpi:
             return False  # an unread phone density is never guessed: no pre-landing, the post-move settle covers it
@@ -338,15 +357,7 @@ class HandoffManager:
         state = session.state
         if state.workspace_id is not None or state.frozen or not session.server.is_alive:
             return False
-        if is_internal_package(pkg) or is_mirror_package(pkg) or is_launcher_package(pkg):
-            return False
-        try:
-            from app.storage import settings_db
-
-            project = await settings_db.get_project_settings()
-            return bool(getattr(project, "handoff_prelanding", True)) and bool(getattr(project, "density_refresh_enabled", True))
-        except Exception:  # noqa: BLE001 — an unreadable DB means the defaults: on
-            return True
+        return not (is_internal_package(pkg) or is_mirror_package(pkg) or is_launcher_package(pkg))
 
     # ActivityInfo.configChanges bits. The pre-landing changes density and screen size on the window's display; the move onto
     # the phone still changes touchscreen and colorMode, which no pre-landing can match (docs/design/HANDOFF.md §6).
@@ -677,6 +688,7 @@ class HandoffManager:
         task_id: str | int | None = None,
         source: str = "pc",
         windowing: str | None = None,
+        prelanding: str | None = None,
     ) -> None:
         """PC ➔ telefon (Display 0) — PC'deki "Telefona Aktar" ya da uygulamanın telefonda açılması (focus olayı /
         watchdog):
@@ -692,7 +704,10 @@ class HandoffManager:
         Pencereleme kipi önceliği (özel > genel): bu aktarım için seçilen kip (`windowing`, başlık menüsü) > Ayarlar'daki
         varsayılan (`phone_handoff_windowing`, YALNIZ kaynak="pc": kullanıcının "Telefona aktar" düğmesi) > tam ekran.
         Uygulama telefonda Android'in ya da kullanıcının eliyle açıldıysa (display0 / watchdog) HER ZAMAN tam ekrandır:
-        serbest pencere ayarı kendi başına açılan uygulamaya uygulanmaz."""
+        serbest pencere ayarı kendi başına açılan uygulamaya uygulanmaz.
+
+        Ön-iniş önceliği de aynı: pencerenin kendi seçimi (`prelanding`: DeX Ayarları › Bu pencere / Hub) > Ayarlar'daki
+        `handoff_prelanding` (bkz. `_prelanding_choice`)."""
         if windowing is None and source != "pc":
             windowing = "fullscreen"
         veiled = False  # PC penceresinin üstündeki "Görünüm Optimize Ediliyor" perdesi açıldı mı (ön-iniş)
@@ -741,8 +756,13 @@ class HandoffManager:
             # ÖN-İNİŞ (yalnız PC'den aktarım): yoğunluk değişimi perdenin arkasında, sanal ekranda yaşanır; taşıma nötr olur.
             prelanded = False
             density_before, changed_at = None, None
-            landing = await self._prelanding_wanted(session, pkg, disp_id, task_id, window_dpi, phys_dpi, phone_size, source)
-            rebuilt_by_move = landing and await self._rebuilt_on_landing_and_move(pkg, task_id)
+            # Seçim (özel > genel): "off" hiç, "auto" çift yeniden kurulacak uygulama dışında, "on" her uygun aktarımda.
+            choice = await self._prelanding_choice(prelanding) if source == "pc" else "off"
+            landing = await self._prelanding_wanted(session, pkg, disp_id, task_id, window_dpi, phys_dpi, phone_size, source, choice)
+            rebuilt_by_move = landing and choice == "auto" and await self._rebuilt_on_landing_and_move(pkg, task_id)
+            if landing and choice == "on":
+                log.info("🛬 [HANDOFF: ÖN-İNİŞ] %s için ön-iniş açık seçildi%s — çift yeniden kurulum kuralı sorulmadı",
+                         pkg, " (pencerenin kendi ayarı)" if prelanding == "on" else "")
             if landing and not rebuilt_by_move:
                 veiled = True
                 prelanded, density_before, changed_at, rebuilt = await self._prelanding(
@@ -957,7 +977,7 @@ class HandoffManager:
                 with contextlib.suppress(Exception):
                     await self._events.emit("vd_phase", window_id=session.state.window_id, package=pkg, phase="live")
 
-    async def handoff_to_phone(self, window_id: str, windowing: str | None = None) -> bool:
+    async def handoff_to_phone(self, window_id: str, windowing: str | None = None, prelanding: str | None = None) -> bool:
         """PC ➔ Telefon Handoff (bkz. _execute_to_phone). Sanal ekran pencerenin yoğunluğunda kalır: geri alındığında
         (reclaim) görev aynı ekrana, aynı yoğunluğa döner."""
         serial = self._serial_getter()
@@ -978,7 +998,7 @@ class HandoffManager:
             wlog.info("📱 [HANDOFF TO PHONE] %s telefona aktarılıyor (disp_id=%s)...", pkg, disp_id)
 
             playing, paused_page = await self._capture_continuity(pkg)
-            await self._execute_to_phone(session, pkg, disp_id, serial, source="pc", windowing=windowing)
+            await self._execute_to_phone(session, pkg, disp_id, serial, source="pc", windowing=windowing, prelanding=prelanding)
             session.state.handoff_to_phone = True
             load_markers.record("handoff", package=pkg)
             self._resume_continuity(playing, paused_page, "0")

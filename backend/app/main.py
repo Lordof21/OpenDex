@@ -1159,7 +1159,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     docs = settings.API_DOCS
     app = FastAPI(
-        title="OpenDeX Backend", version="0.1.0", lifespan=lifespan,
+        title="OpenDeX Backend", version="0.9.2", lifespan=lifespan,
         docs_url="/docs" if docs else None, redoc_url=None, openapi_url="/openapi.json" if docs else None,
     )
     # ONE live context object; routes and websockets read app.state.ctx so

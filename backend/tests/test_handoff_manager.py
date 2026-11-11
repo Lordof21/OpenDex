@@ -1058,3 +1058,87 @@ async def test_a_handoff_that_fails_before_the_move_gives_the_window_its_own_wat
     assert "WATCHER" in log and "MOVE_WCT" not in log
     args = window_watcher.call_args.args
     assert args[3:7] == ("com.android.chrome", 1220, 2712, 520)               # the window's watcher, for what its display is now
+
+
+# ---------------------------------------------------------------------------------------- pre-landing: Otomatik / Açık / Kapalı (özel > genel)
+
+
+def test_the_old_on_off_switch_reads_as_the_new_choice():
+    from app.schemas.settings import ProjectSettings
+
+    assert ProjectSettings(handoff_prelanding=True).handoff_prelanding == "auto"      # what "on" did then
+    assert ProjectSettings(handoff_prelanding=False).handoff_prelanding == "off"
+    assert ProjectSettings().handoff_prelanding == "auto"
+    assert ProjectSettings(handoff_prelanding="on").handoff_prelanding == "on"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("own, setting, density_refresh, expected", [
+    (None, "auto", True, "auto"),
+    (None, "on", True, "on"),
+    ("off", "on", True, "off"),        # the window's own choice wins
+    ("on", "off", True, "on"),
+    ("on", "auto", False, "off"),      # no density refresh: nothing to reconcile, whatever was chosen
+])
+async def test_the_pre_landing_choice_is_the_windows_own_else_the_users_setting(own, setting, density_refresh, expected):
+    from app.schemas.settings import ProjectSettings
+
+    project = ProjectSettings(handoff_prelanding=setting, density_refresh_enabled=density_refresh)
+    with patch("app.storage.settings_db.get_project_settings", AsyncMock(return_value=project)):
+        assert await HandoffManager._prelanding_choice(own) == expected
+
+
+def _twice_rebuilt(handoff):
+    """X's main activity (configChanges 0xdf3): handles neither the pre-landing's density nor the move's touchscreen / color mode."""
+    handoff._daemon_client_getter().task_density_info = AsyncMock(return_value={"config_changes": 0xDF3})
+
+
+def _pre_landed(density):
+    return any(call.kwargs.get("reason") == "pre_landing" for call in density.settle.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_automatic_skips_the_pre_landing_of_an_app_both_steps_would_rebuild(mock_adb, events, settings):
+    handoff, _session, density, _log, _phases, patches = _prelanding_rig(mock_adb, events, settings)
+    _twice_rebuilt(handoff)
+    with patches[0], patches[1], patches[2]:
+        assert await handoff.handoff_to_phone("win-3") is True
+    assert not _pre_landed(density)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("own, setting", [("on", "auto"), (None, "on")])
+async def test_on_pre_lands_even_an_app_both_steps_rebuild(mock_adb, events, settings, own, setting):
+    """X survives two rebuilds in a row (measured on the phone 2026-11-11); what it loses is the switch between its wide and its narrow
+    layout. "Açık" puts that switch behind the PC window's veil."""
+    handoff, _session, density, log, phases, patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting=setting)
+    _twice_rebuilt(handoff)
+    with patches[0], patches[1], patches[2]:
+        assert await handoff.handoff_to_phone("win-3", prelanding=own) is True
+    assert _pre_landed(density)
+    assert log.index("DENSITY") < log.index("MOVE_WCT")
+    assert phases == ["stealth", "live"]
+
+
+@pytest.mark.asyncio
+async def test_off_never_pre_lands_even_where_automatic_would(mock_adb, events, settings):
+    handoff, _session, density, _log, phases, patches = _prelanding_rig(mock_adb, events, settings, prelanding_setting="auto")
+    with patches[0], patches[1], patches[2]:
+        assert await handoff.handoff_to_phone("win-3", prelanding="off") is True
+    assert not _pre_landed(density)
+    assert phases == []                                                     # no veil: nothing happens behind it
+    density.schedule_settle.assert_called_once()                            # the move carries the change, settled on the phone
+
+
+@pytest.mark.asyncio
+async def test_the_handoff_request_carries_the_windows_choice_to_the_handoff():
+    from app.api.v1.endpoints.windows import HandoffWindowRequest, handoff_window
+
+    manager = MagicMock()
+    manager.handoff_window_to_phone = AsyncMock(return_value=True)
+    ctx = MagicMock(window_manager=manager)
+    assert await handoff_window(HandoffWindowRequest(window_id="w", prelanding="on"), ctx) == {"ok": True}
+    manager.handoff_window_to_phone.assert_awaited_once_with("w", windowing=None, prelanding="on")
+    manager.handoff_window_to_phone.reset_mock()
+    await handoff_window(HandoffWindowRequest(window_id="w"), ctx)
+    manager.handoff_window_to_phone.assert_awaited_once_with("w", windowing=None, prelanding=None)
