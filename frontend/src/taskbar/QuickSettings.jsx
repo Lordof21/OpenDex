@@ -299,7 +299,7 @@ export const QuickSettings = forwardRef(function QuickSettings({
               }
               onBack={() => setView('main')}
             />
-            <div className="dex-scroll min-h-0 flex-1 overflow-y-auto pb-1">
+            <div className="dex-scroll min-h-0 flex-1 overflow-y-auto overflow-x-hidden pb-1">
               <MultiFocusChip className="mb-1.5" />
               <AppAudioSection mode={audioMode} />
               <MixerSection title={tt('taskbar.telefon_android_akislari')}>

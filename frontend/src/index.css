@@ -11,6 +11,7 @@
 @tailwind utilities;
 
 :root {
+  color-scheme: light;   /* native controls, scrollbars and the canvas follow the theme (.dark below flips it) */
   --radius: 0.375rem;
   --radius-window: 7px;
   --warning: oklch(0.72 0.15 75);
@@ -115,6 +116,7 @@
 }
 
 .dark {
+  color-scheme: dark;
   /* Dark steps of the same hues, validated against the dark popover (#211d19): all ≥ 3:1. */
   --viz-opendex: #3987e5;
   --viz-apps: #d95926;
@@ -557,14 +559,19 @@
 [data-tooltip] {
   position: relative;
 }
+/* A hidden tooltip is still a box (opacity 0), and an absolutely placed box counts towards its scroll container's scrollable
+   area: a nowrap tooltip on a button near a panel's edge gave that panel a horizontal scrollbar for nothing (the "Çok kanallı
+   mikser" output selector). Hidden, it is shrunk to nothing (`scale: 0`, separate from `transform`, which the variants
+   below own) — only after the fade-out (the 150 ms delay); shown, it is full size at once and fades in as before. */
 [data-tooltip]::after,
 [data-tooltip]::before {
   position: absolute;
   left: 50%;
   pointer-events: none;
   opacity: 0;
+  scale: 0;
   transform: translateX(-50%) translateY(4px);
-  transition: opacity 150ms ease, transform 150ms ease;
+  transition: opacity 150ms ease, transform 150ms ease, scale 0s linear 150ms;
   z-index: 60;
 }
 [data-tooltip]::after {
@@ -593,7 +600,9 @@
 [data-tooltip]:hover::before,
 [data-tooltip]:focus-visible::before {
   opacity: 1;
+  scale: 1;
   transform: translateX(-50%) translateY(0);
+  transition: opacity 150ms ease, transform 150ms ease, scale 0s;
 }
 
 /* Cümle uzunluğundaki ipucu (ayar açıklamaları): tek satıra uzamaz, en çok 220 px genişlikte satırlara bölünür. */
