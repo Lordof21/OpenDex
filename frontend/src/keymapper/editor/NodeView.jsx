@@ -46,6 +46,20 @@ function HitMark({ lit, edit }) {
   );
 }
 
+/** While editing the lowest the "Transparency" setting is previewed at, so a node stays easy to see and grab. */
+export const EDIT_PREVIEW_MIN_OPACITY = 0.35;
+
+/**
+ * A node's opacity. In play it is the HUD's "Transparency" setting (full while pressed). In the editor the setting is previewed live on
+ * every node but the selected one — it used to be ignored there (always 1), so moving the slider changed nothing the user could see.
+ */
+export function nodeOpacity({ off, edit, pressed, selected, hudOpacity }) {
+  if (off) return 0.4;
+  if (pressed) return 1;
+  if (!edit) return hudOpacity;
+  return selected ? 1 : Math.max(EDIT_PREVIEW_MIN_OPACITY, hudOpacity);
+}
+
 export default function NodeView({
   node,
   frame,
@@ -83,7 +97,7 @@ export default function NodeView({
     top: `${node.ry * 100}%`,
     width: halfW * 2,
     height: halfH * 2,
-    opacity: off ? 0.4 : edit || pressed ? 1 : hud.opacity,
+    opacity: nodeOpacity({ off, edit, pressed, selected, hudOpacity: hud.opacity }),
     touchAction: 'none',
     userSelect: 'none',
   };

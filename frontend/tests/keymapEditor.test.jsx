@@ -928,3 +928,23 @@ describe('Bakış alanı silueti', () => {
     expect(node('l')).toBeNull();
   });
 });
+
+describe('nodeOpacity — "Şeffaflık" ayarı düzenleyicide de görünür', async () => {
+  const { nodeOpacity, EDIT_PREVIEW_MIN_OPACITY } = await import('../src/keymapper/editor/NodeView.jsx');
+
+  it('oyunda ayar uygulanır, basılıyken tam görünür', () => {
+    expect(nodeOpacity({ edit: false, pressed: false, hudOpacity: 0.95 })).toBe(0.95);
+    expect(nodeOpacity({ edit: false, pressed: true, hudOpacity: 0.3 })).toBe(1);
+  });
+
+  it('düzenleyicide ayar canlı önizlenir (eskiden hep 1 idi: kaydırıcı hiçbir şeyi değiştirmiyordu); seçili düğüm tam kalır', () => {
+    expect(nodeOpacity({ edit: true, selected: false, hudOpacity: 0.95 })).toBe(0.95);
+    expect(nodeOpacity({ edit: true, selected: false, hudOpacity: 0.75 })).toBe(0.75);
+    expect(nodeOpacity({ edit: true, selected: true, hudOpacity: 0.5 })).toBe(1);
+  });
+
+  it('düzenleyicide çok düşük ayar düğümü tutulamaz yapmaz (alt sınır); devre dışı düğüm soluk kalır', () => {
+    expect(nodeOpacity({ edit: true, selected: false, hudOpacity: 0.2 })).toBe(EDIT_PREVIEW_MIN_OPACITY);
+    expect(nodeOpacity({ off: true, edit: true, hudOpacity: 1 })).toBe(0.4);
+  });
+});
