@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import {
   ChevronLeft,
@@ -27,6 +27,19 @@ import AppIcon from '../ui/AppIcon.jsx';
 import { cn } from '../lib/utils.js';
 import { t } from '../i18n/index.js';
 
+// How much of the header fits (measured bar width, px). The buttons need ~32 px each (24 in a PiP's slim header) and the title wants room:
+//   full     everything
+//   medium   no "Reload page" (it is in the Hub too)
+//   narrow   no audio either; "Send to phone" goes as well outside a PiP (a right-click on the header still offers it)
+// Unmeasured (0) counts as full.
+const HEADER_FULL_PX = { dex: 400, pip: 310 };
+const HEADER_MEDIUM_PX = { dex: 330, pip: 250 };
+export function headerDensity(width, isPip = false) {
+  const kind = isPip ? 'pip' : 'dex';
+  if (!(width > 0) || width >= HEADER_FULL_PX[kind]) return 'full';
+  return width >= HEADER_MEDIUM_PX[kind] ? 'medium' : 'narrow';
+}
+
 export default function TitleBar({
   win,
   onDragStart,
@@ -37,6 +50,10 @@ export default function TitleBar({
   hubOpen = false,
   onToggleHub,
   hubButtonRef,
+  // PiP only: lays the OS window out on a zone of the screen (windowModel.OS_SNAP_ZONES, or 'max'). Given → hovering "maximize" opens the
+  // layout menu (both PiPs); absent → no menu.
+  onSnap,
+  onSnapMenuOpenChange,
 }) {
   const {
     toggleMaximize,
@@ -51,7 +68,20 @@ export default function TitleBar({
   } = useOsWindowController({ win, pipWindow, setPipWindow });
 
   const barRef = useRef(null);
+  const [barWidth, setBarWidth] = useState(0);
+  useEffect(() => {
+    const el = barRef.current;
+    const RO = el?.ownerDocument?.defaultView?.ResizeObserver || (typeof ResizeObserver !== 'undefined' ? ResizeObserver : undefined);
+    if (!el || !RO) return undefined;
+    const observer = new RO(([entry]) => setBarWidth(Math.round(entry?.contentRect?.width || 0)));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  const density = headerDensity(barWidth, isPip);
   const [snapMenuOpen, setSnapMenuOpen] = useState(false);
+  // A PiP whose header floats over the picture closes it when the cursor leaves the header strip; the layout menu hangs BELOW the strip,
+  // so the owner is told while it is open (it then keeps the header down).
+  useEffect(() => { onSnapMenuOpenChange?.(snapMenuOpen); }, [snapMenuOpen]);   // eslint-disable-line react-hooks/exhaustive-deps
   const snapMenuTimeoutRef = useRef(null);
   // "Telefona nasıl aktarılsın" menüsü: başlığa sağ tık → imlecin yanında; "Telefona aktar" düğmesine basılı tut → düğmenin altında.
   const [handoffMenuAnchor, setHandoffMenuAnchor] = useState(null);
@@ -79,7 +109,8 @@ export default function TitleBar({
 
   const handleSnapPick = (zone) => {
     setSnapMenuOpen(false);
-    applySnapZone(win.id, zone);
+    if (onSnap) onSnap(zone);
+    else applySnapZone(win.id, zone);
   };
 
   const handoffPress = useLongPress({
@@ -105,7 +136,7 @@ export default function TitleBar({
       // PiP'in başlığı ince (32 px, 24 px düğmeler): küçük pencerede görüntüye daha çok yer kalır. Boyutlar CSS'ten gelir, düğmeler aynı bileşenlerdir.
       className={cn(
         'relative z-30 flex shrink-0 items-center justify-between border-b border-frame-border bg-frame pl-3 pr-1.5 select-none cursor-default',
-        isPip ? 'h-8 [&_button]:size-6 [&_svg]:size-3.5' : 'h-11',
+        isPip ? 'h-8 [&_button:not([role=menuitem])]:size-6 [&_svg]:size-3.5' : 'h-11',
       )}
       // Kaplanmış / snap'li pencere de başlıktan taşınır (eski boyuta döner); mutlak tam ekran taşınmaz.
       // PiP'te (çerçevesiz işletim sistemi penceresi) sürüklemeyi PipApp'in onDragStart'ı işletim sistemine devreder.
@@ -160,13 +191,13 @@ export default function TitleBar({
 
         {/* This window's own audio channel (Android 13+; hidden otherwise). A DeX crop window carries its source
             Workspace task's audio. */}
-        {!isFiles && <AudioButton windowId={win.sourceTaskId || win.id} />}
+        {!isFiles && density !== 'narrow' && <AudioButton windowId={win.sourceTaskId || win.id} />}
 
-        {/* Chromium-based app: reload the foreground tab (appears only when the window really has a page). */}
-        <ReloadPageButton windowId={win.id} enabled={hasAppSession && !isPip} />
+        {/* Chromium-based app: reload the foreground tab (appears only when the window really has a page; the Hub has it too). */}
+        {density === 'full' && <ReloadPageButton windowId={win.id} enabled={hasAppSession} />}
 
-        {/* Transfer to Phone */}
-        {!isFiles && (
+        {/* Transfer to Phone (a narrow DeX header drops it: a right-click on the header still offers it) */}
+        {!isFiles && (density !== 'narrow' || isPip) && (
           <WindowControl label={t('common.telefona_aktar')} aria-haspopup="menu" aria-expanded={Boolean(handoffMenuAnchor)} {...handoffPress}>
             <Smartphone className="size-4" />
           </WindowControl>
@@ -185,7 +216,7 @@ export default function TitleBar({
           className="relative z-40"
           onPointerDown={(e) => e.stopPropagation()}
           onMouseEnter={() => {
-            if (isPip) return; // PiP işletim sistemi penceresidir: uygulama içi kenara yapıştırma düzeni anlamsız
+            if (isPip && !onSnap) return; // PiP işletim sistemi penceresidir: uygulama içi yapıştırma anlamsız (onSnap: ekranın bölgelerine yerleştirir)
             if (snapMenuTimeoutRef.current) clearTimeout(snapMenuTimeoutRef.current);
             setSnapMenuOpen(true);
           }}

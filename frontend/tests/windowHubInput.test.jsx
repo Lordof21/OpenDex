@@ -1,7 +1,7 @@
-// Pencere Hub'ı ⟷ giriş: (1) eski ekran-üstü "Yön tuşları" kalktı; yerindeki "Tuş düzeni" döşemesi düzeni geçici aç/kapar; (2) "Tuş düzeni" satırı
-// tuş düzenleyicisini açar; (3) editörü olmayan pencerelerde satır ve döşeme görünmez.
+// Pencere Hub'ı ⟷ giriş: (1) eski ekran-üstü "Yön tuşları" kalktı; (2) "Tuş düzeni" TEK satırdır: satır tuş düzenleyicisini açar, düzen varken
+// yanındaki anahtar düzeni geçici aç/kapar; (3) editörü olmayan pencerelerde satır görünmez; (4) "Dinamik DP" üç seçeneğiyle birlikte görünür.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 vi.mock('../src/lib/api.js', () => ({
   BASE: 'http://localhost:8710',
@@ -19,7 +19,6 @@ vi.mock('../src/window/WorkspaceCropCanvas.jsx', () => ({ default: () => <div da
 vi.mock('../src/window/ResizeHandle.jsx', () => ({ default: () => null }));
 
 import WindowFrame from '../src/window/WindowFrame.jsx';
-import { api } from '../src/lib/api.js';
 import { useKeymapStore } from '../src/keymapper/keymapStore.js';
 import { useWindowStore } from '../src/window/windowStore.js';
 import { getLiveSettings, resetLiveSettingsForTests } from '../src/settings/liveSettings.js';
@@ -44,6 +43,8 @@ const openHub = (win) => {
   render(<Live id={win.id} />);
   fireEvent.click(screen.getByLabelText('Pencere Hub ayarları'));
 };
+const hubDialog = () => screen.queryByRole('dialog', { name: "Pencere Hub'ı" });
+const policyOf = () => useWindowStore.getState().windows.find((w) => w.id === 'w1').dpiPolicy;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -61,47 +62,47 @@ describe('Hub: eski "Yön tuşları" kalktı', () => {
   });
 });
 
-describe('Hub: "Tuş düzeni" aç/kapa döşemesi (eski "Yön tuşları"nın yerinde)', () => {
-  const tile = () => screen.getByTestId('hub-keymap-toggle');
+describe('Hub: "Tuş düzeni" — tek satır + anahtar', () => {
   const LAYOUT = [{ id: 'a', type: 'tap', key: 'f', rx: 0.5, ry: 0.5 }, { id: 'b', type: 'dpad', key: 'WASD', rx: 0.2, ry: 0.7 }];
+  const toggle = () => within(screen.getByTestId('hub-keymap-toggle')).getByRole('switch');
 
-  it('Dinamik DP döşemesinin yanında durur; düzen yokken kapalı görünür', () => {
+  it('tek satır vardır (eski döşeme + satır ikilisi yok); düzen yokken ne işe yaradığını söyler ve anahtar yoktur', () => {
     openHub(VIDEO);
-    expect(screen.getByRole('button', { name: 'Dinamik DP: açık' }).parentElement).toBe(tile().parentElement);
-    expect(tile()).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getAllByText('Tuş düzeni')).toHaveLength(1);
+    expect(screen.getByText('Klavye tuşlarını dokunmaya eşle')).toBeInTheDocument();
+    expect(screen.queryByTestId('hub-keymap-toggle')).toBeNull();   // kapatılacak bir düzen yok
   });
 
-  it('düzen yokken döşeme kapatılacak bir şey bulamaz: düzenleyiciyi açar', async () => {
+  it('satır bu pencerenin tuş düzenleyicisini açar ve Hub\'ı kapatır', async () => {
     openHub(VIDEO);
-    fireEvent.click(tile());
+    fireEvent.click(screen.getByTestId('hub-keymap'));
     expect(useKeymapStore.getState().editWindowId).toBe('w1');
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: "Pencere Hub'ı" })).toBeNull());
+    await waitFor(() => expect(hubDialog()).toBeNull());
   });
 
-  it('düzen varken döşeme açık görünür, tuş sayısı rozeti taşır; tıklayınca düzen KAPANIR (silinmez), tekrar tıklayınca açılır', () => {
+  it('düzen varken tuş sayısı yazar; anahtar düzeni KAPATIR (silinmez), tekrar açar; Hub açık kalır', () => {
     useKeymapStore.setState({ presets: { 'com.game': LAYOUT }, layoutOff: {} });
     openHub(VIDEO);
-    expect(tile()).toHaveAttribute('aria-pressed', 'true');
-    expect(tile()).toHaveTextContent('2');
     expect(screen.getByText('2 tuş tanımlı')).toBeInTheDocument();
+    expect(toggle()).toHaveAttribute('aria-checked', 'true');
 
-    fireEvent.click(tile());
+    fireEvent.click(toggle());
     expect(useKeymapStore.getState().layoutOff).toEqual({ 'com.game': true });
     expect(useKeymapStore.getState().presets['com.game']).toHaveLength(2);   // düzen silinmedi
-    expect(tile()).toHaveAttribute('aria-pressed', 'false');
+    expect(toggle()).toHaveAttribute('aria-checked', 'false');
     expect(screen.getByText('Kapalı · 2 tuş tanımlı')).toBeInTheDocument();
-    expect(screen.getByRole('dialog', { name: "Pencere Hub'ı" })).toBeInTheDocument();   // hızlı anahtar: Hub açık kalır
+    expect(useKeymapStore.getState().editWindowId).toBeNull();                // anahtar düzenleyiciyi açmaz
+    expect(hubDialog()).toBeInTheDocument();
 
-    fireEvent.click(tile());
+    fireEvent.click(toggle());
     expect(useKeymapStore.getState().layoutOff).toEqual({});
-    expect(tile()).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('pencerenin KENDİ düzeni varsa döşeme onu açar/kapar: sayı ve anahtar o pencereye aittir, uygulamanınki etkilenmez', () => {
+  it('pencerenin KENDİ düzeni varsa anahtar onu açar/kapar: sayı o pencereye aittir, uygulamanınki etkilenmez', () => {
     useKeymapStore.setState({ presets: { 'com.game': LAYOUT, 'win:w1': [LAYOUT[0]] }, windowOwned: { w1: true }, layoutOff: {} });
     openHub(VIDEO);
-    expect(tile()).toHaveTextContent('1');                                  // pencerenin düzeni: 1 düğüm (uygulamanınki 2)
-    fireEvent.click(tile());
+    expect(screen.getByText('1 tuş tanımlı')).toBeInTheDocument();          // pencerenin düzeni: 1 düğüm (uygulamanınki 2)
+    fireEvent.click(toggle());
     expect(useKeymapStore.getState().layoutOff).toEqual({ 'win:w1': true });
     expect(useKeymapStore.getState().getActiveKeymap('com.game')).toHaveLength(2);   // uygulama düzeni açık kaldı
   });
@@ -116,37 +117,6 @@ describe('Hub: "Tuş düzeni" aç/kapa döşemesi (eski "Yön tuşları"nın yer
     expect(store().getActiveKeymap('com.game')).toHaveLength(2);
   });
 
-  it('düzenleyicisi olmayan pencerede döşeme yok ve Dinamik DP tüm genişliği kullanır', () => {
-    openHub(CROP);
-    expect(screen.queryByTestId('hub-keymap-toggle')).toBeNull();
-  });
-});
-
-describe('Hub: "Tuş düzeni"', () => {
-  it('video penceresinde satır görünür; tuş yokken ne işe yaradığını söyler', () => {
-    openHub(VIDEO);
-    expect(screen.getAllByText('Tuş düzeni')).toHaveLength(2);   // döşeme + satır
-    expect(screen.getByText('Klavye tuşlarını dokunmaya eşle')).toBeInTheDocument();
-  });
-
-  it('o uygulama için tanımlı tuş sayısını gösterir', () => {
-    useKeymapStore.setState({
-      presets: { 'com.game': [{ id: 'a', type: 'tap', key: 'f', rx: 0.5, ry: 0.5 }, { id: 'b', type: 'dpad', key: 'WASD', rx: 0.2, ry: 0.7 }] },
-    });
-    openHub(VIDEO);
-    expect(screen.getByText('2 tuş tanımlı')).toBeInTheDocument();
-  });
-
-  it('tıklayınca bu pencerenin tuş düzenleyicisini açar ve Hub\'ı kapatır', async () => {
-    openHub(VIDEO);
-    expect(useKeymapStore.getState().editWindowId).toBeNull();
-
-    fireEvent.click(screen.getByText('Klavye tuşlarını dokunmaya eşle'));   // satır (tıklaması düzenleyiciyi açar)
-
-    expect(useKeymapStore.getState().editWindowId).toBe('w1');
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: "Pencere Hub'ı" })).toBeNull());
-  });
-
   it('düzenleyicisi olmayan pencerelerde (Workspace, DeX kırpma) satır hiç yok', () => {
     for (const win of [ECO, CROP]) {
       openHub(win);
@@ -156,39 +126,51 @@ describe('Hub: "Tuş düzeni"', () => {
   });
 });
 
-describe('Hub: "Dinamik DP" üçlü döşemesi (Genele uy / Açık / Kapalı)', () => {
-  const dpTile = (name) => screen.getByRole('button', { name });
+describe('Hub: "Dinamik DP" — Genele uy / Açık / Kapalı hep görünür, tek tıkla seçilir', () => {
+  const choice = (name) => within(screen.getByTestId('hub-dynamic-dp')).getByRole('radio', { name });
 
-  it('varsayılan pencerede Açık görünür; tıklamak Kapalı\'ya (mevcut DP\'ye sabit), sonra Genele uy\'a, sonra Açık\'a döndürür', async () => {
+  it('varsayılan pencerede Açık seçili; Kapalı mevcut DP\'ye sabitler, Genele uy genel ayara bağlar, Açık otomatiğe döner', async () => {
     useWindowStore.setState({ windows: [ECO, { ...VIDEO, dpi: 233, dpiPolicy: { mode: 'auto' } }, CROP] });
     openHub(VIDEO);
-    expect(dpTile('Dinamik DP: açık')).toHaveTextContent('Açık');
+    expect(choice('Açık')).toHaveAttribute('aria-checked', 'true');
 
-    fireEvent.click(dpTile('Dinamik DP: açık'));
-    await waitFor(() => expect(dpTile('Dinamik DP: kapalı')).toHaveTextContent('Kapalı'));
-    expect(useWindowStore.getState().windows.find((w) => w.id === 'w1').dpiPolicy).toEqual({ mode: 'custom', dpi: 233 });
+    fireEvent.click(choice('Kapalı'));
+    await waitFor(() => expect(policyOf()).toEqual({ mode: 'custom', dpi: 233 }));
+    await waitFor(() => expect(choice('Kapalı')).toHaveAttribute('aria-checked', 'true'));
 
-    fireEvent.click(dpTile('Dinamik DP: kapalı'));
-    await waitFor(() => expect(useWindowStore.getState().windows.find((w) => w.id === 'w1').dpiPolicy).toEqual({ mode: 'follow' }));
-    expect(screen.getByRole('button', { name: /^Dinamik DP: / })).toHaveTextContent('Genele uy');
+    fireEvent.click(choice('Genele uy'));
+    await waitFor(() => expect(policyOf()).toEqual({ mode: 'follow' }));
 
-    fireEvent.click(screen.getByRole('button', { name: /^Dinamik DP: / }));
-    await waitFor(() => expect(useWindowStore.getState().windows.find((w) => w.id === 'w1').dpiPolicy).toEqual({ mode: 'auto' }));
+    fireEvent.click(choice('Açık'));
+    await waitFor(() => expect(policyOf()).toEqual({ mode: 'auto' }));
   });
 
-  it('"Genele uy" karosu genel ayarın o anki sonucunu da yazar', () => {
+  it('"Genele uy" seçiliyken genel ayarın o anki sonucu yazar', () => {
     useWindowStore.setState({ windows: [ECO, { ...VIDEO, dpi: 233, dpiPolicy: { mode: 'follow' } }, CROP] });
     openHub(VIDEO);
-    expect(screen.getByRole('button', { name: /^Dinamik DP: / })).toHaveTextContent('Genele uy · Açık');
+    expect(choice('Genele uy')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByTestId('hub-dynamic-dp')).toHaveTextContent('→ Açık');
+  });
+
+  it('yoğunluk bilinmiyorsa "Kapalı" (mevcut DP\'ye sabitle) seçilemez', () => {
+    openHub(VIDEO);   // dpi yok
+    expect(choice('Kapalı')).toBeDisabled();
+  });
+
+  it('akışın boyutu ve yoğunluğu Hub\'ın bandında yazar', () => {
+    useWindowStore.setState({ windows: [ECO, { ...VIDEO, dpi: 233 }, CROP] });
+    openHub(VIDEO);
+    expect(screen.getByTestId('hub-metrics')).toHaveTextContent('800×600 · 233 DPI');
   });
 });
 
-describe('Hub: genel "Gerçek çözünürlük" kapalıyken Dinamik DP karosu', () => {
+describe('Hub: genel "Gerçek çözünürlük" kapalıyken Dinamik DP', () => {
   // Her grup tek bir sunucu değeriyle çalışır: canlı ayar deposu (liveSettings) gruplar arasında karışmasın diye.
   function LiveWith({ id, settings }) {
     const win = useWindowStore((s) => s.windows.find((w) => w.id === id));
     return <WindowFrame win={win} settings={settings} />;
   }
+  const row = () => screen.getByTestId('hub-dynamic-dp');
 
   describe('genel ayar kapalı', () => {
     beforeEach(() => {
@@ -196,28 +178,26 @@ describe('Hub: genel "Gerçek çözünürlük" kapalıyken Dinamik DP karosu', (
       getSettings.mockResolvedValue({ dynamic_resolution_enabled: false });
     });
 
-    async function openHub() {
+    async function openHubOff() {
       render(<LiveWith id="w1" settings={{ dynamic_resolution_enabled: false }} />);
       await waitFor(() => expect(getLiveSettings()?.dynamic_resolution_enabled).toBe(false));
       await act(async () => {});
       fireEvent.click(screen.getByLabelText('Pencere Hub ayarları'));
     }
 
-    it('pencere "Genele uy" olsa bile karo kapalı görünür ve nedenini yazar', async () => {
+    it('pencere "Genele uy" olsa bile etkisiz olduğu ve nedeni yazar', async () => {
       useWindowStore.setState({ windows: [ECO, { ...VIDEO, dpiPolicy: { mode: 'follow' } }, CROP] });
-      await openHub();
-
-      const tile = screen.getByRole('button', { name: 'Dinamik DP: kapalı' });
-      expect(tile).toHaveTextContent('Genele uy · Gerçek çözünürlük kapalı');   // seçim görünür kalır, neden yanında
-      expect(tile).not.toHaveTextContent('Açık');
+      await openHubOff();
+      expect(row()).toHaveTextContent('Gerçek çözünürlük kapalı');
+      expect(row()).not.toHaveTextContent('→ Açık');
     });
 
-    it('pencerenin kendi "Açık" seçimi de etkisiz görünür, seçim silinmez', async () => {
+    it('pencerenin kendi "Açık" seçimi görünür kalır ama etkisiz yazar, seçim silinmez', async () => {
       useWindowStore.setState({ windows: [ECO, { ...VIDEO, dpiPolicy: { mode: 'auto' } }, CROP] });
-      await openHub();
-
-      expect(screen.getByRole('button', { name: 'Dinamik DP: kapalı' })).toHaveTextContent('Gerçek çözünürlük kapalı');
-      expect(useWindowStore.getState().windows.find((w) => w.id === 'w1').dpiPolicy).toEqual({ mode: 'auto' });
+      await openHubOff();
+      expect(within(row()).getByRole('radio', { name: 'Açık' })).toHaveAttribute('aria-checked', 'true');
+      expect(row()).toHaveTextContent('Gerçek çözünürlük kapalı');
+      expect(policyOf()).toEqual({ mode: 'auto' });
     });
   });
 
@@ -227,14 +207,32 @@ describe('Hub: genel "Gerçek çözünürlük" kapalıyken Dinamik DP karosu', (
       getSettings.mockResolvedValue({ dynamic_resolution_enabled: true });
     });
 
-    it('karo eskisi gibi çalışır: "Genele uy · Açık"', async () => {
+    it('"Genele uy" eskisi gibi o anki sonucu yazar: "→ Açık"', async () => {
       useWindowStore.setState({ windows: [ECO, { ...VIDEO, dpiPolicy: { mode: 'follow' } }, CROP] });
       render(<LiveWith id="w1" settings={{ dynamic_resolution_enabled: true }} />);
       await waitFor(() => expect(getLiveSettings()?.dynamic_resolution_enabled).toBe(true));
       await act(async () => {});
       fireEvent.click(screen.getByLabelText('Pencere Hub ayarları'));
-
-      expect(screen.getByRole('button', { name: 'Dinamik DP: açık' })).toHaveTextContent('Genele uy · Açık');
+      expect(row()).toHaveTextContent('→ Açık');
     });
+  });
+});
+
+describe('Hub: Görüntü ölçeği ve başlık kipi seçenekleriyle görünür', () => {
+  it('ölçek tek tıkla seçilir (eskiden "Döndür" ile sırayla dolaşılıyordu)', () => {
+    openHub(VIDEO);
+    const fit = screen.getByTestId('hub-fit');
+    expect(within(fit).getByRole('radio', { name: 'Oto' })).toHaveAttribute('aria-checked', 'true');
+    expect(fit).toHaveTextContent('→ Sığdır');
+    fireEvent.click(within(fit).getByRole('radio', { name: 'Kırp' }));
+    expect(useWindowStore.getState().windows.find((w) => w.id === 'w1').videoFitMode).toBe('cover');
+  });
+
+  it('başlık kipi seçilir; "Genele uy"da geçerli kip yazar', async () => {
+    openHub(VIDEO);
+    const header = screen.getByTestId('hub-header');
+    expect(header).toHaveTextContent('→ Sabit');
+    fireEvent.click(within(header).getByRole('radio', { name: 'Hover' }));
+    await waitFor(() => expect(useWindowStore.getState().windows.find((w) => w.id === 'w1').headerMode).toBe('hover'));
   });
 });

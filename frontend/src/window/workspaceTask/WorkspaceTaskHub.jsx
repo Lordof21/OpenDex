@@ -3,7 +3,7 @@
 //
 //   Aktar       Telefona aktar → Tam ekran | Serbest pencere (Ayarlar'daki varsayılan işaretli; seçim yalnız bu aktarım için)
 //               · telefondaysa: Çalışma alanına geri al
-//   Pencere     Kapla / Geri yükle · Ayrı PiP · DeX'te pencere · Masaüstüne çıkar   (2×2 döşeme)
+//   Pencere     Kapla / Geri yükle · Ayrı PiP · DeX'te pencere · Masaüstüne çıkar   (tek sıra küçük karo)
 //   Yoğunluk    Oto + hazır DPI değerleri + ince ayar kaydırıcısı (yalnız canlı görevde)
 //
 // Görsel dil: pencere hub'ı (window/titlebar/HubPanel) ile AYNI — başlık bandı, büyük harf bölüm etiketi, aynı satır (HubAction) ve
@@ -28,11 +28,11 @@ import AppIcon from '../../ui/AppIcon.jsx';
 import FloatingPanel from '../../ui/FloatingPanel.jsx';
 import { PrecisionSlider } from '../../ui/PrecisionSlider.jsx';
 import { cn } from '../../lib/utils.js';
-import { HubAction, HubTile } from '../titlebar/HubPanel.jsx';
+import { HUB_PANEL_WIDTH_PX, HubAction, HubDivider, HubSection, HubTile } from '../titlebar/HubPanel.jsx';
 import { DPI_PRESETS, describeTask, taskMetrics } from './taskMetrics.js';
 import { t } from '../../i18n/index.js';
 
-export const HUB_WIDTH_PX = 320;
+export const HUB_WIDTH_PX = HUB_PANEL_WIDTH_PX;   // the window Hub's width: both Hubs are one size
 
 const HANDOFF_ROWS = [
   { value: 'fullscreen', label: t('common.tam_ekran'), icon: Maximize2, detail: t('window.telefonun_ekranini_doldurur') },
@@ -42,9 +42,7 @@ const HANDOFF_ROWS = [
 // Pencere hub'ının yüzeyi (HubPanel): popover/95 + bulanık arka plan, köşe 6, iç boşluk yok (başlık bandı kenara kadar uzanır).
 const PANEL_SURFACE = 'rounded-md border-border bg-popover/95 p-0 backdrop-blur-2xl';
 
-function SectionTitle({ children }) {
-  return <p className="px-2 pb-1 pt-1 text-[9px] font-semibold uppercase text-muted-foreground">{children}</p>;
-}
+const SectionTitle = HubSection;
 
 /**
  * `boundary`: () => dikdörtgen — hub'ın kalacağı kutu (Workspace tuvali); panel onun içinde konumlanır ve daralır.
@@ -94,7 +92,7 @@ export function WorkspaceTaskHub({ anchor, boundary, compact = false, task, park
             icon={<ArrowDownToLine className="size-4" />}
             label={t('window.calisma_alanina_geri_al')}
             detail={t('window.kaldigi_yerden_eski_yerinde_devam_eder')}
-            compact={compact}
+            compact={compact} dense
             onClick={run(actions.reclaim)}
             testId="hub-reclaim"
           />
@@ -110,7 +108,7 @@ export function WorkspaceTaskHub({ anchor, boundary, compact = false, task, park
                   detail={row.value === defaultWindowing ? t('window.detail_varsayilan', { detail: row.detail }) : row.detail}
                   choice
                   checked={row.value === defaultWindowing}
-                  compact={compact}
+                  compact={compact} dense
                   onClick={run(() => actions.handoff(row.value))}
                   testId={`hub-handoff-${row.value}`}
                 />
@@ -119,33 +117,33 @@ export function WorkspaceTaskHub({ anchor, boundary, compact = false, task, park
           </div>
         )}
 
-        <div className="my-2 h-px bg-border" />
+        <HubDivider />
 
         <SectionTitle>{t('common.pencere')}</SectionTitle>
-        <div className="grid grid-cols-2 gap-1.5 px-1">
+        <div className={cn('grid gap-1 px-1', parked ? 'grid-cols-2' : 'grid-cols-4')}>
           <HubTile
+            size="mini"
             icon={maximized ? <Copy className="size-4" /> : <Square className="size-4" />}
             label={maximized ? t('common.geri_yukle') : t('window.alani_kapla')}
             active={maximized}
-            compact={compact}
             onClick={run(actions.toggleMaximize)}
             testId="hub-maximize"
           />
           {!parked && (
             <HubTile
+              size="mini"
               icon={<PictureInPicture2 className="size-4" />}
               label={pipOpen ? t('window.pip_i_kapat') : t('window.ayri_pip')}
               active={pipOpen}
-              compact={compact}
               onClick={run(actions.togglePip)}
               testId="hub-pip"
             />
           )}
           {!parked && (
-            <HubTile icon={<AppWindow className="size-4" />} label={t('window.dex_te_pencere')} active={false} compact={compact} onClick={run(actions.openCrop)} testId="hub-crop" />
+            <HubTile size="mini" toggle={false} icon={<AppWindow className="size-4" />} label={t('window.dex_te_pencere')} onClick={run(actions.openCrop)} testId="hub-crop" />
           )}
           {!parked && (
-            <HubTile icon={<ArrowUpRight className="size-4" />} label={t('window.masaustune_cikar')} active={false} compact={compact} onClick={run(actions.popOut)} testId="hub-popout" />
+            <HubTile size="mini" toggle={false} icon={<ArrowUpRight className="size-4" />} label={t('window.masaustune_cikar')} onClick={run(actions.popOut)} testId="hub-popout" />
           )}
         </div>
 
@@ -161,7 +159,7 @@ export function WorkspaceTaskHub({ anchor, boundary, compact = false, task, park
                   : keymapEnabled
                     ? t('window.keymapcount_tus_tanimli', { keymapCount })
                     : t('window.tus_duzeni_kapali_keymapcount_tus', { keymapCount })}
-                compact={compact}
+                compact={compact} dense
                 onClick={run(actions.openKeymap)}
                 testId="hub-keymap"
               />
@@ -176,7 +174,7 @@ export function WorkspaceTaskHub({ anchor, boundary, compact = false, task, park
 
         {!parked && (
           <>
-            <div className="my-2 h-px bg-border" />
+            <HubDivider />
 
             <SectionTitle>{t('window.yogunluk_dpi')}</SectionTitle>
             <div className="flex flex-wrap gap-1.5 px-1" role="group" aria-label={t('window.hazir_yogunluk_degerleri')}>
@@ -229,13 +227,13 @@ export function WorkspaceTaskHub({ anchor, boundary, compact = false, task, park
           </>
         )}
 
-        <div className="my-2 h-px bg-border" />
+        <HubDivider />
         {!parked && (
           <HubAction
             icon={<ChevronLeft className="size-4" />}
             label={t('window.android_geri')}
             detail={t('window.uygulamada_bir_adim_geri')}
-            compact={compact}
+            compact={compact} dense
             onClick={run(actions.back)}
             testId="hub-back"
           />
@@ -245,7 +243,7 @@ export function WorkspaceTaskHub({ anchor, boundary, compact = false, task, park
           label={t('window.gorevi_kapat')}
           detail={t('window.uygulama_kapatilir')}
           destructive
-          compact={compact}
+          compact={compact} dense
           onClick={run(actions.closeTask)}
           testId="hub-close"
         />

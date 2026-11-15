@@ -170,3 +170,90 @@ describe('useWheelKineticScroll — Touch resistance & Momentum cancellation', (
   });
 });
 
+
+// ── Ctrl + tekerlek: fare ucunda yakınlaştırma / uzaklaştırma (oyun kipi dışında) ───────────────────────────────────────────────
+import { pinchFingers } from '../src/window/useWheelKineticScroll.js';
+
+describe('pinchFingers — iki parmak odak noktasının (fare ucunun) çevresine dizilir', () => {
+  const mid = ({ f0, f1 }) => ({ x: (f0.x + f1.x) / 2, y: (f0.y + f1.y) / 2 });
+  const dist = ({ f0, f1 }) => Math.hypot(f1.x - f0.x, f1.y - f0.y);
+
+  it('ortada: orta noktası tam fare ucudur', () => {
+    const pair = pinchFingers(500, 400, 200, 1920, 1080);
+    expect(mid(pair)).toEqual({ x: 500, y: 400 });
+  });
+
+  it('kenarda: çift BİRLİKTE içeri kayar, aralarındaki mesafe değişmez (parmak tek başına kırpılırsa mesafe değişir = istenmeyen zoom)', () => {
+    const open = pinchFingers(500, 400, 200, 1920, 1080);
+    for (const [cx, cy] of [[10, 400], [1915, 400], [500, 5], [500, 1078], [0, 0], [1920, 1080]]) {
+      const pair = pinchFingers(cx, cy, 200, 1920, 1080);
+      expect(dist(pair)).toBeCloseTo(dist(open), 6);
+      for (const f of [pair.f0, pair.f1]) {
+        expect(f.x).toBeGreaterThanOrEqual(0);
+        expect(f.x).toBeLessThanOrEqual(1920);
+        expect(f.y).toBeGreaterThanOrEqual(0);
+        expect(f.y).toBeLessThanOrEqual(1080);
+      }
+    }
+  });
+
+  it('ekrandan büyük açıklıkta bile ekran dışına parmak konmaz', () => {
+    const pair = pinchFingers(100, 100, 5000, 400, 300);
+    for (const f of [pair.f0, pair.f1]) {
+      expect(f.x).toBeGreaterThanOrEqual(0);
+      expect(f.x).toBeLessThanOrEqual(400);
+      expect(f.y).toBeGreaterThanOrEqual(0);
+      expect(f.y).toBeLessThanOrEqual(300);
+    }
+  });
+});
+
+describe('useWheelKineticScroll — Ctrl + tekerlek', () => {
+  let canvas;
+  let touchRef;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    canvas = document.createElement('canvas');
+    touchRef = { current: { scroll: vi.fn(), down: vi.fn(), move: vi.fn(), up: vi.fn(), releaseAll: vi.fn() } };
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const wheel = (init) => {
+    const e = new Event('wheel', { bubbles: true, cancelable: true });
+    Object.assign(e, { deltaX: 0, deltaY: -30, ctrlKey: true, ...init });
+    canvas.dispatchEvent(e);
+    return e;
+  };
+  const mount = (extra = {}, coords = () => ({ x: 800, y: 500 })) =>
+    renderHook(() => useWheelKineticScroll({
+      canvasRef: { current: canvas }, touchRef, getDeviceCoords: coords, backTargetId: 'w', active: true, deviceH: 1080, deviceW: 1920, ...extra,
+    }));
+
+  it('yakınlaştırmanın odağı fare ucudur: parmakların orta noktası farenin kendisi, gecikmeden', () => {
+    let pointer = { x: 800, y: 500 };
+    mount({}, () => pointer);
+    wheel();
+    pointer = { x: 1000, y: 620 };                       // fare gesture sürerken gitti
+    wheel({ deltaY: -30 });
+    const [f0, f1] = [touchRef.current.move.mock.calls.at(-2), touchRef.current.move.mock.calls.at(-1)];
+    expect({ x: (f0[0] + f1[0]) / 2, y: (f0[1] + f1[1]) / 2 }).toEqual({ x: 1000, y: 620 });
+  });
+
+  it('oyun kipinde Ctrl + tekerlek yakınlaştırmaz: parmak basılmaz, tekerlek normal kaydırma olur', () => {
+    mount({ shouldSkipPinch: () => true });
+    const e = wheel({ deltaY: 100 });
+    expect(touchRef.current.down).not.toHaveBeenCalled();
+    expect(touchRef.current.move).not.toHaveBeenCalled();
+    expect(touchRef.current.scroll).toHaveBeenCalled();
+    expect(e.defaultPrevented).toBe(true);                // sayfa/arayüz yakınlaşması da tetiklenmez
+  });
+
+  it('oyun kipi kapalıyken (varsayılan) yakınlaştırır', () => {
+    mount({ shouldSkipPinch: () => false });
+    wheel();
+    expect(touchRef.current.down).toHaveBeenCalledTimes(2);
+  });
+});

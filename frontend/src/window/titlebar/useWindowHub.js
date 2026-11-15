@@ -14,16 +14,15 @@ import { isFrontendOnlyWindow } from '../frontendOnly.js';
 import { isMirrorPackage } from '../mirrorPackage.js';
 import { layoutKey, useKeymapStore } from '../../keymapper/keymapStore.js';
 import {
-  HEADER_MODE_LABELS,
   dynamicDpStatusOf,
   effectivePrelanding,
-  fitLabel,
   prelandingModeOf,
-  nextFitMode,
-  nextHeaderMode,
   normalizeHeaderMode,
   useWindowStore,
 } from '../windowStore.js';
+import { isHeaderHidden } from '../windowModel.js';
+import { normalizeFitMode, resolveFit } from '../fitModes.js';
+import { iconPackageOf } from '../workspacePackage.js';
 import { useSystemStore } from '../../state/systemStore.js';
 import { logger } from '../../lib/logger.js';
 import { t } from '../../i18n/index.js';
@@ -65,9 +64,9 @@ export function useWindowHub({
 
   const toggleHub = useCallback(() => setHubOpen((open) => !open), []);
 
-  const cycleImageMode = useCallback(() => {
-    useWindowStore.getState().setWindowFitMode(win.id, nextFitMode(win.videoFitMode));
-  }, [win.id, win.videoFitMode]);
+  const setFitMode = useCallback((mode) => {
+    useWindowStore.getState().setWindowFitMode(win.id, mode);
+  }, [win.id]);
 
   // "Ekran kilidi": akışın (sanal ekranın) px + DPI'ını sabitler. React penceresi serbest kalır — istenen boyuta getirilir, görüntü
   // pencereye "Görüntü ölçeği"ne göre sığdırılır.
@@ -119,9 +118,9 @@ export function useWindowHub({
     setHubOpen(false);
   }, [win.id]);
 
-  const cycleHeaderMode = useCallback(() => {
-    useWindowStore.getState().setHeaderMode(win.id, nextHeaderMode(win.headerMode));
-  }, [win.id, win.headerMode]);
+  const setHeaderMode = useCallback((mode) => {
+    useWindowStore.getState().setHeaderMode(win.id, mode);
+  }, [win.id]);
 
   const handleSendToWorkspace = useCallback(async () => {
     setWorkspaceSent(true);
@@ -142,11 +141,18 @@ export function useWindowHub({
   // Genel "Gerçek çözünürlük" kapalıyken karo "Açık" göstermez (dynamicDpStatusOf).
   const dpStatus = dynamicDpStatusOf(win, effectiveSettings);
 
+  const streamDpi = Number(win.dpi) > 0 ? Math.round(Number(win.dpi)) : 0;
   const panelProps = {
     panelRef: hubPanelRef,
-    compact: (win.w || 480) < 380,
-    imageLabel: fitLabel(win.videoFitMode, effectiveSettings?.video_fit_mode),
-    onCycleImage: cycleImageMode,
+    title: win.title || win.package,
+    iconPkg: win.package ? iconPackageOf(win) : undefined,
+    // The stream the window shows (its virtual display): what "Dinamik DP" / "Ekran kilidi" act on.
+    metrics: hasAppSession && win.deviceW > 0 && win.deviceH > 0
+      ? `${win.deviceW}×${win.deviceH}${streamDpi ? ` · ${streamDpi} DPI` : ''}`
+      : null,
+    fitMode: normalizeFitMode(win.videoFitMode),
+    fitAuto: resolveFit('auto', effectiveSettings?.video_fit_mode).key,
+    onFitMode: setFitMode,
     absoluteFullscreen: Boolean(win.fullscreen),
     onFullscreen,
     pipOpen,
@@ -163,7 +169,8 @@ export function useWindowHub({
     dynamicDpMode: dpStatus.mode,
     dynamicDpLocked: dpStatus.locked,
     dynamicResolutionOff: dpStatus.resolutionOff,
-    onDynamicDp: () => useWindowStore.getState().cycleDynamicDp(win.id),
+    dynamicDpOffAvailable: streamDpi > 0,
+    onDynamicDp: (mode) => useWindowStore.getState().setDynamicDpMode(win.id, mode),
     onKeymap: hasKeymapEditor ? openKeymapEditor : undefined,
     keymapCount,
     keymapEnabled,
@@ -172,10 +179,11 @@ export function useWindowHub({
     // pencere (arkasında gerçek bir uygulama ve kendi akışı olan) sunar.
     prelandingMode: prelandingModeOf(win),
     prelandingEffective: effectivePrelanding(win, effectiveSettings),
-    onCyclePrelanding: hasAppSession ? () => useWindowStore.getState().cyclePrelanding(win.id) : undefined,
-    headerModeLabel: HEADER_MODE_LABELS[normalizeHeaderMode(win.headerMode)],
-    headerModeActive: normalizeHeaderMode(win.headerMode) !== 'follow',
-    onCycleHeader: cycleHeaderMode,
+    onPrelanding: hasAppSession ? (mode) => useWindowStore.getState().setWindowPrelanding(win.id, mode) : undefined,
+    headerMode: normalizeHeaderMode(win.headerMode),
+    // What "Genele uy" means for this window now (the global setting), as the window would be when not maximized.
+    headerEffective: isHeaderHidden({ ...win, headerMode: 'follow', maximized: false, fullscreen: false }, effectiveSettings) ? 'hover' : 'pinned',
+    onHeaderMode: setHeaderMode,
     workspaceSent,
     onSend: handleSendToWorkspace,
     variant: isFrontendOnlyWindow(win) ? 'workspace-crop' : 'video',

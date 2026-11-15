@@ -1,37 +1,23 @@
+// Yerleşim menüsü: Windows 11'in "yerleşim düzenleri" menüsündeki gibi 3 × 2 düzen (yarılar, 3/5 + yığın, üçte birler, çeyrekler…) ve altta
+// tam ekran. Hem DeX içi pencerelerde (uygulama içi kenara yapıştırma: store.applySnapZone) hem PiP / Workspace PiP işletim sistemi
+// pencerelerinde (ekranın bölgesine oturtma: usePipOsWindow.snap) AYNI menü açılır; bölgelerin kutuları windowModel.OS_SNAP_ZONES'tadır.
+
 import React from 'react';
 import { motion } from 'framer-motion';
 import { t } from '../../i18n/index.js';
+import { rovingKeys } from '../../ui/rovingKeys.js';
+import { OS_SNAP_ZONES } from '../windowModel.js';
 
-const SNAP_LAYOUTS = [
-  {
-    id: 'halves',
-    zones: [
-      { zone: 'left', className: 'col-span-3 row-span-2' },
-      { zone: 'right', className: 'col-span-3 row-span-2' },
-    ],
-  },
-  {
-    id: 'quarters',
-    zones: [
-      { zone: 'tl', className: 'col-span-3' },
-      { zone: 'tr', className: 'col-span-3' },
-      { zone: 'bl', className: 'col-span-3' },
-      { zone: 'br', className: 'col-span-3' },
-    ],
-  },
-  {
-    id: 'left-stack',
-    zones: [
-      { zone: 'left', className: 'col-span-3 row-span-2' },
-      { zone: 'tr', className: 'col-span-3' },
-      { zone: 'br', className: 'col-span-3' },
-    ],
-  },
-  {
-    id: 'full',
-    zones: [{ zone: 'max', className: 'col-span-6 row-span-2' }],
-  },
+const LAYOUTS = [
+  ['left', 'right'],
+  ['main', 'stack-t', 'stack-b'],
+  ['l13', 'r23'],
+  ['l23', 'r13'],
+  ['left', 'tr', 'br'],
+  ['tl', 'tr', 'bl', 'br'],
 ];
+
+const pct = (v) => `${(v * 100).toFixed(3)}%`;
 
 export default function SnapLayoutMenu({ current, onPick }) {
   return (
@@ -45,32 +31,50 @@ export default function SnapLayoutMenu({ current, onPick }) {
       aria-label={t('window.yerlesim_duzenleri')}
       onPointerDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => rovingKeys(e, '[role="menuitem"]', { orientation: 'both' })}
     >
-      <div className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-popover/95 p-2.5 shadow-window backdrop-blur-2xl">
-        {SNAP_LAYOUTS.map((layout) => (
-          <div
-            key={layout.id}
-            className="grid h-[52px] grid-cols-6 grid-rows-2 gap-1 rounded-md bg-muted/60 p-1"
-            role="group"
-          >
-            {layout.zones.map((item) => (
-              <button
-                key={`${layout.id}-${item.zone}`}
-                type="button"
-                role="menuitem"
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onPick(item.zone);
-                }}
-                aria-label={t('window.zone_konumuna_yerlestir', { zone: item.zone })}
-                className={`${item.className} rounded-[3px] border border-border/60 bg-background/80 transition-colors hover:border-primary hover:bg-primary/70 ${
-                  current === item.zone ? 'border-primary bg-primary/40' : ''
-                } cursor-pointer`}
-              />
-            ))}
-          </div>
-        ))}
+      <div className="rounded-lg border border-border bg-popover/95 p-2.5 shadow-window backdrop-blur-2xl">
+        <div className="grid grid-cols-2 gap-2">
+          {LAYOUTS.map((zones, index) => (
+            <div key={index} className="relative h-[52px] rounded-md bg-muted/60" role="group">
+              {zones.map((zone) => {
+                const [x, y, w, h] = OS_SNAP_ZONES[zone];
+                return (
+                  <div key={zone} className="absolute p-[2px]" style={{ left: pct(x), top: pct(y), width: pct(w), height: pct(h) }}>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onPick(zone);
+                      }}
+                      aria-label={t('window.zone_konumuna_yerlestir', { zone })}
+                      className={`size-full rounded-[3px] border border-border/60 bg-background/80 transition-colors hover:border-primary hover:bg-primary/70 ${
+                        current === zone ? 'border-primary bg-primary/40' : ''
+                      } cursor-pointer`}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+        <button
+          type="button"
+          role="menuitem"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onPick('max');
+          }}
+          aria-label={t('window.ekrani_kapla')}
+          className={`mt-2 h-[22px] w-full rounded-[3px] border border-border/60 bg-background/80 text-[10px] text-muted-foreground transition-colors hover:border-primary hover:bg-primary/70 hover:text-primary-foreground ${
+            current === 'max' ? 'border-primary bg-primary/40' : ''
+          } cursor-pointer`}
+        >
+          {t('window.ekrani_kapla')}
+        </button>
       </div>
     </motion.div>
   );

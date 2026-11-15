@@ -8,6 +8,8 @@ import { newOpId } from '../../lib/opId.js';
 import { resolveAppDisplayName } from '../../desktop/appRegistry.js';
 import { t as tt } from '../../i18n/index.js';
 import { prelandingModeOf } from '../windowModel.js';
+import { isPipWebview } from '../pip/pipBridge.js';
+import { isInPip } from '../pip/pipRegistry.js';
 
 const reclaimingWindows = new Set();
 
@@ -78,7 +80,13 @@ export function createContinuitySlice(set, get) {
       // kaydettiği pencere geometrisine döndürür. Pencere o arada büyüdüyse / küçüldüyse (ya da kip değiştiyse) akış artık
       // pencerenin tuvaline tam oturmaz (yanlarda boşluk) — yeniden boyutlandırınca düzelmesinin sebebi buydu. Dönüşte pencere
       // KENDİ güncel kutusuna göre bir kez uzlaştırılır; akış zaten uygunsa hiçbir istek gitmez.
-      const returning = !isHandoff ? get().windows.filter((w) => matches(w) && w.handoffToPhone && !w.isEcoWorkspace).map((w) => w.id) : [];
+      // A window shown in a PiP is not reconciled here: the PiP sizes its own stream (PipApp) — this world's store would size it for the
+      // DeX window's box (or, in the PiP's own store where `maximized` only means "fills the OS window", for the whole desktop).
+      const returning = !isHandoff
+        ? get().windows
+          .filter((w) => matches(w) && w.handoffToPhone && !w.isEcoWorkspace && !isPipWebview() && !isInPip(w.id))
+          .map((w) => w.id)
+        : [];
       set((s) => ({
         handoffMap: {
           ...s.handoffMap,

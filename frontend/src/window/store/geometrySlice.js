@@ -45,6 +45,7 @@ import {
   planFullscreenToggle,
   planMaximizeToggle,
   planSnap,
+  boxForHeaderChange,
   policyArgs,
   prelandingModeOf,
   settingsForWindow,
@@ -367,8 +368,18 @@ export function createGeometrySlice(set, get) {
       const win = get().windows.find((w) => w.id === id);
       if (!win) return;
       const next = nextDynamicDpMode(dynamicDpModeOf(win));
-      if (next === 'on') return get().setWindowDpiPolicy(id, { mode: 'auto' });
-      if (next === 'off' && Number(win.dpi) > 0) return get().setWindowDpiPolicy(id, { mode: 'custom', dpi: Math.round(Number(win.dpi)) });
+      return get().setDynamicDpMode(id, next === 'off' && !(Number(win.dpi) > 0) ? 'follow' : next);
+    },
+
+    /** Hub "Dinamik DP" seçimi: 'follow' | 'on' (otomatik yoğunluk) | 'off' (mevcut yoğunluğa sabitle — yoğunluk bilinmiyorsa yapılmaz). */
+    async setDynamicDpMode(id, mode) {
+      const win = get().windows.find((w) => w.id === id);
+      if (!win) return;
+      if (mode === 'on') return get().setWindowDpiPolicy(id, { mode: 'auto' });
+      if (mode === 'off') {
+        if (!(Number(win.dpi) > 0)) return;
+        return get().setWindowDpiPolicy(id, { mode: 'custom', dpi: Math.round(Number(win.dpi)) });
+      }
       return get().setWindowDpiPolicy(id, DPI_FOLLOW);
     },
 
@@ -396,6 +407,10 @@ export function createGeometrySlice(set, get) {
       const win = get().windows.find((w) => w.id === id);
       if (!win) return;
       const next = normalizeHeaderMode(mode);
+      // The box is sized for the header as it is NOW: that is noted first, so the change below is seen as a change (and the window
+      // grows around the picture instead of the header squeezing it).
+      const globalSettings = await settingsOrNull();
+      if (globalSettings) get().reconcileHeaderBoxes(globalSettings, id);
       saveAppGeometry(win.package, { headerMode: next });
       patchWindow(id, { headerMode: next });
       await get().applyDynamicResolutionToOpenWindows({ onlyId: id });
@@ -625,9 +640,38 @@ export function createGeometrySlice(set, get) {
     // kip ancak bir sonraki elle boyutlandırmada etki ederdi.
     // `explicitDpi`: değişiklik kullanıcının AÇIK yoğunluk isteği (DPI politikası). "DP kilidi" yoğunluğu boyutlandırmada
     // sabit tutar; kullanıcının kendi isteğini engellemez — istek uygulanır, kilit yeni değeri tutar.
+    /**
+     * The header (hover ↔ pinned, per window or the global setting) appeared or disappeared since the box was last sized: the PICTURE keeps
+     * its size and place (the window grows upward by the header's height, or — pressed against the top — is pushed down), so nothing is
+     * squeezed and the stream is not re-asked. Only a free window's box follows; a maximized / snapped one keeps its box (its saved
+     * restore box is corrected so it comes back right).
+     */
+    reconcileHeaderBoxes(globalSettings, onlyId = null) {
+      set((s) => ({
+        windows: s.windows.map((win) => {
+          if (onlyId && win.id !== onlyId) return win;
+          // The decision WITHOUT the window mode: a maximized window has no header row, but that is not a header change.
+          const hidden = isHeaderHidden({ ...win, maximized: false, fullscreen: false }, globalSettings);
+          if (win.headerHiddenApplied === undefined) return { ...win, headerHiddenApplied: hidden };
+          if (win.headerHiddenApplied === hidden) return win;
+          const next = { ...win, headerHiddenApplied: hidden };
+          if (modeOf(win) === 'normal' && !win.minimized) {
+            const box = boxForHeaderChange({ x: win.x, y: win.y, w: win.w, h: win.h }, { hidden, top: 0, push: win.headerPush || 0 });
+            return { ...next, x: box.x, y: box.y, w: box.w, h: box.h, headerPush: box.push };
+          }
+          if (win._prevH > 0) {
+            const prev = boxForHeaderChange({ x: win._prevX, y: win._prevY, w: win._prevW, h: win._prevH }, { hidden, top: 0 });
+            return { ...next, _prevY: prev.y, _prevH: prev.h };
+          }
+          return next;
+        }),
+      }));
+    },
+
     async applyDynamicResolutionToOpenWindows({ onlyId = null, explicitDpi = false, explicitMode = false } = {}) {
       const globalSettings = await settingsOrNull();
       if (!globalSettings) return;
+      get().reconcileHeaderBoxes(globalSettings, onlyId);
       const ctx = viewportCtx();
       // Kip kararları PENCERE BAŞINA: bir pencere sabit 1080p'de, yanındaki dinamikte olabilir (settingsForWindow).
       const effective = (win) => settingsForWindow(win, globalSettings);

@@ -2,6 +2,25 @@ import { useEffect, useRef } from 'react';
 import { computeScrollFromWheelDelta, computeAdaptiveUnitsPerTick } from '../input/touchInject.js';
 import { useWindowStore } from './windowStore.js';
 
+/**
+ * The two fingers of a wheel pinch, laid out around the focal point (the mouse tip): a diagonal pair `span * 0.7` apart each way.
+ * Next to a screen edge the whole PAIR is shifted inward — never each finger clamped on its own: a clamped finger changes the distance
+ * between them, and the phone reads a distance change as zoom (zooming in near an edge used to wobble in and out, and the point under
+ * the mouse drifted away).
+ */
+export function pinchFingers(cx, cy, span, maxW, maxH) {
+  const offset = Math.round(span * 0.35);
+  let x0 = cx - offset;
+  let y0 = cy - offset;
+  let x1 = cx + offset;
+  let y1 = cy + offset;
+  const dx = x0 < 0 ? -x0 : x1 > maxW ? maxW - x1 : 0;
+  const dy = y0 < 0 ? -y0 : y1 > maxH ? maxH - y1 : 0;
+  x0 += dx; x1 += dx; y0 += dy; y1 += dy;
+  const clamp = (v, max) => Math.max(0, Math.min(max, v));   // only when the pair is bigger than the screen itself
+  return { f0: { x: clamp(x0, maxW), y: clamp(y0, maxH) }, f1: { x: clamp(x1, maxW), y: clamp(y1, maxH) } };
+}
+
 // Mobile kinetic-inertia wheel scroll, laptop touchpad pinch-to-zoom
 // (two-finger multi-touch pinch on Android via ctrlKey wheel), and 2-finger-tap/right-click -> Android Back, wired as a
 // single non-passive (preventDefault) 'wheel' listener.
@@ -15,6 +34,7 @@ export function useWheelKineticScroll({
   deviceW,
   active = true,
   shouldSkip,
+  shouldSkipPinch,
   deps = [],
 }) {
   const kineticRef = useRef({ vx: 0, vy: 0, x: 0, y: 0, raf: null });
@@ -65,8 +85,9 @@ export function useWheelKineticScroll({
       const rect = canvas.getBoundingClientRect();
       const p = getDeviceCoords(e, canvas, rect);
 
-      // Laptop Touchpad Pinch-to-Zoom (browser emits wheel event with ctrlKey=true on pinch or Ctrl+wheel)
-      if (e.ctrlKey) {
+      // Laptop Touchpad Pinch-to-Zoom (browser emits wheel event with ctrlKey=true on pinch or Ctrl+wheel).
+      // In game mode Ctrl is the key that frees the mouse: scrolling with it held is a scroll (a game menu), never a zoom.
+      if (e.ctrlKey && !shouldSkipPinch?.()) {
         stopKinetic();
 
         const pr = pinchRef.current;
@@ -87,9 +108,7 @@ export function useWheelKineticScroll({
           pr.cx = cx;
           pr.cy = cy;
 
-          const offset = Math.round(pr.span * 0.35);
-          const f0 = { x: Math.max(0, Math.min(maxW, cx - offset)), y: Math.max(0, Math.min(maxH, cy - offset)) };
-          const f1 = { x: Math.max(0, Math.min(maxW, cx + offset)), y: Math.max(0, Math.min(maxH, cy + offset)) };
+          const { f0, f1 } = pinchFingers(cx, cy, pr.span, maxW, maxH);
           pr.f0 = f0;
           pr.f1 = f1;
 
@@ -105,12 +124,12 @@ export function useWheelKineticScroll({
         const minSpan = 40;
         const maxSpan = Math.min(maxW, maxH) * 0.95;
         pr.span = Math.max(minSpan, Math.min(maxSpan, pr.span * factor));
-        pr.cx = Math.round(pr.cx * 0.75 + cx * 0.25);
-        pr.cy = Math.round(pr.cy * 0.75 + cy * 0.25);
+        // The focal point IS the mouse tip, tick by tick (it used to be smoothed 75 / 25 toward it, so the point under the mouse lagged
+        // behind and the picture slid while zooming).
+        pr.cx = cx;
+        pr.cy = cy;
 
-        const offset = Math.round(pr.span * 0.35);
-        const newF0 = { x: Math.max(0, Math.min(maxW, pr.cx - offset)), y: Math.max(0, Math.min(maxH, pr.cy - offset)) };
-        const newF1 = { x: Math.max(0, Math.min(maxW, pr.cx + offset)), y: Math.max(0, Math.min(maxH, pr.cy + offset)) };
+        const { f0: newF0, f1: newF1 } = pinchFingers(pr.cx, pr.cy, pr.span, maxW, maxH);
         pr.f0 = newF0;
         pr.f1 = newF1;
 

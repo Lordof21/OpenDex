@@ -96,24 +96,26 @@ describe('store', () => {
 });
 
 describe('Hub', () => {
-  it('the row says the window\'s own choice, and next to "Genele uy" what applies', () => {
-    const cycle = vi.fn();
-    const { getByTestId, rerender } = render(<HubPanel prelandingMode="follow" prelandingEffective="off" onCyclePrelanding={cycle} />);
+  it('every choice is visible and one click picks it; under "Genele uy" what applies is written', () => {
+    const pick = vi.fn();
+    const { getByTestId, rerender } = render(<HubPanel prelandingMode="follow" prelandingEffective="off" onPrelanding={pick} />);
     const row = getByTestId('hub-prelanding');
     expect(row).toHaveTextContent('Ön-iniş');
-    expect(row).toHaveTextContent('Genele uy · Kapalı');
-    fireEvent.click(row);
-    expect(cycle).toHaveBeenCalledTimes(1);
+    expect(row).toHaveTextContent('→ Kapalı');
+    const choice = (name) => within(getByTestId('hub-prelanding')).getByRole('radio', { name });
+    expect(choice('Genele uy')).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(choice('Açık'));
+    expect(pick).toHaveBeenCalledWith('on');
 
-    rerender(<HubPanel prelandingMode="on" prelandingEffective="on" onCyclePrelanding={cycle} />);
-    expect(getByTestId('hub-prelanding')).toHaveTextContent('Açık');
-    expect(getByTestId('hub-prelanding')).not.toHaveTextContent('Genele uy');
+    rerender(<HubPanel prelandingMode="on" prelandingEffective="on" onPrelanding={pick} />);
+    expect(choice('Açık')).toHaveAttribute('aria-checked', 'true');
+    expect(getByTestId('hub-prelanding')).not.toHaveTextContent('→');
   });
 
   it('a window that cannot go to the phone has no row (a mirror of the phone, Files, a crop)', () => {
     const { queryByTestId } = render(<HubPanel />);
     expect(queryByTestId('hub-prelanding')).toBeNull();
-    const crop = render(<HubPanel variant="workspace-crop" onCyclePrelanding={() => {}} />);
+    const crop = render(<HubPanel variant="workspace-crop" onPrelanding={() => {}} />);
     expect(crop.queryByTestId('hub-prelanding')).toBeNull();
   });
 
@@ -121,9 +123,9 @@ describe('Hub', () => {
     const app = renderHook(() => useWindowHub({ win: X, effectiveSettings: { handoff_prelanding: 'off' } }));
     expect(app.result.current.panelProps.prelandingMode).toBe('follow');
     expect(app.result.current.panelProps.prelandingEffective).toBe('off');
-    expect(app.result.current.panelProps.onCyclePrelanding).toBeTypeOf('function');
+    expect(app.result.current.panelProps.onPrelanding).toBeTypeOf('function');
     const mirror = renderHook(() => useWindowHub({ win: MIRROR, effectiveSettings: {} }));
-    expect(mirror.result.current.panelProps.onCyclePrelanding).toBeUndefined();
+    expect(mirror.result.current.panelProps.onPrelanding).toBeUndefined();
   });
 });
 

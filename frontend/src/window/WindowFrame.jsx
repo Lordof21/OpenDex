@@ -22,7 +22,9 @@ import HubPanel from './titlebar/HubPanel.jsx';
 import { useOsWindowController } from './titlebar/useOsWindowController.js';
 import { useWindowHub } from './titlebar/useWindowHub.js';
 import { usePipHost } from './pip/usePipHost.js';
+import { markPipClosed, markPipOpen } from './pip/pipRegistry.js';
 import { REVEAL_HOLD_MS, useFastEdgeIntent } from './pip/useFastEdgeReveal.js';
+import { useHeaderHoverFailsafe } from './useHeaderHoverFailsafe.js';
 import {
   TASKBAR_H,
   awaitingFrameBox,
@@ -35,11 +37,13 @@ import {
   isHeaderHidden,
   modeOf,
   policyArgs,
+  streamFitsTarget,
   targetDisplaySizeForMode,
   targetDisplaySizeForWindow,
   useWindowStore,
 } from './windowStore.js';
 import { getSettings } from '../settings/settingsApi.js';
+import { api } from '../lib/api.js';
 import { useLiveSettings } from '../settings/liveSettings.js';
 import { windowVariants } from '../ui/motion.js';
 import { windowStackZ } from '../ui/zIndex.js';
@@ -145,6 +149,13 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
     return () => window.removeEventListener('opendex:highlight-window', handleHighlight);
   }, [win.id]);
 
+  // The store of this world does not know the window is shown in a PiP; what must not be done for it here asks the registry.
+  useEffect(() => {
+    if (!pipWindow) return undefined;
+    markPipOpen(win.id);
+    return () => markPipClosed(win.id);
+  }, [pipWindow, win.id]);
+
   // PiP lifecycle
   useEffect(() => {
     if (!pipWindow) return;
@@ -201,21 +212,23 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
       if (!s) {
         try { s = await getSettings(); } catch {}
       }
-      const mode = settingsForWindow(currentWin, s)?.resolution_mode || 'dynamic_fix';
-      const { customDpi, targetDp, phoneScale, autoDensity } = policyArgs(dpiPolicyOf(currentWin, s));
-      const target = targetDisplaySizeForMode(
-        mode,
-        customDpi,
-        targetDp,
-        win.w,
-        win.h,
-        0, 0, false, false,
-        phoneScale,
-        autoDensity,
+      // Back on the desktop the window is sized exactly as the DeX window is drawn (its header mode decides the chrome — the old guess
+      // assumed a visible 44 px title bar and brought a hover-header window back a title bar too small).
+      const target = targetDisplaySizeForWindow(
+        currentWin,
+        { ...s, resolution_mode: s?.resolution_mode || 'dynamic_fix' },
+        { w: currentWin.w, h: currentWin.h },
+        { mode: modeOf(currentWin) },
       );
-      if (target) {
-        store.commitResize(win.id, target.w, target.h, target.dpi, { settings: s }).catch(() => {});
-      }
+      if (!target) return;
+      // The PiP left the stream as it was (the usual case: it opened at the picture's own size and was not resized): nothing to change.
+      // The phone's own answer decides, not this world's store (the PiP's resizes never reached it).
+      try {
+        const live = await api.get('/api/windows');
+        const onPhone = Array.isArray(live) ? live.find((w) => w.window_id === win.id) : null;
+        if (onPhone && streamFitsTarget(target, onPhone.width, onPhone.height)) return;
+      } catch { /* no answer: ask for the size as before */ }
+      store.commitResize(win.id, target.w, target.h, target.dpi, { settings: s }).catch(() => {});
     };
 
     pipWindow.addEventListener?.('resize', onResize);
@@ -648,8 +661,28 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
   const hubOpen = hub.hubOpen;
   // Başlık gizli mi? TEK karar fonksiyonu (windowModel.isHeaderHidden): geometri hesapları da aynısını kullanır.
   const shouldAutoHideHeader = isHeaderHidden(win, effectiveSettings);
+  // The header state the box was sized for is noted once, when the window first knows the settings: a later change of it (per window or
+  // the global setting) is then seen by the store (geometrySlice.reconcileHeaderBoxes) and the window grows around the picture.
+  useEffect(() => {
+    if (!effectiveSettings || win.headerHiddenApplied !== undefined) return;
+    useWindowStore.getState().setLocalGeometry(win.id, {
+      headerHiddenApplied: isHeaderHidden({ ...win, maximized: false, fullscreen: false }, effectiveSettings),
+    });
+  }, [effectiveSettings, win.headerHiddenApplied]);   // eslint-disable-line react-hooks/exhaustive-deps
   const [isHeaderHovered, setIsHeaderHovered] = useState(false);
   const headerTimerRef = useRef(null);
+  const headerBoxRef = useRef(null);
+  // A window that moves under a still cursor (layout picked from the maximize menu, reclaimed from the phone, resized) never sends `mouseleave`:
+  // the open header is then closed by checking where the cursor really is (useHeaderHoverFailsafe).
+  useHeaderHoverFailsafe({
+    active: shouldAutoHideHeader && isHeaderHovered && !isResizing && !isDragging,
+    elementRef: headerBoxRef,
+    onClose: () => {
+      if (headerTimerRef.current) clearTimeout(headerTimerRef.current);
+      headerTimerRef.current = null;
+      setIsHeaderHovered(false);
+    },
+  });
 
   const handleHeaderMouseEnter = () => {
     if (isResizing || isDragging || dragRef.current) return;
@@ -797,6 +830,7 @@ export const WindowFrame = forwardRef(function WindowFrame({ win, settings }, fo
           <div className="relative flex h-full w-full flex-col overflow-hidden">
             {/* Slide-down Header on Hover */}
             <div
+              ref={headerBoxRef}
               className={`absolute top-0 left-0 right-0 z-[90] transition-all duration-240 ease-out bg-frame/95 backdrop-blur-2xl border-b border-frame-border shadow-2xl ${
                 isHeaderHovered
                   ? 'translate-y-0 opacity-100 pointer-events-auto'

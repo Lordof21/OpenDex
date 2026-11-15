@@ -18,7 +18,7 @@ import { stealthVeilDeadlineMs } from './store/continuitySlice.js';
 import { useWheelKineticScroll } from './useWheelKineticScroll.js';
 
 import { useLiveSettings } from '../settings/liveSettings.js';
-import { hasLayout, layoutKey, useKeymapStore } from '../keymapper/keymapStore.js';
+import { hasLayout, isGameMode, layoutKey, useKeymapStore } from '../keymapper/keymapStore.js';
 import { handleKeymapperInput, releaseKeymapperInput } from '../keymapper/keymapperEngine.js';
 import KeymapperOverlay from '../keymapper/KeymapperOverlay.jsx';
 import MouseLookBadge from '../keymapper/MouseLookBadge.jsx';
@@ -81,7 +81,7 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
 
   // Görüntü ölçeği: pencere modu (auto → genel ayar) tek tabloya (fitModes.js) çözülür; Hub, ayar panelleri ve
   // bu render AYNI sözlüğü kullanır.
-  const { css: effectiveFitMode, zoom: zoomScale } = resolveFit(win.videoFitMode, globalFit);
+  const { key: fitKey, css: effectiveFitMode, zoom: zoomScale } = resolveFit(win.videoFitMode, globalFit);
 
   const trans = win.pendingResizeTransition;
   const isTransitioning = Boolean(trans?.isAwaitingFirstFrame || trans?.isAnimating || isResizing);
@@ -189,7 +189,11 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
     };
 
     const onPaste = (e) => {
+      // Same gates as onKeyDown: not into (or out of) the app's own text fields, not while the key editor owns the keyboard, and
+      // only the focused window — every open window listens on `window`, so without this one Ctrl+V reached all of them.
+      if (e.target?.closest?.('input, textarea, select, [contenteditable]')) return;
       if (editorBlocksInput) return;
+      if (!win.focused && targetWindow === window) return;
       const text = e.clipboardData?.getData('text/plain');
       if (text && touchRef.current) {
         e.preventDefault();
@@ -274,7 +278,9 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
   const winY = win.y;
   useEffect(() => {
     const surface = surfaceRef.current;
-    if (!surface || isTransitioning || !streamSize || zoomScale !== 1) {
+    // Only "Sığdır" sits on the pixel grid: "Uzat" / "Kırp" exist to FILL the box, and a canvas pinned to the stream's own size would leave the
+    // few-pixel black rim they are meant to close (switching from Sığdır to Uzat then changed nothing).
+    if (!surface || isTransitioning || !streamSize || zoomScale !== 1 || fitKey !== 'fit') {
       setExactBox(null);
       return undefined;
     }
@@ -297,7 +303,7 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
       observer?.disconnect();
       view.removeEventListener('resize', recompute);
     };
-  }, [streamSize, isTransitioning, zoomScale, pixelPerfectDpr, winX, winY]);
+  }, [streamSize, isTransitioning, zoomScale, fitKey, pixelPerfectDpr, winX, winY]);
 
   // The video box measurement & ResizeObserver. The SURFACE (the box the video may fill) is measured, not the canvas: a 1:1
   // canvas is the stream's own size, and measuring it would feed the few-pixel slack back into the next stream request.
@@ -570,12 +576,14 @@ export default function VideoCanvas({ win, isHeaderOpen = false, isResizing = fa
     deviceH: win.deviceH,
     deviceW: win.deviceW,
     shouldSkip: () => editorBlocksInput,
+    // Ctrl + wheel zooms (a pinch around the mouse tip) only outside game mode; in game mode Ctrl frees the mouse and the wheel just scrolls.
+    shouldSkipPinch: () => isGameMode(win.id, win.package),
     getDeviceCoords: (e, canvas, rect) => {
       const cw = canvas.width || win.deviceW;
       const ch = canvas.height || win.deviceH;
       return mapPointerToDevice(e.clientX, e.clientY, rect, cw, ch);
     },
-    deps: [win.id, win.deviceW, win.deviceH, effectiveFitMode, zoomScale, editorBlocksInput],
+    deps: [win.id, win.package, win.deviceW, win.deviceH, effectiveFitMode, zoomScale, editorBlocksInput],
   });
 
   return (

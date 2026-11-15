@@ -31,3 +31,38 @@ describe('pixelExactBox', () => {
     expect(pixelExactBox({ left: 0, top: 0, width: 800, height: 600 }, 1, 0, 600)).toBeNull();
   });
 });
+
+// ── Pencere el değiştirirken (DeX ⇄ PiP) telefona dokunulmaz: boyutlar ve "zaten oturuyor" kararı
+import { pipCanvasBox, pipInnerSizeFor, streamFitsTarget } from '../src/window/windowMath.js';
+
+describe('streamFitsTarget', () => {
+  it('akış istenecek boyutun 1:1 payı içindeyse oturuyordur', () => {
+    expect(streamFitsTarget({ w: 1080, h: 1008 }, 1080, 1008)).toBe(true);
+    expect(streamFitsTarget({ w: 1080, h: 1008 }, 1072, 1000)).toBe(true);
+    expect(streamFitsTarget({ w: 1080, h: 1008 }, 1080, 1008 - PIXEL_EXACT_SLACK_PX)).toBe(true);
+  });
+
+  it('pay aşılırsa ya da akış bilinmiyorsa oturmuyordur', () => {
+    expect(streamFitsTarget({ w: 1080, h: 1008 }, 1080, 952)).toBe(false);      // PiP'in ilk isteğindeki 56 px'lik fark
+    expect(streamFitsTarget({ w: 1080, h: 1008 }, 0, 0)).toBe(false);
+    expect(streamFitsTarget(null, 1080, 1008)).toBe(false);
+  });
+});
+
+describe('PiP çerçevesi', () => {
+  it('sabit başlıkta kutu = pencere − kenarlık (2) − başlık (32); DeX başlığının 44 px\'i değil', () => {
+    expect(pipCanvasBox(1000, 800)).toEqual({ w: 998, h: 766 });
+  });
+
+  it('başlık görüntünün üstüne biniyorsa yalnız kenarlık düşer; büyütülmüş/tam ekranda hiçbiri', () => {
+    expect(pipCanvasBox(1000, 800, { headerOverlay: true })).toEqual({ w: 998, h: 798 });
+    expect(pipCanvasBox(1000, 800, { chromeless: true, headerOverlay: true })).toEqual({ w: 1000, h: 800 });
+  });
+
+  it('pipInnerSizeFor, pipCanvasBox\'ın tersidir: pencere görüntü kutusunu birebir verecek boyutta açılır', () => {
+    for (const headerOverlay of [false, true]) {
+      const inner = pipInnerSizeFor(864, 806, { headerOverlay });
+      expect(pipCanvasBox(inner.w, inner.h, { headerOverlay })).toEqual({ w: 864, h: 806 });
+    }
+  });
+});

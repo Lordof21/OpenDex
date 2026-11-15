@@ -5,7 +5,8 @@
 // handoff/pin) has to branch on whichever of those three PiP hosts (if any)
 // currently owns the panel before falling back to the normal in-app window.
 
-import { useWindowStore } from '../windowStore.js';
+import { useWindowStore, isHeaderHidden, pipInnerSizeFor } from '../windowStore.js';
+import { getSettings } from '../../settings/settingsApi.js';
 import { logger } from '../../lib/logger.js';
 import { isTauriHost, sendPipCommand } from '../pip/pipBridge.js';
 
@@ -14,6 +15,23 @@ export function closeThisTauriWindow() {
   return import('@tauri-apps/api/webviewWindow')
     .then((m) => m.getCurrentWebviewWindow().close())
     .catch(() => window.close());
+}
+
+/**
+ * Size of a new PiP window: its canvas is made EXACTLY as big as the picture the DeX window shows (measured canvas box), plus the PiP's
+ * own chrome. The stream then fits the PiP as it is — nothing is asked of the phone when the window changes hands. Falls back to the
+ * window's own size when the canvas was never measured, and never beyond the screen (a bigger window could not be placed anyway).
+ */
+export async function pipInitialSize(win) {
+  const fallback = { w: win.w || 480, h: win.h || 780 };
+  if (!(win.canvasW > 0 && win.canvasH > 0)) return fallback;
+  let settings = null;
+  try { settings = await getSettings(); } catch { /* the global setting only decides whether the header overlays the picture */ }
+  const headerOverlay = isHeaderHidden({ ...win, maximized: false, fullscreen: false }, settings);
+  const size = pipInnerSizeFor(win.canvasW, win.canvasH, { headerOverlay });
+  const screenW = window.screen?.availWidth || Infinity;
+  const screenH = window.screen?.availHeight || Infinity;
+  return { w: Math.min(size.w, screenW), h: Math.min(size.h, screenH) };
 }
 
 export function useOsWindowController({ win, pipWindow, setPipWindow }) {
@@ -38,11 +56,12 @@ export function useOsWindowController({ win, pipWindow, setPipWindow }) {
       if (isTauri) {
         try {
           const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+          const size = await pipInitialSize(win);
           newPip = new WebviewWindow(`os-window-${win.id}`, {
             url: `/?pip=${encodeURIComponent(win.id)}&pin=${isPinned ? 1 : 0}`,
             title: win.title || 'OpenDex Window',
-            width: win.w || 480,
-            height: win.h || 780,
+            width: size.w,
+            height: size.h,
             minWidth: 280,
             minHeight: 200,
             alwaysOnTop: isPinned,
@@ -217,8 +236,10 @@ export function useOsWindowController({ win, pipWindow, setPipWindow }) {
       else useWindowStore.getState().handoffWindowToPhone(target);
     };
     if (pipWindow === window && isTauriHost()) {
-      // PiP kendi (ayrı) store'unda aktarsaydı pencere kapanırken yarıda kalır, ana pencere hiçbir şey görmezdi.
-      runFromPipWebview({ name: 'handoff', windowing: mode }, handoffHere);
+      // PiP penceresi KAPANMAZ: aktarım burada (PiP'in kendi store'unda) başlar, backend'in `app_handoff_to_phone` olayı da bu webview'a
+      // gelir; "telefonda — geri al" kaplaması PiP'in içinde kalır ve oradan geri alınır (DeX'teki pencere gibi). Eskiden komut ana
+      // pencereye gidip PiP kapanıyordu: kullanıcı kaplamayı hiç görmüyordu.
+      handoffHere();
       return;
     }
     if (pipWindow) {

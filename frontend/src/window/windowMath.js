@@ -725,3 +725,34 @@ export function cascadePosition(step) {
     y: CASCADE_BASE.y + cycle * CASCADE_STEP_PX,
   };
 }
+
+/**
+ * Does the stream the window already has fit the size we would ask for? Within the pixel-exact slack the picture is drawn 1:1
+ * anyway, so asking changes the phone's display (a size + density change, a keyframe, a re-fit of the app) for nothing.
+ * Used when a window changes hands without its box changing (DeX → PiP and back): nothing may be reconfigured then.
+ */
+export function streamFitsTarget(target, streamW, streamH, slack = PIXEL_EXACT_SLACK_PX) {
+  if (!target || !(streamW > 0) || !(streamH > 0)) return false;
+  return Math.abs(target.w - streamW) <= slack && Math.abs(target.h - streamH) <= slack;
+}
+
+/** The Tauri PiP window's own chrome around the canvas (PipApp): a 1 px border all round, and a 32 px header unless it overlays the picture. */
+export const PIP_BORDER_PX = 2;
+export const PIP_HEADER_H_PX = 32;
+
+/** The canvas box inside a PiP window of this inner size. `chromeless`: maximized / full screen (no border); `headerOverlay`: no header row. */
+export function pipCanvasBox(innerW, innerH, { headerOverlay = false, chromeless = false } = {}) {
+  const border = chromeless ? 0 : PIP_BORDER_PX;
+  return {
+    w: Math.max(1, Math.round(innerW) - border),
+    h: Math.max(1, Math.round(innerH) - border - (headerOverlay ? 0 : PIP_HEADER_H_PX)),
+  };
+}
+
+/** The inner size a PiP window needs for its canvas to be exactly this big (the inverse of `pipCanvasBox`). */
+export function pipInnerSizeFor(canvasW, canvasH, { headerOverlay = false } = {}) {
+  return {
+    w: Math.round(canvasW) + PIP_BORDER_PX,
+    h: Math.round(canvasH) + PIP_BORDER_PX + (headerOverlay ? 0 : PIP_HEADER_H_PX),
+  };
+}

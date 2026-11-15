@@ -12,9 +12,10 @@ import { closeTracker } from './closeTracker.js';
 import { resolveAppDisplayName } from '../../desktop/appRegistry.js';
 import { useSystemStore } from '../../state/systemStore.js';
 import { logger } from '../../lib/logger.js';
-import { appViewportBox, cascadePosition, resolveTaskDensity } from '../windowMath.js';
+import { appViewportBox, cascadePosition, devicePixelRatioSafe, resolveTaskDensity } from '../windowMath.js';
 import { buildCropWindow, cropWindowId, isCropWindow } from '../cropWindow.js';
-import { frameForBounds, planCropResize, referenceScale } from '../workspacePip/cropMath.js';
+import { frameForBounds, pixelScale, planCropResize } from '../workspacePip/cropMath.js';
+import { getLiveSettings } from '../../settings/liveSettings.js';
 import { newOpId } from '../../lib/opId.js';
 import { t as tt } from '../../i18n/index.js';
 
@@ -153,8 +154,7 @@ export function createWorkspaceSlice(set, get) {
       }
       set((s) => {
         const zIndex = s.nextZ + 1;
-        const vd = { w: container.vdW || 1920, h: container.vdH || 1080 };
-        const win = buildCropWindow({ task, vd, zIndex, position: cascadePosition(s.windows.length) });
+        const win = buildCropWindow({ task, zIndex, position: cascadePosition(s.windows.length), settings: getLiveSettings() });
         return { nextZ: zIndex, windows: [...s.windows.map((w) => ({ ...w, focused: false })), win] };
       });
       logger.info('crop', 'window_opened', { taskWindowId });
@@ -288,7 +288,7 @@ export function createWorkspaceSlice(set, get) {
       }
       const vd = { w: container.vdW || 1920, h: container.vdH || 1080 };
       const viewport = appViewportBox();
-      const scale = referenceScale(viewport, vd);
+      const scale = pixelScale(devicePixelRatioSafe());   // 1:1: the same scale at any window size
       const edge = win.pendingResizeTransition?.edgeId || '';
       // Sürüklenen kenarın KARŞISI yerinde kalır (sol/üst kenardan boyutlandırmada sağ/alt kenar sabit).
       const boxFor = (bounds) => {

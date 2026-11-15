@@ -258,8 +258,29 @@ export function snapBoxFor(zone, work) {
     case 'tr': return { x: rightX, y: 0, w: halfW, h: halfH };
     case 'bl': return { x: 0, y: bottomY, w: halfW, h: halfH };
     case 'br': return { x: rightX, y: bottomY, w: halfW, h: halfH };
-    default: return null;
+    default: return osSnapBoxFor(zone, work);   // the other layouts of the menu (3/5 + stack, thirds); null for an unknown zone
   }
+}
+
+/**
+ * İşletim sistemi penceresi (PiP) için ekran bölgeleri — Windows 11'in yerleşim menüsündeki düzenler: [x, y, genişlik, yükseklik], ekranın
+ * çalışma alanına oranı. (DeX içi pencereler `snapBoxFor`'un 7 bölgesini kullanır; bunlar onun üst kümesidir.)
+ */
+export const OS_SNAP_ZONES = Object.freeze({
+  left: [0, 0, 1 / 2, 1], right: [1 / 2, 0, 1 / 2, 1],
+  tl: [0, 0, 1 / 2, 1 / 2], tr: [1 / 2, 0, 1 / 2, 1 / 2], bl: [0, 1 / 2, 1 / 2, 1 / 2], br: [1 / 2, 1 / 2, 1 / 2, 1 / 2],
+  main: [0, 0, 3 / 5, 1], 'stack-t': [3 / 5, 0, 2 / 5, 1 / 2], 'stack-b': [3 / 5, 1 / 2, 2 / 5, 1 / 2],
+  l23: [0, 0, 2 / 3, 1], r13: [2 / 3, 0, 1 / 3, 1],
+  l13: [0, 0, 1 / 3, 1], r23: [1 / 3, 0, 2 / 3, 1],
+});
+
+/** Bir bölgenin çalışma alanındaki kutusu ({x, y, w, h}; alanın sol-üstüne göre). Kenarlar yuvarlanır: komşu bölgeler arasında boşluk/çakışma kalmaz. */
+export function osSnapBoxFor(zone, area) {
+  const z = OS_SNAP_ZONES[zone];
+  if (!z) return null;
+  const left = Math.round(area.w * z[0]);
+  const top = Math.round(area.h * z[1]);
+  return { x: left, y: top, w: Math.round(area.w * (z[0] + z[2])) - left, h: Math.round(area.h * (z[1] + z[3])) - top };
 }
 
 /** Ekran kutuları: `full` = taskbar dahil (mutlak tam ekran), `work` = taskbar hariç (kaplama / snap). */
@@ -374,6 +395,26 @@ export function planDragRestore(win, pointer, ctx) {
     box: { x, y, w: restore.w, h: restore.h },
     patch: { maximized: false, fullscreen: false, snapZone: null, modeStack: [], x, y, w: restore.w, h: restore.h },
   };
+}
+
+/**
+ * Başlık görününce / kaybolunca serbest bir pencerenin yeni kutusu: GÖRÜNTÜ ne boyut ne yer değiştirir (500 px'lik görüntü + 20 px başlık
+ * = 520 px'lik pencere; başlık kalkınca yine 500 px görüntü). Başlık görüntünün ÜSTÜNE eklenir: pencere yukarı büyür. Yukarıda yer yoksa
+ * (üst sınır `top`) üst kenar sınırda kalır ve eksik kısım kadar pencere AŞAĞI itilir; `push` bu itilen miktardır — başlık kalkarken
+ * geri verilir, görüntü başladığı yere döner.
+ *
+ * @param box     { x, y, w, h } pencerenin şimdiki kutusu (çerçeve dahil)
+ * @param hidden  başlığın YENİ durumu (true = gizli / üstüne biner)
+ * @returns { x, y, w, h, push }
+ */
+export function boxForHeaderChange(box, { hidden, top = 0, push = 0 }) {
+  const delta = FRAME_CHROME_H_PX - FRAME_BORDER_PX;
+  if (!hidden) {
+    const wanted = box.y - delta;
+    const y = Math.max(top, wanted);
+    return { x: box.x, y, w: box.w, h: box.h + delta, push: y - wanted };
+  }
+  return { x: box.x, y: Math.max(top, box.y + delta - push), w: box.w, h: Math.max(1, box.h - delta), push: 0 };
 }
 
 /** Pencere ilk açılırken (özellikle kaplanmış açılırken) geri dönülecek NORMAL kutuyu kaydeder. */
