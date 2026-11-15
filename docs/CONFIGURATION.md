@@ -4,14 +4,17 @@
 
 Every tunable of the backend is an environment variable with the prefix `OPENDEX_` (a `.env` file next to where the backend starts is read too). Nothing is hard-coded at call sites. Values are validated at start-up; an invalid value stops the backend with a message instead of running half-configured.
 
-85 settings, generated from [`backend/app/config.py`](../backend/app/config.py) — the comment above each setting there is the description below.
+88 settings, generated from [`backend/app/config.py`](../backend/app/config.py) — the comment above each setting there is the description below.
 
 
 ## ADB / scrcpy
 
 | Variable | Type | Default | Description |
 |---|---|---|---|
-| `OPENDEX_ADB_PATH` | `str` | `adb` | The adb executable: a name found on PATH, or a full path. |
+| `OPENDEX_ADB_PATH` | `str` | `adb` | The adb executable: a name found on PATH, or a full path. Left as "adb", OpenDeX looks for one by itself at start (PATH, the file you picked in the boot screen, its own copy, the Android SDK) and offers to install it when there is none. |
+| `OPENDEX_ADB_CHOICE_FILE` | `Path` | `~\.opendex\adb-path` | The adb you picked in the boot screen ("Dosya seç"): one line, the full path. Read at start, before PATH. |
+| `OPENDEX_ADB_MANAGED_DIR` | `Path` | `~\.opendex\platform-tools` | Where "Otomatik kur" puts Google's platform-tools (nothing outside this folder is touched: no PATH, no registry). |
+| `OPENDEX_ADB_MANAGED_ONLY` | `bool` | `false` | True: only OpenDeX's own adb (the folder above) and the file picked in the boot screen count — PATH, the Android SDK and OPENDEX_ADB_PATH are ignored. To see (and try) the "adb gerekli" start-up screen on a computer that has adb, or to run with one known adb that no other tool on the machine can swap. |
 | `OPENDEX_ADB_SERIAL` | `str \| None` | *(unset)* | The default device serial for adb commands that name none (a USB serial or `host:port`); unset: adb's own default. |
 | `OPENDEX_SCRCPY_CLIENT_VERSION` | `str` | `4.1` | The scrcpy protocol version the backend speaks; it selects vendor/scrcpy-server-v<version>[-opendex]. |
 | `OPENDEX_SCRCPY_SERVER_FLAVOR` | `Literal['auto', 'upstream', 'opendex']` | `auto` | Which scrcpy-server binary is pushed. "opendex": the patched build of the same version (backend/scrcpy — leading-edge resize debouncer, OPENDEX_RESIZE, bitrate on reset), "upstream": Genymobile's release, "auto": the patched build when vendor/ has it, else upstream. Resolved to "upstream" or "opendex" at load. What a running server can do is learned from its own announcement, never from this setting, so the wrong binary under either name only means today's behaviour. Rollback: "upstream". |

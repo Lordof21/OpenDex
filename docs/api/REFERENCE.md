@@ -2,7 +2,7 @@
 
 # API reference
 
-All 132 operations of the public OpenAPI document ([`openapi.json`](openapi.json), OpenAPI 3.1.0), grouped by tag. Conventions that apply to every operation — authentication, the Origin/Host guard, limits, error shapes — are in [API.md](../API.md); the WebSocket channels and the event types are there too.
+All 137 operations of the public OpenAPI document ([`openapi.json`](openapi.json), OpenAPI 3.1.0), grouped by tag. Conventions that apply to every operation — authentication, the Origin/Host guard, limits, error shapes — are in [API.md](../API.md); the WebSocket channels and the event types are there too.
 
 Paths are relative to `http://127.0.0.1:8710/api/v1` (every operation is also served under `/api`, unversioned). **Auth** `token` = needs the API token; **Device** = answers `409` while no phone is bound.
 
@@ -10,6 +10,7 @@ Paths are relative to `http://127.0.0.1:8710/api/v1` (every operation is also se
 |---|---|
 | [general](#general) | 2 |
 | [devices](#devices) | 32 |
+| [adb](#adb) | 5 |
 | [pairing](#pairing) | 4 |
 | [apps](#apps) | 4 |
 | [windows](#windows) | 23 |
@@ -65,7 +66,7 @@ The bound phone: connection state, battery and its diagnostics, volumes, quick t
 |---|---|---|---|---|
 | `GET` | `/devices` | Lists currently detected ADB devices (USB and Wireless). | token |  |
 | `GET` | `/devices/state` | The device list and the bound phone — the same payload every `devices_changed` event carries. The UI reads… | token |  |
-| `GET` | `/startup` | Where bringing the phone up stands — device, the daemon's health check (attempt n of N), services — for the… | token |  |
+| `GET` | `/startup` | Where bringing the phone up stands — adb on this computer (`adb`: checking \| ok \| missing, `adb_version`)… | token |  |
 | `GET` | `/device/profile` | Returns the bound device profile and encoder capabilities. | token |  |
 | `POST` | `/device/encoder-stress-test` | Opt-in, manually-triggered empirical measurement of how many concurrent virtual-display/encoder sessions th… | token |  |
 | `POST` | `/device/unlock` | Wakes the phone panel (through the display-power controller) and dismisses the keyguard. | token | yes |
@@ -115,8 +116,9 @@ once when its event stream (re)connects and follows the events from there (no po
 
 ### `GET /startup`
 
-Where bringing the phone up stands — device, the daemon's health check (attempt n of N), services — for the boot
-screen. In-memory: it asks neither adb nor the phone (startup_state.py).
+Where bringing the phone up stands — adb on this computer (`adb`: checking | ok | missing, `adb_version`), device, the
+daemon's health check (attempt n of N), services — for the boot screen. `adb: missing` holds everything else until adb is
+installed or picked (`/adb`). In-memory: it asks neither adb nor the phone (startup_state.py).
 
 *token required*
 
@@ -465,6 +467,68 @@ bt_result {ok, error?, status?} — `error: permission_denied` hides that action
 
 **Responses:** `200` Successful Response · `422` Validation Error · `409` no device bound · `401` token missing/wrong · `403` foreign Origin/Host · `411` chunked body · `413` body too large
 
+## adb
+
+adb on this computer: is there one, install Google's official platform-tools for OpenDeX, or use the one the user picked (the boot screen's calls).
+
+| Method | Path | Summary | Auth | Device |
+|---|---|---|---|---|
+| `GET` | `/adb` | {state: checking\|ok\|missing, path, version, source: env\|chosen\|path\|managed\|sdk, install: {phase: idl… | token |  |
+| `POST` | `/adb/recheck` | Looks for adb again ("Tekrar ara": the user installed one in the meantime) and returns the snapshot. | token |  |
+| `POST` | `/adb/install` | Installs Google's official platform-tools (newest stable, SHA-1 checked against Google's manifest) into the… | token |  |
+| `POST` | `/adb/install/cancel` | Stops a running install and removes what it started. Nothing running: nothing happens. | token |  |
+| `POST` | `/adb/locate` | Uses the adb the user picked. 422 `detail` = `not_found` (no such file) \| `not_adb` (not called adb[.exe])… | token |  |
+
+### `GET /adb`
+
+{state: checking|ok|missing, path, version, source: env|chosen|path|managed|sdk, install: {phase: idle|manifest|download|
+verify|extract|done|error, received, total, error, version}, can_install, install_dir, download_page}. In memory: it runs
+nothing, so it is cheap to poll while an install runs.
+
+*token required*
+
+**Responses:** `200` Successful Response · `401` token missing/wrong · `403` foreign Origin/Host
+
+### `POST /adb/recheck`
+
+Looks for adb again ("Tekrar ara": the user installed one in the meantime) and returns the snapshot.
+
+*token required*
+
+**Responses:** `200` Successful Response · `401` token missing/wrong · `403` foreign Origin/Host · `411` chunked body · `413` body too large
+
+### `POST /adb/install`
+
+Installs Google's official platform-tools (newest stable, SHA-1 checked against Google's manifest) into the OpenDeX
+folder and uses it. Returns at once with the snapshot; poll `GET /adb` for `install.phase`. Already running: no second one.
+
+*token required*
+
+**Responses:** `200` Successful Response · `401` token missing/wrong · `403` foreign Origin/Host · `411` chunked body · `413` body too large
+
+### `POST /adb/install/cancel`
+
+Stops a running install and removes what it started. Nothing running: nothing happens.
+
+*token required*
+
+**Responses:** `200` Successful Response · `401` token missing/wrong · `403` foreign Origin/Host · `411` chunked body · `413` body too large
+
+### `POST /adb/locate`
+
+Uses the adb the user picked. 422 `detail` = `not_found` (no such file) | `not_adb` (not called adb[.exe]) | `broken`
+(it does not run). On success the choice is remembered for the next start.
+
+*token required*
+
+**Request body** (JSON, `AdbLocateRequest`)
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `path` | string (1–1024 chars) | yes |  |
+
+**Responses:** `200` Successful Response · `422` Validation Error · `401` token missing/wrong · `403` foreign Origin/Host · `411` chunked body · `413` body too large
+
 ## pairing
 
 Wireless debugging: QR pairing, mDNS discovery, connect by IP.
@@ -546,6 +610,9 @@ Lists launcher apps installed on the attached Android device.
 ### `GET /apps/icon-v2/{package}`
 
 Retrieves high-resolution app icon bytes from the on-disk cache or extracts via ADB.
+
+A cached icon is served WITHOUT a phone (it is on this PC's disk): the desktop shows its icons while the phone is still binding, and a
+phone that is away no longer turns every icon into a letter. Only an icon never seen before needs the device.
 
 *token required*
 
@@ -1023,6 +1090,9 @@ Updates settings and applies live quality/audio reconfigurations.
 
 Retrieves saved desktop icon grid layout for current device.
 
+No device yet is an ANSWER OF ITS OWN (409), not an empty layout: the desktop used to read `[]` here right after start, took it for
+"nothing saved", built the default layout and saved it over the user's real one.
+
 *token required*
 
 **Responses:** `200` Successful Response · `401` token missing/wrong · `403` foreign Origin/Host
@@ -1048,7 +1118,7 @@ Per-app audio routing (Phone / DeX / Both), the cross-device sync and its calibr
 | `PUT` | `/audio/multi-focus` | `enabled: true` = the user agrees for this session: the flag is set through the audio service, then READ BA… | token | yes |
 | `POST` | `/audio/multi-focus/recheck` | Reads the flag from the phone right now ("Yeniden kontrol et") and returns the snapshot. Changes nothing on… | token | yes |
 | `PUT` | `/audio/sync` | The DeX page reports what it measures about its own audio: the output device's latency and how many chunks… | token |  |
-| `POST` | `/audio/clock` | The device's monotonic clock (µs) — the clock of the audio PTS. The page calls this a few times, times each… | token |  |
+| `POST` | `/audio/clock` | The device's monotonic clock (µs) NOW — the clock of the audio PTS — and `err_ms`, how far off the backend'… | token |  |
 | `POST` | `/audio/probe` | The phone's half of the "İkisi" calibration: test tones on the phone at the instants (device-clock PTS) in… | token |  |
 | `PUT` | `/audio/apps/{package}` | Saves the package's preference (device-independent) and applies it to its open windows, if any. With `stand… | token |  |
 
@@ -1115,8 +1185,10 @@ streams/app_audio.py). The fine tune is a setting (`audio_sync_offset_ms` in PUT
 
 ### `POST /audio/clock`
 
-The device's monotonic clock (µs) — the clock of the audio PTS. The page calls this a few times, times each round
-trip with its own clock and keeps the quickest, to know which PTS is "now" on its side. 503 when the daemon cannot say.
+The device's monotonic clock (µs) NOW — the clock of the audio PTS — and `err_ms`, how far off the backend's estimate
+can be. The backend keeps its own fix on the phone's clock (quick adb pings, refreshed in the background), so this
+answers at once: the page times the round trip with its own clock and keeps the probe with the least total error
+(half its round trip + `err_ms`), to know which PTS is "now" on its side. 503 when the daemon cannot say.
 
 *token required*
 

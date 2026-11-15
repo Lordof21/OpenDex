@@ -261,6 +261,8 @@
     "diagnoses": []
   },
   "startup": {
+    "adb": "checking",
+    "adb_version": null,
     "device": "bound",
     "transport": "usb",
     "model": "Example Phone",
@@ -94633,6 +94635,8 @@
     "text": "WIFI:T:ADB;S:studio-sample01;P:SamplePass12;;"
   },
   "startup_booting": {
+    "adb": "checking",
+    "adb_version": null,
     "device": "binding",
     "transport": "usb",
     "model": "Example Phone",

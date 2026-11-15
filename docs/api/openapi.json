@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "OpenDeX Backend API",
-    "version": "0.9.2",
+    "version": "0.9.3",
     "summary": "Local control API of the OpenDeX backend (Android multi-window mirroring).",
     "description": "The local control API of the **OpenDeX backend** — the process that drives an Android phone over `adb` and the patched\nscrcpy server, and that the desktop UI talks to. It listens on `127.0.0.1:8710` by default.\n\n### Authentication\nEvery `/api/*` request and every `/ws/*` handshake must present the API token — one secret per user, read from\n`OPENDEX_API_TOKEN` or the file `~/.opendex/api-token` (created with mode 0600 on first start):\n\n* `Authorization: Bearer <token>` (preferred), or\n* a `token` query parameter — **only** on `GET` requests and WebSocket handshakes (browsers cannot set headers on those).\n\nA missing/wrong token is `401` (HTTP) or WebSocket close code `4401`, before any route runs. Only `GET /health` and, when\n`OPENDEX_TOKEN_BOOTSTRAP` is enabled, `GET /auth/bootstrap` are exempt.\n\n### Browser protection\nA request that carries an `Origin` header that is not one of the app's own origins is refused with `403` (WebSocket: close\ncode `4403`); so is a `Host` header that is not a loopback / `*.localhost` name (DNS rebinding). Clients without an `Origin`\nheader (curl, scripts) are not affected — they still need the token.\n\n### Limits\nRequest bodies are capped (`OPENDEX_MAX_BODY_BYTES`, default 2 MB): `413` when the declared `Content-Length` is larger, `411` when a\nbody is sent chunked without a `Content-Length`, `400` when the declared length is not a number. Responses are never cached (`Cache-Control: no-store`).\n\n### Versioning\n`/api/v1/*` is the versioned surface. The same operations are also served unversioned as `/api/*` (an alias that tracks the\nlatest version — what the bundled UI calls). Breaking changes will get a new version prefix.\n\n### Not described here\nReal-time channels are WebSockets, which OpenAPI cannot describe: `/ws/events` (JSON events), `/ws/video/{window_id}`,\n`/ws/audio`, `/ws/audio/{window_id}` (binary media) and `/ws/input/{window_id}` (JSON touch/keyboard messages). They are\nspecified in [docs/API.md](https://github.com/Lordof21/OpenDex/blob/main/docs/API.md).\n",
     "license": {
@@ -121,7 +121,7 @@
           "devices"
         ],
         "summary": "Get Startup State",
-        "description": "Where bringing the phone up stands — device, the daemon's health check (attempt n of N), services — for the boot\nscreen. In-memory: it asks neither adb nor the phone (startup_state.py).",
+        "description": "Where bringing the phone up stands — adb on this computer (`adb`: checking | ok | missing, `adb_version`), device, the\ndaemon's health check (attempt n of N), services — for the boot screen. `adb: missing` holds everything else until adb is\ninstalled or picked (`/adb`). In-memory: it asks neither adb nor the phone (startup_state.py).",
         "operationId": "get_startup_state_api_v1_startup_get",
         "responses": {
           "200": {
@@ -1390,6 +1390,200 @@
         "x-requires-device": true
       }
     },
+    "/api/v1/adb": {
+      "get": {
+        "tags": [
+          "adb"
+        ],
+        "summary": "Get Adb",
+        "description": "{state: checking|ok|missing, path, version, source: env|chosen|path|managed|sdk, install: {phase: idle|manifest|download|\nverify|extract|done|error, received, total, error, version}, can_install, install_dir, download_page}. In memory: it runs\nnothing, so it is cheap to poll while an install runs.",
+        "operationId": "get_adb_api_v1_adb_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Adb Api V1 Adb Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForeignOrigin"
+          }
+        }
+      }
+    },
+    "/api/v1/adb/recheck": {
+      "post": {
+        "tags": [
+          "adb"
+        ],
+        "summary": "Recheck Adb",
+        "description": "Looks for adb again (\"Tekrar ara\": the user installed one in the meantime) and returns the snapshot.",
+        "operationId": "recheck_adb_api_v1_adb_recheck_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Recheck Adb Api V1 Adb Recheck Post"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForeignOrigin"
+          },
+          "411": {
+            "$ref": "#/components/responses/LengthRequired"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          }
+        }
+      }
+    },
+    "/api/v1/adb/install": {
+      "post": {
+        "tags": [
+          "adb"
+        ],
+        "summary": "Install Adb",
+        "description": "Installs Google's official platform-tools (newest stable, SHA-1 checked against Google's manifest) into the OpenDeX\nfolder and uses it. Returns at once with the snapshot; poll `GET /adb` for `install.phase`. Already running: no second one.",
+        "operationId": "install_adb_api_v1_adb_install_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Install Adb Api V1 Adb Install Post"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForeignOrigin"
+          },
+          "411": {
+            "$ref": "#/components/responses/LengthRequired"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          }
+        }
+      }
+    },
+    "/api/v1/adb/install/cancel": {
+      "post": {
+        "tags": [
+          "adb"
+        ],
+        "summary": "Cancel Adb Install",
+        "description": "Stops a running install and removes what it started. Nothing running: nothing happens.",
+        "operationId": "cancel_adb_install_api_v1_adb_install_cancel_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Cancel Adb Install Api V1 Adb Install Cancel Post"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForeignOrigin"
+          },
+          "411": {
+            "$ref": "#/components/responses/LengthRequired"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          }
+        }
+      }
+    },
+    "/api/v1/adb/locate": {
+      "post": {
+        "tags": [
+          "adb"
+        ],
+        "summary": "Locate Adb",
+        "description": "Uses the adb the user picked. 422 `detail` = `not_found` (no such file) | `not_adb` (not called adb[.exe]) | `broken`\n(it does not run). On success the choice is remembered for the next start.",
+        "operationId": "locate_adb_api_v1_adb_locate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdbLocateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Locate Adb Api V1 Adb Locate Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForeignOrigin"
+          },
+          "411": {
+            "$ref": "#/components/responses/LengthRequired"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          }
+        }
+      }
+    },
     "/api/v1/pairing/qr": {
       "post": {
         "tags": [
@@ -1594,7 +1788,7 @@
           "apps"
         ],
         "summary": "Get App Icon",
-        "description": "Retrieves high-resolution app icon bytes from the on-disk cache or extracts via ADB.",
+        "description": "Retrieves high-resolution app icon bytes from the on-disk cache or extracts via ADB.\n\nA cached icon is served WITHOUT a phone (it is on this PC's disk): the desktop shows its icons while the phone is still binding, and a\nphone that is away no longer turns every icon into a letter. Only an icon never seen before needs the device.",
         "operationId": "get_app_icon_api_v1_apps_icon_v2__package__get",
         "parameters": [
           {
@@ -2998,7 +3192,7 @@
           "settings"
         ],
         "summary": "Get Layout",
-        "description": "Retrieves saved desktop icon grid layout for current device.",
+        "description": "Retrieves saved desktop icon grid layout for current device.\n\nNo device yet is an ANSWER OF ITS OWN (409), not an empty layout: the desktop used to read `[]` here right after start, took it for\n\"nothing saved\", built the default layout and saved it over the user's real one.",
         "operationId": "get_layout_api_v1_layout_get",
         "responses": {
           "200": {
@@ -3304,7 +3498,7 @@
           "audio"
         ],
         "summary": "Audio Clock",
-        "description": "The device's monotonic clock (µs) — the clock of the audio PTS. The page calls this a few times, times each round\ntrip with its own clock and keeps the quickest, to know which PTS is \"now\" on its side. 503 when the daemon cannot say.",
+        "description": "The device's monotonic clock (µs) NOW — the clock of the audio PTS — and `err_ms`, how far off the backend's estimate\ncan be. The backend keeps its own fix on the phone's clock (quick adb pings, refreshed in the background), so this\nanswers at once: the page times the round trip with its own clock and keeps the probe with the least total error\n(half its round trip + `err_ms`), to know which PTS is \"now\" on its side. 503 when the daemon cannot say.",
         "operationId": "audio_clock_api_v1_audio_clock_post",
         "responses": {
           "200": {
@@ -6221,6 +6415,21 @@
   },
   "components": {
     "schemas": {
+      "AdbLocateRequest": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "AdbLocateRequest"
+      },
       "AdoptPhoneAppRequest": {
         "properties": {
           "package": {
@@ -6324,6 +6533,16 @@
             "type": "boolean",
             "title": "Hidden",
             "default": false
+          },
+          "custom": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CustomDesktopItem"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -6331,7 +6550,8 @@
           "package",
           "position"
         ],
-        "title": "AppLayoutEntry"
+        "title": "AppLayoutEntry",
+        "description": "One desktop cell. `package` is an Android package, or a `custom-…` id whose content is in `custom`."
       },
       "AudioSyncReport": {
         "properties": {
@@ -6481,6 +6701,33 @@
           "window_id"
         ],
         "title": "CloseWorkspaceTaskRequest"
+      },
+      "CustomDesktopItem": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "title": "Name",
+            "default": ""
+          },
+          "type": {
+            "type": "string",
+            "maxLength": 24,
+            "title": "Type",
+            "default": "folder"
+          },
+          "app_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 300,
+            "title": "App Ids"
+          }
+        },
+        "type": "object",
+        "title": "CustomDesktopItem",
+        "description": "A desktop item that is not an Android app (a folder): what the UI needs to draw it again after a restart."
       },
       "DeleteRequest": {
         "properties": {
@@ -8858,6 +9105,10 @@
     {
       "name": "devices",
       "description": "The bound phone: connection state, battery and its diagnostics, volumes, quick toggles (Wi-Fi, Bluetooth, mobile data …), screen power, Wi-Fi/Bluetooth management, startup progress."
+    },
+    {
+      "name": "adb",
+      "description": "adb on this computer: is there one, install Google's official platform-tools for OpenDeX, or use the one the user picked (the boot screen's calls)."
     },
     {
       "name": "pairing",

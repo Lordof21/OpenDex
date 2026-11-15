@@ -11,7 +11,7 @@ OpenDeX is a **desktop app plus a helper on the phone**. Nothing is installed on
 | | |
 |---|---|
 | **Computer** | Windows 10/11 is the supported desktop. The Tauri packaging also targets macOS (`.dmg`) but that build has not been verified. Linux can run the backend and tests but there is no packaged app. |
-| **adb** | Google's *Android platform-tools* (`adb`). OpenDeX does **not** bundle it: install it and put it on `PATH`, or set `OPENDEX_ADB_PATH` to the executable ([CONFIGURATION.md](CONFIGURATION.md)). |
+| **adb** | Google's *Android platform-tools* (`adb`). OpenDeX does **not** bundle it, but it looks for one at every start (`PATH`, `OPENDEX_ADB_PATH`, the file you picked, the Android SDK) and, when the computer has none, the start-up screen offers **Otomatik kur**: Google's official package is downloaded, checked against the checksum in Google's own manifest and kept in `~/.opendex/platform-tools` — nothing else on the system changes ([CONFIGURATION.md](CONFIGURATION.md)). |
 | **Phone** | **Android 10 (API 29) or newer.** Developer options on, **USB debugging** on. For wireless: Android 11+ *Wireless debugging*. Full feature set — per-app audio — needs **Android 13+** (below). |
 | **Cable or Wi-Fi** | USB for the lowest latency; Wi-Fi (same network, not a hotspot hosted *by the phone*) works too. |
 | **WebView** | Windows: Microsoft Edge WebView2 (present on Windows 11 and current Windows 10). It must be able to decode H.264/HEVC (WebCodecs); OpenDeX tells you at start-up if it cannot. |
@@ -28,11 +28,11 @@ Smaller differences: from Android 12 (API 31) OpenDeX can restart just an app's 
 
 ## Install
 
-1. Install **platform-tools** and check `adb version` in a terminal.
+1. **adb** is optional at this point: if you already have it, nothing to do; if not, OpenDeX offers to install it the first time it starts (step 3).
 2. Download the installer from the repository's **Releases** page and run it.
    *(No release has been published yet. Until then, build it yourself — [BUILD_AND_RELEASE.md](BUILD_AND_RELEASE.md) — or run
    from source — [DEVELOPMENT.md](DEVELOPMENT.md).)*
-3. Start **OpenDeX**.
+3. Start **OpenDeX**. Without adb on the computer the start-up screen says so and offers three ways on: **Otomatik kur** (one click, ≈ 8 MB), **Kurulu olanı seç…** (an adb you already have somewhere) or Google's official page; installing one yourself is noticed without a click. Nothing is installed unless you press the button.
 
 ## Prepare the phone
 

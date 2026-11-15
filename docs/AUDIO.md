@@ -57,8 +57,11 @@ constant. Left alone, you hear an echo. OpenDeX puts both outputs on **one timel
 2. Each output presents it at **`PTS + target`**:
    * the **phone**: the helper silences the app and plays the capture itself through an `AudioTrack`, placed by the track's own timestamps
      (`audio_route <package> both <phone_target_ms>`);
-   * the **computer**: the page converts the PTS to its own clock using the **device-clock offset** it measures (`POST /audio/clock`, a
-     few round trips, the quickest wins) and schedules each chunk with Web Audio at `PTS + target`.
+   * the **computer**: the page converts the PTS to its own clock using the **device-clock offset** it measures and schedules each chunk
+     with Web Audio at `PTS + target`. The offset is measured in two hops, each with its own quickest-probe filter: the backend pings the
+     helper over adb (timed with the high-resolution counter, refreshed in the background — `backend/app/device/device_clock.py`), and
+     `POST /audio/clock` answers the page at once from that fix with `err_ms`, how far off it can be; the page keeps the probe with the
+     least total error (half its localhost round trip + `err_ms` + drift since) — `frontend/src/media/deviceClock.js`.
 3. The **target** is the least latency that every chunk can meet: the page's output-device latency + one chunk + the link + the relay +
    a jitter margin (60 ms to start with). When the page reports chunks that arrived too late (`PUT /audio/sync`) the margin grows quickly (30 ms per report with two or more late chunks, up to 300 ms) and relaxes slowly (10 ms after three calm minutes), because a late chunk is an audible gap.
 4. A helper without the `audio_playout` capability, or a phone that cannot build the playback track, falls back to *native* phone playback
@@ -76,7 +79,9 @@ phone + computer + link** — and no software number can tell it; an ear or a mi
   apart, for several pairs. A matched filter finds each chirp to a fraction of a millisecond; the median difference, minus the planned gap, is the
   unmodelled error — and since both chirps are in the *same* recording, the microphone's own latency cancels out. The two sides sweep **disjoint
   bands** (phone 1.5 → 3.1 kHz, page 5.1 → 3.5 kHz) so a loud copy never masquerades as the quiet one. Nothing is guessed: a pair that cannot
-  be found, or pairs that disagree by more than 3 ms, fail the whole run **without touching the setting**.
+  be found, or pairs that disagree by more than 15 ms, fail the whole run **without touching the setting**. The page's audio output is held
+  up for the whole run (it is otherwise released after 4 s of silence, which froze the page's chirps mid-run), chirps still on the timeline
+  are cancelled when a run ends, and a run during which the audio clock fell behind the page clock is refused.
   (`frontend/src/media/syncCalibration.js`, `backend/java/src/com/opendex/tools/ProbeTone.java`, `AudioProbe.java`; endpoint `POST /audio/probe`.)
 
 Calibration needs microphone permission for the page. It is the only place OpenDeX uses the microphone, only while you press *Oto*, and the

@@ -43,7 +43,7 @@ TOKEN=$(cat ~/.opendex/api-token)
 
 # liveness — the only call that needs no token
 curl http://127.0.0.1:8710/api/v1/health
-# {"ok":true,"version":"0.9.2","auth":"bearer"}
+# {"ok":true,"version":"0.9.3","auth":"bearer"}
 
 # the bound phone
 curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8710/api/v1/devices/state
