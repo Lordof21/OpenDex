@@ -8,6 +8,7 @@ import { useFilesStore } from './filesStore.js';
 import { FOCUS_SEARCH_EVENT } from './menuActions.js';
 import { locKey } from './paths.js';
 import { t } from '../i18n/index.js';
+import { isImeKey } from '../lib/ime.js';
 
 export default function SearchField({ winId, compact }) {
   const pi = useFilesStore((s) => s.wins[winId]?.activePane ?? 0);
@@ -60,6 +61,7 @@ export default function SearchField({ winId, compact }) {
         onChange={(e) => { setText(e.target.value); store.getState().setQuery(winId, pi, e.target.value); }}
         onKeyDown={(e) => {
           e.stopPropagation();
+          if (isImeKey(e)) return;
           if (e.key === 'Enter' && text.trim()) { e.preventDefault(); store.getState().searchDeep(winId, pi, text); }
           else if (e.key === 'Escape') { e.preventDefault(); if (text || deep) clear(); else { setOpen(false); input.current?.blur(); } }
         }}

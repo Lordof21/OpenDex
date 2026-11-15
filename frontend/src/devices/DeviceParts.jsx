@@ -9,6 +9,7 @@ import { LINK_USB, LINK_WIFI } from './deviceModel.js';
 import { REASON_TEXT, TONE_DOT, linkLabel, statusLine } from './deviceText.js';
 import { DEFAULT_TCP_PORT } from './deviceHubStore.js';
 import { t } from '../i18n/index.js';
+import { isImeKey } from '../lib/ime.js';
 
 const PULSING = new Set(['binding', 'switching', 'reconnecting']);
 
@@ -160,6 +161,7 @@ export function PortChip({ port, onChange, disabled }) {
         onChange={(e) => setDraft(e.target.value.replace(/\D/g, '').slice(0, 5))}
         onBlur={commit}
         onKeyDown={(e) => {
+          if (isImeKey(e)) return;
           if (e.key === 'Enter') commit();
         }}
         className={cn(

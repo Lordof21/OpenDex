@@ -1,23 +1,42 @@
 // Bağlam / açılır menü parçaları (Desktop.jsx MenuLabel/MenuSeparator/MenuRow buraya taşındı).
 // Açılış animasyonu framer-motion ile: eski "animate-in fade-in zoom-in-95" sınıfları Tailwind v3'te CSS üretmiyordu.
-import React, { forwardRef } from 'react';
+import React, { forwardRef, useCallback, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Check } from 'lucide-react';
 import { cn } from '../lib/utils.js';
 import { menuVariants } from './motion.js';
+import { rovingKeys } from './rovingKeys.js';
 
 // `surfaceRef`: AnimatePresence'in doğrudan çocuğuna `ref` verilmez — framer-motion bunu props.ref olarak da okur ve React 18.3 dev'de
 // "`ref` is not a prop" uyarısı basar. AnimatePresence içinde yüzeye erişmek için `ref` yerine `surfaceRef` kullanılır.
-export const MenuSurface = forwardRef(function MenuSurface({ className, children, surfaceRef, ...props }, ref) {
+export const MenuSurface = forwardRef(function MenuSurface({ className, children, surfaceRef, onKeyDown, ...props }, ref) {
+  const own = useRef(null);
+  const setRef = useCallback((node) => {
+    own.current = node;
+    for (const target of [surfaceRef, ref]) {
+      if (typeof target === 'function') target(node);
+      else if (target) target.current = node;
+    }
+  }, [surfaceRef, ref]);
+  // Opened (by the mouse or by the ContextMenu key): the keyboard must be able to enter it. Focus lands on the surface itself;
+  // the first arrow press moves to an item.
+  useEffect(() => {
+    if (own.current && !own.current.contains(document.activeElement)) own.current.focus({ preventScroll: true });
+  }, []);
   return (
     <motion.div
-      ref={surfaceRef ?? ref}
+      ref={setRef}
       role="menu"
+      tabIndex={-1}
+      onKeyDown={(event) => {
+        onKeyDown?.(event);
+        rovingKeys(event, '[role="menuitem"]');
+      }}
       variants={menuVariants}
       initial="initial"
       animate="animate"
       exit="exit"
-      className={cn('overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-window backdrop-blur-2xl', className)}
+      className={cn('overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-window outline-none backdrop-blur-2xl', className)}
       {...props}
     >
       {children}

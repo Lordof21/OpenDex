@@ -30,6 +30,7 @@ import {
   viewApps,
   viewCounts,
 } from './launcher/launcherModel.js';
+import { isImeKey } from '../lib/ime.js';
 
 export { SYSTEM_APP_PKGS };
 
@@ -241,6 +242,7 @@ export const AppLauncher = forwardRef(function AppLauncher({
 
   const onKeyDown = (event) => {
     if (menu) return;                                          // menünün kendi klavyesi var
+    if (isImeKey(event)) return;                               // IME'nin Enter/ok/Esc'si arama kutusuna aittir
     const target = event.target;
     const inInput = target === inputRef.current;
     const inContent = inInput || scrollRef.current?.contains(target);

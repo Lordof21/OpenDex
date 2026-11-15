@@ -7,6 +7,7 @@ import { PanelShell } from './PanelShell.jsx';
 import { cn } from '../lib/utils.js';
 import { cardLeft, TASKBAR_ICON_PX } from './taskbarModel.js';
 import { t } from '../i18n/index.js';
+import { rovingKeys } from '../ui/rovingKeys.js';
 
 const PANEL_WIDTH = 248;
 
@@ -49,7 +50,7 @@ export const OverflowPanel = forwardRef(function OverflowPanel({ items, anchorX 
       className="rounded-xl border border-border/80 bg-popover/95 p-1 shadow-2xl backdrop-blur-3xl"
     >
       <p className="truncate px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('taskbar.diger_pencereler')}</p>
-      <div role="menu" aria-label={t('taskbar.diger_pencereler')} className="max-h-[min(60vh,360px)] overflow-y-auto">
+      <div role="menu" aria-label={t('taskbar.diger_pencereler')} onKeyDown={(e) => rovingKeys(e, '[role="menuitem"]')} className="max-h-[min(60vh,360px)] overflow-y-auto">
         {items.map((app) => (
           <button
             key={app.id}

@@ -16,6 +16,7 @@ import { HUD_OPACITY_RANGE, HUD_SCALE_RANGE, MOUSE_SENSITIVITY_RANGE } from '../
 import { keyCapLabel } from '../keycaps.js';
 import KeyCapture from './KeyCapture.jsx';
 import { tip } from './tip.js';
+import { isImeKey } from '../../lib/ime.js';
 
 const TYPE_META = {
   tap: { icon: Crosshair, title: () => t('keymapper.tus') },
@@ -77,6 +78,7 @@ function PercentField({ label, value, onCommit }) {
         onChange={(e) => setText(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => {
+          if (isImeKey(e)) return;
           if (e.key === 'Enter') {
             e.currentTarget.blur();
           }

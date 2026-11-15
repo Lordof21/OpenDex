@@ -1,28 +1,29 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 
 const ThemeContext = createContext(undefined);
+const STORAGE_KEY = 'theme';
+
+// Read synchronously: the first render already knows the saved theme (public/theme-init.js applied the class before the first
+// paint; this keeps React's state in step with it instead of starting at 'light' and correcting itself after mount).
+function readSavedTheme() {
+  try {
+    return window.localStorage.getItem(STORAGE_KEY) === 'dark' ? 'dark' : 'light';
+  } catch {
+    return 'light';
+  }
+}
 
 export function ThemeProvider({ children }) {
-  const [theme, setTheme] = useState('light'); // Default dominant mode: 'light' (gray-white)
-  const [isInitialized, setIsInitialized] = useState(false);
+  const [theme, setTheme] = useState(readSavedTheme);
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem('theme');
-    const initialTheme = savedTheme || 'light';
-    setTheme(initialTheme);
-    setIsInitialized(true);
-  }, []);
-
-  useEffect(() => {
-    if (isInitialized) {
-      localStorage.setItem('theme', theme);
-      if (theme === 'dark') {
-        document.documentElement.classList.add('dark');
-      } else {
-        document.documentElement.classList.remove('dark');
-      }
+    try {
+      window.localStorage.setItem(STORAGE_KEY, theme);
+    } catch {
+      /* storage blocked: the choice lasts for this run only */
     }
-  }, [theme, isInitialized]);
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+  }, [theme]);
 
   const toggleTheme = () => {
     setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));

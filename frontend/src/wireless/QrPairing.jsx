@@ -152,6 +152,10 @@ export function ManualIpEntry({ initialIp = '' }) {
           <input
             value={ip}
             onChange={(e) => setIp(e.target.value)}
+            aria-label={t('wireless.ip_192_168_1_105')}
+            inputMode="decimal"
+            autoComplete="off"
+            spellCheck={false}
             placeholder="192.168.1.105"
             required
             className="flex-1 h-8 rounded-md border border-border/70 bg-background px-3 text-[11px] font-mono text-foreground placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary/30 focus:outline-none transition-all"
@@ -159,6 +163,9 @@ export function ManualIpEntry({ initialIp = '' }) {
           <input
             value={port}
             onChange={(e) => setPort(e.target.value)}
+            aria-label={t('wireless.port')}
+            inputMode="numeric"
+            autoComplete="off"
             placeholder={t('wireless.port')}
             required
             pattern="\d+"
@@ -289,6 +296,9 @@ export function PairingCodeEntry() {
           <input
             value={connectPort}
             onChange={(e) => setConnectPort(e.target.value)}
+            aria-label={t('wireless.baglanti_portu')}
+            inputMode="numeric"
+            autoComplete="off"
             placeholder={t('wireless.baglanti_portu')}
             required
             autoFocus
@@ -326,6 +336,10 @@ export function PairingCodeEntry() {
         <input
           value={ip}
           onChange={(e) => setIp(e.target.value)}
+          aria-label={t('wireless.ip_192_168_1_105')}
+          inputMode="decimal"
+          autoComplete="off"
+          spellCheck={false}
           placeholder={t('wireless.ip_192_168_1_105')}
           required
           className="flex-1 h-8 rounded-md border border-border/70 bg-background px-3 text-[11px] font-mono text-foreground placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary/30 focus:outline-none transition-all"
@@ -333,6 +347,9 @@ export function PairingCodeEntry() {
         <input
           value={pairPort}
           onChange={(e) => setPairPort(e.target.value)}
+          aria-label={t('wireless.esleme_portu')}
+          inputMode="numeric"
+          autoComplete="off"
           placeholder={t('wireless.esleme_portu')}
           required
           pattern="\d+"
@@ -348,6 +365,8 @@ export function PairingCodeEntry() {
             ref={(el) => (digitInputRefs.current[idx] = el)}
             type="text"
             inputMode="numeric"
+            autoComplete="off"
+            aria-label={t('wireless.kod_hanesi', { n: idx + 1 })}
             maxLength={6}
             value={val}
             onChange={(e) => handleDigitChange(idx, e.target.value)}

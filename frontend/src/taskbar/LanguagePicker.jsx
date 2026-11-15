@@ -2,6 +2,7 @@ import React, { useMemo, useRef, useState } from 'react';
 import { Check, Languages, Search, X } from 'lucide-react';
 import { activeLocale, changeLanguage, currentLanguage, describeLanguages, systemLanguage, t } from '../i18n/index.js';
 import { cn } from '../lib/utils.js';
+import { isImeKey } from '../lib/ime.js';
 
 // Arama için büyük/küçük harf ve aksan farkı yok sayılır ("turkce" → "Türkçe", "espanol" → "Español").
 const fold = (text) => String(text).normalize('NFD').replace(/\p{M}/gu, '').toLocaleLowerCase();
@@ -62,6 +63,7 @@ export function LanguageView() {
     else items[at - 1].focus();
   };
   const onSearchKeyDown = (event) => {
+    if (isImeKey(event)) return;
     if (event.key === 'Enter' && visible.length === 1) changeLanguage(visible[0].code);
   };
 

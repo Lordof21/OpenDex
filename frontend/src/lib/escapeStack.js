@@ -4,11 +4,14 @@
 //
 //   const remove = pushEscapeHandler(() => close());   // katman açılınca
 //   remove();                                          // katman kapanınca
+import { isImeKey } from './ime.js';
+
 const stack = [];
 let installed = false;
 
 function onKeyDown(event) {
   if (event.key !== 'Escape' || stack.length === 0) return;
+  if (isImeKey(event)) return;                                   // Esc, IME bileşimini iptal eder; katmanı kapatmaz
   event.stopPropagation();
   event.preventDefault();
   stack[stack.length - 1].handler(event);

@@ -12,6 +12,7 @@ import { breadcrumbs, collapseCrumbs, locKey, parsePathInput } from './paths.js'
 import { acceptsDrop } from './dragRules.js';
 import { MenuItem } from '../ui/Menu.jsx';
 import { t as tt } from '../i18n/index.js';
+import { isImeKey } from '../lib/ime.js';
 
 const MAX = { compact: 2, medium: 4, wide: 6 };
 
@@ -113,6 +114,7 @@ export default function Breadcrumbs({ winId, pi, layoutMode }) {
           onChange={(e) => { setDraft(e.target.value); setError(null); }}
           onKeyDown={(e) => {
             e.stopPropagation();
+            if (isImeKey(e)) return;
             if (e.key === 'Enter') { e.preventDefault(); commit(); }
             else if (e.key === 'Escape') { e.preventDefault(); setEditing(false); }
           }}

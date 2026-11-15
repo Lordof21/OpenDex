@@ -4,6 +4,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { cn } from '../lib/utils.js';
 import { renameSelection } from './fileNames.js';
 import { t } from '../i18n/index.js';
+import { isImeKey } from '../lib/ime.js';
 
 export default function InlineRename({ entry, onCommit, onCancel, centered = false }) {
   const ref = useRef(null);
@@ -46,6 +47,7 @@ export default function InlineRename({ entry, onCommit, onCancel, centered = fal
         onChange={(e) => { setValue(e.target.value); setError(null); }}
         onKeyDown={(e) => {
           e.stopPropagation();                                   // klasör kısayolları (Delete, F2, ok tuşları) metni etkilemesin
+          if (isImeKey(e)) return;
           if (e.key === 'Enter') { e.preventDefault(); commit(); }
           else if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
         }}

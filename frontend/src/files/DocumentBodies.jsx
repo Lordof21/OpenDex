@@ -13,6 +13,7 @@ import { SHEET_MAX_COLS, SHEET_MAX_ROWS, formatCell, readWorkbook } from './docu
 import { readSlides } from './documents/slides.js';
 import PreviewFailed from './PreviewFailed.jsx';
 import { t } from '../i18n/index.js';
+import { isImeKey } from '../lib/ime.js';
 
 const READ_ONLY_NOTE = t('files.salt_okunur_onizleme_duzenlemek_icin');
 
@@ -161,19 +162,32 @@ export function SheetBody({ loc, entry, onOpen }) {
   useEffect(() => setActive(0), [loc.path, entry.mtime]);                           // eslint-disable-line react-hooks/exhaustive-deps
   const sheets = state.status === 'ready' ? state.value : [];
   const sheet = sheets[Math.min(active, sheets.length - 1)];
+  // Sheet tabs: ←/→ move to (and open) the neighbouring sheet, Home/End the first/last; only the open tab is in the Tab order.
+  const onTabKeys = (event) => {
+    if (isImeKey(event) || event.altKey || event.ctrlKey || event.metaKey) return;
+    const last = sheets.length - 1;
+    const at = Math.min(active, last);
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? last
+      : event.key === 'ArrowRight' ? (at + 1) % sheets.length : event.key === 'ArrowLeft' ? (at - 1 + sheets.length) % sheets.length : -1;
+    if (next < 0) return;
+    event.preventDefault();
+    setActive(next);
+    event.currentTarget.querySelectorAll('[role="tab"]')[next]?.focus();
+  };
   return (
     <Frame state={state} onOpen={onOpen}>
       {sheet && (
         <div className="flex h-full flex-col gap-1.5">
           {sheets.length > 1 && (
-            <div role="tablist" aria-label={t('files.sayfalar')} className="flex gap-1 overflow-x-auto">
+            <div role="tablist" aria-label={t('files.sayfalar')} className="flex gap-1 overflow-x-auto" onKeyDown={onTabKeys}>
               {sheets.map((s, i) => (
-                <button key={s.name + i} type="button" role="tab" aria-selected={i === active} onClick={() => setActive(i)}
+                <button key={s.name + i} type="button" role="tab" id={`sheet-tab-${i}`} aria-controls="sheet-panel" aria-selected={i === active}
+                  tabIndex={i === active ? 0 : -1} onClick={() => setActive(i)}
                   className={`shrink-0 rounded-md px-2.5 py-1 text-xs cursor-pointer ${i === active ? 'bg-scrim-foreground/20 font-semibold' : 'hover:bg-scrim-foreground/10'}`}>{s.name}</button>
               ))}
             </div>
           )}
-          <div className="min-h-0 flex-1"><SheetTable sheet={sheet} /></div>
+          <div id="sheet-panel" role={sheets.length > 1 ? 'tabpanel' : undefined} aria-labelledby={sheets.length > 1 ? `sheet-tab-${Math.min(active, sheets.length - 1)}` : undefined} className="min-h-0 flex-1"><SheetTable sheet={sheet} /></div>
         </div>
       )}
     </Frame>

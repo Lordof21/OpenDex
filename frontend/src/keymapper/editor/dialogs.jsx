@@ -8,6 +8,7 @@ import { t } from '../../i18n/index.js';
 import { TEMPLATES, buildTemplate } from '../templates.js';
 import { TEMPLATE_NAME_MAX, USER_TEMPLATE_LIMIT } from '../keymapStore.js';
 import { tip } from './tip.js';
+import { isImeKey } from '../../lib/ime.js';
 
 const IMPORT_ERRORS = {
   invalid_json: () => t('keymapper.ice_aktar_hata_gecersiz_json'),
@@ -55,6 +56,7 @@ function UserTemplateCard({ template, onApply, onRename, onDelete }) {
             onChange={(e) => setName(e.target.value)}
             onBlur={commit}
             onKeyDown={(e) => {
+              if (isImeKey(e)) return;
               if (e.key === 'Enter') e.currentTarget.blur();
               if (e.key === 'Escape') {
                 e.stopPropagation();

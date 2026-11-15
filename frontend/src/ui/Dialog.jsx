@@ -1,9 +1,10 @@
 // Tek modal kabuğu: karartma + kart + Esc (escapeStack: yalnız EN ÜSTTEKİ katman kapanır) + dış tıklamayla kapatma.
 // Desktop (2 modal), KeymapperOverlay, "Cihaz bağla" (devices/ConnectDialog) ve NoticeDialog aynı kabuğu kullanır.
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { cn } from '../lib/utils.js';
 import { pushEscapeHandler } from '../lib/escapeStack.js';
+import { useModalFocus } from './useModalFocus.js';
 import { modalCardVariants, modalOverlayVariants } from './motion.js';
 
 export function Dialog({
@@ -20,6 +21,9 @@ export function Dialog({
   cardProps, // karta ek motion props (ör. "Cihaz bağla" penceresinin `layout` yükseklik animasyonu)
   children,
 }) {
+  const cardRef = useRef(null);
+  useModalFocus(open, cardRef);
+
   useEffect(() => {
     if (!open || !closeOnEscape || !onClose) return undefined;
     return pushEscapeHandler(() => onClose());
@@ -44,9 +48,11 @@ export function Dialog({
           onClick={closeOnBackdrop && onClose ? () => onClose() : undefined}
         >
           <motion.div
+            ref={cardRef}
             role="dialog"
             aria-modal="true"
             aria-label={label}
+            tabIndex={-1}
             variants={modalCardVariants}
             initial="initial"
             animate="animate"

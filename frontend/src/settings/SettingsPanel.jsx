@@ -58,6 +58,7 @@ import { AppearanceSection, PowerSection, WindowsSection } from './sections/wind
 import { AboutSection, AdvancedSection } from './sections/system.jsx';
 import { PhoneSection } from './sections/phone.jsx';
 import { t } from '../i18n/index.js';
+import { isImeKey } from '../lib/ime.js';
 
 export const OPENDEX_SETTINGS_EVENT = 'opendex:open-settings';
 
@@ -145,6 +146,7 @@ function SearchField({ value, onChange, inputRef, onSubmit, compact = false, aut
         autoFocus={autoFocus}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={(event) => {
+          if (isImeKey(event)) return;
           if (event.key === 'Enter') onSubmit?.();
         }}
         placeholder={t('settings.ayarlarda_ara_2')}

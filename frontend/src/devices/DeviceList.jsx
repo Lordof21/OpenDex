@@ -16,6 +16,7 @@ import { BUSY_TEXT, HINT_TEXT, PRIMARY_LABEL, TONE_TEXT, statusLine } from './de
 import { COLLAPSE, DeviceGlyph, EASE, InlineNote, LinkChip } from './DeviceParts.jsx';
 import { useDeviceInteractions } from './DeviceInteractions.jsx';
 import { t } from '../i18n/index.js';
+import { isImeKey } from '../lib/ime.js';
 
 const ROW_MOTION = {
   initial: { opacity: 0, y: 6 },
@@ -105,6 +106,7 @@ function RenameField({ group, onDone, className }) {
       onBlur={() => finish(true)}
       onKeyDown={(e) => {
         e.stopPropagation();
+        if (isImeKey(e)) return;
         if (e.key === 'Enter') finish(true);
       }}
       onClick={(e) => e.stopPropagation()}
