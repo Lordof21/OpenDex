@@ -320,6 +320,25 @@ export class AppAudioMixer {
     this._lastAudibleAt = 0;
     this._emptySince = null;         // when the last channel went away (performance.now()), null while one exists
     this._idleTimer = null;
+    this._holds = 0;                 // holdAwake(): something times sound against this context (the calibration) — never release it
+    this._probeSources = new Set();  // playProbeAt's scheduled chirps (stopProbes cancels the ones still to come)
+  }
+
+  /**
+   * Keeps the output from being released while silent until the returned function is called. The "İkisi" calibration
+   * needs this: its run is longer than SILENCE_SUSPEND_MS and mostly silence on the channels, and a context suspended
+   * mid-run froze its timeline — the page's remaining chirps then played whenever the output woke up again (often during
+   * the NEXT run, on top of the phone's first chirps), and the recording lost the rest.
+   */
+  holdAwake() {
+    this._holds += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this._holds = Math.max(0, this._holds - 1);
+      this._lastAudibleAt = performance.now();                 // the silence timer counts from here, not from before the hold
+    };
   }
 
   /**
@@ -353,7 +372,7 @@ export class AppAudioMixer {
 
   _checkIdle() {
     const { ctx } = this;
-    if (!ctx || ctx.state !== 'running' || this._idle) return;
+    if (!ctx || ctx.state !== 'running' || this._idle || this._holds > 0) return;
     const now = performance.now();
     const silent = this.channels.size === 0
       ? this._emptySince !== null && now - this._emptySince >= NO_CHANNEL_SUSPEND_MS
@@ -499,11 +518,21 @@ export class AppAudioMixer {
     level.gain.value = gain;
     src.connect(level);
     level.connect(ctx.destination);
+    this._probeSources.add(src);
     src.onended = () => {
+      this._probeSources.delete(src);
       try { src.disconnect(); level.disconnect(); } catch { /* already */ }
     };
     src.start(when);
     return true;
+  }
+
+  /** Cancels every probe chirp still to come — a run that ended (or was cancelled) must not sound later. */
+  stopProbes() {
+    for (const src of this._probeSources) {
+      try { src.stop(); } catch { /* not started / already ended */ }
+    }
+    this._probeSources.clear();
   }
 
   /** Chunks that missed their presentation time since the last call (PRESENTED channels); the count starts over. */

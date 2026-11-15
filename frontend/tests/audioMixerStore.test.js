@@ -229,7 +229,7 @@ describe('"İkisi" alignment — the page presents against the device clock and 
     vi.spyOn(performance, 'now').mockImplementation(() => t);
     api.post.mockImplementation(async () => {
       t += 10;                                               // a 10 ms round trip
-      return { device_us: 5_000_000 };
+      return { device_us: 5_000_000, err_ms: 1.5 };          // the backend's own fix on the phone is good to 1.5 ms
     });
     store().onAppAudioState(both());
     await vi.advanceTimersByTimeAsync(800);
@@ -237,8 +237,9 @@ describe('"İkisi" alignment — the page presents against the device clock and 
     expect(api.post).toHaveBeenCalledWith('/api/audio/clock', undefined, expect.anything());
     expect(deviceClock.ready).toBe(true);
     expect(deviceClock.rttMs()).toBe(10);
+    expect(deviceClock.errorMs()).toBe(6.5);                 // half the round trip + the backend's error
 
-    await vi.advanceTimersByTimeAsync(15_000);
+    await vi.advanceTimersByTimeAsync(5_000);
     expect(api.post).toHaveBeenCalledTimes(6);
     vi.restoreAllMocks();
   });

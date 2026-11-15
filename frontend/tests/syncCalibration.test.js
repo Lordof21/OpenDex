@@ -3,7 +3,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   CHIRP_MS, MAX_SPREAD_MS, PC_BAND, PC_LEAD_MS, PHONE_BAND, abortableSleep,
-  analyzeRecording, calibrationMessage, chirp, crossCorrelate, fft, findPulses, pairPulses, runCalibration,
+  analyzeRecording, calibrationMessage, chirp, contextStalled, crossCorrelate, fft, findPulses, pairPulses, runCalibration,
 } from '../src/media/syncCalibration.js';
 
 const RATE = 48000;
@@ -320,6 +320,47 @@ describe('runCalibration', () => {
   it('refuses a recording that lost a block', async () => {
     const h = harness({ record: async () => ({ stop: async () => ({ samples: new Float32Array(1000), rate: RATE, gap: true }) }) });
     expect(await runCalibration(h.defaults)).toMatchObject({ ok: false, reason: 'recording_gap' });
+  });
+
+  it('holds the PC output up for the whole run and leaves no chirp on the timeline afterwards (the field bug)', async () => {
+    const release = vi.fn();
+    const events = [];
+    const h = harness({
+      mixerOverrides: {
+        holdAwake: vi.fn(() => { events.push('hold'); return () => { events.push('release'); release(); }; }),
+        stopProbes: vi.fn(() => events.push('stop')),
+        ensureRunning: vi.fn(async () => { events.push('running'); return { sampleRate: RATE }; }),
+      },
+    });
+    const result = await runCalibration(h.defaults);
+    expect(result.ok).toBe(true);
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(events.slice(0, 3)).toEqual(['stop', 'hold', 'running']);    // a previous run's chirps go first, then the hold
+    expect(events.slice(-2)).toEqual(['stop', 'release']);
+
+    const failing = harness({ mixerOverrides: { holdAwake: vi.fn(() => release), playProbeAt: vi.fn(() => false), stopProbes: vi.fn() } });
+    release.mockClear();
+    expect(await runCalibration(failing.defaults)).toMatchObject({ ok: false, reason: 'late' });
+    expect(release).toHaveBeenCalledTimes(1);                            // released on failure too
+    expect(failing.mixer.stopProbes).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses a run whose audio clock stood still (context suspended / starved): its chirps were not where planned', async () => {
+    let perf = 0;
+    const ctx = { sampleRate: RATE, state: 'running', currentTime: 10 };
+    const h = harness({ mixerOverrides: { ensureRunning: vi.fn(async () => ctx) } });
+    const result = await runCalibration({
+      ...h.defaults,
+      now: () => perf,
+      sleep: vi.fn(async (ms) => { perf += ms; ctx.currentTime += Math.min(ms, 1000) / 1000; }),   // the audio clock lags
+    });
+    expect(result).toMatchObject({ ok: false, reason: 'recording_gap', stalled: true });
+  });
+
+  it('contextStalled: only a real lag counts, unknown clocks never do', () => {
+    expect(contextStalled({ perfMs: 0, ctxS: 1 }, { perfMs: 5000, ctxS: 5.99 })).toBe(false);   // 10 ms behind: fine
+    expect(contextStalled({ perfMs: 0, ctxS: 1 }, { perfMs: 5000, ctxS: 3 })).toBe(true);       // 3 s frozen
+    expect(contextStalled({ perfMs: 0, ctxS: undefined }, { perfMs: 5000, ctxS: 3 })).toBe(false);
   });
 
   it('refuses an audio engine that will not start', async () => {

@@ -465,6 +465,53 @@ async def test_clock_us_reads_the_devices_monotonic_clock_with_a_ping():
     assert await DeviceDaemonClient(adb=None, events=None).clock_us() is None
 
 
+async def _answer_pings(client, reply):
+    """Answers every pending RPC with `reply()` as soon as it is sent (a phone that is always there)."""
+    while True:
+        for fut in list(client._pending_responses.values()):
+            if not fut.done():
+                fut.set_result(reply())
+        await asyncio.sleep(0.001)
+
+
+@pytest.mark.asyncio
+async def test_clock_estimate_keeps_its_own_fix_on_the_phones_clock_and_answers_from_it(monkeypatch):
+    import time
+
+    from app.device import device_daemon_client as module
+
+    client = _connected_client()
+    client.daemon_capabilities = {"ping"}
+    phone_ahead_us = 5_000_000_000                                                  # the phone's clock reads 5000 s more
+    answerer = asyncio.ensure_future(_answer_pings(
+        client, lambda: {"type": "pong", "clock_us": time.perf_counter_ns() // 1000 + phone_ahead_us}))
+    try:
+        device_us, err_ms = await client.clock_estimate()                           # knows nothing: waits for a first burst
+        assert abs(device_us - (time.perf_counter_ns() // 1000 + phone_ahead_us)) < 20_000
+        assert 0 <= err_ms < 20
+        sent = client._writer.written.decode().count("ping")
+        assert sent == module._CLOCK_BURST
+
+        await client.clock_estimate()                                               # fresh: answered from the model
+        await asyncio.sleep(0.01)
+        assert client._writer.written.decode().count("ping") == sent
+
+        monkeypatch.setattr(module, "_CLOCK_REFRESH_AFTER_NS", 0)                   # stale: answered at once, refreshed behind
+        assert await client.clock_estimate() is not None
+        await asyncio.sleep(0.2)
+        assert client._writer.written.decode().count("ping") > sent
+    finally:
+        answerer.cancel()
+
+    client._clock_model.reset()                                                     # a jar from before `clock_us`
+    answerer = asyncio.ensure_future(_answer_pings(client, lambda: {"type": "pong"}))
+    try:
+        assert await client.clock_estimate() is None
+    finally:
+        answerer.cancel()
+    assert await DeviceDaemonClient(adb=None, events=None).clock_estimate() is None
+
+
 @pytest.mark.asyncio
 async def test_audio_calls_while_disconnected():
     client = DeviceDaemonClient(adb=None, events=None)

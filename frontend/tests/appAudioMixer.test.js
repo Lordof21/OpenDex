@@ -612,6 +612,32 @@ describe('appAudioMixer: the output is released while nothing audible plays', ()
     expect(ctx.state).toBe('running');
   });
 
+  it('holdAwake (the calibration) keeps a silent output up — also with no channel — and the silence timer restarts at release', () => {
+    mixer.attach('w1');
+    const release = mixer.holdAwake();
+    vi.advanceTimersByTime(SILENCE_SUSPEND_MS * 3);                       // the field bug: released mid-run at 4 s
+    expect(ctx.suspend).not.toHaveBeenCalled();
+    mixer.detach('w1');
+    vi.advanceTimersByTime(NO_CHANNEL_SUSPEND_MS * 4);
+    expect(ctx.suspend).not.toHaveBeenCalled();
+
+    release();
+    release();                                                            // idempotent: a second call does not free another hold
+    vi.advanceTimersByTime(NO_CHANNEL_SUSPEND_MS + 1000);
+    expect(ctx.suspend).toHaveBeenCalledTimes(1);
+  });
+
+  it('stopProbes cancels the probe chirps still to come (a cancelled run must not sound later)', () => {
+    mixer.attach('w1');
+    ctx.getOutputTimestamp = () => ({ contextTime: 0, performanceTime: performance.now() });
+    expect(mixer.playProbeAt(performance.now() + 500, new Float32Array(960))).toBe(true);
+    expect(mixer.playProbeAt(performance.now() + 900, new Float32Array(960))).toBe(true);
+    const probes = ctx.started.slice(-2);
+    mixer.stopProbes();
+    expect(probes.every((s) => s.stopped)).toBe(true);
+    expect(mixer._probeSources.size).toBe(0);
+  });
+
   it('a barely audible noise floor above the silence threshold counts as sound', () => {
     mixer.attach('w1');
     for (let t = 0; t < 6000; t += 500) {

@@ -56,9 +56,9 @@ def test_the_device_clock_is_served_for_the_pages_offset_probes_and_503_when_the
 
     client = _client()
     ctx = client.app.state.ctx
-    ctx.daemon_client.clock_us = AsyncMock(return_value=987_654_321)
-    assert client.post("/api/audio/clock").json() == {"device_us": 987_654_321}
-    ctx.daemon_client.clock_us = AsyncMock(return_value=None)
+    ctx.daemon_client.clock_estimate = AsyncMock(return_value=(987_654_321, 1.23456))
+    assert client.post("/api/audio/clock").json() == {"device_us": 987_654_321, "err_ms": 1.235}
+    ctx.daemon_client.clock_estimate = AsyncMock(return_value=None)
     res = client.post("/api/audio/clock")
     assert (res.status_code, res.json()["detail"]) == (503, "clock_unavailable")
 

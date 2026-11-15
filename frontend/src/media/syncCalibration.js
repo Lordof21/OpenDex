@@ -19,6 +19,7 @@
 // to the other, so a loud copy never masquerades as the quiet one.
 
 import { api } from '../lib/api.js';
+import { logger } from '../lib/logger.js';
 import { appAudioMixer } from './appAudioMixer.js';
 import { deviceClock } from './deviceClock.js';
 import { t as tt } from '../i18n/index.js';
@@ -37,6 +38,7 @@ const MIN_SEPARATION_S = 0.15;                     // guard window between conse
 const MIC_WARMUP_MS = 400;
 const TAIL_MS = 700;                               // recording goes on this long after the last chirp (room, reverb)
 const CLOCK_PROBES = 5;
+export const STALL_TOLERANCE_MS = 40;              // the audio clock may fall behind the page clock by this much over a run
 
 // ------------------------------------------------------------------ the signal
 
@@ -243,14 +245,9 @@ export function analyzeRecording(samples, { rate, count, plannedGapMs }) {
 
   const snr = Math.min(median(phone.pulses.map((p) => p.snr)), median(pc.pulses.map((p) => p.snr)));
   const gapMs = median(pairs.map((p) => p.gapMs)) - PC_LEAD_MS;
-  const base = { biasMs, gapMs, spreadMs, pairs: pairs.length, snr };
+  const heard = { phone: phone.pulses.length, pc: pc.pulses.length };
+  const base = { biasMs, gapMs, spreadMs, pairs: pairs.length, snr, heard };
   if (spreadMs > MAX_SPREAD_MS) return { ok: false, reason: 'inconsistent', ...base };
-  console.info('[SyncCalibration] Ölçüm başarılı:', {
-    duyulanFarkMs: Math.round(gapMs * 10) / 10,
-    uygulanacakAyarMs: Math.round(-biasMs),
-    tutarlilikMs: Math.round(spreadMs * 10) / 10,
-    eslesenCift: pairs.length,
-  });
   return { ok: true, ...base };
 }
 
@@ -356,8 +353,42 @@ export const abortableSleep = (ms, signal = null) =>
 
 const defaultSleep = (ms, signal = null) => abortableSleep(ms, signal);
 
+/**
+ * Did the audio clock stop while the page clock went on (the context was suspended, the audio thread starved)? Then the
+ * page's chirps did not sound where they were planned and the recording lost time: nothing in it can be trusted.
+ * `start` / `end` = { perfMs, ctxS } read at the start of the plan and before the recording stops.
+ */
+export function contextStalled(start, end, toleranceMs = STALL_TOLERANCE_MS) {
+  if (!start || !end || ![start.perfMs, start.ctxS, end.perfMs, end.ctxS].every(Number.isFinite)) return false;
+  return (end.perfMs - start.perfMs) - (end.ctxS - start.ctxS) * 1000 > toleranceMs;
+}
+
+/** One line in the backend log for every run ([FE:audio] sync_calibration): what was heard, what was decided. */
+function logRun(result, extra = {}) {
+  const r1 = (v) => (Number.isFinite(v) ? Math.round(v * 10) / 10 : undefined);
+  logger.info('audio', 'sync_calibration', {
+    ok: !!result.ok,
+    reason: result.ok ? undefined : result.reason,
+    bias_ms: r1(result.biasMs),
+    gap_ms: r1(result.gapMs),
+    spread_ms: r1(result.spreadMs),
+    pairs: result.pairs,
+    heard: result.heard,
+    snr: r1(result.snr),
+    offset_ms: result.offsetMs,
+    ...extra,
+  });
+}
+
 /** The measurement, end to end. Never throws: `{ok: false, reason}` says what stopped it; nothing is written on failure. */
-export async function runCalibration({
+export async function runCalibration(options = {}) {
+  const facts = {};
+  const result = await runCalibrationInner(options, facts);
+  if (result.reason !== 'cancelled') logRun(result, facts);
+  return result;
+}
+
+async function runCalibrationInner({
   mixer = appAudioMixer,
   clock = deviceClock,
   requestProbe = (opts = {}) => api.post('/api/audio/probe', undefined, opts),
@@ -367,8 +398,12 @@ export async function runCalibration({
   now = () => performance.now(),
   onPhase = () => {},
   signal = null,
-} = {}) {
+} = {}, facts = {}) {
   let recorder = null;
+  // The output must stay up for the whole run (see AppAudioMixer.holdAwake), and a previous run's chirps still waiting on
+  // the timeline (a cancelled one) must not sound in this one.
+  mixer.stopProbes?.();
+  const releaseOutput = mixer.holdAwake?.() ?? null;
   const checkAbort = () => {
     if (signal?.aborted) throw Object.assign(new Error('aborted'), { reason: 'cancelled' });
   };
@@ -392,6 +427,8 @@ export async function runCalibration({
       await sleep(40, signal);
     }
     if (!clock.ready) return { ok: false, reason: 'clock' };
+    facts.clock_rtt_ms = clock.rttMs?.() ?? undefined;
+    facts.clock_err_ms = clock.errorMs?.() ?? undefined;
     await sleep(MIC_WARMUP_MS, signal);
 
     checkAbort();
@@ -410,6 +447,7 @@ export async function runCalibration({
     const offset = Number(plan.offset_ms) || 0;
     const previousOffset = Number(plan.current_offset_ms ?? plan.offset_ms) || 0;
     const pcTemplate = chirp(ctx.sampleRate, CHIRP_MS, PC_BAND[0], PC_BAND[1]);
+    const planStart = { perfMs: now(), ctxS: ctx.currentTime };
     let scheduled = 0;
     let lastAudible = 0;
     for (const ptsUs of pts) {
@@ -419,15 +457,20 @@ export async function runCalibration({
         lastAudible = Math.max(lastAudible, audible + PC_LEAD_MS + offset);
       }
     }
+    facts.tones = pts.length;
+    facts.scheduled = scheduled;
+    facts.lead_ms = Math.round(clock.perfAt(pts[0]) + common - planStart.perfMs);   // how much time the first chirp had
     if (scheduled < MIN_PAIRS) return { ok: false, reason: 'late' };            // the page could not keep up with the plan
     checkAbort();
     await sleep(Math.max(0, lastAudible - now()) + TAIL_MS, signal);
 
     checkAbort();
     onPhase('analyze');
+    const planEnd = { perfMs: now(), ctxS: ctx.currentTime };
+    const stalled = ctx.state === 'suspended' || contextStalled(planStart, planEnd);
     const { samples, rate, gap } = await recorder.stop();
     recorder = null;
-    if (gap) return { ok: false, reason: 'recording_gap' };
+    if (gap || stalled) return { ok: false, reason: 'recording_gap', stalled };
     const result = analyzeRecording(samples, { rate, count: pts.length, plannedGapMs: offset + PC_LEAD_MS });
     if (!result.ok) return result;
     return { ...result, offsetMs: Math.round(-result.biasMs), previousMs: previousOffset };
@@ -435,6 +478,8 @@ export async function runCalibration({
     if (signal?.aborted || err?.reason === 'cancelled') return { ok: false, reason: 'cancelled' };
     return { ok: false, reason: 'failed', detail: err?.message };
   } finally {
+    mixer.stopProbes?.();                                // whatever is still on the timeline (cancel / failure) stays silent
+    releaseOutput?.();
     if (recorder) await recorder.stop().catch(() => {});
   }
 }

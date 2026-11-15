@@ -61,12 +61,15 @@ async def put_audio_sync(body: AudioSyncReport, ctx: AppContextDep) -> dict[str,
 
 @router.post("/audio/clock")
 async def audio_clock(ctx: AppContextDep) -> dict[str, Any]:
-    """The device's monotonic clock (µs) — the clock of the audio PTS. The page calls this a few times, times each round
-    trip with its own clock and keeps the quickest, to know which PTS is "now" on its side. 503 when the daemon cannot say."""
-    device_us = await ctx.daemon_client.clock_us()
-    if device_us is None:
+    """The device's monotonic clock (µs) NOW — the clock of the audio PTS — and `err_ms`, how far off the backend's estimate
+    can be. The backend keeps its own fix on the phone's clock (quick adb pings, refreshed in the background), so this
+    answers at once: the page times the round trip with its own clock and keeps the probe with the least total error
+    (half its round trip + `err_ms`), to know which PTS is "now" on its side. 503 when the daemon cannot say."""
+    estimate = await ctx.daemon_client.clock_estimate()
+    if estimate is None:
         raise HTTPException(status_code=503, detail="clock_unavailable")
-    return {"device_us": device_us}
+    device_us, err_ms = estimate
+    return {"device_us": device_us, "err_ms": round(err_ms, 3)}
 
 
 @router.post("/audio/probe")

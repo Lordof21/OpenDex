@@ -15,7 +15,9 @@ const VOLUME_PERSIST_MS = 250;
 // every few seconds, what its own audio does: the output device's latency, and how many chunks missed their time. The
 // backend widens/narrows the common target from the latter; it then reaches the page in the app's state.
 const CLOCK_BURST_MS = [0, 120, 260, 450, 700];
-const CLOCK_REFRESH_MS = 15_000;
+// A probe is a localhost request answered from the backend's own fix (it refreshes that from the phone behind the scenes):
+// cheap, so often enough that drift never builds up between two fixes (deviceClock ages samples out after 30 s).
+const CLOCK_REFRESH_MS = 5_000;
 const FIRST_REPORT_MS = 1500;       // the context's output latency is only real once it is playing
 const REPORT_EVERY_MS = 4000;
 const OUTPUT_REPORT_MIN_CHANGE_MS = 10;
@@ -144,7 +146,7 @@ export const useAudioMixerStore = create((set, get) => ({
     const sentMs = performance.now();
     try {
       const res = await api.post('/api/audio/clock', undefined, opts);
-      if (Number.isFinite(res?.device_us)) deviceClock.addSample(sentMs, performance.now(), res.device_us);
+      if (Number.isFinite(res?.device_us)) deviceClock.addSample(sentMs, performance.now(), res.device_us, res.err_ms);
     } catch {
       /* 503: the phone cannot say — chunks keep their arrival timing (alignment is simply not as exact) */
     }

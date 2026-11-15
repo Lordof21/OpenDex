@@ -21,6 +21,7 @@ from ..schemas.identifiers import MEDIA_ACTIONS, PACKAGE_RE
 from ..telemetry.adb_meter import meter as adb_meter
 from . import daemon_auth, tools_jar
 from .adb import ShellOutcome
+from .device_clock import DeviceClockModel
 from .media_state import carry_over_art, is_stale_media_event
 from .tools_jar import DEVICE_TOOLS_JAR
 
@@ -74,6 +75,11 @@ _RECENT_MEDIA_S = 30.0
 # Telemetry reads: a poll that is not answered this fast is skipped (the caller falls back), never queued behind.
 _PING_TIMEOUT_S = 2.0
 _PROC_PROBE_TIMEOUT_S = 4.0
+# The device clock model (device_clock.py): a burst of pings when it knows nothing; a background burst when its newest
+# sample is older than this, so the page's answers come from a fresh fix without waiting for the phone.
+_CLOCK_BURST = 4
+_CLOCK_BURST_GAP_S = 0.02
+_CLOCK_REFRESH_AFTER_NS = 1_000_000_000
 
 
 # Pushed snapshot events: type -> (cache attribute, EventBus event). The same attribute is refreshed by the
@@ -232,6 +238,10 @@ class DeviceDaemonClient:
         # response (see _send_rpc_full) — NOT a "resolve whichever is pending" guess.
         self._pending_responses: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self._next_req_id = 0
+
+        # The phone's monotonic clock in this process's perf_counter terms ("İkisi" timing; see clock_estimate).
+        self._clock_model = DeviceClockModel()
+        self._clock_refresh: asyncio.Task | None = None
 
     @property
     def is_connected(self) -> bool:
@@ -556,6 +566,7 @@ class DeviceDaemonClient:
             self._shell_suspended_until = 0.0
             self.daemon_version = data.get("version")
             self.daemon_capabilities = set(data.get("capabilities", []))
+            self._clock_model.reset()              # maybe another phone (or a rebooted one): another clock
             # A new daemon process: what the previous one pushed about the panel says nothing about a change made while
             # we were away (it pushes only on change) — the next read asks again.
             self.last_display_state = {"ok": False}
@@ -1519,6 +1530,44 @@ class DeviceDaemonClient:
         resp = await self._send_rpc_full("ping", "clock", timeout=_PING_TIMEOUT_S, quiet=True)
         value = resp.get("clock_us") if resp and resp.get("type") == "pong" else None
         return int(value) if isinstance(value, (int, float)) else None
+
+    async def _clock_sample(self) -> bool:
+        """One timed ping into the clock model (perf_counter_ns: the clock the page shares, fine-grained on Windows)."""
+        sent = time.perf_counter_ns()
+        resp = await self._send_rpc_full("ping", "clock", timeout=_PING_TIMEOUT_S, quiet=True)
+        received = time.perf_counter_ns()
+        value = resp.get("clock_us") if resp and resp.get("type") == "pong" else None
+        return self._clock_model.add(sent, received, value if isinstance(value, (int, float)) else None)
+
+    async def _refresh_clock(self, count: int = _CLOCK_BURST) -> None:
+        for i in range(count):
+            if i:
+                await asyncio.sleep(_CLOCK_BURST_GAP_S)
+            try:
+                if not await self._clock_sample():
+                    return                                   # not connected / a jar without clock_us: asking again is no use
+            except Exception:  # noqa: BLE001 — a failed refresh only means the next answer is less fresh
+                return
+
+    def _clock_refresh_task(self) -> asyncio.Task:
+        if self._clock_refresh is None or self._clock_refresh.done():
+            self._clock_refresh = spawn_background(self._refresh_clock(), name="daemon-clock-refresh")
+        return self._clock_refresh
+
+    async def clock_estimate(self) -> tuple[int, float] | None:
+        """(the device clock in µs NOW, how far off it can be in ms) — the backend's half of the "İkisi" clock
+        (device_clock.py). Answers at once from the model and refreshes it in the background when its newest ping is more
+        than a second old; only a model that knows nothing yet waits for its first burst. None: the daemon cannot say."""
+        if not self.supports("ping"):
+            return None
+        now = time.perf_counter_ns()
+        if self._clock_model.estimate(now) is None:
+            await asyncio.shield(self._clock_refresh_task())
+        else:
+            age = self._clock_model.newest_age_ns(now)
+            if age is None or age > _CLOCK_REFRESH_AFTER_NS:
+                self._clock_refresh_task()
+        return self._clock_model.estimate(time.perf_counter_ns())
 
     @property
     def supports_multi_audio_focus(self) -> bool:

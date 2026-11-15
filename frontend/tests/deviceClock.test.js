@@ -38,8 +38,22 @@ describe('DeviceClock', () => {
 
   it('probes older than the window age out, so a stale fix cannot hide a drifted one', () => {
     clock.addSample(1000, 1004, 5_000_000);                       // the quickest, but…
-    clock.addSample(100_000, 100_030, 99_000_000);                // … 99 s later a slower one: the old one is gone
+    clock.addSample(40_000, 40_030, 44_000_000);                  // … 39 s later a slower one: the old one is gone
     expect(clock.rttMs()).toBe(30);
+  });
+
+  it('counts the backend\'s own error: a quick probe answered from a poor fix loses to a slower one from a good fix', () => {
+    clock.addSample(1000, 1002, 5_000_000, 6);                    // 1 + 6 = 7 ms
+    clock.addSample(2000, 2006, 6_000_000, 1);                    // 3 + 1 = 4 ms → used
+    expect(clock.rttMs()).toBe(6);
+    expect(clock.errorMs()).toBe(4);
+    expect(clock.perfAt(6_000_000)).toBeCloseTo(2003, 6);
+  });
+
+  it('a fresh probe beats an equally quick old one by more than the drift since (a crystal drifts ~50 ppm)', () => {
+    clock.addSample(1000, 1004, 5_000_000);                       // rtt 4, 20 s old by the time of the next
+    clock.addSample(21_000, 21_005, 25_000_000);                  // rtt 5: 2.5 ms vs 2 + 1 ms of possible drift
+    expect(clock.rttMs()).toBe(5);
   });
 
   it('keeps only the latest few probes', () => {
