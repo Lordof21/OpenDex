@@ -69,6 +69,7 @@ Var olan anahtarın **Türkçe metni değiştiğinde** ekle; çeviri turunda o a
 | 2026-10-30 | 22 anahtar × 18 dil (396 metin): Telefon Yükü paneli etkileşimi — yakınlaştırma, tepe/ortalama, kopyala, seyir, bulgu kanıtı (telemetry.*); kullanılmayan 4 telemetry anahtarı silindi; `i18n:todo` boş | Sonnet 5.5 (elle, dil dil; kullanıcı isteğiyle Haiku durdurulup elle yapıldı; yer tutucular `i18n:apply` ile doğrulandı) |
 | 2026-11-05 | 1 anahtar × 18 dil: Telefon Yükü olay listesi vurgusu (telemetry.olay_odak_ozet); `i18n:todo` boş | Sonnet 5.5 (elle, dil dil; yer tutucular testle doğrulandı) |
 | 2026-11-11 | 9 anahtar × 18 dil (162 metin): ön-iniş Otomatik / Açık / Kapalı (common.on_inis, window.telefona_aktarim, settings.*on_inis*, settings.her_aktarimda, settings.tek_adim, taskbar.on_inis_bu_pencere); `i18n:todo` boş | Sonnet 5.5 (elle, dil dil; yer tutucu yok, `i18n:apply` ile işlendi) |
+| 2026-11-15 | 41 anahtar × 18 dil (738 metin): açılışta "adb gerekli" kurulum akışı (startup.adb_*, 36), Hub ölçek/başlık düğmeleri (window.olcek/uzat/kirp/baslik), eşleme kodu hane etiketi (wireless.kod_hanesi); `i18n:todo` boş | Sonnet 5.5 (elle, dil dil; yer tutucular betikle doğrulandı, `i18n:apply` ile işlendi) |
 
 ## Notlar
 
