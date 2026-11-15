@@ -5,6 +5,7 @@ Aggregates all sub-routers from endpoints/ into a single cohesive api_router.
 from fastapi import APIRouter
 
 from .endpoints import (
+    adb_setup,
     apps,
     audio,
     devices,
@@ -22,6 +23,7 @@ from .endpoints import (
 api_router = APIRouter()
 
 api_router.include_router(devices.router, tags=["devices"])
+api_router.include_router(adb_setup.router, tags=["adb"])
 api_router.include_router(pairing.router, tags=["pairing"])
 api_router.include_router(apps.router, tags=["apps"])
 api_router.include_router(windows.router, tags=["windows"])

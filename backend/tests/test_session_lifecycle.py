@@ -27,6 +27,7 @@ class Harness:
 
     def __init__(self, monkeypatch, **settings):
         self.ctx = ctx = AppContext(Settings(DEVICE_POLL_INTERVAL_S=0.01, **settings))
+        ctx.adb_setup.assume_working()                  # these tests start after adb was found (tests/test_adb_setup.py)
         self.calls: list[str] = []
         self.events: list[tuple[str, dict]] = []
         self.fail: dict[str, Exception] = {}

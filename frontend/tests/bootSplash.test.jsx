@@ -61,6 +61,23 @@ describe('bootSteps — her satır bir olgu', () => {
   it('ilerleme gerçek adımlardan hesaplanır', () => {
     expect(bootSteps('ok', snap({ device: 'binding', daemon: 'checking' })).progress).toBe(63); // 1 + 1 + 0.5 + 0 of 4
   });
+
+  it('bilgisayarda adb yoksa: telefon adımları "adb bekleniyor" der, açılış asla bitmiş sayılmaz ve engellendiği bildirilir', () => {
+    const r = bootSteps('ok', snap({ adb: 'missing', device: 'waiting' }));   // device 'waiting' normally means "done, offer pairing"
+    expect(['device', 'daemon', 'services'].map((id) => byId(r)[id])).toEqual([
+      expect.objectContaining({ status: 'pending', detail: 'adb bekleniyor' }),
+      expect.objectContaining({ status: 'pending', detail: 'adb bekleniyor' }),
+      expect.objectContaining({ status: 'pending', detail: 'adb bekleniyor' }),
+    ]);
+    expect(r).toMatchObject({ done: false, blocked: true, headline: 'adb gerekli' });
+  });
+
+  it('adb bulununca (ya da hiç sorun yokken) açılış eskisi gibi ilerler; eski bir backend adb alanı göndermese de engellenmez', () => {
+    expect(bootSteps('ok', snap({ adb: 'ok', adb_version: '37.0.1', device: 'waiting' }))).toMatchObject({ done: true, blocked: false });
+    expect(bootSteps('ok', snap({ adb: 'checking', device: 'searching' })).blocked).toBe(false);
+    expect(bootSteps('ok', snap({ device: 'waiting' })).blocked).toBe(false);          // no `adb` field at all
+    expect(bootSteps('pending', null).blocked).toBe(false);
+  });
 });
 
 describe('BootSplash — gerçek durumu yoklar', () => {

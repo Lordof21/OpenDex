@@ -21,8 +21,14 @@ function coreStep(core) {
   return { status: 'active', detail: t('startup.baslatiliyor') };
 }
 
+// No adb on this computer (snapshot.adb === 'missing'): nothing below can start. The boot screen shows the install flow
+// (AdbSetupPanel) instead of this list, and the desktop does not open until adb is found.
+const adbMissing = (snapshot) => snapshot?.adb === 'missing';
+const waitingForAdb = () => ({ status: 'pending', detail: t('startup.adb_bekleniyor') });
+
 function deviceStep(snapshot) {
   if (!snapshot) return { status: 'pending', detail: t('startup.cekirdek_bekleniyor') };
+  if (adbMissing(snapshot)) return waitingForAdb();
   switch (snapshot.device) {
     case 'waiting': return { status: 'skipped', detail: t('startup.bagli_telefon_yok_eslestirme_ekrani') };
     case 'binding':
@@ -36,6 +42,7 @@ function deviceStep(snapshot) {
 }
 
 function daemonStep(snapshot) {
+  if (adbMissing(snapshot)) return waitingForAdb();
   if (!snapshot || snapshot.device === 'searching') return { status: 'pending', detail: t('startup.telefon_bekleniyor') };
   if (snapshot.device === 'waiting') return { status: 'skipped', detail: t('startup.telefon_baglaninca_baslar') };
   const of = snapshot.daemon_attempts || 3;
@@ -58,6 +65,7 @@ function daemonStep(snapshot) {
 }
 
 function servicesStep(snapshot) {
+  if (adbMissing(snapshot)) return waitingForAdb();
   if (!snapshot || snapshot.device === 'searching') return { status: 'pending', detail: t('startup.bekliyor') };
   if (snapshot.device === 'waiting') return { status: 'skipped', detail: t('startup.telefon_baglaninca_baslar') };
   if (snapshot.services === 'ready') return { status: 'done', detail: t('common.hazir') };
@@ -77,6 +85,7 @@ const SETTLED = new Set(['done', 'warn', 'skipped']);
 /**
  * @param {'pending'|'ok'|'error'} core  /api/health sonucu
  * @param {object|null} snapshot          /api/startup yanıtı (henüz yoksa null)
+ * @returns {{steps, progress, headline, done, blocked}} `blocked`: bilgisayarda adb yok — kullanıcı kurana dek açılış ilerlemez
  */
 export function bootSteps(core, snapshot) {
   const parts = {
@@ -91,10 +100,12 @@ export function bootSteps(core, snapshot) {
   const progress = Math.round((weight / steps.length) * 100);
   const done = core === 'ok' && steps.every((s) => SETTLED.has(s.status));
   const current = steps.find((s) => s.status === 'active');
+  const blocked = core === 'ok' && adbMissing(snapshot);
   let headline;
   if (core === 'error') headline = t('startup.arka_uc_servisine_ulasilamadi');
+  else if (blocked) headline = t('startup.adb_gerekli');
   else if (done) headline = parts.device.status === 'skipped' ? t('startup.masaustu_hazir_telefon_bekleniyor') : t('startup.masaustu_hazir');
   else headline = current ? `${current.label}: ${current.detail}` : t('startup.baslatiliyor');
 
-  return { steps, progress: done ? 100 : progress, headline, done };
+  return { steps, progress: done ? 100 : progress, headline, done, blocked };
 }

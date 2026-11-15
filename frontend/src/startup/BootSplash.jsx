@@ -14,6 +14,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { bootSteps } from './bootSteps.js';
+import AdbSetupPanel from './AdbSetupPanel.jsx';
 import { t } from '../i18n/index.js';
 
 const HEALTH_POLL_MS = 350;
@@ -29,6 +30,11 @@ const STEP_ICONS = { core: Cpu, device: Smartphone, daemon: Activity, services: 
 export default function BootSplash({ onReady }) {
   const [stage, setStage] = useState({ core: 'pending', snapshot: null });
   const [run, setRun] = useState(0); // "Yeniden dene" starts the checks over without reloading the page
+  // No adb on this computer: the steps give way to the install flow (AdbSetupPanel) and stay away until it has shown its
+  // "adb hazır" moment — the boot must not end underneath it.
+  const [setupOpen, setSetupOpen] = useState(false);
+  const setupOpenRef = useRef(false);
+  setupOpenRef.current = setupOpen;
   // The parent passes a fresh arrow on every render; reading it through a ref keeps the checks below from restarting.
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
@@ -56,7 +62,10 @@ export default function BootSplash({ onReady }) {
         return;
       }
       setStage({ core: 'ok', snapshot });
-      if (bootSteps('ok', snapshot).done || Date.now() - coreOkAt > STARTUP_MAX_MS) finish();
+      // While the user installs adb the boot is waiting for THEM: the time limit below counts from when adb is there.
+      if (snapshot.adb === 'missing') coreOkAt = Date.now();
+      const settled = bootSteps('ok', snapshot).done && !setupOpenRef.current;
+      if (settled || Date.now() - coreOkAt > STARTUP_MAX_MS) finish();
       else later(pollStartup, STARTUP_POLL_MS);
     };
 
@@ -87,8 +96,9 @@ export default function BootSplash({ onReady }) {
     };
   }, [run]);
 
-  const { steps, progress: progressPercent, headline } = bootSteps(stage.core, stage.snapshot);
+  const { steps, progress: progressPercent, headline, blocked } = bootSteps(stage.core, stage.snapshot);
   const failed = stage.core === 'error';
+  useEffect(() => { if (blocked) setSetupOpen(true); }, [blocked]);
 
   return (
     <motion.div
@@ -220,6 +230,32 @@ export default function BootSplash({ onReady }) {
           </p>
         </div>
 
+        <AnimatePresence mode="wait" initial={false}>
+        {setupOpen && !failed ? (
+        <motion.div
+          key="adb-setup"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.15 }}
+          className="w-full"
+        >
+          {/* ── bilgisayarda adb yok: kurulum akışı (AdbSetupPanel) adımların yerini alır ── */}
+          <AdbSetupPanel
+            resolved={stage.snapshot?.adb === 'ok'}
+            version={stage.snapshot?.adb_version ?? null}
+            onDone={() => setSetupOpen(false)}
+          />
+        </motion.div>
+        ) : (
+        <motion.div
+          key="boot-steps"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.15 }}
+          className="w-full"
+        >
         {/* ── İlerleme Çubuğu ───────────────────────────────────────────────── */}
         <div className="w-full mb-5">
           <div className="flex items-center justify-between text-[10.5px] font-semibold mb-1.5">
@@ -297,6 +333,9 @@ export default function BootSplash({ onReady }) {
             );
           })}
         </div>
+        </motion.div>
+        )}
+        </AnimatePresence>
 
         {/* ── Hata Durumu ───────────────────────────────────────────────────── */}
         <AnimatePresence>

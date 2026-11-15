@@ -52,8 +52,9 @@ async def get_device_state(ctx: AppContextDep):
 
 @router.get("/startup")
 async def get_startup_state(ctx: AppContextDep):
-    """Where bringing the phone up stands — device, the daemon's health check (attempt n of N), services — for the boot
-    screen. In-memory: it asks neither adb nor the phone (startup_state.py)."""
+    """Where bringing the phone up stands — adb on this computer (`adb`: checking | ok | missing, `adb_version`), device, the
+    daemon's health check (attempt n of N), services — for the boot screen. `adb: missing` holds everything else until adb is
+    installed or picked (`/adb`). In-memory: it asks neither adb nor the phone (startup_state.py)."""
     return ctx.startup.current.as_dict()
 
 

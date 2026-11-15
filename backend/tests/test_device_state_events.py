@@ -18,6 +18,7 @@ PHONE = DeviceInfo(serial="R5CT123", state=DeviceState.DEVICE, model="Galaxy_S24
 
 def _context(**settings):
     ctx = AppContext(Settings(**settings))
+    ctx.adb_setup.assume_working()                      # these tests start after adb was found (tests/test_adb_setup.py)
     events: list[dict] = []
 
     async def emit(type, **payload):

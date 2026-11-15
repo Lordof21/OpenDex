@@ -35,6 +35,7 @@ from .config import Settings, get_settings
 from .lifecycle import register_server, watch_parent
 from .device import daemon_auth
 from .device.adb import Adb, AdbError
+from .device.adb_setup import AdbSetup
 from .device.capability_probe import CapabilityProbe
 from .device.connection_supervisor import ConnectionSupervisor
 from .device.device_daemon_client import HEALTH_CHECK_ATTEMPTS, HEALTH_CHECK_INTERVAL_S
@@ -82,8 +83,8 @@ def _transport_of(serial: str) -> str:
 def _log_startup(**s) -> None:
     """One line per startup step — what a user's log shows when "it was slow to connect"."""
     log.info(
-        "[STARTUP] cihaz=%s(%s) daemon=%s %d/%d servisler=%s",
-        s["device"], s["transport"] or "-", s["daemon"], s["daemon_attempt"], s["daemon_attempts"], s["services"],
+        "[STARTUP] adb=%s cihaz=%s(%s) daemon=%s %d/%d servisler=%s",
+        s["adb"], s["device"], s["transport"] or "-", s["daemon"], s["daemon_attempt"], s["daemon_attempts"], s["services"],
     )
 
 
@@ -254,6 +255,8 @@ class AppContext:
         self._serial: str | None = None
         # What the boot screen shows: device → daemon health check → services, as it happens (GET /api/startup).
         self.startup = StartupState(publish=self._on_startup_step)
+        # Which adb this computer runs — found at start, or installed / picked from the boot screen (device/adb_setup.py).
+        self.adb_setup = AdbSetup(self.adb, settings, configured=settings.ADB_PATH, on_change=self._on_adb_change)
         self.display_power = DisplayPowerController(
             self.adb, lambda: self.serial, lambda: self.daemon_client, self.event_bus
         )
@@ -373,6 +376,10 @@ class AppContext:
             return "binding"
         return "ready" if self.supervisor.connected else "lost"
 
+    async def _on_adb_change(self) -> None:
+        """adb was found, lost sight of or installed: the boot screen reads it from the startup snapshot."""
+        await self.startup.update(adb=self.adb_setup.state, adb_version=self.adb_setup.version)
+
     async def _on_startup_step(self, **snapshot) -> None:
         _log_startup(**snapshot)
         self._schedule_device_state()  # "binding" → "ready" is a session phase the UI follows
@@ -413,6 +420,8 @@ class AppContext:
             return self.serial
         if self._auto_connect_paused:
             return None  # the user disconnected: only their own choice binds a phone
+        if self.adb_setup.state != "ok":
+            return None  # no adb on this computer yet: the boot screen is offering to install one
         if time.monotonic() < self._bind_retry_after:
             return None  # the last bind failed a moment ago: the bootstrap loop retries on its own schedule
         try:
@@ -1024,6 +1033,11 @@ class AppContext:
     async def device_bootstrap(self) -> None:
         """Waits for the first usable device, then binds. Keeps polling quietly if none is attached — the UI meanwhile
         offers QR pairing. A bind that fails (bind_device undid it) is retried with a growing pause: 4 s, 8 s, 15 s."""
+        # Nothing below works without adb. Look for one (instant when it is there); when the computer has none, wait for the
+        # boot screen's install / pick / "look again" instead of polling a missing executable.
+        if self.adb_setup.state != "ok":
+            await self.adb_setup.inspect()
+        await self.adb_setup.wait_until_found()
         failures = 0
         while self.serial is None:
             self._device_list_changed.clear()  # before looking: a change from here on wakes the wait below
@@ -1096,6 +1110,7 @@ class AppContext:
         await _safe_step(self.load_monitor.stop(), "load_monitor.stop", timeout=1.0)
         await _safe_step(self.supervisor.stop(), "supervisor.stop", timeout=1.0)
         await _safe_step(self.notifications.stop(), "notifications.stop", timeout=1.2)
+        await _safe_step(self.adb_setup.shutdown(), "adb_setup.shutdown", timeout=1.0)
         log.info("OpenDeX backend shutdown complete.")
 
 
@@ -1159,7 +1174,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     docs = settings.API_DOCS
     app = FastAPI(
-        title="OpenDeX Backend", version="0.9.2", lifespan=lifespan,
+        title="OpenDeX Backend", version="0.9.3", lifespan=lifespan,
         docs_url="/docs" if docs else None, redoc_url=None, openapi_url="/openapi.json" if docs else None,
     )
     # ONE live context object; routes and websockets read app.state.ctx so

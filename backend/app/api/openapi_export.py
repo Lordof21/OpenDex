@@ -22,13 +22,16 @@ from fastapi import APIRouter, FastAPI
 from fastapi.routing import APIRoute
 
 from .deps import get_active_serial
-from .v1.endpoints import apps, audio, devices, diagnostics, fs, input, notifications, pairing, settings, system, telemetry, windows
+from .v1.endpoints import (
+    adb_setup, apps, audio, devices, diagnostics, fs, input, notifications, pairing, settings, system, telemetry, windows,
+)
 
 # The endpoint routers api/v1/router.py mounts. Their `routes` are plain APIRoute objects whatever the FastAPI version
 # (the mounted app's own route list is a tree of lazily included routers on recent versions) — so the per-route facts the
 # schema cannot show (the bound-device guard) are read from these. tests/test_openapi_snapshot.py pins that the list is complete.
 ENDPOINT_ROUTERS: tuple[APIRouter, ...] = tuple(
-    module.router for module in (devices, pairing, apps, windows, settings, audio, input, notifications, diagnostics, system, telemetry, fs)
+    module.router
+    for module in (devices, adb_setup, pairing, apps, windows, settings, audio, input, notifications, diagnostics, system, telemetry, fs)
 )
 
 PUBLIC_PREFIX = "/api/v1"
@@ -76,6 +79,8 @@ specified in [docs/API.md]({REPOSITORY_URL}/blob/main/docs/API.md).
 TAGS: list[dict[str, str]] = [
     {"name": "devices", "description": "The bound phone: connection state, battery and its diagnostics, volumes, quick toggles "
      "(Wi-Fi, Bluetooth, mobile data …), screen power, Wi-Fi/Bluetooth management, startup progress."},
+    {"name": "adb", "description": "adb on this computer: is there one, install Google's official platform-tools for OpenDeX, "
+     "or use the one the user picked (the boot screen's calls)."},
     {"name": "pairing", "description": "Wireless debugging: QR pairing, mDNS discovery, connect by IP."},
     {"name": "apps", "description": "Installed apps of the phone (list, icons) and launching them."},
     {"name": "windows", "description": "Mirror windows: one phone app per virtual display — open, close, resize, density, "

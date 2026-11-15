@@ -322,6 +322,33 @@ class Adb:
     def adb_path(self) -> str:
         return self._adb
 
+    def set_path(self, adb_path: str) -> None:
+        """Every later call runs this adb (AdbSetup: found at start, installed or picked in the boot screen). Calls already
+        running keep the process they started."""
+        self._adb = adb_path
+
+    @staticmethod
+    async def version_text(path: str, timeout_s: float = 6.0) -> str | None:
+        """What `<path> version` prints, or None when `path` is not a working adb (no such file, not runnable, a non-zero exit,
+        too slow). Static: AdbSetup asks about ANY adb binary, before this Adb has one that works. `adb version` does not
+        start the adb server."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                path, "version", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+        except (OSError, ValueError):
+            return None
+        try:
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
+        except asyncio.TimeoutError:
+            with contextlib.suppress(Exception):
+                proc.kill()
+                await proc.wait()
+            return None
+        if proc.returncode != 0:
+            return None
+        return out.decode("utf-8", errors="replace")
+
     async def exec_out(self, *args: str, serial: str | None = None, timeout_s: float = 5.0) -> bytes:
         """Binary-safe `adb exec-out` (no pty, no CRLF mangling). Same failure semantics as `run` — it used to let a
         broken pipe escape as a raw ValueError/OSError. This is adb itself: device commands call :meth:`shell_bytes`,

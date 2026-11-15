@@ -54,8 +54,17 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="OPENDEX_", env_file=".env", extra="ignore")
 
     # --- ADB / scrcpy ---
-    # The adb executable: a name found on PATH, or a full path.
+    # The adb executable: a name found on PATH, or a full path. Left as "adb", OpenDeX looks for one by itself at start (PATH,
+    # the file you picked in the boot screen, its own copy, the Android SDK) and offers to install it when there is none.
     ADB_PATH: str = "adb"
+    # The adb you picked in the boot screen ("Dosya seç"): one line, the full path. Read at start, before PATH.
+    ADB_CHOICE_FILE: Path = Path.home() / ".opendex" / "adb-path"
+    # Where "Otomatik kur" puts Google's platform-tools (nothing outside this folder is touched: no PATH, no registry).
+    ADB_MANAGED_DIR: Path = Path.home() / ".opendex" / "platform-tools"
+    # True: only OpenDeX's own adb (the folder above) and the file picked in the boot screen count — PATH, the Android SDK and
+    # OPENDEX_ADB_PATH are ignored. To see (and try) the "adb gerekli" start-up screen on a computer that has adb, or to run
+    # with one known adb that no other tool on the machine can swap.
+    ADB_MANAGED_ONLY: bool = False
     # The default device serial for adb commands that name none (a USB serial or `host:port`); unset: adb's own default.
     ADB_SERIAL: str | None = None
     # The scrcpy protocol version the backend speaks; it selects vendor/scrcpy-server-v<version>[-opendex].

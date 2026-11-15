@@ -140,7 +140,7 @@ TRACE_CATEGORIES: dict[str, tuple[str, ...]] = {
     ),
     "video": ("app.streams.video_stream", "app.streams.broadcaster"),
     "adb": (
-        "app.device.adb", "app.device.device_manager", "app.device.device_tracker", "app.device.capability_probe",
+        "app.device.adb", "app.device.adb_setup", "app.device.device_manager", "app.device.device_tracker", "app.device.capability_probe",
         "app.device.android_shell", "app.device.tools_jar", "app.device.xml_inspector", "app.device.network_utils",
         "app.device.daemon_auth", "app.device.device_queries", "app.device.usb_stability", "app.device.phone_footprint",
     ),

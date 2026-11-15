@@ -2,6 +2,7 @@
 user sees during startup is what is actually happening, step by step. (The boot screen polls it: the event stream only
 connects once the desktop is up.)
 
+    adb:      checking → ok | missing (no adb on this computer: the boot screen offers to install one and waits)
     device:   searching → waiting (no phone: the UI offers pairing) | binding → bound
     daemon:   idle → checking (attempt n of N, Docker-style health check) → healthy | unavailable (adb fallback)
     services: idle → starting → ready
@@ -13,6 +14,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Awaitable, Callable, Literal
 
+AdbPhase = Literal["checking", "ok", "missing"]
 DevicePhase = Literal["searching", "waiting", "binding", "bound"]
 DaemonPhase = Literal["idle", "checking", "healthy", "unavailable"]
 ServicesPhase = Literal["idle", "starting", "ready"]
@@ -20,6 +22,8 @@ ServicesPhase = Literal["idle", "starting", "ready"]
 
 @dataclass(frozen=True)
 class StartupSnapshot:
+    adb: AdbPhase = "checking"
+    adb_version: str | None = None
     device: DevicePhase = "searching"
     transport: Literal["usb", "wireless"] | None = None
     model: str | None = None
@@ -49,5 +53,6 @@ class StartupState:
             await self.publish(**snapshot.as_dict())
 
     async def reset(self, device: DevicePhase) -> None:
-        """A new device binding starts over (unbind, transport switch): nothing about the previous one still holds."""
-        await self.update(**StartupSnapshot(device=device).as_dict())
+        """A new device binding starts over (unbind, transport switch): nothing about the previous one still holds — except
+        which adb this computer has, which is not about the phone."""
+        await self.update(**StartupSnapshot(device=device, adb=self.current.adb, adb_version=self.current.adb_version).as_dict())
