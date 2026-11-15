@@ -62,6 +62,12 @@ class DeviceManager:
         self._tracker = tracker
         tracker.on_change(lambda: self._observe(tracker.snapshot() or []))
 
+    def adb_server_epoch(self) -> int | None:
+        """How many times the adb server went away since the tracker started (DeviceTracker.epoch); None without a tracker.
+        A changed value means every adb forward / `adb shell` / scrcpy session of the old server is dead — even when the
+        phone's transport id is the same one (a new server numbers its transports from 1 again)."""
+        return self._tracker.epoch if self._tracker is not None else None
+
     def on_change(self, callback: Callable[[], None]) -> None:
         """`callback()` whenever the device list differs from the last one seen — pushed by the tracker, or found by a
         list_devices that had to start the process (an adb without tracking). Sync and cheap: wake something up."""

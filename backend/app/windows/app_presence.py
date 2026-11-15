@@ -70,6 +70,8 @@ class AppPresenceMonitor:
         behavior_getter: Callable[[], Awaitable[Behavior]],
         request_snapshot: Callable[[], Awaitable[Any]],
         clock: Callable[[], float] = time.monotonic,
+        link_dropped: Callable[[], Awaitable[bool]] | None = None,
+        server_alive: Callable[["WindowSession"], bool] | None = None,
     ) -> None:
         self._events = events
         self._sessions = sessions
@@ -79,6 +81,10 @@ class AppPresenceMonitor:
         self._behavior = behavior_getter
         self._request_snapshot = request_snapshot
         self._clock = clock
+        self._link_dropped = link_dropped
+        # Is the scrcpy server that owns this window's display alive? (A Workspace member's is the shared one — the manager
+        # knows which.) Default: the window's own.
+        self._server_alive = server_alive or (lambda s: bool(getattr(s.server, "is_alive", True)))
         self._misses: dict[str, tuple[int, float]] = {}        # window_id → (count, first miss)
         self._placement: dict[str, tuple[str, float]] = {}     # window_id → (display it was seen on, since)
         self._reported: set[str] = set()                       # badge mode: already told the user
@@ -216,8 +222,28 @@ class AppPresenceMonitor:
                 log.debug("[AppPresence] snapshot request failed: %s", exc)
                 return
 
+    async def _died_with_link(self, session: "WindowSession | None") -> bool:
+        """The window's scrcpy server is dead AND the adb link dropped (or the adb server restarted): its virtual display
+        died with the server and took the app's task along, so an empty display says nothing about what the USER did. The
+        window is rebuilt in place (ConnectionSupervisor → WindowManager.heal_links); judging it now would close it —
+        field log 2026-11-15 12:58: the adb server vanished, Instagram's window was closed as "closed on the phone" five
+        seconds later, its display destroyed and the app killed. A live server (the display exists: an empty one means
+        the app really was closed) and a healthy link keep the normal verdict."""
+        if session is None or self._link_dropped is None or self._server_alive(session):
+            return False
+        try:
+            return bool(await self._link_dropped())
+        except Exception:  # noqa: BLE001 — an unanswerable probe leaves the normal verdict in charge
+            return False
+
     async def _app_gone(self, window_id: str, package: str, eco: bool) -> None:
         session = self._sessions.get(window_id)
+        if await self._died_with_link(session):
+            log.info(
+                "🔗 [AppPresence] %s penceresinin sunucusu bağlantı kopmasıyla öldü — 'telefonda kapatıldı' sayılmıyor, "
+                "pencere yerinde yeniden kurulacak (win=%s)", package, window_id,
+            )
+            return
         if session and getattr(session, "back_protect_until", 0.0) > time.monotonic():
             log.info("🛡️ [AppPresence] %s Back tuşu sonrası kapandı; pencere korunuyor ve uygulama yeniden başlatılıyor (win=%s)", package, window_id)
             session.back_protect_until = 0.0

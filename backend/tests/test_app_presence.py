@@ -23,17 +23,17 @@ class Clock:
         return self.t
 
 
-def _session(window_id="w1", pkg=PKG, display="12", **state):
+def _session(window_id="w1", pkg=PKG, display="12", server_alive=True, **state):
     return SimpleNamespace(
         state=WindowState(window_id=window_id, package=pkg, width=1280, height=720, display_id=display, **state),
-        server=SimpleNamespace(display_id=display, spawned_at=0.0),        # long ago → no placement grace from it
+        server=SimpleNamespace(display_id=display, spawned_at=0.0, is_alive=server_alive),   # long ago → no placement grace
         lifecycle_task=None,
         applock_task=None,
     )
 
 
 class Harness:
-    def __init__(self, sessions, *, behavior="close", parked=(), workspace_display="30", confirm=False):
+    def __init__(self, sessions, *, behavior="close", parked=(), workspace_display="30", confirm=False, link_dropped=None):
         self.clock = Clock()
         self.events = EventBus()
         self.close = AsyncMock()
@@ -49,6 +49,7 @@ class Harness:
             behavior_getter=AsyncMock(return_value=behavior),
             request_snapshot=self.snapshots,
             clock=self.clock,
+            link_dropped=link_dropped,
         )
         if not confirm:
             # The confirm loop sleeps between requests; most tests drive snapshots explicitly.
@@ -89,6 +90,60 @@ async def test_three_misses_over_1_5_s_close_the_window():
         await h.snapshot([HOME])
     h.close.assert_awaited_once_with("w1")
     assert h.seen == [("closed", {"window_id": "w1", "package": PKG, "action": "close"})]
+
+
+async def _vanish(h, snapshots=4):
+    await h.settle_placement([HOME, ON_VD])
+    for _ in range(snapshots):
+        await h.snapshot([HOME])
+
+
+async def test_a_dead_server_with_a_dropped_link_is_not_closed_on_the_phone():
+    """REGRESYON (2026-11-15 12:58, Instagram): adb sunucusu öldü → pencerenin scrcpy sunucusu ve sanal ekranı onunla öldü →
+    ekran boş göründü → pencere 'telefonda kapatıldı' diye kapatıldı. Bağlantı onarımı yerinde yeniden kurar."""
+    dropped = AsyncMock(return_value=True)
+    h = Harness({"w1": _session(server_alive=False)}, link_dropped=dropped)
+    await _vanish(h)
+    dropped.assert_awaited()
+    h.close.assert_not_awaited()
+    assert h.seen == []
+
+
+async def test_a_dead_server_on_a_healthy_link_keeps_the_normal_verdict():
+    """Bağlantı sağlamsa ve sunucu kendi kendine ölmüşse (ekran çöktü) yargı eskisi gibi: kimse onarmayacak."""
+    h = Harness({"w1": _session(server_alive=False)}, link_dropped=AsyncMock(return_value=False))
+    await _vanish(h)
+    h.close.assert_awaited_once_with("w1")
+
+
+async def test_a_live_server_with_an_empty_display_is_closed_without_asking_about_the_link():
+    """Ekran var ve boş = uygulama gerçekten kapatıldı (kullanıcı telefonda kaydırdı): bağlantıya sorulmaz bile."""
+    dropped = AsyncMock(return_value=True)
+    h = Harness({"w1": _session()}, link_dropped=dropped)
+    await _vanish(h)
+    h.close.assert_awaited_once_with("w1")
+    dropped.assert_not_awaited()
+
+
+async def test_a_workspace_member_follows_the_shared_server_not_its_own():
+    """Workspace üyesinin kendi sunucusu hiç başlamaz: sanal ekranın sahibi ortak Workspace sunucusudur. Bağlantıyla o ölürse
+    üyeler kapatılmaz (Workspace üyelerini bağlantı onarımı geri kurar); o canlıyken boş görünen üye eskisi gibi kapanır."""
+    member = _session(display="30", workspace_id="eco", server_alive=True)         # its own server object says nothing
+    for shared_alive, expect_closed in ((False, False), (True, True)):
+        dropped = AsyncMock(return_value=True)
+        h = Harness({"w1": member}, link_dropped=dropped, workspace_display="30")
+        h.monitor._server_alive = lambda s, alive=shared_alive: alive
+        h.close.reset_mock()
+        await h.settle_placement([HOME, {"id": 5, "display": 30, "package": PKG}])
+        for _ in range(4):
+            await h.snapshot([HOME])
+        assert h.close.await_count == (1 if expect_closed else 0), shared_alive
+
+
+async def test_an_unanswerable_link_probe_leaves_the_normal_verdict_in_charge():
+    h = Harness({"w1": _session(server_alive=False)}, link_dropped=AsyncMock(side_effect=RuntimeError("adb")))
+    await _vanish(h)
+    h.close.assert_awaited_once_with("w1")
 
 
 async def test_a_fast_burst_of_misses_is_not_enough():

@@ -119,6 +119,48 @@ async def test_a_restarted_adb_server_is_followed__the_list_is_unknown_meanwhile
     await back.close()
 
 
+async def test_the_adb_server_going_away_is_counted__the_same_transport_id_afterwards_proves_nothing(server):
+    """Field log 2026-11-15 12:58: the adb server vanished and a new one started; the phone was transport 1 before and
+    transport 1 after (a new server numbers its transports from 1 again), so nothing but this counter says that every
+    forward, `adb shell` and scrcpy session of the old server is dead."""
+    tracker = tracker_for(server.port)
+    manager = DeviceManager(_Adb())
+    assert tracker.epoch == 0 and manager.adb_server_epoch() is None      # no tracker attached: nothing to count
+    manager.attach_tracker(tracker)
+    tracker.start()
+    await server.connected.wait()
+    await server.push(USB)
+    await until(lambda: tracker.snapshot() is not None)
+    assert tracker.epoch == 0 and manager.adb_server_epoch() == 0
+
+    port = server.port
+    await server.close()                                                  # the server process is gone
+    await until(lambda: tracker.epoch == 1)
+    assert manager.adb_server_epoch() == 1
+
+    back = FakeAdbServer()
+    await back.start(port)
+    await back.connected.wait()
+    await back.push(USB)                                                  # a NEW server: the phone is transport 4 again
+    await until(lambda: tracker.snapshot() is not None)
+    assert tracker.snapshot()[0].transport_id == 4 and tracker.epoch == 1  # the id says nothing; the counter does
+
+    await tracker.stop()
+    assert tracker.epoch == 1                                             # closing the stream ourselves is not the server leaving
+    await back.close()
+
+
+async def test_a_tracker_that_never_reached_the_server_counts_nothing():
+    srv = FakeAdbServer()
+    port = await srv.start()
+    await srv.close()                                                     # nothing listens on the port
+    tracker = tracker_for(port)
+    tracker.start()
+    await asyncio.sleep(0.3)                                              # several failed attempts
+    assert tracker.epoch == 0
+    await tracker.stop()
+
+
 async def test_an_adb_without_track_devices_l_leaves_the_process_fallback_in_charge():
     srv = FakeAdbServer(reply=b"FAIL")
     port = await srv.start()

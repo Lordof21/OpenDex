@@ -335,6 +335,10 @@ class WindowManager:
             close_window=self.close_window,
             behavior_getter=self._app_closed_behavior,
             request_snapshot=self._request_tasks_snapshot,
+            # A window whose scrcpy server died with the adb link lost its display and its task: heal_links rebuilds it —
+            # it is not "closed on the phone".
+            link_dropped=lambda: self._link_dropped(),
+            server_alive=self._display_server_alive,
         )
 
     async def _resize_display_for_handoff(
@@ -1710,6 +1714,14 @@ class WindowManager:
             if broadcaster is not None and s.server.is_alive and not (s.state.frozen or s.state.minimized):
                 total = (total or 0) + broadcaster.packets_total
         return total
+
+    def _display_server_alive(self, session: WindowSession) -> bool:
+        """Is the scrcpy server that owns this window's virtual display alive? A standalone window's is its own; a Workspace
+        member's is the shared Workspace server (the member's own server object is never started)."""
+        if session.state.workspace_id == "eco":
+            server = self._eco_workspace.server
+            return server is not None and server.is_alive
+        return session.server.is_alive
 
     def _workspace_dead(self) -> bool:
         eco = self._eco_workspace

@@ -63,6 +63,9 @@ class ConnectionSupervisor:
         self._unreachable_since: float | None = None
         # adb's id of the link the windows were built over; a different one means the link cycled since.
         self._transport_id: int | None = None
+        # How many times the adb SERVER had gone away when the windows were built over it (DeviceTracker.epoch). A new server
+        # numbers its transports from 1 again, so the id above cannot see a server restart; every scrcpy session still died.
+        self._server_epoch: int | None = None
         self._heal_pending = False
         self._heal_attempts = 0
         self._next_heal_at = 0.0
@@ -92,6 +95,7 @@ class ConnectionSupervisor:
         self._pulse = None
         info = await self._probe()
         self._transport_id = info.transport_id if info is not None else None
+        self._server_epoch = self._read_server_epoch()
         self._task = asyncio.create_task(self._watch_loop(), name="connection-supervisor")
 
     async def stop(self) -> None:
@@ -117,7 +121,9 @@ class ConnectionSupervisor:
         members. Only looks — the heal itself runs from the watch loop, woken at once."""
         if self._task is None:
             return False
-        dropped = self._heal_pending or not self._connected or self._unreachable_since is not None
+        dropped = (
+            self._heal_pending or not self._connected or self._unreachable_since is not None or self._server_restarted()
+        )
         if not dropped:
             info = await self._probe()
             dropped = not self._usable(info) or self._cycled(info)
@@ -144,6 +150,17 @@ class ConnectionSupervisor:
             info is not None and info.transport_id is not None
             and self._transport_id is not None and info.transport_id != self._transport_id
         )
+
+    def _read_server_epoch(self) -> int | None:
+        reader = getattr(self._devices, "adb_server_epoch", None)
+        return reader() if callable(reader) else None
+
+    def _server_restarted(self) -> bool:
+        """The adb server went away since the windows were built (field log 2026-11-15 12:58: the server process vanished,
+        a new one started, the phone was transport 1 again — nothing else showed it, so no heal ran, and the windows whose
+        scrcpy servers and virtual displays had died with it were judged "closed on the phone")."""
+        now = self._read_server_epoch()
+        return now is not None and self._server_epoch is not None and now != self._server_epoch
 
     async def _is_device_alive(self) -> bool:
         return self._usable(await self._probe())
@@ -198,6 +215,13 @@ class ConnectionSupervisor:
         """The device answers. If the link cycled meanwhile — seen as an unreachable spell or as a new transport id —
         the windows' servers died with it: arm a heal (once), and run it while one is pending."""
         cycled = self._cycled(info)
+        if self._server_restarted():
+            log.warning(
+                "⚠️ [SUPERVISOR] adb sunucusu yeniden başladı (cihaz yine aynı bağlantı numarasında) — sunucuyla birlikte "
+                "tüm scrcpy oturumları ve sanal ekranlar öldü; pencereler yerinde yeniden kuruluyor."
+            )
+            cycled = True
+        self._server_epoch = self._read_server_epoch()
         if self._unreachable_since is not None:
             log.info(
                 "✅ [SUPERVISOR] Cihaz (%s) anlık kesintiden %.2fs içinde geri bağlandı! Pencereler yerinde yeniden kuruluyor.",
@@ -313,6 +337,7 @@ class ConnectionSupervisor:
         info = await self._probe()
         if info is not None and info.transport_id is not None:
             self._transport_id = info.transport_id
+        self._server_epoch = self._read_server_epoch()
         try:
             if android_id == self._android_id:
                 log.info("[SUPERVISOR] same device back (%s); rebuilding its windows in place", android_id)

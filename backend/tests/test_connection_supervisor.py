@@ -13,9 +13,13 @@ class _FakeDeviceManager:
         self.devices = devices or []
         self.get_android_id_calls = []
         self.silent_phone = False
+        self.epoch = 0                 # DeviceManager.adb_server_epoch: how many times the adb server went away
 
     async def list_devices(self) -> list[DeviceInfo]:
         return self.devices
+
+    def adb_server_epoch(self) -> int:
+        return self.epoch
 
     async def get_android_id(self, serial: str) -> str:
         self.get_android_id_calls.append(serial)
@@ -246,6 +250,39 @@ async def test_a_link_cycle_is_healed_in_place_without_device_lost(offline_first
 
 
 @pytest.mark.asyncio
+async def test_an_adb_server_restart_is_healed_even_though_the_phone_keeps_its_transport_id():
+    """REGRESYON (2026-11-15 12:58, Instagram penceresi kapandı): adb SUNUCUSU öldü, yenisi başladı; telefon yine 1 numaralı
+    bağlantı. Yeni sunucu numaraları 1'den başlattığı için kimlik karşılaştırması bir şey görmedi → onarım hiç kurulmadı,
+    sunucuyla ölen sanal ekranın penceresi 'telefonda kapatıldı' diye kapatıldı."""
+    wm = _HealWindowManager()
+    sup, dev_mgr, events = await _running(wm)          # the phone is transport 1
+    dev_mgr.epoch += 1                                  # the server went away; the list afterwards is IDENTICAL
+    await asyncio.sleep(0.3)
+    await sup.stop()
+
+    assert wm.calls == 1 and sup._transport_id == 1 and not events.has_event("device_lost")
+
+
+@pytest.mark.asyncio
+async def test_the_same_server_restart_is_healed_once_not_on_every_poll():
+    wm = _HealWindowManager()
+    sup, dev_mgr, _ = await _running(wm)
+    dev_mgr.epoch += 1
+    await asyncio.sleep(0.5)                            # many polls after it
+    await sup.stop()
+    assert wm.calls == 1 and sup._server_epoch == 1
+
+    wm2 = _HealWindowManager()                           # a SECOND restart is a second heal
+    sup2, dev_mgr2, _ = await _running(wm2)
+    dev_mgr2.epoch += 1
+    await asyncio.sleep(0.3)
+    dev_mgr2.epoch += 1
+    await asyncio.sleep(0.3)
+    await sup2.stop()
+    assert wm2.calls == 2
+
+
+@pytest.mark.asyncio
 async def test_a_stable_link_never_heals():
     wm = _HealWindowManager()
     sup, _, _ = await _running(wm)
@@ -276,6 +313,13 @@ async def test_link_dropped_reports_an_unhealed_drop_and_only_that():
     dev_mgr.devices = _link(2)  # bağlantı döndü ama kimlik değişti
     assert await sup.link_dropped() is True
     dev_mgr.devices = _link(None, DeviceState.OFFLINE)
+    assert await sup.link_dropped() is True
+    dev_mgr.devices = _link(1)
+    sup._transport_id = 1
+    sup._unreachable_since = None
+    sup._heal_pending = False
+    assert await sup.link_dropped() is False
+    dev_mgr.epoch += 1  # adb sunucusu yeniden başladı: aynı bağlantı numarası, ama her şey ölmüştü
     assert await sup.link_dropped() is True
     sup._task = None  # denetçi çalışmıyor (bilinçli taşıyıcı geçişi): hiçbir şeyi bağlantı kopması saymaz
     assert await sup.link_dropped() is False

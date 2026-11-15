@@ -49,14 +49,25 @@ class DeviceTracker:
         self._listeners: list[Callable[[], None]] = []
         self._task: asyncio.Task | None = None
         self._unsupported = False
+        self._epoch = 0
+        self._stopping = False      # we closed the stream ourselves (stop / cancel): not the adb server going away
 
     # ------------------------------------------------------------------ public
 
+    @property
+    def epoch(self) -> int:
+        """How many times the adb SERVER went away (the live stream was up, then closed). A new server numbers its transports
+        from 1 again, so a phone that was transport 1 is transport 1 after the restart: the transport id cannot tell that
+        every forward, every `adb shell` and every scrcpy session died with the old server — this counter can."""
+        return self._epoch
+
     def start(self) -> None:
         if self._task is None or self._task.done():
+            self._stopping = False
             self._task = asyncio.create_task(self._run(), name="adb-device-tracker")
 
     async def stop(self) -> None:
+        self._stopping = True
         await cancel_and_wait(self._task)
         self._task = None
         self._devices = None
@@ -115,6 +126,9 @@ class DeviceTracker:
     def _set(self, devices: list[DeviceInfo] | None) -> None:
         if devices is None and self._devices is None:
             return
+        if devices is None and not self._stopping:
+            self._epoch += 1
+            log.warning("[DeviceTracker] adb sunucusuyla bağlantı koptu (sunucu kapandı ya da yeniden başlıyor) — sayaç=%d", self._epoch)
         self._devices = devices
         if devices is None:
             return
