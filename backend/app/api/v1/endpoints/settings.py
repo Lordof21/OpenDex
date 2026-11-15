@@ -89,9 +89,13 @@ async def put_settings(body: ProjectSettings, ctx: AppContextDep):
 
 @router.get("/layout", response_model=list[AppLayoutEntry])
 async def get_layout(ctx: AppContextDep):
-    """Retrieves saved desktop icon grid layout for current device."""
+    """Retrieves saved desktop icon grid layout for current device.
+
+    No device yet is an ANSWER OF ITS OWN (409), not an empty layout: the desktop used to read `[]` here right after start, took it for
+    "nothing saved", built the default layout and saved it over the user's real one.
+    """
     if ctx.android_id is None:
-        return []
+        raise HTTPException(status_code=409, detail="Cihaz bağlı değil.")
     return await settings_db.get_app_layout(ctx.android_id)
 
 

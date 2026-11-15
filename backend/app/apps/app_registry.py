@@ -26,6 +26,11 @@ from ..storage import settings_db
 
 log = logging.getLogger(__name__)
 
+
+def is_desktop_only_item(package: str) -> bool:
+    """A desktop icon that is not a package on the phone: OpenDeX's built-in apps (``com.opendex.*``) and the user's folders (``custom-*``)."""
+    return package.startswith(("com.opendex.", "custom-")) or package == "com.android.internal.mirror"
+
 # A scrcpy --list-apps row. Two formats seen in the wild:
 #   upstream scrcpy wraps the package in brackets:
 #     " - Chrome                 [com.android.chrome]"
@@ -192,18 +197,16 @@ class AppRegistry:
         saved_layout = await settings_db.get_app_layout(android_id)
         known_packages = {e.package for e in saved_layout}
 
+        # Only phone packages can be "uninstalled". OpenDeX's own items (Settings, Files, the mirror) and the user's folders are on the
+        # desktop but never in the phone's launcher list: pruning them wiped them from the saved layout at every refresh.
         added = [a for a in current if a.package not in known_packages]
-        removed = sorted(known_packages - current_packages)
+        removed = sorted(p for p in known_packages - current_packages if not is_desktop_only_item(p))
 
-        if removed:
-            pruned = [e for e in saved_layout if e.package in current_packages]
-            await settings_db.save_app_layout(android_id, pruned)
-        if added and saved_layout:
-            base = max((e.position for e in saved_layout), default=-1) + 1
-            appended = saved_layout + [
-                AppLayoutEntry(package=a.package, position=base + i)
-                for i, a in enumerate(added)
-            ]
-            await settings_db.save_app_layout(android_id, appended)
+        # One save of the kept entries plus the new ones (two saves from the same stale list brought the pruned apps back).
+        kept = [e for e in saved_layout if e.package not in removed]
+        if removed or (added and saved_layout):
+            base = max((e.position for e in kept), default=-1) + 1
+            fresh = [AppLayoutEntry(package=a.package, position=base + i) for i, a in enumerate(added)] if saved_layout else []
+            await settings_db.save_app_layout(android_id, kept + fresh)
 
         return RegistryDiff(added=added, removed=removed, all_apps=current)

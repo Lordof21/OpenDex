@@ -41,7 +41,7 @@ import WallpaperDialog from './wallpaper/WallpaperDialog.jsx';
 import { useWallpaper } from './wallpaper/useWallpaper.js';
 import { useWallpaperStore } from './wallpaper/wallpaperStore.js';
 import { desktopStats } from './manageIcons.js';
-import { fetchAppList, refreshAppList } from './appRegistry.js';
+import { BUILTIN_SYSTEM_APPS, fetchAppList, refreshAppList } from './appRegistry.js';
 import { getAppLayout, saveAppLayout } from '../settings/settingsApi.js';
 import { useWindowStore } from '../window/windowStore.js';
 import { useSystemStore } from '../state/systemStore.js';
@@ -50,6 +50,22 @@ import { openOpenDexSettings } from '../settings/SettingsPanel.jsx';
 import { cn } from '../lib/utils.js';
 import { api } from '../lib/api.js';
 import { t } from '../i18n/index.js';
+import { isImeKey } from '../lib/ime.js';
+
+/** A folder as the backend stores it (`custom` on a layout entry) <-> as the desktop uses it. */
+const folderToEntry = (item) => ({ name: item.name || '', type: item.type || 'folder', app_ids: Array.isArray(item.appIds) ? item.appIds : [] });
+export function foldersFromLayout(entries) {
+  if (!Array.isArray(entries)) return [];
+  return entries
+    .filter((entry) => entry?.custom && typeof entry.package === 'string' && entry.package.startsWith('custom-'))
+    .map((entry) => ({
+      id: entry.package,
+      name: entry.custom.name || '',
+      type: entry.custom.type || 'folder',
+      appIds: Array.isArray(entry.custom.app_ids) ? entry.custom.app_ids : [],
+    }));
+}
+const layoutSignature = (layout, folders) => JSON.stringify([layout, (folders || []).map((f) => [f.id, f.name, f.type, f.appIds])]);
 
 export const COLUMNS = 17;
 export const ROWS = 7;
@@ -112,6 +128,26 @@ const DEFAULT_FALLBACK_APPS = [
   { package: 'com.samsung.android.calendar', display_name: t('common.takvim') },
 ];
 
+// The cell the n-th default item takes: columns fill top to bottom (see buildDefaultSlots).
+const defaultCellOf = (index) => (index % ROWS) * COLUMNS + Math.floor(index / ROWS);
+
+/** Puts OpenDeX's built-in icons that the saved layout does not mention at all back on the desktop. Returns the SAME object when
+ *  nothing is missing. An icon the user hid is in the saved layout (hidden) and is left alone. */
+export function restoreMissingBuiltins(layoutObj, savedLayout) {
+  const known = new Set((savedLayout || []).map((entry) => entry.package));
+  const next = { ...layoutObj };
+  let changed = false;
+  BUILTIN_SYSTEM_APPS.forEach((app, index) => {
+    if (known.has(app.package)) return;
+    let cell = defaultCellOf(index);
+    if (next[cell]) cell = Array.from({ length: CELLS }, (_, i) => i).find((i) => !next[i]) ?? -1;
+    if (cell < 0) return;
+    next[cell] = app.package;
+    changed = true;
+  });
+  return changed ? next : layoutObj;
+}
+
 function buildDefaultSlots(apps) {
   const effectiveApps = apps && apps.length > 2 ? apps : DEFAULT_FALLBACK_APPS;
   const chosenPkgs = new Set();
@@ -165,8 +201,16 @@ function GridBox({ boxRef, ...props }) {
 
 export default function Desktop() {
   const [apps, setApps] = useState([]);
+  const appsRef = useRef([]);          // newest values for persistLayout (a callback closed over state saved a stale app list)
+  const layoutRef = useRef({});
+  const customRef = useRef([]);
+  const hydratedRef = useRef(false);   // the saved layout has been read: from here on every change is saved
+  const saveChainRef = useRef(Promise.resolve());
+  const lastSavedRef = useRef('');     // what the backend already has (skips a save that would change nothing)
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const refreshingRef = useRef(false);
+  const [iconEpoch, setIconEpoch] = useState(0);   // bumped by "Yenile": every icon asks again (one that failed shows its letter until then)
 
   // Desktop slots & layout: cell -> app.package or customId
   const [layout, setLayout] = useState({});
@@ -257,12 +301,16 @@ export default function Desktop() {
 
   // Load app list and persisted layout
   const loadRetriedRef = useRef(false);
-  const load = useCallback(async () => {
+  // Resolves true when the list and the saved layout were read (the manual refresh reports a failure; the automatic loads retry once).
+  const load = useCallback(async ({ force = false } = {}) => {
     setLoading(true);
     try {
-      const [list, savedLayout] = await Promise.all([fetchAppList(), getAppLayout().catch(() => [])]);
+      // An unreadable layout (no phone bound yet, backend still starting) must NOT look like "nothing saved": the desktop used to take
+      // that for a first run, build the default layout and save it over the user's real one. A failure here goes to the retry below.
+      const [list, savedLayout] = await Promise.all([fetchAppList({ force }), getAppLayout()]);
       loadRetriedRef.current = false; // başarılı: sıradaki bağımsız bir hatada yeniden tek seferlik deneme hakkı yenilenir
       setApps(list);
+      appsRef.current = list;
 
       // Determine initial slot arrangement
       const layoutObj = {};
@@ -280,31 +328,46 @@ export default function Desktop() {
         }
       }
 
-      // Restore custom icons into their slots
-      try {
-        const savedCustom = window.localStorage.getItem('opendex_custom_icons');
-        const customItems = savedCustom ? JSON.parse(savedCustom) : [];
-        const savedCustomSlots = window.localStorage.getItem('opendex_custom_slots');
-        const customSlots = savedCustomSlots ? JSON.parse(savedCustomSlots) : {};
-        for (const [cell, id] of Object.entries(customSlots)) {
-          const numCell = Number(cell);
-          if (!layoutObj[numCell] && customItems.some((c) => c.id === id)) {
-            layoutObj[numCell] = id;
-            occupied.add(numCell);
+      // The user's folders live in the same saved layout (entries with `custom`): what the backend has wins.
+      const savedFolders = foldersFromLayout(savedLayout);
+      let folders = savedFolders;
+      if (savedFolders.length === 0) {
+        // Folders kept only in this browser's storage (before they were saved with the layout) are carried over once.
+        try {
+          const savedCustom = window.localStorage.getItem('opendex_custom_icons');
+          const customItems = savedCustom ? JSON.parse(savedCustom) : [];
+          const savedCustomSlots = window.localStorage.getItem('opendex_custom_slots');
+          const customSlots = savedCustomSlots ? JSON.parse(savedCustomSlots) : {};
+          folders = customItems.map((item) => ({ ...item, type: item.type || 'folder', appIds: Array.isArray(item.appIds) ? item.appIds : [] }));
+          for (const [cell, id] of Object.entries(customSlots)) {
+            const numCell = Number(cell);
+            if (!layoutObj[numCell] && folders.some((c) => c.id === id)) {
+              layoutObj[numCell] = id;
+              occupied.add(numCell);
+            }
           }
-        }
-      } catch {}
+        } catch {}
+      }
+      customRef.current = folders;
+      setCustom(folders);
 
-      // If no valid layout was saved, or if saved layout has the legacy full dump (> 20 apps),
-      // initialize with the clean curated essentials (Windows / DeX style).
-      const placedCount = Object.keys(layoutObj).length;
-      if (placedCount === 0 || placedCount > 20) {
+      // Only a layout that was NEVER saved starts from the curated essentials (Windows / DeX style). A saved one is the user's, whatever
+      // its size — an emptied desktop stays empty and one with more than twenty icons stays as it is (it used to be reset to the defaults).
+      if (!Array.isArray(savedLayout) || savedLayout.length === 0) {
         const initial = buildDefaultSlots(list);
         setLayout(initial);
-        persistLayout(initial);
+        persistLayout(initial, folders, list);
       } else {
-        setLayout(layoutObj);
+        // OpenDeX's own icons that are in the saved layout NOWHERE (not even hidden) were wiped by an old refresh that took them for
+        // uninstalled phone apps: they come back at their default cell (or the first free one).
+        const restored = restoreMissingBuiltins(layoutObj, savedLayout);
+        setLayout(restored);
+        layoutRef.current = restored;
+        lastSavedRef.current = layoutSignature(layoutObj, folders);
+        if (restored !== layoutObj) persistLayout(restored, folders, list);
       }
+      hydratedRef.current = true;
+      return true;
     } catch (err) {
       console.warn('Desktop load error:', err);
       // Telefon tam hazır olmadan (örn. ekran henüz kapalıyken) ilk istek düşebilir; bağlantı durumu WS
@@ -314,6 +377,7 @@ export default function Desktop() {
         loadRetriedRef.current = true;
         setTimeout(load, 2500);
       }
+      return false;
     } finally {
       setLoading(false);
     }
@@ -329,25 +393,36 @@ export default function Desktop() {
 
   // Persist layout changes
   const persistLayout = useCallback(
-    async (nextLayout) => {
+    async (nextLayout, nextCustom = customRef.current, appList = appsRef.current) => {
       setLayout(nextLayout);
+      layoutRef.current = nextLayout;
 
       // Extract custom vs app placements
       const customSlots = {};
       const backendArray = [];
+      const folderById = new Map((nextCustom || []).map((item) => [item.id, item]));
 
       for (const [cellStr, id] of Object.entries(nextLayout)) {
         const cell = Number(cellStr);
         if (id.startsWith('custom-')) {
           customSlots[cell] = id;
+          const item = folderById.get(id);
+          if (item) backendArray.push({ package: id, position: cell, hidden: false, custom: folderToEntry(item) });
         } else {
           backendArray.push({ package: id, position: cell, hidden: false });
         }
       }
 
+      // Folders that are not on a cell (taken off the desktop but not deleted) are kept as hidden entries
+      for (const item of nextCustom || []) {
+        if (!backendArray.some((e) => e.package === item.id)) {
+          backendArray.push({ package: item.id, position: 999, hidden: true, custom: folderToEntry(item) });
+        }
+      }
+
       // Include hidden apps in backend layout
       const visibleSet = new Set(backendArray.map((e) => e.package));
-      for (const app of (apps.length > 0 ? apps : DEFAULT_FALLBACK_APPS)) {
+      for (const app of (appList.length > 0 ? appList : DEFAULT_FALLBACK_APPS)) {
         if (!visibleSet.has(app.package)) {
           backendArray.push({ package: app.package, position: 999, hidden: true });
         }
@@ -355,7 +430,11 @@ export default function Desktop() {
 
       try {
         window.localStorage.setItem('opendex_custom_slots', JSON.stringify(customSlots));
-        await saveAppLayout(backendArray);
+        // One save at a time, in the order they were asked: two quick changes must not reach the backend swapped.
+        const turn = saveChainRef.current.then(() => saveAppLayout(backendArray));
+        saveChainRef.current = turn.catch(() => {});
+        await turn;
+        lastSavedRef.current = layoutSignature(nextLayout, nextCustom);
       } catch {
         // Fallback local storage
         try {
@@ -363,8 +442,16 @@ export default function Desktop() {
         } catch {}
       }
     },
-    [apps]
+    []
   );
+
+  // A change to the folders themselves (rename, an app added to / taken out of one) is saved with the layout too.
+  useEffect(() => {
+    customRef.current = custom;
+    if (!hydratedRef.current) return;
+    if (lastSavedRef.current === layoutSignature(layoutRef.current, custom)) return;
+    persistLayout(layoutRef.current, custom);
+  }, [custom, persistLayout]);
 
   // App resolver: maps ID to either custom item or Android app object
   const resolve = useCallback(
@@ -415,10 +502,32 @@ export default function Desktop() {
     setMenu(null);
   }, []);
 
+  // "Yenile" (right-click menu, Ctrl+R): reads the app list and the saved layout again and makes every icon load afresh. It never touches
+  // the layout itself (it used to be a dead "reset to defaults"): for the times a load came up incomplete (phone late, an icon that failed).
+  const refresh = useCallback(async () => {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
+    setRefreshing(true);
+    try {
+      try { await refreshAppList(); } catch { /* phone unreachable: the backend's own list is still re-read below */ }
+      const ok = await load({ force: true });
+      setIconEpoch(Date.now());
+      if (!ok) pushToast(t('desktop.yenileme_hatasi_value', { value: t('common.cihaz_bagli_degil') }));
+    } finally {
+      refreshingRef.current = false;
+      setRefreshing(false);
+    }
+  }, [load, pushToast]);
+
   // Keyboard navigation: Escape closes menu/selection, F2 renames, Enter launches or confirms rename
   useEffect(() => {
     const onKey = (event) => {
-      if (event.key === 'Escape') {
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'r') {
+        // The browser's own reload would restart the app. With a phone window in focus Ctrl+R belongs to that app (Chrome reloads).
+        event.preventDefault();
+        const phoneWindowFocused = useWindowStore.getState().windows.some((w) => w.focused && !w.minimized);
+        if (!phoneWindowFocused && !event.target?.closest?.('input, textarea, select, [contenteditable]')) refresh();
+      } else if (event.key === 'Escape') {
         closeMenu();
         setSelected(null);
         setEditingId(null);
@@ -454,7 +563,7 @@ export default function Desktop() {
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('mousedown', onDown);
     };
-  }, [closeMenu, selected, resolve, editingId, editingName]);
+  }, [closeMenu, selected, resolve, editingId, editingName, refresh]);
 
   // Open context menu with bounds safety
   const openMenu = (event, cell, itemId) => {
@@ -517,9 +626,10 @@ export default function Desktop() {
     const id = `custom-${Date.now()}`;
     const newName = t('desktop.yeni_klasor_value', { value: custom.length + 1 });
     const newFolder = { id, name: newName, type: 'folder', appIds: [] };
-    setCustom((current) => [...current, newFolder]);
+    const nextCustom = [...custom, newFolder];
+    setCustom(nextCustom);
     const nextLayout = { ...layout, [free]: id };
-    persistLayout(nextLayout);
+    persistLayout(nextLayout, nextCustom);
     setSelected(id);
     setEditingId(id);
     setEditingName(newName);
@@ -596,12 +706,13 @@ export default function Desktop() {
 
   // Remove custom item
   const removeIcon = (id) => {
-    setCustom((current) => current.filter((item) => item.id !== id));
+    const nextCustom = custom.filter((item) => item.id !== id);
+    setCustom(nextCustom);
     const next = { ...layout };
     for (const key of Object.keys(next)) {
       if (next[Number(key)] === id) delete next[Number(key)];
     }
-    persistLayout(next);
+    persistLayout(next, nextCustom);
     setSelected(null);
     pushToast(t('desktop.simge_masaustunden_silindi'));
   };
@@ -621,24 +732,6 @@ export default function Desktop() {
   const applyManagedLayout = (next) => {
     persistLayout(next);
     setSelected((current) => (current && Object.values(next).includes(current) ? current : null));
-  };
-
-  // Reset layout to default
-  const refresh = async () => {
-    setRefreshing(true);
-    try {
-      const diff = await refreshAppList();
-      setApps(diff.all_apps);
-      const initial = buildDefaultSlots(diff.all_apps);
-      persistLayout(initial);
-      setSelected(null);
-      setSpin((v) => v + 1);
-      pushToast(t('desktop.masaustu_duzeni_sifirlandi'));
-    } catch (err) {
-      pushToast(t('desktop.yenileme_hatasi_value', { value: err.message || err }));
-    } finally {
-      setRefreshing(false);
-    }
   };
 
   // Force re-extract app icon from device
@@ -775,7 +868,7 @@ export default function Desktop() {
                               pkg={entry.app.package}
                               displayName={entry.app.display_name}
                               size={44}
-                              version={iconVersions[entry.app.package] || 0}
+                              version={iconVersions[entry.app.package] || iconEpoch}
                             />
                           </div>
                         ) : (
@@ -804,12 +897,14 @@ export default function Desktop() {
                         <input
                           type="text"
                           autoFocus
+                          aria-label={t('files.yeni_ad')}
                           value={editingName}
                           onChange={(e) => setEditingName(e.target.value)}
                           onKeyDown={(e) => {
+                            e.stopPropagation();
+                            if (isImeKey(e)) return;
                             if (e.key === 'Enter') handleSaveRename(id);
                             if (e.key === 'Escape') setEditingId(null);
-                            e.stopPropagation();
                           }}
                           onBlur={() => handleSaveRename(id)}
                           onClick={(e) => e.stopPropagation()}
@@ -962,6 +1057,16 @@ export default function Desktop() {
                 aria-expanded={submenu?.type === 'scale'}
                 onClick={toggleSubmenu('scale')}
               />
+              <MenuItem
+                icon={<RefreshCw className={cn('size-3.5', refreshing && 'animate-spin')} />}
+                label={t('files.yenile')}
+                hint="Ctrl+R"
+                disabled={refreshing}
+                onClick={() => {
+                  refresh();
+                  closeMenu();
+                }}
+              />
               <MenuSeparator />
               <MenuItem
                 icon={<ImageIcon className="size-3.5" />}
@@ -1082,6 +1187,7 @@ export default function Desktop() {
                   <div>
                     <input
                       type="text"
+                      aria-label={t('desktop.klasor_adi')}
                       value={activeFolder.name}
                       onChange={(e) => {
                         const val = e.target.value;
@@ -1124,6 +1230,7 @@ export default function Desktop() {
                       <Search className="absolute left-3 top-2.5 size-3.5 text-muted-foreground" />
                       <input
                         type="text"
+                        aria-label={t('desktop.klasore_eklenecek_uygulama_ara')}
                         placeholder={t('desktop.klasore_eklenecek_uygulama_ara')}
                         value={folderAppSearch}
                         onChange={(e) => setFolderAppSearch(e.target.value)}

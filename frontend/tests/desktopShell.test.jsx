@@ -24,7 +24,8 @@ vi.mock('../src/desktop/appRegistry.js', async (orig) => {
 import Desktop from '../src/desktop/Desktop.jsx';
 import { ThemeProvider } from '../src/state/ThemeContext.jsx';
 import { useWallpaperStore } from '../src/desktop/wallpaper/wallpaperStore.js';
-import { fetchAppList } from '../src/desktop/appRegistry.js';
+import { DEFAULT_FALLBACK_APPS, fetchAppList, refreshAppList } from '../src/desktop/appRegistry.js';
+import { useWindowStore } from '../src/window/windowStore.js';
 
 afterEach(cleanup);
 
@@ -85,6 +86,53 @@ describe('Desktop kabuğu (ui/Menu + ui/Dialog)', () => {
     expect(useWallpaperStore.getState().prefs.id).not.toBe('plain');
     expect(screen.queryByRole('dialog', { name: 'Arka plan' })).toBeNull();
     expect(container.querySelector('.workspace-grid')).toBeNull();
+  });
+});
+
+describe('Desktop: "Yenile" (sağ tık menüsü ve Ctrl+R)', () => {
+  // Yükleme bazen eksik kalıyordu (telefon geç geldi, bir simge indirilemedi): yenile listeyi ve kayıtlı düzeni yeniden okur,
+  // düzene dokunmaz (eski ölü "varsayılana sıfırla" değildir).
+  const mount = async () => {
+    vi.mocked(fetchAppList).mockReset().mockResolvedValue(DEFAULT_FALLBACK_APPS);
+    vi.mocked(refreshAppList).mockClear();
+    const view = render(<ThemeProvider><Desktop /></ThemeProvider>);
+    await act(async () => {});
+    vi.mocked(fetchAppList).mockClear();
+    return view;
+  };
+  afterEach(() => useWindowStore.setState({ windows: [] }));
+
+  it('sağ tık menüsündeki "Yenile" listeyi telefondan ve kayıtlı düzeni yeniden okur', async () => {
+    const { container } = await mount();
+    fireEvent.contextMenu(container.querySelector('main'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Yenile/ }));
+    await act(async () => {});
+    expect(refreshAppList).toHaveBeenCalledTimes(1);
+    expect(fetchAppList).toHaveBeenCalledWith({ force: true });
+  });
+
+  it('Ctrl+R aynı yenilemeyi yapar ve tarayıcının sayfa yenilemesini engeller', async () => {
+    await mount();
+    const event = new KeyboardEvent('keydown', { key: 'r', ctrlKey: true, bubbles: true, cancelable: true });
+    await act(async () => { window.dispatchEvent(event); });
+    expect(event.defaultPrevented).toBe(true);
+    expect(fetchAppList).toHaveBeenCalledWith({ force: true });
+  });
+
+  it('bir telefon penceresi odaktayken Ctrl+R masaüstünü yenilemez (tuş o uygulamanındır)', async () => {
+    await mount();
+    useWindowStore.setState({ windows: [{ id: 'w1', package: 'com.android.chrome', focused: true, minimized: false }] });
+    const event = new KeyboardEvent('keydown', { key: 'r', ctrlKey: true, bubbles: true, cancelable: true });
+    await act(async () => { window.dispatchEvent(event); });
+    expect(fetchAppList).not.toHaveBeenCalled();
+  });
+
+  it('metin alanındayken Ctrl+R yenilemez', async () => {
+    await mount();
+    const input = document.body.appendChild(document.createElement('input'));
+    await act(async () => { fireEvent.keyDown(input, { key: 'r', ctrlKey: true }); });
+    input.remove();
+    expect(fetchAppList).not.toHaveBeenCalled();
   });
 });
 

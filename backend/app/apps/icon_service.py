@@ -13,6 +13,7 @@ import json
 import logging
 import pathlib
 import time
+from collections import OrderedDict
 
 from ..device import tools_jar
 from ..device.adb import Adb
@@ -24,6 +25,12 @@ ICON_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 _PKG_LOCKS: dict[str, asyncio.Lock] = {}
 _PREFETCH_TASK: asyncio.Task | None = None
+
+# Icons already read from the folder, newest last: an icon is shown many times (desktop, taskbar, launcher, previews) and used to be read
+# from disk and scanned for its PNG header on every one of them. The entry is checked against the file's size and time, so a refreshed icon
+# is never served stale.
+_MEM_MAX = 512
+_MEM: OrderedDict[str, tuple[tuple[int, int], bytes]] = OrderedDict()
 
 
 def _get_pkg_lock(pkg: str) -> asyncio.Lock:
@@ -44,32 +51,61 @@ def _extract_pure_png(data: bytes | None) -> bytes | None:
     return None
 
 
+def cached_icon(package: str) -> tuple[bytes, str] | None:
+    """The icon of `package` from memory / the cache folder, with an ETag — WITHOUT a phone. None when it was never cached.
+
+    The folder is the store (`~/.opendex/icon_cache/<package>.png`, shared by every phone: an icon is the app's, not the phone's); this only
+    keeps what was read, so it is not read again.
+    """
+    path = ICON_CACHE_DIR / f"{package}.png"
+    try:
+        stat = path.stat()
+    except OSError:
+        _MEM.pop(package, None)
+        return None
+    signature = (stat.st_mtime_ns, stat.st_size)
+    etag = f'"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
+    hit = _MEM.get(package)
+    if hit is not None and hit[0] == signature:
+        _MEM.move_to_end(package)
+        return hit[1], etag
+    try:
+        pure = _extract_pure_png(path.read_bytes())
+    except OSError:
+        return None
+    if not pure:
+        with contextlib.suppress(OSError):
+            path.unlink(missing_ok=True)
+        _MEM.pop(package, None)
+        return None
+    _MEM[package] = (signature, pure)
+    _MEM.move_to_end(package)
+    while len(_MEM) > _MEM_MAX:
+        _MEM.popitem(last=False)
+    return pure, etag
+
+
 async def get_app_icon_bytes(adb: Adb, serial: str, package: str, size: int = 128, force: bool = False) -> bytes | None:
     """İstenen paketin ikonunu önbellekten veya doğrudan cihazda render ederek getirir."""
     cached = ICON_CACHE_DIR / f"{package}.png"
 
-    if not force and cached.is_file():
-        with contextlib.suppress(Exception):
-            data = cached.read_bytes()
-            pure = _extract_pure_png(data)
-            if pure:
-                log.debug("[IconService:CACHE_HIT] %s -> %d bytes", package, len(pure))
-                return pure
-            cached.unlink(missing_ok=True)
+    if not force:
+        hit = cached_icon(package)
+        if hit is not None:
+            log.debug("[IconService:CACHE_HIT] %s -> %d bytes", package, len(hit[0]))
+            return hit[0]
 
     async with _get_pkg_lock(package):
         # Double check inside lock
-        if not force and cached.is_file():
-            with contextlib.suppress(Exception):
-                data = cached.read_bytes()
-                pure = _extract_pure_png(data)
-                if pure:
-                    return pure
-                cached.unlink(missing_ok=True)
+        if not force:
+            hit = cached_icon(package)
+            if hit is not None:
+                return hit[0]
 
         if force and cached.is_file():
             with contextlib.suppress(Exception):
                 cached.unlink(missing_ok=True)
+                _MEM.pop(package, None)
                 log.info("[IconService:FORCE_REFRESH] Önbellek silindi: %s", cached)
 
         await tools_jar.ensure_tools_jar(adb, serial)
