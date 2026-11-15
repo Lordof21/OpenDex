@@ -5,9 +5,9 @@
 // (cropPackage.js), `resolutionLocked` her zaman true'dur (akış çözünürlüğü yok). İçeriğini Sub-PiP ile AYNI görünüm
 // çizer (WorkspaceTaskPipView); pencere boyutlanınca görev Workspace'te gerçekten o boyuta gelir.
 
-import { appViewportBox } from './windowMath.js';
-import { chromeForMode, initialRestorePatch } from './windowModel.js';
-import { frameForBounds, referenceScale } from './workspacePip/cropMath.js';
+import { appViewportBox, devicePixelRatioSafe } from './windowMath.js';
+import { chromeForMode, initialRestorePatch, isHeaderHidden } from './windowModel.js';
+import { frameForBounds, pixelScale } from './workspacePip/cropMath.js';
 import { cropPackageKey } from './cropPackage.js';
 
 export const CROP_KIND = 'workspace-crop';
@@ -20,20 +20,23 @@ export const isCropWindow = (win) => win?.kind === CROP_KIND;
 export const CROP_CHROME = chromeForMode('normal', false);
 
 /**
- * Görevin DeX'teki ilk pencere kutusu: VD, DeX görünüm alanına sığdırılmış gibi ölçeklenir (referenceScale) — görev
- * VD'nin yüzde kaçını kaplıyorsa pencere de görünüm alanının o kadarını kaplar. En-boy oranı kilitli değildir.
+ * Görevin DeX'teki ilk pencere kutusu: görevin 1:1 karşılığı (bir VD pikseli = bir fiziksel piksel) + çerçevenin video olmayan
+ * payı. `chrome` açılış anındaki başlık durumunu içerir (başlık gizliyse yalnız kenarlık): çerçeve sonradan "düzeltilmez", ilk
+ * karede doğrudur ve görev değişmez. Görünüm alanına sığmayan görev alana kırpılır (görev sonra buna göre küçülür).
  */
-export function initialCropBox(bounds, vd, position, viewport = appViewportBox()) {
+export function initialCropBox(bounds, position, { viewport = appViewportBox(), chrome = CROP_CHROME, dpr = devicePixelRatioSafe() } = {}) {
   const margin = 24;
-  const size = frameForBounds(bounds, referenceScale(viewport, vd), CROP_CHROME, {
+  const size = frameForBounds(bounds, pixelScale(dpr), chrome, {
     w: viewport.w - 2 * margin,
     h: viewport.h - margin,
   });
   return { x: position.x, y: position.y, w: size.w, h: size.h };
 }
 
-export function buildCropWindow({ task, vd, zIndex, position }) {
-  const box = initialCropBox(task.bounds, vd, position);
+export function buildCropWindow({ task, zIndex, position, settings = null }) {
+  const headerMode = 'follow';
+  const chrome = chromeForMode('normal', isHeaderHidden({ headerMode }, settings));
+  const box = initialCropBox(task.bounds, position, { chrome });
   return {
     id: cropWindowId(task.windowId),
     kind: CROP_KIND,
@@ -56,7 +59,7 @@ export function buildCropWindow({ task, vd, zIndex, position }) {
     deviceH: 0,
     dpi: null,
     videoFitMode: 'fit',
-    headerMode: 'follow',
+    headerMode,
     modeStack: [],
     ...initialRestorePatch(box),
   };

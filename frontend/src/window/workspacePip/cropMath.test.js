@@ -7,6 +7,7 @@ import {
   cropPointToStream,
   frameForBounds,
   isViewInSync,
+  pixelScale,
   planCropResize,
   referenceScale,
   viewSizeOf,
@@ -127,10 +128,28 @@ describe('isViewInSync / frameForBounds / computePipWindowSize', () => {
     expect(frameForBounds([0, 0, 1920, 1080], 1, CHROME, { w: 900, h: 700 })).toEqual({ w: 900, h: 700 });
   });
 
-  it('PiP boyutu görevin ekrandaki ölçekli karşılığı + başlık satırı; ekrandan büyük / çok küçük olmaz; bounds yoksa güvenli varsayılan', () => {
-    expect(computePipWindowSize([0, 0, 800, 600], VD, SURFACE)).toEqual({ w: 400, h: 300 + 28 });
-    expect(computePipWindowSize([0, 0, 1920, 1080], VD, { w: 1000, h: 300 })).toEqual({ w: 533, h: 300 }); // başlık satırı dahil ekrana sığar
-    expect(computePipWindowSize([0, 0, 100, 80], VD, SURFACE)).toEqual({ w: 240, h: 140 + 28 });
-    expect(computePipWindowSize(null, VD, SURFACE).w).toBeGreaterThanOrEqual(240);
+  it('PiP iç boyutu görevin 1:1 karşılığıdır (başlık satırı yok); ekrandan büyük / çok küçük olmaz; bounds yoksa güvenli varsayılan', () => {
+    expect(computePipWindowSize([0, 0, 800, 600], 1, { w: 1920, h: 1000 })).toEqual({ w: 800, h: 600 });
+    expect(computePipWindowSize([0, 0, 800, 600], 0.8, { w: 1920, h: 1000 })).toEqual({ w: 640, h: 480 });   // dpr 1,25
+    expect(computePipWindowSize([0, 0, 1920, 1080], 1, { w: 1000, h: 300 })).toEqual({ w: 1000, h: 300 });
+    expect(computePipWindowSize([0, 0, 100, 80], 1, { w: 1920, h: 1000 })).toEqual({ w: 240, h: 140 });
+    expect(computePipWindowSize(null, 1, { w: 1920, h: 1000 }).w).toBeGreaterThanOrEqual(240);
+  });
+});
+
+describe('pixelScale (1:1)', () => {
+  it('bir VD pikseli = bir fiziksel piksel = 1/dpr CSS pikseli; bilinmeyen oranda 1', () => {
+    expect(pixelScale(1)).toBe(1);
+    expect(pixelScale(1.25)).toBe(0.8);
+    expect(pixelScale(2)).toBe(0.5);
+    expect(pixelScale(0)).toBe(1);
+    expect(pixelScale(undefined)).toBe(1);
+  });
+
+  it("pencere/yüzey boyutuna bağlı değildir: sığdırma ölçeği 1/dpr'den küçük olsa da 1:1 pencere büyük çıkar", () => {
+    const fit = referenceScale({ w: 1536, h: 800 }, VD);   // eski model: 0,74 → çerçeve küçük, görüntü yeniden örneklenir
+    expect(fit).toBeLessThan(pixelScale(1.25));
+    expect(viewSizeOf([0, 0, 800, 600], pixelScale(1.25))).toEqual({ w: 640, h: 480 });
+    expect(viewSizeOf([0, 0, 800, 600], fit).w).toBeLessThan(640);
   });
 });

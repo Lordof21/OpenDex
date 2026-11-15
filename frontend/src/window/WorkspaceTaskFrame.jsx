@@ -322,7 +322,7 @@ export default function WorkspaceTaskFrame({
     handoff: (windowing) => store().handoffWindowToPhone(task.windowId, windowing),
     reclaim: () => store().reclaimWindow(task.windowId),
     toggleMaximize: toggleMaximizeInsideWorkspace,
-    togglePip: () => (pipOpen ? closeWorkspaceTaskPip(task.windowId) : openWorkspaceTaskPip(task, { w: effVdW, h: effVdH })),
+    togglePip: () => (pipOpen ? closeWorkspaceTaskPip(task.windowId) : openWorkspaceTaskPip(task)),
     openCrop: () => store().openWorkspaceCropWindow(task.windowId),
     popOut: () => store().popOutToDesktop(task.windowId),
     closeTask: () => store().closeWorkspaceTask(task.windowId),

@@ -14,8 +14,13 @@ vi.mock('../src/settings/settingsApi.js', () => ({
   saveSettings: vi.fn().mockResolvedValue({}),
   subscribeSettings: vi.fn(() => () => {}),
 }));
+// Oluşturulan kod çözücülerin seçenekleri (getCropRect'i testten çağırmak için).
+globalThis.__cropDecoders = [];
 vi.mock('../src/media/videoDecoder.js', () => ({
   WindowVideoDecoder: class {
+    constructor(canvas, opts) {
+      globalThis.__cropDecoders.push(opts);
+    }
     connect() {}
     destroy() {}
   },
@@ -76,16 +81,49 @@ describe('WorkspaceTaskPipView — gömülü (DeX-içi) kip', () => {
   });
   afterEach(cleanup);
 
-  it('bağımsız PiP penceresinde kendi başlık satırı vardır; gömülüyken YOKTUR (pencerenin başlığı var)', () => {
+  it('bağımsız PiP penceresinde başlık satırı ve "Öne getir" YOKTUR (görüntü pencerenin tamamı); DeX-içinde "Öne getir" kalır', () => {
     const standalone = render(<WorkspaceTaskPipView taskWindowId="task-1" onRequestClose={() => {}} />);
-    expect(standalone.getByTitle("PiP'i kapat")).toBeInTheDocument();
-    expect(standalone.getByText('WhatsApp')).toBeInTheDocument();
+    expect(standalone.queryByTitle("PiP'i kapat")).toBeNull();
+    expect(standalone.queryByText('WhatsApp')).toBeNull();
+    expect(standalone.queryByText('Öne getir')).toBeNull();
+    expect(standalone.container.querySelector('canvas').parentElement).toBe(standalone.container.firstChild.lastChild);   // canvas'ın üstünde bir şerit yok
     standalone.unmount();
 
     const embedded = render(<WorkspaceTaskPipView taskWindowId="task-1" embedded onRequestClose={() => {}} />);
     expect(embedded.queryByTitle("PiP'i kapat")).toBeNull();
     expect(embedded.queryByText('WhatsApp')).toBeNull();
     expect(embedded.getByText('Öne getir')).toBeInTheDocument(); // yine de erişilebilir
+  });
+
+  describe('1:1 yerleşim', () => {
+    let boxSpy;
+    const boxOf = (w, h) => vi.spyOn(HTMLDivElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({
+      left: 0, top: 0, right: w, bottom: h, width: w, height: h, x: 0, y: 0, toJSON() {},
+    }));
+    beforeEach(() => { globalThis.__cropDecoders.length = 0; });
+    afterEach(() => boxSpy?.mockRestore());
+
+    const withFrame = async (w, h) => {
+      boxSpy = boxOf(w, h);
+      const view = render(<WorkspaceTaskPipView taskWindowId="task-1" embedded onRequestClose={() => {}} />);
+      await act(async () => { globalThis.__cropDecoders.at(-1).getCropRect(1920, 1080); });   // kırpma = görev kutusu 800×600
+      await act(async () => {});
+      return view.container.querySelector('canvas');
+    };
+
+    it('kırpma görüntü alanına birkaç piksel kala canvas kırpmanın KENDİ boyutunda ve tam piksele oturur (object-fit ile yeniden örneklenmez)', async () => {
+      const canvas = await withFrame(804, 604);
+      expect(canvas.style.width).toBe('800px');
+      expect(canvas.style.height).toBe('600px');
+      expect(canvas.style.left).toBe('2px');
+      expect(canvas.style.top).toBe('2px');
+    });
+
+    it('alan kırpmadan çok farklıysa canvas alanı doldurur (gerçek ölçekleme)', async () => {
+      const canvas = await withFrame(500, 400);
+      expect(canvas.style.width).toBe('100%');
+      expect(canvas.style.height).toBe('100%');
+    });
   });
 
   it('"Öne getir" kaynak görevi Workspace’te öne getirir', () => {
@@ -127,16 +165,15 @@ describe('WorkspaceTaskPipView — gömülü (DeX-içi) kip', () => {
 
 describe('WorkspaceTaskPipView — pencere boyutlanınca görev boyutlanır', () => {
   let observers = [];
-  let rect = { w: 400, h: 300 };
+  let rect = { w: 800, h: 600 };
   let rectSpy;
+  let boxSpy;
 
   beforeEach(() => {
     vi.useFakeTimers();
     api.post.mockClear();
     observers = [];
-    rect = { w: 400, h: 300 }; // görev 800×600, yüzey (uygulama görünüm alanı) 960×540 → ölçek 0,5
-    window.innerWidth = 960;
-    window.innerHeight = 590;
+    rect = { w: 800, h: 600 }; // görev 800×600, ölçek 1:1 (jsdom devicePixelRatio = 1) → canvas 800×600
     useWorkspaceTaskFeed.mockReturnValue(live());
     vi.stubGlobal(
       'ResizeObserver',
@@ -149,9 +186,9 @@ describe('WorkspaceTaskPipView — pencere boyutlanınca görev boyutlanır', ()
         disconnect() {}
       },
     );
-    rectSpy = vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({
-      left: 0, top: 0, right: rect.w, bottom: rect.h, width: rect.w, height: rect.h, x: 0, y: 0, toJSON() {},
-    }));
+    const fakeRect = () => ({ left: 0, top: 0, right: rect.w, bottom: rect.h, width: rect.w, height: rect.h, x: 0, y: 0, toJSON() {} });
+    rectSpy = vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockImplementation(fakeRect);
+    boxSpy = vi.spyOn(HTMLDivElement.prototype, 'getBoundingClientRect').mockImplementation(fakeRect);   // ölçülen görünüm alanı kapsayıcıdır
   });
   afterEach(() => {
     cleanup();
@@ -160,6 +197,7 @@ describe('WorkspaceTaskPipView — pencere boyutlanınca görev boyutlanır', ()
     // Yalnız KENDİ casusumuz geri alınır: vi.restoreAllMocks() modül sahte fonksiyonlarının (injectDomKeyEvent…)
     // varsayılan çözümlerini de siler ve sonraki testleri bozar.
     rectSpy.mockRestore();
+    boxSpy.mockRestore();
   });
 
   const resizeTo = async (w, h) => {
@@ -171,7 +209,7 @@ describe('WorkspaceTaskPipView — pencere boyutlanınca görev boyutlanır', ()
 
   it('pencere büyüyünce tek resize-task isteği gider (bounds + yoğunluk + kip)', async () => {
     render(<WorkspaceTaskPipView taskWindowId="task-1" embedded onRequestClose={() => {}} />);
-    await resizeTo(500, 375);
+    await resizeTo(1000, 750);
 
     expect(resizeCalls()).toHaveLength(1);
     const body = resizeCalls()[0][1];
@@ -182,14 +220,14 @@ describe('WorkspaceTaskPipView — pencere boyutlanınca görev boyutlanır', ()
   it('VD sınırını aşan istekte "VD sınırı" rozeti görünür', async () => {
     const { queryByText } = render(<WorkspaceTaskPipView taskWindowId="task-1" embedded onRequestClose={() => {}} />);
     expect(queryByText('VD sınırı')).toBeNull();
-    await resizeTo(1300, 900);
+    await resizeTo(2600, 1800);
     expect(queryByText('VD sınırı')).not.toBeNull();
   });
 
   it('görev telefonda (park) iken pencere boyutlansa da istek GİTMEZ', async () => {
     useWorkspaceTaskFeed.mockReturnValue({ status: 'phone', task: TASK });
     render(<WorkspaceTaskPipView taskWindowId="task-1" embedded onRequestClose={() => {}} />);
-    await resizeTo(600, 450);
+    await resizeTo(900, 700);
     expect(resizeCalls()).toHaveLength(0);
   });
 });
@@ -223,11 +261,11 @@ describe('WorkspaceCropCanvas', () => {
   describe('pencere görevin gerçek kutusuna uyar', () => {
     let rectSpy;
     beforeEach(() => {
-      window.innerWidth = 960;
-      window.innerHeight = 590; // yüzey 960×540 → ölçek 0,5; görev 800×600 → canvas 400×300
+      window.innerWidth = 300;   // yüzey boyutu ölçeği etkilemez (1:1); görev 800×600 → canvas 800×600
+      window.innerHeight = 300;
       vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
       rectSpy = vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({
-        left: 0, top: 0, right: 400, bottom: 344, width: 400, height: 344, x: 0, y: 0, toJSON() {}, // başlık gizli: canvas 44 px uzun
+        left: 0, top: 0, right: 800, bottom: 644, width: 800, height: 644, x: 0, y: 0, toJSON() {}, // başlık gizli: canvas 44 px uzun
       }));
     });
     afterEach(() => {
@@ -235,10 +273,10 @@ describe('WorkspaceCropCanvas', () => {
       vi.unstubAllGlobals();
     });
 
-    it('serbest pencerenin çerçevesi görevin ölçekli kutusuna çekilir; görev boyutlanmaz', () => {
+    it('serbest pencerenin çerçevesi görevin 1:1 kutusuna çekilir (başlık dahil); görev boyutlanmaz', () => {
       render(<WorkspaceCropCanvas win={CROP} />);
       const win = useWindowStore.getState().windows.find((w) => w.id === CROP.id);
-      expect([win.w, win.h]).toEqual([402, 346]); // 400×300 canvas + kenarlık + başlık
+      expect([win.w, win.h]).toEqual([802, 646]); // 800×600 canvas + kenarlık + başlık
       expect(api.post.mock.calls.filter(([u]) => u === '/api/windows/workspace/resize-task')).toHaveLength(0);
     });
 
@@ -266,16 +304,18 @@ describe('WorkspaceCropCanvas', () => {
 describe('Hub varyantı', () => {
   afterEach(cleanup);
 
+  const handlers = { onFitMode: () => {}, onDynamicDp: () => {}, onPip: () => {}, onSend: () => {} };
+
   it('video penceresinde tüm eylemler vardır', () => {
-    const { queryByText } = render(<HubPanel />);
-    for (const label of ['Görüntü ölçeği', 'Dinamik DP', 'Ayrı PiP', "Workspace'e gönder", 'Tam ekran', 'Üstte tut']) {
+    const { queryByText } = render(<HubPanel {...handlers} />);
+    for (const label of ['Ölçek', 'Dinamik DP', 'Ayrı PiP', "Workspace'e gönder", 'Tam ekran', 'Üstte tut']) {
       expect(queryByText(label), label).not.toBeNull();
     }
   });
 
   it('kırpma penceresinde video/akış eylemleri gizlenir; pencere eylemleri kalır', () => {
-    const { queryByText } = render(<HubPanel variant="workspace-crop" />);
-    for (const label of ['Görüntü ölçeği', 'Dinamik DP', 'Ayrı PiP', "Workspace'e gönder"]) {
+    const { queryByText } = render(<HubPanel variant="workspace-crop" {...handlers} />);
+    for (const label of ['Ölçek', 'Dinamik DP', 'Ayrı PiP', "Workspace'e gönder"]) {
       expect(queryByText(label), label).toBeNull();
     }
     for (const label of ['Tam ekran', 'Üstte tut']) {

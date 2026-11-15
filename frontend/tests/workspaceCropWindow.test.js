@@ -72,22 +72,46 @@ describe('buildCropWindow', () => {
     expect(win.deviceW).toBe(0);
   });
 
-  it('pencere kutusu VD\u2019nin görünüm alanına sığdırılmış ölçeğidir (alan yüzdesi korunur, oran kilitli değil); normal kutu kayıtlıdır', () => {
-    window.innerWidth = 960;
-    window.innerHeight = 590; // görünüm alanı 960×540 → VD'nin yarısı
-    const box = initialCropBox(TASK.bounds, VD, { x: 40, y: 30 });
-    expect(box).toEqual({ x: 40, y: 30, w: 400 + FRAME_BORDER_PX, h: 300 + FRAME_CHROME_H_PX }); // 800×600 görev → 400×300 canvas
+  it('pencere kutusu görevin 1:1 karşılığıdır (bir VD pikseli = bir fiziksel piksel; yüzeye sığdırma yok); normal kutu kayıtlıdır', () => {
+    window.innerWidth = 1920;
+    window.innerHeight = 1200;
+    const box = initialCropBox(TASK.bounds, { x: 40, y: 30 });
+    expect(box).toEqual({ x: 40, y: 30, w: 800 + FRAME_BORDER_PX, h: 600 + FRAME_CHROME_H_PX }); // 800×600 görev → 800×600 canvas
 
-    const built = buildCropWindow({ task: TASK, vd: VD, zIndex: 7, position: { x: 40, y: 30 } });
+    const built = buildCropWindow({ task: TASK, zIndex: 7, position: { x: 40, y: 30 } });
     expect(built).toMatchObject({ ...box, zIndex: 7, focused: true, minimized: false });
     expect([built._prevX, built._prevY, built._prevW, built._prevH]).toEqual([40, 30, box.w, box.h]);
 
     // Görünüm alanından büyük görev alana kırpılır (görev sonradan pencereye göre küçülür).
-    expect(initialCropBox([0, 0, 1920, 1080], VD, { x: 0, y: 0 }).w).toBeLessThanOrEqual(960);
+    expect(initialCropBox([0, 0, 1920, 1080], { x: 0, y: 0 }).w).toBeLessThanOrEqual(1920);
+  });
+
+  it('kutu pencerenin boyutundan bağımsızdır: küçük bir görünüm alanı ölçeği değiştirmez', () => {
+    window.innerWidth = 1000;
+    window.innerHeight = 1000;
+    const small = initialCropBox([0, 0, 400, 300], { x: 0, y: 0 });
+    window.innerWidth = 3000;
+    const large = initialCropBox([0, 0, 400, 300], { x: 0, y: 0 });
+    expect(small).toEqual(large);
+    expect([small.w, small.h]).toEqual([400 + FRAME_BORDER_PX, 300 + FRAME_CHROME_H_PX]);
+  });
+
+  it('Windows ölçeklemesinde (dpr 1,25) görev fiziksel pikseline oturur: 800×600 görev 640×480 CSS px', () => {
+    const box = initialCropBox(TASK.bounds, { x: 0, y: 0 }, { viewport: { w: 1920, h: 1200 }, dpr: 1.25 });
+    expect([box.w, box.h]).toEqual([640 + FRAME_BORDER_PX, 480 + FRAME_CHROME_H_PX]);
+  });
+
+  it('başlık gizli açılırsa çerçeve ilk karede doğrudur (yalnız kenarlık): sonradan düzeltme sıçraması yok', () => {
+    window.innerWidth = 1920;
+    window.innerHeight = 1200;
+    const hidden = buildCropWindow({ task: TASK, zIndex: 1, position: { x: 0, y: 0 }, settings: { header_hover_mode: true } });
+    const shown = buildCropWindow({ task: TASK, zIndex: 1, position: { x: 0, y: 0 }, settings: { header_hover_mode: false } });
+    expect(hidden.h).toBe(600 + FRAME_BORDER_PX);
+    expect(shown.h).toBe(600 + FRAME_CHROME_H_PX);
   });
 
   it('görev başlığı yoksa paket adı kullanılır', () => {
-    expect(buildCropWindow({ task: { ...TASK, title: '' }, vd: VD, zIndex: 1, position: { x: 0, y: 0 } }).title).toBe('com.whatsapp');
+    expect(buildCropWindow({ task: { ...TASK, title: '' }, zIndex: 1, position: { x: 0, y: 0 } }).title).toBe('com.whatsapp');
   });
 });
 
@@ -246,8 +270,8 @@ describe('store: kırpma penceresi bırakılınca (commitCropWindowResize)', () 
 
   beforeEach(() => {
     localStorage.clear();
-    window.innerWidth = 960;
-    window.innerHeight = 590; // görünüm alanı 960×540 → ölçek 0.5 (VD 1920×1080)
+    window.innerWidth = 1920;
+    window.innerHeight = 1200; // ölçek 1:1 (jsdom dpr = 1); pencere görev kutusuna sığar
     api.post.mockReset();
     useWindowStore.setState({ windows: [{ ...ECO, vdW: 1920, vdH: 1080, tasks: [{ ...TASK }] }], nextZ: 5 });
     useWindowStore.getState().openWorkspaceCropWindow('task-1');
@@ -267,18 +291,18 @@ describe('store: kırpma penceresi bırakılınca (commitCropWindowResize)', () 
     expect(api.post).toHaveBeenCalledTimes(1);
     const [url, body] = api.post.mock.calls[0];
     expect(url).toBe('/api/windows/workspace/resize-task');
-    expect(body.bounds).toEqual([100, 50, 1100, 850]); // 500×400 canvas / 0.5
+    expect(body.bounds).toEqual([100, 50, 600, 450]); // 500×400 canvas / 1
     expect(win().pendingResizeTransition.isAwaitingFirstFrame).toBe(true);
     expect(win().w).toBe(start.w); // henüz büyümedi
-    resolve({ bounds: [100, 50, 1080, 850] }); // Android 20 px dar verdi
+    resolve({ bounds: [100, 50, 580, 450] }); // Android 20 px dar verdi
     await done;
-    expect(win().w).toBe(490 + CHROME.dw);
+    expect(win().w).toBe(480 + CHROME.dw);
     expect(win().h).toBe(400 + CHROME.dh);
     expect(win().pendingResizeTransition.isAnimating).toBe(true);
   });
 
   it('sol kenardan boyutlandırmada sağ kenar yerinde kalır', async () => {
-    api.post.mockResolvedValue({ bounds: [100, 50, 1080, 850] });
+    api.post.mockResolvedValue({ bounds: [100, 50, 580, 450] });
     const final = { x: 0, y: 30, w: 500 + CHROME.dw, h: 400 + CHROME.dh };
     release(final, 'w');
     await useWindowStore.getState().commitCropWindowResize(ID, final, CHROME);

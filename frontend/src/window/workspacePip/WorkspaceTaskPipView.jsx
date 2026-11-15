@@ -14,23 +14,28 @@ import { useWheelKineticScroll } from '../useWheelKineticScroll.js';
 import { api } from '../../lib/api.js';
 import { logger } from '../../lib/logger.js';
 import { newOpId } from '../../lib/opId.js';
+import { pixelExactBox } from '../windowMath.js';
 import { computeCropRect, cropPointToStream } from './cropMath.js';
 import { useWorkspaceTaskFeed } from './useWorkspaceTaskFeed.js';
 import { useWorkspaceCropResize } from './useWorkspaceCropResize.js';
 import { t as tt } from '../../i18n/index.js';
 
+const sameBox = (a, b) => (a === b) || (a && b && a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height);
+
 const RAISE_THROTTLE_MS = 800;
 const GONE_AUTOCLOSE_MS = 1800;
 
 /**
- * @param embedded  true → DeX penceresinin İÇİNDE: kendi başlık satırı yok (pencerenin başlığı var);
- *                  "Öne getir" ve "VD sınırı" küçük bir yer paylaşımı olarak gösterilir.
+ * @param embedded  true → DeX penceresinin İÇİNDE ("Öne getir" küçük bir yer paylaşımıdır). PiP penceresinin (false) kendi başlık
+ *                  satırı YOKTUR: görüntü pencerenin tamamıdır, taşıma/kapatmayı işletim sistemi çerçevesi verir.
  * @param active    klavye enjeksiyonu yalnız bu görünüm odaktayken çalışır (gömülüyken ana pencerenin tuşları
  *                  her kırpma penceresine sızmasın); bağımsız PiP OS penceresinde her zaman true.
  * @param onAdopt   (bounds, ölçek) → ev sahibi penceresini görevin gerçek kutusuna uydurur (bkz. useWorkspaceCropResize)
  */
-export default function WorkspaceTaskPipView({ taskWindowId, onRequestClose, embedded = false, active = true, onAdopt }) {
-  const { status, task } = useWorkspaceTaskFeed(taskWindowId);
+export default function WorkspaceTaskPipView({ taskWindowId, onRequestClose, embedded = false, active = true, onAdopt, feed = null }) {
+  // `feed`: the owner (the PiP shell, which needs the task for its own title and window) shares its feed; otherwise the view reads its own.
+  const ownFeed = useWorkspaceTaskFeed(feed ? null : taskWindowId);
+  const { status, task } = feed || ownFeed;
   const canvasRef = useRef(null);
   const touchRef = useRef(null);
   const taskRef = useRef(null); // decoder callback'i re-render tetiklemeden güncel bounds'u okusun
@@ -38,7 +43,20 @@ export default function WorkspaceTaskPipView({ taskWindowId, onRequestClose, emb
   const lastRaiseRef = useRef(0);
   const activeRef = useRef(active);
   activeRef.current = active;
+  const boxRef = useRef(null); // the viewing area (the canvas may be a few pixels smaller than it, see exactBox)
   const [hasFrame, setHasFrame] = useState(false);
+  const [exactBox, setExactBox] = useState(null);
+
+  // 1:1: when the crop is within a few physical pixels of the viewing area, the canvas takes the crop's own size (CSS = pixels / dpr)
+  // on whole physical pixels; `object-fit` would resample the whole picture by 0.1% and blur the text (the same rule as VideoCanvas).
+  const placeExact = useCallback(() => {
+    const box = boxRef.current;
+    if (!box) return;
+    const crop = cropRef.current;
+    const dpr = box.ownerDocument?.defaultView?.devicePixelRatio || 1;
+    const next = pixelExactBox(box.getBoundingClientRect(), dpr, crop.sw, crop.sh);
+    setExactBox((prev) => (sameBox(prev, next) ? prev : next));
+  }, []);
 
   taskRef.current = task;
   const isLive = status === 'live' && Boolean(task?.wsUrl);
@@ -46,7 +64,16 @@ export default function WorkspaceTaskPipView({ taskWindowId, onRequestClose, emb
   const anchorId = wsUrl ? wsUrl.split('/').pop() : null;
 
   // Pencere boyutlanınca görev Workspace'te GERÇEKTEN o boyuta gelir: durgunluktan sonra tek istek.
-  const { atVdLimit } = useWorkspaceCropResize({ canvasRef, task, enabled: isLive, embedded, onAdopt });
+  const { atVdLimit } = useWorkspaceCropResize({ canvasRef, boxRef, task, enabled: isLive, embedded, onAdopt });
+
+  useEffect(() => {
+    const box = boxRef.current;
+    const RO = box?.ownerDocument?.defaultView?.ResizeObserver || (typeof window !== 'undefined' ? window.ResizeObserver : undefined);
+    if (!box || !RO) return undefined;
+    const observer = new RO(placeExact);
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, [placeExact]);
 
   // Video: anchor akışına kendi decoder'ı; kare başına kırpma bounds'u canlı okur, yani
   // görev ana pencerede taşınırken/boyutlanırken PiP kutuyu otomatik takip eder.
@@ -57,14 +84,16 @@ export default function WorkspaceTaskPipView({ taskWindowId, onRequestClose, emb
       getCropRect: (frameW, frameH) => {
         const t = taskRef.current;
         const crop = computeCropRect(t?.bounds, { w: t?.vdW, h: t?.vdH }, { w: frameW, h: frameH });
+        const resized = crop.sw !== cropRef.current.sw || crop.sh !== cropRef.current.sh;
         cropRef.current = crop;
+        if (resized) queueMicrotask(placeExact);   // the crop changed size: the 1:1 placement is decided again
         return crop;
       },
       onFirstFrame: () => setHasFrame(true),
     });
     decoder.connect(wsUrl);
     return () => decoder.destroy();
-  }, [isLive, wsUrl]);
+  }, [isLive, wsUrl, placeExact]);
 
   // Dokunma/scroll/klavye: ANCHOR oturumunun control soketi (ana WorkspaceCanvas ile aynı) —
   // Android WM ham koordinatı kendisi görev penceresine çözer.
@@ -192,6 +221,8 @@ export default function WorkspaceTaskPipView({ taskWindowId, onRequestClose, emb
       });
     };
     const onPaste = (e) => {
+      if (!activeRef.current) return;
+      if (e.target?.closest?.('input, textarea, select, [contenteditable]')) return;
       const text = e.clipboardData?.getData('text/plain');
       if (text && touchRef.current) {
         e.preventDefault();
@@ -225,9 +256,11 @@ export default function WorkspaceTaskPipView({ taskWindowId, onRequestClose, emb
       .catch((err) => L.error('reclaim', 'pip_bring_back_failed', { taskWindowId, error: err?.message || String(err) }));
   };
 
+  // The picture is the whole window: a PiP has NO header of its own (the OS frame carries the title, moving and closing), so the
+  // inner area is exactly the task's pixels. Over it, only a small overlay: the "VD limit" badge, and — inside a DeX window — "Bring to front".
   return (
-    <div className="group/pip relative flex h-full w-full flex-col overflow-hidden bg-video-backdrop text-scrim-foreground select-none">
-      {embedded ? (
+    <div className="group/pip relative flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden bg-video-backdrop text-scrim-foreground select-none">
+      {(embedded || atVdLimit) && (
         <div className="pointer-events-none absolute right-1.5 top-1.5 z-20 flex items-center gap-1 text-[10px]">
           {atVdLimit && (
             <span
@@ -237,54 +270,26 @@ export default function WorkspaceTaskPipView({ taskWindowId, onRequestClose, emb
              {tt('window.vd_siniri')}
             </span>
           )}
-          <button
-            type="button"
-            className="pointer-events-auto rounded bg-scrim px-1.5 py-0.5 opacity-0 transition-opacity hover:bg-scrim/95 focus-visible:opacity-100 group-hover/pip:opacity-100 cursor-pointer"
-            onClick={raiseTask}
-            title={tt('window.gorevi_calisma_alaninda_one_getir')}
-          >
-           {tt('common.one_getir')}
-          </button>
-        </div>
-      ) : (
-      <div className="flex h-7 shrink-0 items-center justify-between gap-2 bg-scrim px-2 text-[11px]">
-        <span className="truncate font-medium" title={task?.package}>
-          {task?.title || tt('window.workspace_gorevi')}
-        </span>
-        <div className="flex items-center gap-1">
-          {atVdLimit && (
-            <span
-              className="shrink-0 rounded bg-warning/20 px-1 text-[9px] font-semibold text-warning"
-              title={tt('window.gorev_calisma_alaninin_vd_sinirina')}
+          {embedded && (
+            <button
+              type="button"
+              className="pointer-events-auto rounded bg-scrim px-1.5 py-0.5 opacity-0 transition-opacity hover:bg-scrim/95 focus-visible:opacity-100 group-hover/pip:opacity-100 cursor-pointer"
+              onClick={raiseTask}
+              title={tt('window.gorevi_calisma_alaninda_one_getir')}
             >
-             {tt('window.vd_siniri')}
-            </span>
+             {tt('common.one_getir')}
+            </button>
           )}
-          <button
-            type="button"
-            className="rounded px-1.5 py-0.5 hover:bg-scrim-foreground/10 cursor-pointer"
-            onClick={raiseTask}
-            title={tt('window.gorevi_calisma_alaninda_one_getir')}
-          >
-           {tt('common.one_getir')}
-          </button>
-          <button
-            type="button"
-            className="rounded px-1.5 py-0.5 hover:bg-destructive/30 cursor-pointer"
-            onClick={() => onRequestClose?.()}
-            title={tt('window.pip_i_kapat')}
-          >
-            ✕
-          </button>
         </div>
-      </div>
       )}
 
-      <div className="relative min-h-0 flex-1">
+      <div ref={boxRef} className="relative min-h-0 flex-1">
         <canvas
           ref={canvasRef}
-          className="absolute inset-0 size-full touch-none cursor-default"
-          style={{ objectFit: 'contain' }}
+          className="absolute touch-none cursor-default"
+          style={exactBox
+            ? { left: exactBox.left, top: exactBox.top, width: exactBox.width, height: exactBox.height, objectFit: 'contain' }
+            : { inset: 0, width: '100%', height: '100%', objectFit: 'contain' }}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}

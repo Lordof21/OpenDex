@@ -190,6 +190,9 @@ export default function WorkspaceCanvas({ win }) {
     };
 
     const onPaste = (e) => {
+      if (e.target?.closest?.('input, textarea, select, [contenteditable]')) return;
+      if (keymapRef.current.editing) return;
+      if (!win.focused && targetWindow === window) return;
       const text = e.clipboardData?.getData('text/plain');
       if (text && touchRef.current) {
         e.preventDefault();
@@ -272,6 +275,7 @@ export default function WorkspaceCanvas({ win }) {
     backTargetId: anchorId,
     deviceH: vdH,
     deviceW: vdW,
+    shouldSkipPinch: () => keymapRef.current.nodes.length > 0,   // game mode: Ctrl frees the mouse, the wheel only scrolls
     getDeviceCoords: (e, canvas, rect) => {
       const canvasResized = canvas.width && canvas.height && (canvas.width !== 300 || canvas.height !== 150);
       const cw = canvasResized ? canvas.width : (win.streamW || canvas.width || vdW);

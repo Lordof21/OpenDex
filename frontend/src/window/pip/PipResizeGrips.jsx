@@ -1,6 +1,6 @@
 // Çerçevesiz PiP penceresinin kenar / köşe tutamaçları: işletim sistemi başlık çubuğunu ve kenarlığını kaldırdığımız için pencereyi
-// kenarından tutup büyütüp küçültmek bunlarla olur. Basınca işletim sisteminin kendi boyutlandırması başlar (Windows'taki gibi;
-// kenara yapıştırma ve imleç biçimi dahil). Pencere büyütülmüş / tam ekranken gösterilmez.
+// kenarından tutup büyütüp küçültmek bunlarla olur. Sürüklemeyi sahibi izler (DeX penceresi gibi hayalet kutu: usePipResizeGhost); izleyemezse
+// işletim sisteminin kendi boyutlandırması başlar. Pencere büyütülmüş / tam ekranken gösterilmez.
 
 import React from 'react';
 
@@ -18,7 +18,9 @@ const GRIPS = [
   { direction: 'SouthEast', cursor: 'nwse-resize', style: { bottom: 0, right: 0, width: CORNER, height: CORNER } },
 ];
 
-export default function PipResizeGrips({ onResize, disabled = false }) {
+// `onResize(direction, event)`: the press (the owner may follow the pointer itself — usePipResizeGhost — or hand it to the OS).
+// `onPrepare()`: the cursor reached an edge (the ghost window is made ahead of the first drag).
+export default function PipResizeGrips({ onResize, onPrepare, disabled = false }) {
   if (disabled) return null;
   return (
     <>
@@ -29,11 +31,12 @@ export default function PipResizeGrips({ onResize, disabled = false }) {
           aria-hidden="true"
           className="absolute z-[200]"
           style={{ ...style, cursor, touchAction: 'none' }}
+          onPointerEnter={onPrepare}
           onPointerDown={(event) => {
             if (event.button !== 0) return;
             event.preventDefault();
             event.stopPropagation();
-            onResize(direction);
+            onResize(direction, event);
           }}
         />
       ))}

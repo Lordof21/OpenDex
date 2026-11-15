@@ -1,5 +1,5 @@
 // Kırpma görünümü yeniden boyutlanınca görev Workspace'te GERÇEKTEN o boyuta gelir; görev kutusu pencereden farklı
-// çıkarsa pencere görevin gerçek kutusuna uyar. Ölçek: VD, pencerenin yüzeyine sığdırılır.
+// çıkarsa pencere görevin gerçek kutusuna uyar. Ölçek 1:1'dir (1 / devicePixelRatio): pencerenin yüzeyine ya da boyutuna bağlı değil.
 
 import { useRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -48,15 +48,15 @@ class FakeResizeObserver {
 const fireResize = () => act(() => observers.forEach((o) => o.cb()));
 
 // canvas'ın ekrandaki boyutu (jsdom düzen hesaplamaz)
-let rect = { w: 400, h: 300 };
+let rect = { w: 800, h: 600 };
 const setRect = (w, h) => {
   rect = { w, h };
 };
 
-const SCALE = 0.5; // yüzey 960×540 (VD 1920×1080'in yarısı)
+const SCALE = 1; // jsdom'da devicePixelRatio = 1 → bir VD pikseli = bir CSS pikseli
 const TASK = {
   windowId: 'task-1',
-  bounds: [100, 50, 900, 650], // 800×600 → 0,5 ölçekte canvas 400×300
+  bounds: [100, 50, 900, 650], // 800×600 → 1:1'de canvas 800×600
   vdW: 1920,
   vdH: 1080,
   density: null,
@@ -78,9 +78,9 @@ describe('useWorkspaceCropResize', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     observers = [];
-    rect = { w: 400, h: 300 };
-    window.innerWidth = 960; // appViewportBox() = 960 × (590 − TASKBAR_H) = 960×540
-    window.innerHeight = 590;
+    rect = { w: 800, h: 600 };
+    window.innerWidth = 300; // yüzey çok küçük: ölçeği ETKİLEMEZ (eskiden VD yüzeye sığdırılırdı)
+    window.innerHeight = 300;
     vi.stubGlobal('ResizeObserver', FakeResizeObserver);
     vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({
       left: 0, top: 0, right: rect.w, bottom: rect.h, width: rect.w, height: rect.h, x: 0, y: 0, toJSON() {},
@@ -104,7 +104,7 @@ describe('useWorkspaceCropResize', () => {
     expect(resizeCalls()).toHaveLength(0);
     expect(onAdopt).not.toHaveBeenCalled();
 
-    setRect(500, 375); // 400×300 → 500×375
+    setRect(1000, 750); // 800×600 → 1000×750
     fireResize();
     await advance(CROP_RESIZE_DEBOUNCE_MS - 1);
     expect(resizeCalls()).toHaveLength(0); // sürüklerken / durgunluktan önce istek YOK
@@ -113,8 +113,8 @@ describe('useWorkspaceCropResize', () => {
     expect(resizeCalls()).toHaveLength(1);
     const [, body, opts] = resizeCalls()[0];
     expect(body.window_id).toBe('task-1');
-    expect(body.bounds).toEqual([100, 50, 1100, 800]); // canvas / 0,5 = 1000×750, sol/üst sabit
-    expect(body.density).toBe(calculateWorkspaceTaskDpi(1000, 750, 1080, { scale: 0.5 })); // ekrandaki boyuta (ölçek 0,5) göre
+    expect(body.bounds).toEqual([100, 50, 1100, 800]); // canvas / 1 = 1000×750, sol/üst sabit
+    expect(body.density).toBe(calculateWorkspaceTaskDpi(1000, 750, 1080, { scale: 1 })); // ekrandaki (fiziksel) boyuta göre
     expect(body.density_mode).toBe('auto');
     expect(typeof opts.opId).toBe('string');
     expect(onAdopt).not.toHaveBeenCalled(); // Android istenen kutuyu verdi: pencereye dokunulmaz
@@ -122,7 +122,7 @@ describe('useWorkspaceCropResize', () => {
 
   it('sürekli sürüklemede yalnız SON boyut için tek istek', async () => {
     render(<Harness />);
-    for (const [w, h] of [[420, 315], [450, 338], [480, 360], [500, 375]]) {
+    for (const [w, h] of [[840, 630], [900, 675], [960, 720], [1000, 750]]) {
       setRect(w, h);
       fireResize();
       await advance(60); // debounce'tan kısa aralıklar
@@ -136,7 +136,7 @@ describe('useWorkspaceCropResize', () => {
 
   it('kullanıcı yoğunluğu sabitlediyse (manual) yeniden boyutlandırma yoğunluğu KORUR', async () => {
     render(<Harness task={{ ...TASK, density: 260, densityMode: 'manual' }} />);
-    setRect(500, 375);
+    setRect(1000, 750);
     fireResize();
     await advance(CROP_RESIZE_DEBOUNCE_MS);
 
@@ -146,20 +146,20 @@ describe('useWorkspaceCropResize', () => {
   it('VD sınırına kırpar ve "VD sınırı" verir; verilen kutu pencereden küçükse pencere o kutuya döner', async () => {
     const onAdopt = vi.fn();
     const { queryByTestId } = render(<Harness onAdopt={onAdopt} />);
-    setRect(1300, 900); // 2600×1800 istenir
+    setRect(2600, 1800); // 2600×1800 istenir
     fireResize();
     await advance(CROP_RESIZE_DEBOUNCE_MS);
 
     expect(resizeCalls()[0][1].bounds).toEqual([0, 0, 1920, 1080]);
     expect(queryByTestId('vd-limit')).not.toBeNull();
-    expect(onAdopt).toHaveBeenCalledWith([0, 0, 1920, 1080], SCALE); // pencere 960×540'a iner → siyah kenarlık kalmaz
+    expect(onAdopt).toHaveBeenCalledWith([0, 0, 1920, 1080], SCALE); // pencere 1920×1080'e iner → siyah kenarlık kalmaz
   });
 
   it('Android başka bir kutu verdiyse pencere yanıttaki GERÇEK kutuya uyar', async () => {
     api.post.mockResolvedValue({ ok: true, bounds: [100, 50, 1000, 700] }); // 1000×750 yerine 900×650
     const onAdopt = vi.fn();
     render(<Harness onAdopt={onAdopt} />);
-    setRect(500, 375);
+    setRect(1000, 750);
     fireResize();
     await advance(CROP_RESIZE_DEBOUNCE_MS);
 
@@ -172,13 +172,13 @@ describe('useWorkspaceCropResize', () => {
     const onAdopt = vi.fn();
     render(<Harness onAdopt={onAdopt} />);
 
-    setRect(500, 375);
+    setRect(1000, 750);
     fireResize();
     await advance(CROP_RESIZE_DEBOUNCE_MS);
     expect(resizeCalls()).toHaveLength(1);
     expect(onAdopt).toHaveBeenCalledWith(TASK.bounds, SCALE);
 
-    setRect(300, 225);
+    setRect(600, 450);
     fireResize();
     await advance(CROP_RESIZE_DEBOUNCE_MS);
     expect(resizeCalls()).toHaveLength(2);
@@ -190,10 +190,10 @@ describe('useWorkspaceCropResize', () => {
     const onAdopt = vi.fn();
     render(<Harness onAdopt={onAdopt} />);
 
-    setRect(500, 375);
+    setRect(1000, 750);
     fireResize();
     await advance(CROP_RESIZE_DEBOUNCE_MS); // 1. istek uçuşta
-    setRect(560, 420); // kullanıcı sürüklemeye devam ediyor
+    setRect(1120, 840); // kullanıcı sürüklemeye devam ediyor
     fireResize();
     releaseFirst({ ok: true, bounds: [100, 50, 1100, 800] }); // 1. yanıt eski boyutu gösterir ama pencere artık ondan ileride
     await advance(10);
@@ -206,7 +206,7 @@ describe('useWorkspaceCropResize', () => {
   });
 
   it('açılışta pencere görevden farklıysa (ör. başlık gizli) GÖREV esastır: istek yok, pencere uyar', async () => {
-    setRect(400, 344); // başlık gizliyken canvas 44 px uzun
+    setRect(800, 644); // başlık gizliyken canvas 44 px uzun
     const onAdopt = vi.fn();
     render(<Harness onAdopt={onAdopt} />);
 
@@ -224,18 +224,35 @@ describe('useWorkspaceCropResize', () => {
     expect(onAdopt).toHaveBeenCalledWith([100, 50, 1300, 950], SCALE);
   });
 
-  it('PiP OS penceresi (embedded=false) VD alanını KENDİ ekranına sığdırır', async () => {
-    const screenSpy = vi.spyOn(window, 'screen', 'get').mockReturnValue({ availWidth: 1920, availHeight: 1080 });
+  it('ölçek pencerenin piksel oranından gelir (1 / dpr): ekran ya da pencere boyutundan değil', async () => {
+    const dpr = vi.spyOn(window, 'devicePixelRatio', 'get').mockReturnValue(1.25);
     const onAdopt = vi.fn();
-    render(<Harness embedded={false} onAdopt={onAdopt} />); // ekranda ölçek 1,0 → görev 800×600 canvas bekler; canvas 400×300
-    expect(onAdopt).toHaveBeenCalledWith(TASK.bounds, 1);
-    screenSpy.mockRestore();
+    render(<Harness onAdopt={onAdopt} />); // 800×600 görev 1,25'te 640×480 CSS px ister; canvas 800×600 → pencere uyar
+    expect(onAdopt).toHaveBeenCalledWith(TASK.bounds, 0.8);
+    dpr.mockRestore();
+  });
+
+  it('kapsayıcı verilmişse ölçülen ve izlenen odur (canvas 1:1 oturması için kapsayıcıdan küçük olabilir)', async () => {
+    function WithBox() {
+      const canvasRef = useRef(null);
+      const boxRef = useRef(null);
+      useWorkspaceCropResize({ canvasRef, boxRef, task: TASK, enabled: true, embedded: true, onAdopt: () => {} });
+      return <div ref={boxRef}><canvas ref={canvasRef} /></div>;
+    }
+    const boxRect = vi.spyOn(HTMLDivElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({
+      left: 0, top: 0, right: 800, bottom: 600, width: 800, height: 600, x: 0, y: 0, toJSON() {},
+    }));
+    setRect(790, 590); // canvas birkaç piksel küçük (1:1 yerleşim payı): ölçüm kapsayıcıdan, yani uyumlu
+    render(<WithBox />);
+    await advance(1000);
+    expect(resizeCalls()).toHaveLength(0);
+    boxRect.mockRestore();
   });
 
   it('görev canlı değilken (enabled=false) gözlemci kurulmaz, istek gitmez', async () => {
     render(<Harness enabled={false} />);
     expect(observers).toHaveLength(0);
-    setRect(500, 375);
+    setRect(1000, 750);
     fireResize();
     await advance(1000);
     expect(resizeCalls()).toHaveLength(0);
@@ -243,7 +260,7 @@ describe('useWorkspaceCropResize', () => {
 
   it('bekleyen zamanlayıcı ayrılırken (unmount) iptal olur: istek sızmaz, gözlemci bırakılır', async () => {
     const { unmount } = render(<Harness />);
-    setRect(500, 375);
+    setRect(1000, 750);
     fireResize();
     unmount();
     await advance(1000);

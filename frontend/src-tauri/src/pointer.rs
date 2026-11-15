@@ -3,7 +3,9 @@
 // instead, and re-requests the stream size only once the button is up (src/window/pip/pipBridge.js `isPrimaryButtonDown`).
 
 /// True while the PRIMARY mouse button (the one that drags / resizes) is physically held. False elsewhere than Windows.
-#[tauri::command]
+/// `async`: off the main thread — a plain command runs on it, and during the resize the main thread is inside Windows' modal sizing
+/// loop, which held the answer back. GetAsyncKeyState works from any thread.
+#[tauri::command(async)]
 pub fn primary_button_down() -> bool {
     #[cfg(windows)]
     {

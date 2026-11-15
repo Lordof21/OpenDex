@@ -13,12 +13,15 @@ import { PanelShell } from './PanelShell.jsx';
 import AppIcon from '../ui/AppIcon.jsx';
 import { useWindowStore } from '../window/windowStore.js';
 import { iconPackageOf } from '../window/workspacePackage.js';
-import { getWindowThumbnail, subscribeThumbnail } from '../state/windowThumbnailCache.js';
+import { getWindowThumbnail, setWindowThumbnail, subscribeThumbnail } from '../state/windowThumbnailCache.js';
+import { isInPip } from '../window/pip/pipRegistry.js';
+import { decodeThumbnail, listenPipThumbnails, requestPipThumbnail } from '../window/pip/pipThumbnail.js';
 import { drawDownscaled } from '../lib/downscale.js';
 import { ACTION_LABEL, cardLeft, cardWidthFor, clampAspect, fitBox, toggleActionFor } from './taskbarModel.js';
 import { t } from '../i18n/index.js';
 
 const LIVE_INTERVAL_MS = 66; // ~15 fps: küçük bir önizleme için yeterli, 60 fps tam çözünürlük kopyalamaya göre çok ucuz
+const PIP_THUMB_INTERVAL_MS = 400; // PiP penceresinin önizleme karesi kart açıkken bu aralıkla istenir (~2,5 kare/sn)
 const ASPECT_EPSILON = 0.012; // kaynak oranı bu kadar değişmeden kutu yeniden boyutlanmaz (sürekli yeniden yerleşimi önler)
 
 /** Canlı video tuvali (VideoCanvas / WorkspaceCanvas `data-window-id` taşır). Kimlik karşılaştırması DOM'da yapılır, seçici kurulmaz. */
@@ -62,6 +65,7 @@ export const WindowPreview = forwardRef(function WindowPreview({
   const targetWinId = targetWin?.id || app?.id;
   const isMinimized = Boolean(targetWin?.minimized);
   const action = toggleActionFor(targetWin);
+  const inPip = Boolean(targetWinId) && isInPip(targetWinId);   // its picture is in a PiP webview, not in this document
 
   const [aspect, setAspect] = useState(() => initialAspect(targetWin, targetWinId));
   const aspectRef = useRef(aspect);
@@ -96,7 +100,8 @@ export const WindowPreview = forwardRef(function WindowPreview({
 
     paint();
     const unsubscribe = subscribeThumbnail((windowId) => {
-      if (windowId === targetWinId && isMinimized) paint(); // küçültülmüşken canlı kare yok; yeni önbellek karesi gelince yenile
+      // Küçültülmüşken ya da görüntüsü bir PiP'te dururken bu belgede canlı kare yok; yeni önbellek karesi gelince yenile.
+      if (windowId === targetWinId && (isMinimized || inPip)) paint();
     });
     if (!isMinimized) {
       const loop = (now) => {
@@ -114,7 +119,25 @@ export const WindowPreview = forwardRef(function WindowPreview({
       if (raf) cancelAnimationFrame(raf);
       unsubscribe();
     };
-  }, [targetWinId, isMinimized, pxW, pxH]);
+  }, [targetWinId, isMinimized, inPip, pxW, pxH]);
+
+  // A window shown in a PiP: its picture lives in the PiP's webview. While the card is open the PiP is asked for a small picture a few
+  // times a second; it goes to the same cache a minimized window uses.
+  useEffect(() => {
+    if (!inPip || !targetWinId) return undefined;
+    let alive = true;
+    const stop = listenPipThumbnails((shot) => {
+      if (!alive || shot?.winId !== targetWinId) return;
+      decodeThumbnail(shot).then((canvas) => { if (alive) setWindowThumbnail(targetWinId, canvas); }).catch(() => {});
+    });
+    stop.ready.then(() => { if (alive) requestPipThumbnail(targetWinId); });   // the first picture is asked for once the listener is in place
+    const timer = setInterval(() => requestPipThumbnail(targetWinId), PIP_THUMB_INTERVAL_MS);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+      stop();
+    };
+  }, [targetWinId, inPip]);
 
   const vw = typeof window !== 'undefined' ? window.innerWidth : 1920;
   const cardW = cardWidthFor(box.w);

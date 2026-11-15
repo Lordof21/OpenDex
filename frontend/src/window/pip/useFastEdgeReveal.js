@@ -91,6 +91,7 @@ export function useFastEdgeReveal({ enabled, holdOpen = false }) {
   const holdRef = useRef(holdOpen);
   holdRef.current = holdOpen;
   const revealedAtRef = useRef(0);
+  const scheduleCloseRef = useRef(null);   // the open header's own close scheduler (set while it is open)
   useFastEdgeIntent({
     enabled: enabled && !revealed,
     onIntent: () => {
@@ -136,14 +137,22 @@ export function useFastEdgeReveal({ enabled, holdOpen = false }) {
       schedule(0);
     };
     schedule(REVEAL_HOLD_MS);   // imleç hiç kıpırdamasa da 1 sn sonra normal kurala döner
+    scheduleCloseRef.current = schedule;
     window.addEventListener('pointermove', onMove, { passive: true });
     document.documentElement.addEventListener('pointerleave', onLeave);
     return () => {
+      scheduleCloseRef.current = null;
       clearClose();
       window.removeEventListener('pointermove', onMove);
       document.documentElement.removeEventListener('pointerleave', onLeave);
     };
   }, [enabled, revealed]);
+
+  // Whatever held the header down (the Hub, the layout menu) is gone: back to the normal rule. Without this the header stayed down when the
+  // menu closed under a cursor that did not move (a layout picked from it moves the window) — no pointer event ever scheduled the close.
+  useEffect(() => {
+    if (!holdOpen) scheduleCloseRef.current?.(REVEAL_CLOSE_DELAY_MS);
+  }, [holdOpen]);
 
   return revealed;
 }

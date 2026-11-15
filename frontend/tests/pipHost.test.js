@@ -26,19 +26,11 @@ beforeEach(() => {
 });
 
 describe('applyPipCommand', () => {
-  it('"handoff": ana store pencereyi telefona aktarır (kip varsa onunla) ve PiP kapanışını "ayrılıyor" diye işaretler', async () => {
+  it('"Telefona aktar" ana pencereye komut olarak GELMEZ: PiP açık kalır, aktarımı ve "geri al" kaplamasını kendisi taşır', async () => {
     const onLeaving = vi.fn();
     await applyPipCommand({ winId: 'w1', name: 'handoff' }, WIN, { onLeaving });
-    expect(handoff).toHaveBeenCalledWith('w1');
-    expect(onLeaving).toHaveBeenCalledTimes(1);
-
-    await applyPipCommand({ winId: 'w1', name: 'handoff', windowing: 'freeform' }, WIN, { onLeaving });
-    expect(handoff).toHaveBeenLastCalledWith('w1', 'freeform');
-  });
-
-  it('kırpma penceresinden aktarılan şey kaynak Workspace görevidir (başlıktaki tıklamayla aynı kural)', async () => {
-    await applyPipCommand({ winId: 'w1', name: 'handoff', windowing: 'fullscreen' }, { ...WIN, sourceTaskId: 'task-9' }, {});
-    expect(handoff).toHaveBeenCalledWith('task-9', 'fullscreen');
+    expect(handoff).not.toHaveBeenCalled();
+    expect(onLeaving).not.toHaveBeenCalled();   // PiP kapanmayacak: kapanışta "masaüstüne dönüş" atlanmamalı
   });
 
   it('"close": pencereyi ana store kapatır', async () => {

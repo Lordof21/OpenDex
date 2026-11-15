@@ -1,5 +1,6 @@
 // Ana pencere tarafı: bir pencere Tauri PiP'inde açıkken PiP'in yolladığı komutları (pipBridge.js) kendi store'unda çalıştırır.
-// Böylece PiP'ten "Telefona aktar" / "Workspace'e gönder" / "Kapat", DeX'teki tıklamanın birebir aynısıdır.
+// Böylece PiP'ten "Workspace'e gönder" / "Kapat", DeX'teki tıklamanın birebir aynısıdır. ("Telefona aktar" gelmez: PiP açık kalır ve
+// aktarımı kendi store'unda başlatır, "geri al" kaplaması PiP'in içindedir.)
 
 import { useEffect, useRef } from 'react';
 import { PIP_SYNC_FIELDS, isTauriHost, listenPipCommands } from './pipBridge.js';
@@ -22,14 +23,6 @@ export async function applyPipCommand(command, win, { onLeaving } = {}) {
       if (Object.keys(patch).length) {
         useWindowStore.setState((s) => ({ windows: s.windows.map((w) => (w.id === win.id ? { ...w, ...patch } : w)) }));
       }
-      return;
-    }
-    case 'handoff': {
-      onLeaving?.();
-      // DeX-içi kırpma penceresinde aktarılan şey kaynak Workspace görevidir (TitleBar.handleHandoffToPhone ile aynı kural).
-      const target = win.sourceTaskId || win.id;
-      if (command.windowing === 'fullscreen' || command.windowing === 'freeform') await store.handoffWindowToPhone(target, command.windowing);
-      else await store.handoffWindowToPhone(target);
       return;
     }
     case 'send-to-workspace': {

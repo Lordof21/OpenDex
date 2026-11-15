@@ -29,6 +29,7 @@ export function useWorkspaceTaskFeed(taskWindowId) {
   const [feed, setFeed] = useState({ status: 'loading', task: null });
 
   useEffect(() => {
+    if (!taskWindowId) return undefined;   // the owner passed its own feed (WorkspaceTaskPipView `feed`)
     let cancelled = false;
     connectEventStream(); // idempotent — ana pencerede zaten bağlı
 

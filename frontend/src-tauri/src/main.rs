@@ -50,10 +50,32 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            // Only the MAIN window ends the app. The PiP windows (`os-window-*`, `ws-pip-*`) are opened and closed all the time; their
+            // `Destroyed` used to shut the backend down too (in the packaged app a closing PiP killed the backend).
             if let tauri::WindowEvent::Destroyed = event {
-                sidecar::shutdown_backend(window.app_handle());
+                if ends_the_app(window.label()) {
+                    sidecar::shutdown_backend(window.app_handle());
+                }
             }
         })
         .run(tauri::generate_context!())
         .expect("error while running OpenDeX");
+}
+
+/// Whether the destruction of the window with this label ends the app (and so the backend). Only the main window does:
+/// every other window is a PiP the user opens and closes while the app keeps running.
+fn ends_the_app(label: &str) -> bool {
+    label == "main"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ends_the_app;
+
+    #[test]
+    fn only_the_main_window_ends_the_app() {
+        assert!(ends_the_app("main"));
+        assert!(!ends_the_app("os-window-35f2cd806d7f"));
+        assert!(!ends_the_app("ws-pip-task1"));
+    }
 }

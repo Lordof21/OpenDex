@@ -1,5 +1,6 @@
 // Kırpma görünümü (Sub-PiP OS penceresi veya DeX-içi kırpma penceresi) ile Workspace görevinin kutusunu EŞ tutar.
-// İki yön, tek sahip (bu hook); ölçek modeli cropMath.js'te (VD, pencerenin yüzeyine sığdırılmış sabit ölçek):
+// İki yön, tek sahip (bu hook); ölçek modeli cropMath.js'te (1:1: bir VD pikseli = bir fiziksel piksel, boyuttan bağımsız sabit ölçek).
+// Açılışta pencere görevin kutusuna tam oturur (görev esastır), bu yüzden açılış telefondan HİÇBİR şey istemez:
 //
 //   pencere → görev: canvas boyutu değişir → durgunluk beklenir (CROP_RESIZE_DEBOUNCE_MS; sürüklerken istek YOK) →
 //                    yeni bounds = canvas / ölçek → TEK `resize-task` isteği (bounds + yoğunluk).
@@ -14,8 +15,8 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../../lib/api.js';
 import { logger } from '../../lib/logger.js';
 import { newOpId } from '../../lib/opId.js';
-import { appViewportBox, resolveTaskDensity } from '../windowMath.js';
-import { CROP_RESIZE_DEBOUNCE_MS, isViewInSync, planCropResize, referenceScale } from './cropMath.js';
+import { resolveTaskDensity } from '../windowMath.js';
+import { CROP_RESIZE_DEBOUNCE_MS, isViewInSync, pixelScale, planCropResize } from './cropMath.js';
 import { isPrimaryButtonDown } from '../pip/pipBridge.js';
 
 /** PiP: düğme bırakılınca bu kadar sonra istek gider (sürüklerken zaten gitmez: düğme denetlenir). */
@@ -23,27 +24,25 @@ const PIP_RELEASE_DEBOUNCE_MS = 100;
 /** PiP: düğme hâlâ basılıyken bırakılması bu aralıkla yeniden denetlenir. */
 const RELEASE_POLL_MS = 80;
 
-const measure = (canvas) => {
-  const rect = canvas.getBoundingClientRect();
+const measure = (el) => {
+  const rect = el.getBoundingClientRect();
   return { w: Math.round(rect.width), h: Math.round(rect.height) };
 };
 
-/** Pencerenin bulunduğu yüzey: DeX-içi pencere için uygulama görünüm alanı, PiP OS penceresi için kendi ekranı. */
-const surfaceOf = (canvas, embedded) => {
-  if (embedded) return appViewportBox();
-  const screen = canvas.ownerDocument?.defaultView?.screen;
-  return { w: screen?.availWidth || 0, h: screen?.availHeight || 0 };
-};
+/** Görüntünün bulunduğu pencerenin piksel oranı (PiP başka bir ekrana gidebilir: kendi penceresinin oranı). */
+const dprOf = (el) => el.ownerDocument?.defaultView?.devicePixelRatio || (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1;
 
 /**
- * @param canvasRef  kırpmayı çizen canvas (boyutu = görünüm alanı)
+ * @param canvasRef  kırpmayı çizen canvas
+ * @param boxRef     görünüm alanını çeviren kapsayıcı (ölçülen ve izlenen budur: canvas, 1:1 oturması için kapsayıcıdan birkaç
+ *                   piksel küçük olabilir); yoksa canvas
  * @param task       { windowId, bounds, vdW, vdH, density, densityMode } — CANLI (her render güncel)
  * @param enabled    görev canlı ve akıyorsa true (telefonda park / silinmiş görev boyutlanmaz)
- * @param embedded   DeX-içi pencere (yüzey = uygulama görünüm alanı) mi, PiP OS penceresi (yüzey = ekran) mi
+ * @param embedded   DeX-içi pencere mi, PiP OS penceresi mi (PiP'te işletim sistemi boyutlandırırken düğme denetlenir)
  * @param onAdopt    (bounds, ölçek) → ev sahibi çerçevesini görev kutusuna uydurur; yoksa uyum denenmez
  * @returns { atVdLimit } — istenen alan çalışma alanının (VD) sınırını aştı (rozet için)
  */
-export function useWorkspaceCropResize({ canvasRef, task, enabled, embedded = false, onAdopt, debounceMs = CROP_RESIZE_DEBOUNCE_MS }) {
+export function useWorkspaceCropResize({ canvasRef, boxRef, task, enabled, embedded = false, onAdopt, debounceMs = CROP_RESIZE_DEBOUNCE_MS }) {
   const live = useRef({});
   live.current = { task, embedded, onAdopt };
   const adoptRef = useRef(null);
@@ -53,6 +52,7 @@ export function useWorkspaceCropResize({ canvasRef, task, enabled, embedded = fa
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!enabled || !canvas) return undefined;
+    const box = boxRef?.current || canvas;
     const RO = canvas.ownerDocument?.defaultView?.ResizeObserver || (typeof window !== 'undefined' ? window.ResizeObserver : undefined);
     if (!RO) return undefined;
 
@@ -61,9 +61,8 @@ export function useWorkspaceCropResize({ canvasRef, task, enabled, embedded = fa
     const busy = () => s.timer !== null || s.inflight > 0;
 
     const read = () => {
-      const { task: t, embedded: emb } = live.current;
-      const scale = t ? referenceScale(surfaceOf(canvas, emb), { w: t.vdW, h: t.vdH }) : 0;
-      return { t, scale, size: measure(canvas) };
+      const { task: t } = live.current;
+      return { t, scale: t ? pixelScale(dprOf(box)) : 0, size: measure(box) };
     };
 
     // görev → pencere. `bounds`: isteğin yanıtındaki gerçek kutu; yoksa canlı görev kutusu.
@@ -136,7 +135,7 @@ export function useWorkspaceCropResize({ canvasRef, task, enabled, embedded = fa
     // sığmıyor) ilk gözlem pencere→görev turunu başlatır ve görev pencerenin alabildiği kadarına iner.
     adoptIfOutOfSync();
     const observer = new RO(onResize);
-    observer.observe(canvas);
+    observer.observe(box);
 
     return () => {
       s.disposed = true;

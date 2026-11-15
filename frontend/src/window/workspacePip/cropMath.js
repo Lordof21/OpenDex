@@ -51,11 +51,18 @@ export const CROP_RESIZE_DEBOUNCE_MS = 250;
 /** Pencere ile görev bu kadar CSS pikselinden az ayrışıyorsa "uyumlu" sayılır (yuvarlama + Android'in hizalaması). */
 export const SYNC_TOLERANCE_PX = 3;
 
-// ÖLÇEK MODELİ. Kırpma penceresi (DeX-içi ya da PiP) bir "ekran"dır ve Workspace'in VD'si gibi davranır: VD, bulunduğu
-// yüzeye (DeX görünüm alanı / PiP'in ekranı) SIĞDIRILIR → tek, SABİT ölçek. Pencere o yüzeyin yüzde kaçını kaplıyorsa
-// görev de VD'nin o kadarını kaplar; en-boy oranı kilitli DEĞİLDİR (genişlik ve yükseklik ayrı ayrı esner).
+// ÖLÇEK MODELİ. Kırpma penceresi (DeX-içi ya da PiP) görevi AKIŞ PİKSELİ = EKRAN PİKSELİ (1:1) gösterir: ölçek (CSS px / VD px)
+// = 1 / devicePixelRatio, pencerenin boyutuna, yüzeyine ya da başlığın durumuna BAĞLI DEĞİLDİR. Görev ne kadar VD pikseliyse
+// pencere o kadar fiziksel piksel kaplar; yeniden boyutlanınca görev de aynı sayıda piksel kazanır/yitirir (en-boy kilitli değil).
+// (Eskiden VD, yüzeye SIĞDIRILIYORDU: yüzey VD'den küçükse ölçek 1/dpr'ın altında kalır, çerçeve olması gerekenden küçük çıkar ve
+// görüntü her seferinde yeniden örneklenip bulanıklaşırdı.)
 
-/** Yüzeyin VD'yi tam sığdıran ölçeği: CSS px / VD px. Bilinmeyen girdide 0. */
+/** 1:1 ölçek: bir VD pikseli = bir fiziksel piksel = 1/dpr CSS pikseli. dpr bilinmiyorsa 1. */
+export function pixelScale(dpr) {
+  return dpr > 0 ? 1 / dpr : 1;
+}
+
+/** Yüzeyin VD'yi tam sığdıran ölçeği (CSS px / VD px; yalnız bilgi amaçlı — pencere boyutu bununla BELİRLENMEZ). Bilinmeyen girdide 0. */
 export function referenceScale(reference, vd) {
   if (!(reference?.w > 0 && reference?.h > 0 && vd?.w > 0 && vd?.h > 0)) return 0;
   return Math.min(reference.w / vd.w, reference.h / vd.h);
@@ -111,14 +118,14 @@ export function frameForBounds(bounds, scale, chrome, max) {
 }
 
 /**
- * PiP işletim sistemi penceresinin ilk boyutu: görevin PiP'in ekranındaki ölçekli karşılığı (+ PiP başlık satırı);
- * ekrandan büyük olamaz, çok küçük de olamaz (OS pencere alt sınırı — fazlası ilk eşitlemede görevi büyütür).
+ * PiP işletim sistemi penceresinin ilk (İÇ) boyutu: görevin 1:1 karşılığı + PiP çerçevesinin video olmayan payı (`chrome`: kenarlık +
+ * başlık; başlık görüntünün üstüne biniyorsa yalnız kenarlık). Ekrandan büyük olamaz; çok küçük de olamaz (OS pencere alt sınırı —
+ * fazlası ilk eşitlemede görevi büyütür). Sığıyorsa görev DEĞİŞMEZ: açılışta telefondan hiçbir şey istenmez.
  */
-export function computePipWindowSize(bounds, vd, screen, { chromeH = 28, minW = 240, minH = 140 } = {}) {
-  const scale = referenceScale(screen, vd);
+export function computePipWindowSize(bounds, scale, screen, { chrome = { dw: 0, dh: 0 }, minW = 240, minH = 140 } = {}) {
   const view = scale > 0 && hasBounds(bounds) ? viewSizeOf(bounds, scale) : { w: 480, h: 320 };
   return {
-    w: clamp(view.w, minW, Math.max(minW, screen?.w || Infinity)),
-    h: clamp(view.h, minH, Math.max(minH, (screen?.h || Infinity) - chromeH)) + chromeH,
+    w: clamp(view.w + chrome.dw, minW, Math.max(minW, screen?.w || Infinity)),
+    h: clamp(view.h + chrome.dh, minH, Math.max(minH, screen?.h || Infinity)),
   };
 }

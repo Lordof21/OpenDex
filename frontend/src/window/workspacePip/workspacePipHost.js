@@ -10,7 +10,10 @@
 import { createElement, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import WorkspaceTaskPipView from './WorkspaceTaskPipView.jsx';
-import { computePipWindowSize } from './cropMath.js';
+import { computePipWindowSize, pixelScale } from './cropMath.js';
+import { isHeaderHidden } from '../windowModel.js';
+import { pipInnerSizeFor } from '../windowMath.js';
+import { getLiveSettings } from '../../settings/liveSettings.js';
 import { t } from '../../i18n/index.js';
 
 const isTauriHost = () =>
@@ -53,10 +56,18 @@ function copyStyles(fromDoc, toDoc) {
   });
 }
 
-export async function openWorkspaceTaskPip(task, vd) {
+export async function openWorkspaceTaskPip(task) {
   const id = task.windowId;
   if (openPips.has(id)) return openPips.get(id).kind;
-  const size = computePipWindowSize(task.bounds, vd, { w: window.screen?.availWidth, h: window.screen?.availHeight });
+  // The picture is exactly the task's pixels (1:1) and the PiP's own chrome is added around it — the border, and the header row unless
+  // the header overlays the picture (same decision as every window: isHeaderHidden). When it fits, the task is not resized at all.
+  const headerOverlay = isHeaderHidden({ headerMode: 'follow' }, getLiveSettings());
+  // (A browser's Document PiP / popup carries its own frame and the view draws no header there: no chrome to add.)
+  const chromeBox = isTauriHost() ? pipInnerSizeFor(0, 0, { headerOverlay }) : { w: 0, h: 0 };
+  const size = computePipWindowSize(task.bounds, pixelScale(window.devicePixelRatio), {
+    w: window.screen?.availWidth,
+    h: window.screen?.availHeight,
+  }, { chrome: { dw: chromeBox.w, dh: chromeBox.h } });
 
   if (isTauriHost()) {
     try {
@@ -66,8 +77,13 @@ export async function openWorkspaceTaskPip(task, vd) {
         title: t('window.value_workspace_pip', { value: task.title || task.package }),
         width: size.w,
         height: size.h,
+        minWidth: 280,
+        minHeight: 200,
         alwaysOnTop: true,
-        decorations: true,
+        // The frame is ours (WorkspacePipApp): the same header, hub, drag and edge-resize as a stream PiP; no OS title bar. The shadow
+        // and Windows' own edge snapping are kept.
+        decorations: false,
+        shadow: true,
         center: true,
       });
       win.once('tauri://destroyed', () => {
