@@ -28,9 +28,9 @@ OpenDeX telefonuna masaüstünde ikinci bir hayat verdiyse, ⭐ iki saniye süre
 ## Tanıtım videosunu izle
 
 <div align="center">
-<a href="docs/media/opendex-demo.mp4"><img alt="OpenDeX tanıtım videosunu izle (6 dk, sessiz)" src="docs/images/live/demo-poster.webp" width="760"></a>
+<a href="https://www.youtube.com/watch?v=AqUaztzMt1k"><img alt="OpenDeX tanıtım videosunu YouTube'da izle" src="docs/images/live/demo-poster.webp" width="760"></a>
 
-<sub>▶ Oynatmak için tıklayın — 6 dk, sessiz, 26 MB.</sub>
+<sub>▶ YouTube'da izleyin.</sub>
 </div>
 
 ## Uygulamayı telefona ver, geri al

@@ -28,9 +28,9 @@ If OpenDeX gave your phone a second life on your desk, a ⭐ takes two seconds a
 ## Watch the demo
 
 <div align="center">
-<a href="docs/media/opendex-demo.mp4"><img alt="Watch the OpenDeX demo video (6 min, no sound)" src="docs/images/live/demo-poster.webp" width="760"></a>
+<a href="https://www.youtube.com/watch?v=AqUaztzMt1k"><img alt="Watch the OpenDeX demo on YouTube" src="docs/images/live/demo-poster.webp" width="760"></a>
 
-<sub>▶ Click to play — 6 min, silent, 26 MB.</sub>
+<sub>▶ Watch on YouTube.</sub>
 </div>
 
 ## Hand an app over, take it back
